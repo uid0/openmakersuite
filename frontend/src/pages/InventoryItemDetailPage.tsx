@@ -4,6 +4,7 @@
  */
 import {
     Alert,
+    Anchor,
     Badge,
     Button,
     Card,
@@ -24,7 +25,7 @@ import {
 import { IconArchive, IconArchiveOff, IconBoxOff, IconBoxSeam, IconClipboardCheck, IconEdit, IconPackageExport, IconQrcode } from '@tabler/icons-react';
 import { QRCodeSVG } from 'qrcode.react';
 import React, { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import CommittedBreakdown from '../components/inventory/CommittedBreakdown';
 import InventoryMetricsRow from '../components/inventory/InventoryMetricsRow';
 import PurchaseReceiptsPanel from '../components/inventory/PurchaseReceiptsPanel';
@@ -34,7 +35,7 @@ import NFPADiamond from '../components/NFPADiamond';
 import StockHistoryChart from '../components/StockHistoryChart';
 import { useNotifications } from '../hooks/useNotifications';
 import { assetsAPI, CycleCountPayload, inventoryAPI, PackTransition, reorderAPI, sigAPI } from '../services/api';
-import { Asset, InventoryItem, InventoryItemMetrics, ItemPurchaseHistory, ReorderRequest, SIG, StockHistory, UsageLog } from '../types';
+import { Asset, InventoryItem, InventoryItemMetrics, ItemPurchaseHistory, KitSummary, ReorderRequest, SIG, StockHistory, UsageLog } from '../types';
 import { showError } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 import {
@@ -406,6 +407,9 @@ const InventoryItemDetailPage: React.FC = () => {
 
   const [item, setItem] = useState<InventoryItem | null>(null);
   const [metrics, setMetrics] = useState<InventoryItemMetrics | null>(null);
+  // Kits that contain this item (op-8n0). Empty means the card is not rendered
+  // at all — most items belong to no kit, and an empty card is noise.
+  const [suppliedByKits, setSuppliedByKits] = useState<KitSummary[]>([]);
   const [usageLogs, setUsageLogs] = useState<UsageLog[]>([]);
   const [stockHistory, setStockHistory] = useState<StockHistory | null>(null);
   const [purchaseHistory, setPurchaseHistory] = useState<ItemPurchaseHistory | null>(null);
@@ -450,6 +454,7 @@ const InventoryItemDetailPage: React.FC = () => {
       reorderRes,
       assetsRes,
       usedByRes,
+      suppliedByKitsRes,
     ] = await Promise.allSettled([
       inventoryAPI.getItem(id),
       inventoryAPI.getItemMetrics(id),
@@ -459,7 +464,19 @@ const InventoryItemDetailPage: React.FC = () => {
       reorderAPI.listRequests({ status: undefined }),
       assetsAPI.listAssets({ inventory_item: id }),
       assetsAPI.listAssets({ consumable_for_item: id }),
+      // "Which kits would restock this?" (op-8n0). Joined into the existing
+      // allSettled so a rejection just omits the card instead of blocking the
+      // page — the same reasoning as every sibling call here.
+      inventoryAPI.getItemKits(id),
     ]);
+
+    if (suppliedByKitsRes.status === 'fulfilled') {
+      // Optional read: AC-45 requires a failed (or absent) supplied-by lookup to
+      // omit the card WITHOUT blocking the rest of the page, and allSettled
+      // reports a non-promise value as fulfilled-with-undefined.
+      const payload = suppliedByKitsRes.value?.data;
+      setSuppliedByKits(Array.isArray(payload) ? payload : []);
+    }
 
     if (itemRes.status === 'fulfilled') {
       setItem(itemRes.value.data);
@@ -932,6 +949,47 @@ const InventoryItemDetailPage: React.FC = () => {
                   <Text size="xs" c="dimmed">
                     Scan to view item details
                   </Text>
+                </Stack>
+              </Card>
+            )}
+
+            {/* Supplied by kits (op-8n0). A CARD on Overview rather than a new
+                tab: the tab bar already carries 6-7 tabs, and this is a 0-2 row
+                fact that is most useful while looking at stock. Rendered only
+                when the item actually belongs to a kit. */}
+            {suppliedByKits.length > 0 && (
+              <Card withBorder p="md" data-testid="supplied-by-kits-card">
+                <Stack gap="md">
+                  <Title order={4}>Supplied by kits</Title>
+                  <Text size="sm" c="dimmed">
+                    This item also arrives inside these kits. Ordering one is a single
+                    purchase-order line.
+                  </Text>
+                  <Stack gap="xs">
+                    {suppliedByKits.map((kit) => (
+                      <Group key={kit.id} justify="space-between" wrap="nowrap">
+                        <Anchor
+                          component={Link}
+                          to={`/inventory/kits/${kit.id}`}
+                          data-testid={`supplied-by-kit-${kit.id}`}
+                        >
+                          {kit.name}
+                        </Anchor>
+                        <Group gap="sm" wrap="nowrap">
+                          {kit.quantity_in_kit !== null && (
+                            <Text size="sm" c="dimmed">
+                              {kit.quantity_in_kit} per kit
+                            </Text>
+                          )}
+                          {kit.unit_cost && (
+                            <Text size="sm" fw={600}>
+                              ${kit.unit_cost}
+                            </Text>
+                          )}
+                        </Group>
+                      </Group>
+                    ))}
+                  </Stack>
                 </Stack>
               </Card>
             )}

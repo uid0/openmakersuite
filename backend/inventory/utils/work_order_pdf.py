@@ -598,10 +598,18 @@ def generate_work_order_pdf(
     # the LOTO reference *before* walking to the machine. Reference only: no
     # AcroCheckbox, so this section adds nothing to ``region_collector`` and
     # leaves the OMR target ids / template drift signature untouched.
-    from inventory.services.work_order_context import sorted_maintenance_tools
+    # op-0v4: the work order's own tool rows when it has any — so a corrective
+    # work order prints a tool list at all, and a restaged tool prints where it
+    # is for THIS job — else the PM template's, which is what a work order
+    # generated before per-job tools has always printed.
+    from inventory.services.work_order_context import (
+        resolve_tool_location,
+        sorted_maintenance_tools,
+        sorted_work_order_tools,
+    )
 
     story.append(Paragraph("Tools Required", subheading_style))
-    tools = sorted_maintenance_tools(item)
+    tools = sorted_work_order_tools(work_order) or sorted_maintenance_tools(item)
     if tools:
         tool_rows = [
             [
@@ -615,11 +623,7 @@ def generate_work_order_pdf(
             # Tool text is operator-entered and lands in a reportlab Paragraph,
             # which parses a mini-XML dialect — escape it. ``html.escape`` (not
             # ``xml.sax.saxutils.escape``, which trips bandit B406).
-            location = tool.location_hint or (
-                tool.inventory_item.location.name
-                if tool.inventory_item and tool.inventory_item.location
-                else ""
-            )
+            location = resolve_tool_location(tool)
             tool_rows.append(
                 [
                     Paragraph(escape(tool.name, quote=False), normal_style),

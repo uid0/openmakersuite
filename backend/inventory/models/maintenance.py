@@ -10,6 +10,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 
@@ -992,6 +993,123 @@ class WorkOrderMaterialUsage(models.Model):
         if self.unit_cost is None:
             return None
         return (self.quantity_used or Decimal("0")) * self.unit_cost
+
+
+class WorkOrderTool(models.Model):
+    """A tool this *job* needs, and where it is staged for this job (op-0v4).
+
+    The work-order-level counterpart of :class:`MaintenanceTool`, mirroring
+    :class:`WorkOrderMaterialUsage`'s two-kinds-of-row shape:
+
+    * **Template-derived** — a frozen copy of the PM template's
+      :class:`MaintenanceTool`, created up front at work-order generation.
+      ``tool`` points at the spec (nullable only because the spec may be
+      deleted afterwards) and ``is_ad_hoc`` is False. The copy is what prints
+      and displays, so editing the template later does not rewrite a job
+      already in flight.
+    * **Ad-hoc** — added *during* the job. No template spec exists (``tool``
+      is null, ``is_ad_hoc`` True), which is the only kind of tool a
+      *corrective* work order can ever have: it has no PM template to copy
+      from. Only ad-hoc rows are deletable.
+
+    Rows are self-contained: ``name``/``quantity``/``location_hint``/
+    ``is_required``/``notes`` are copied at generation and read directly, the
+    same way ``material_name`` is read rather than ``material.name``. The
+    ``tool`` FK is provenance only, never read for display.
+
+    ``location_hint`` is the point of the model: it is *this job's* staging
+    spot, editable on the work order without touching the recurring template.
+    Read :attr:`resolved_location`, never the location fields directly, so
+    every surface resolves the hint and the inventory link the same way.
+
+    Unlike materials, tools are **not consumed**: a tool is gathered, used and
+    returned, so there is no stock decrement, no usage log, no cost and no
+    purchase-order bridge here. And unlike materials they carry no OMR
+    checkbox — the printed list is reference only.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    work_order = models.ForeignKey(
+        "WorkOrder",
+        on_delete=models.CASCADE,
+        related_name="tools",
+        help_text="The work order this tool belongs to",
+    )
+    tool = models.ForeignKey(
+        "MaintenanceTool",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="work_order_tools",
+        help_text=(
+            "The template tool this row was copied from (null if the template "
+            "tool was deleted after WO generation, or if this is an ad-hoc row "
+            "added during the job). Provenance only — never read for display."
+        ),
+    )
+    inventory_item = models.ForeignKey(
+        "InventoryItem",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="work_order_tools",
+        help_text=(
+            "Optional link to an inventory item so the tool's storage location "
+            "resolves automatically when no per-job location is set."
+        ),
+    )
+    is_ad_hoc = models.BooleanField(
+        default=False,
+        help_text=(
+            "True when this tool was added during the job rather than copied "
+            "from the PM template. Only ad-hoc rows can be removed."
+        ),
+    )
+    name = models.CharField(max_length=200, help_text="Denormalized tool name")
+    quantity = models.PositiveIntegerField(default=1, help_text="How many are needed")
+    location_hint = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text=(
+            "Where this tool is staged for THIS job (e.g., 'Bench 2'). Editable "
+            "on the work order; overrides the linked inventory item's location "
+            "and never writes back to the PM template."
+        ),
+    )
+    is_required = models.BooleanField(
+        default=True,
+        help_text="Required tools are highlighted on the work order",
+    )
+    notes = models.TextField(blank=True, help_text="Notes about the tool or its use")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        # Required first, then case-folded name — the same total order
+        # ``inventory.services.work_order_context.sorted_maintenance_tools``
+        # applies to template tools, so both branches of the display fallback
+        # read identically. The raw name breaks case-insensitive ties.
+        ordering = ["-is_required", Lower("name"), "name"]
+        indexes = [
+            models.Index(fields=["work_order"], name="wotool_wo_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} (WO {self.work_order.short_id})"
+
+    @property
+    def resolved_location(self) -> str:
+        """Where to find this tool: the per-job hint, else the item's location.
+
+        The one accessor every surface (detail API, printed form) consults, so
+        a row cannot display one location on screen and another on paper.
+        Empty string — never ``None`` — when neither is set.
+        """
+        if self.location_hint:
+            return self.location_hint
+        item = self.inventory_item
+        if item is not None and item.location is not None:
+            return item.location.name
+        return ""
 
 
 class WorkOrderLotoCompletion(models.Model):

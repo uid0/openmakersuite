@@ -58,6 +58,7 @@ from .models import (
     WorkOrderPhoto,
     WorkOrderSubmission,
     WorkOrderTaskCompletion,
+    WorkOrderTool,
     WorkOrderValidation,
 )
 
@@ -2861,6 +2862,94 @@ class WorkOrderAdHocMaterialSerializer(serializers.Serializer):
     receipt_image = serializers.ImageField(required=False, allow_null=True)
 
 
+class WorkOrderToolSerializer(serializers.ModelSerializer):
+    """A work order's own tool row — what to grab, and where it is for THIS job.
+
+    Everything except ``location_hint`` is read-only: the display fields are
+    frozen at generation (or set once through ``add_tool``), the same way
+    ``WorkOrderMaterialUsageSerializer`` freezes ``material_name``/``unit``.
+    ``location_hint`` stays writable because per-job restaging *is* the
+    feature — editing it here never writes back to the PM template.
+
+    ``resolved_location`` is what every surface displays; read it rather than
+    ``location_hint``, which is blank whenever the linked inventory item's
+    location is standing in.
+    """
+
+    resolved_location = serializers.CharField(read_only=True)
+    inventory_item_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WorkOrderTool
+        fields = [
+            "id",
+            "work_order",
+            "tool",
+            "inventory_item",
+            "inventory_item_name",
+            "is_ad_hoc",
+            "name",
+            "quantity",
+            "location_hint",
+            "resolved_location",
+            "is_required",
+            "notes",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "work_order",
+            "tool",
+            "inventory_item",
+            "inventory_item_name",
+            "is_ad_hoc",
+            "name",
+            "quantity",
+            "is_required",
+            "notes",
+            "created_at",
+        ]
+
+    def get_inventory_item_name(self, obj):
+        """Name of the inventory item backing this tool, or ``None``."""
+        return obj.inventory_item.name if obj.inventory_item_id else None
+
+
+class WorkOrderAdHocToolSerializer(serializers.Serializer):
+    """Write-only input for ``WorkOrderViewSet.add_tool`` (op-0v4).
+
+    A separate input serializer rather than the model one, mirroring
+    ``WorkOrderAdHocMaterialSerializer``: the model serializer freezes every
+    display field, and they are set exactly once — here.
+
+    ``quantity`` is bounded at 1 because "zero of a tool" is not a tool, and
+    ``name`` is required and non-blank because it is the only thing the tech
+    reads off the printed list.
+    """
+
+    name = serializers.CharField(max_length=200, trim_whitespace=True)
+    quantity = serializers.IntegerField(min_value=1, required=False, default=1)
+    inventory_item = serializers.PrimaryKeyRelatedField(
+        queryset=InventoryItem.objects.all(), required=False, allow_null=True
+    )
+    location_hint = serializers.CharField(
+        max_length=200, required=False, allow_blank=True, default=""
+    )
+    is_required = serializers.BooleanField(required=False, default=True)
+    notes = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class WorkOrderToolLocationSerializer(serializers.Serializer):
+    """Write-only input for restaging a tool on one job (op-0v4).
+
+    The whole editable surface of a work-order tool: where it is for THIS job.
+    Blank is meaningful — it clears the per-job hint and lets the linked
+    inventory item's location stand in again.
+    """
+
+    location_hint = serializers.CharField(max_length=200, allow_blank=True)
+
+
 class WorkOrderLotoCompletionSerializer(serializers.ModelSerializer):
     """Serializer for per-energy-source LOTO completion within a work order.
 
@@ -3117,6 +3206,13 @@ class WorkOrderSerializer(serializers.ModelSerializer):
     loto_completions = WorkOrderLotoCompletionSerializer(many=True, read_only=True)
     photos = WorkOrderPhotoSerializer(many=True, read_only=True)
     tools = serializers.SerializerMethodField()
+    # op-0v4: the work order's OWN tool rows, in full. Named ``tool_rows``
+    # rather than ``tools`` because ``tools`` is the pinned ScanTTY display
+    # payload and its key set cannot grow. This is the editable surface — which
+    # rows exist, which are ad-hoc (so removable), and their per-job location.
+    # Empty on a work order generated before per-job tools, whose ``tools``
+    # falls back to the PM template.
+    tool_rows = WorkOrderToolSerializer(source="tools", many=True, read_only=True)
     submissions = serializers.SerializerMethodField()
     pending_review_count = serializers.SerializerMethodField()
     has_pending_review = serializers.SerializerMethodField()
@@ -3160,6 +3256,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "loto_completions",
             "photos",
             "tools",
+            "tool_rows",
             "submissions",
             "pending_review_count",
             "has_pending_review",
@@ -3186,6 +3283,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "loto_completions",
             "photos",
             "tools",
+            "tool_rows",
             "submissions",
             "pending_review_count",
             "has_pending_review",
@@ -3254,10 +3352,15 @@ class WorkOrderSerializer(serializers.ModelSerializer):
         carried on every work order so the web detail page can show "what to
         grab" up front. Built by the same helper the printed form uses, so the
         two surfaces cannot drift.
+
+        op-0v4: the work order's own tool rows when it has any — including a
+        corrective one's, which have no template to come from — otherwise the
+        PM template's, which is what every work order generated before per-job
+        tools shows. ``location_hint`` carries the resolved per-job location.
         """
         from .services.work_order_context import build_tools_context
 
-        return build_tools_context(obj.maintenance_item)
+        return build_tools_context(obj)
 
     def get_electrical(self, obj):
         from .services.work_order_context import build_electrical_context

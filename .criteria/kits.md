@@ -4,7 +4,7 @@
 Purchasers often buy one supplier SKU that contains several stock items, such as an Eufy Ink Kit containing Cyan, Magenta, Yellow, Black, and Cleaning cartridges. OMS needs kits to be purchasable as one purchase-order line while receiving them credits stock to the component items, not to the kit itself.
 
 ## Scope
-- In: InventoryItem-based kits using `InventoryItem.is_kit` and `KitComponent`, nested-writable kit APIs, default kit visibility filters, supplier ordering data, purchase-order kit lines, kit receipt decomposition, component reorder-request closure, kit management UI, purchase-order kit selection/detail/receiving UI, component "supplied by kits" display, reactive mutation behavior, regenerated API permission/list docs, the stale Django note correction in `AGENTS.md`, and focused backend/frontend tests.
+- In: InventoryItem-based kits using `InventoryItem.is_kit` and `KitComponent`, nested-writable kit APIs, default kit visibility filters, supplier ordering data, purchase-order kit lines with a durable order-time component snapshot, one additive `reorder_queue` migration for that snapshot field, kit receipt decomposition, component reorder-request closure, kit management UI, purchase-order kit selection/detail/receiving UI, component "supplied by kits" display, reactive mutation behavior, regenerated API permission/list docs, the stale Django note correction in `AGENTS.md`, and focused backend/frontend tests.
 - Out: A standalone `Kit` model, a standalone kits Django app, a standalone `/kit-components/` endpoint, nested kits, serialized components inside kits, kit-level stock, kits as reorder-request targets, kits as reorder-queue action rows, cost allocation across components, automatic "buy the kit instead" substitution, kit demand forecasting, multi-supplier kits, `?supplier=&kit=` deep-link prefill, changes to `create_optimized_order`, `by_supplier`, or the op-tm70 approval gate beyond excluding kits from action surfaces, barcode-receive path consolidation, and fixing the pre-existing voided-line receipt gap.
 
 ## Criteria
@@ -130,7 +130,7 @@ Purchasers often buy one supplier SKU that contains several stock items, such as
 - **Then** the kit line has `is_kit_line=true` and a read-only component preview, while the ordinary item line has no component preview and keeps its existing response shape
 
 ### AC-25: The preview matches the receipt effect
-- **Given** a kit purchase-order line with a component preview
+- **Given** a kit purchase-order line with a component preview from its order-time component snapshot
 - **When** that same quantity is received
 - **Then** the component item stock deltas exactly match the preview quantities shown on the line
 
@@ -149,8 +149,8 @@ Purchasers often buy one supplier SKU that contains several stock items, such as
 - **When** a receiver attempts to receive more than the pending kit quantity
 - **Then** the API returns a validation error and no kit or component stock changes
 
-### AC-29: Empty kit breakdowns do not break physical receiving
-- **Given** a kit purchase-order line whose kit component rows were removed after the order was placed
+### AC-29: Legacy empty kit breakdowns do not break physical receiving
+- **Given** a legacy kit purchase-order line with no stored kit snapshot and no current kit component rows
 - **When** a receiver records a receipt for that kit line
 - **Then** the receipt does not return a server error, no component stock is credited, and a warning is available to operators or logs
 
@@ -214,10 +214,10 @@ Purchasers often buy one supplier SKU that contains several stock items, such as
 - **When** the purchase-order form renders the Inventory Items section
 - **Then** a conflict banner names the overlapping items, provides one action to deselect those ordinary item rows, and each overlapping item row shows a persistent "in kit" chip even when the kit is unchecked
 
-### AC-42: Purchase-order detail uses the ordered kit snapshot
-- **Given** a purchase order was created for a kit and the kit's component breakdown is edited afterward
-- **When** a user views or receives the purchase order
-- **Then** the displayed kit breakdown and receipt credits use the purchase-order line snapshot from order time, not the kit's current live definition
+### AC-42: Purchase-order detail and receipt use the ordered kit snapshot
+- **Given** a purchase order was created for a kit with components A and B, and the kit's live component rows are edited afterward to remove A, change B, or add C
+- **When** a user retrieves the purchase-order detail and then receives that kit line
+- **Then** the displayed kit breakdown and component stock credits exactly match the purchase-order line snapshot captured at order time, not the kit's current live definition
 
 ### AC-43: Receiving preview updates before submit
 - **Given** a receiver opens the receive flow for a kit line
@@ -249,10 +249,20 @@ Purchasers often buy one supplier SKU that contains several stock items, such as
 - **When** they inspect the Django version and constraint guidance
 - **Then** the docs agree that the backend is on Django `6.0.7` and mention Django 6's `CheckConstraint(condition=...)` form instead of stale Django 5.1 guidance
 
-### AC-49: Kit schema changes stay isolated to inventory
+### AC-49: Kit schema changes use only the authorized migrations
 - **Given** migrations are inspected after implementation
 - **When** maintainers review the generated migration files
-- **Then** the kit schema change is an inventory migration named for kits and kit components, adds `InventoryItem.is_kit` plus `KitComponent` with its indexes and database constraints, and does not create a new `reorder_queue` migration
+- **Then** the kit schema changes consist of the inventory migration for `InventoryItem.is_kit` plus `KitComponent` and exactly one additive `reorder_queue/0028_purchaseorderitem_kit_snapshot.py` migration that only adds nullable `PurchaseOrderItem.kit_snapshot = JSONField(null=True, blank=True)`, with no `CheckConstraint` change, no fourth purchase-order-item target slot, no `unique_together` or index change, and no consumer branching
+
+### AC-50: Ordinary purchase-order lines keep their existing contract
+- **Given** a purchase order contains an ordinary item line and no kit line
+- **When** a client retrieves the purchase order and maintainers inspect the stored purchase-order item
+- **Then** the ordinary line response is byte-identical to the pre-kit response shape, no kit component preview is exposed, and `PurchaseOrderItem.kit_snapshot` is `NULL`
+
+### AC-51: Snapshot migration leaves schemas clean
+- **Given** the authorized inventory and `reorder_queue` migrations have been committed
+- **When** `cd backend && python manage.py makemigrations --check` runs
+- **Then** Django reports no pending model changes for `inventory` or `reorder_queue`
 
 ## Verification Commands
 - `cd backend && pytest`

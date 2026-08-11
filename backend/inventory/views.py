@@ -6248,10 +6248,7 @@ class MaintenanceDashboardViewSet(viewsets.ViewSet):
         filter on completed_at; the by_asset rollup uses the trailing 90 days
         and reports days_in_maintenance_90d the same way TCO does.
         """
-        from .services.work_order_reports import (
-            iter_asset_work_orders,
-            prefetch_asset_work_orders,
-        )
+        from .services.work_order_reports import iter_asset_work_orders, prefetch_asset_work_orders
 
         now = timezone.now()
         today = now.date()
@@ -6886,10 +6883,7 @@ class AssetReportViewSet(viewsets.ViewSet):
         Query params ``start_date``/``end_date`` (``YYYY-MM-DD``) default to the
         last 30 days. Rows are sorted by ``asset_name`` then ``used_at``.
         """
-        from .services.work_order_reports import (
-            iter_asset_work_orders,
-            prefetch_asset_work_orders,
-        )
+        from .services.work_order_reports import iter_asset_work_orders, prefetch_asset_work_orders
 
         start_date, end_date = self._supplies_window(request)
 

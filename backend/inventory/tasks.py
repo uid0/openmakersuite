@@ -202,10 +202,7 @@ def generate_demand_forecasts():
     # Reuse the serialized forecast's batched lead-time resolution (observed
     # LeadTimeLog mean, else the primary supplier's estimate) to avoid N+1.
     from .services.component_forecast import _lead_time_days_by_item
-    from .services.demand_forecast_engine import (
-        build_restock_events,
-        forecast_item_by_interval,
-    )
+    from .services.demand_forecast_engine import build_restock_events, forecast_item_by_interval
 
     InventoryItem = apps.get_model("inventory", "InventoryItem")
     DemandForecast = apps.get_model("inventory", "DemandForecast")

@@ -204,9 +204,7 @@ def receive_delivery(
             # never moves stock, so ordinary receives are untouched. Local
             # import avoids a reorder_queue <-> inventory services cycle.
             if po_item.work_order_id:
-                from inventory.services.work_order_purchase_bridge import (
-                    post_work_order_material,
-                )
+                from inventory.services.work_order_purchase_bridge import post_work_order_material
 
                 post_work_order_material(po_item)
 

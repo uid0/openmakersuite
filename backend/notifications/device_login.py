@@ -54,7 +54,7 @@ def get_client_ip(request):
     ``REMOTE_ADDR``. Mirrors the extractor in ``inventory.views`` so the alert
     reports the same address operators see elsewhere.
     """
-    forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
+    forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.META.get("REMOTE_ADDR")
@@ -125,7 +125,7 @@ def track_device_login(request, user):
 
         token = _read_device_token(request)
         ip_address = get_client_ip(request)
-        user_agent = request.META.get("HTTP_USER_AGENT", "")
+        user_agent = request.headers.get("user-agent", "")
 
         if token:
             device = KnownDevice.objects.filter(user=user, device_token=token).first()

@@ -51,10 +51,9 @@ class ProjectStorageStintAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         return super().get_queryset(request).select_related("slot")
 
+    @admin.display(description="Status")
     def status_display(self, obj: ProjectStorageStint) -> str:
         return obj.compute_status()
-
-    status_display.short_description = "Status"
 
 
 @admin.register(StorageSlot)

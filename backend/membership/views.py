@@ -436,7 +436,7 @@ from .serializers import (  # noqa: E402
 
 def _client_ip(request) -> str | None:
     """Best-effort client IP, honoring X-Forwarded-For when behind nginx."""
-    xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    xff = request.headers.get("x-forwarded-for", "")
     if xff:
         return xff.split(",")[0].strip()
     return request.META.get("REMOTE_ADDR")

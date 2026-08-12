@@ -25,16 +25,14 @@ class PMScheduleAdmin(admin.ModelAdmin):
     search_fields = ("task_name", "asset__name", "asset__asset_tag")
     inlines = [PMServiceLogInline]
 
+    @admin.display(description="Status")
     def _status(self, obj: PMSchedule) -> str:
         return obj.status()
 
-    _status.short_description = "Status"
-
+    @admin.display(description="Last service")
     def _days_since(self, obj: PMSchedule) -> str:
         d = obj.days_since_last()
         return "never" if d is None else f"{d}d"
-
-    _days_since.short_description = "Last service"
 
 
 @admin.register(PMServiceLog)

@@ -4,8 +4,9 @@ Tests for notifications app.
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.urls import reverse
 
-from .models import Notification, NotificationPreference
+from .models import KnownDevice, Notification, NotificationPreference
 from .services import create_bulk_notifications, create_notification, notify_admins
 
 User = get_user_model()
@@ -473,3 +474,35 @@ class NotificationListEtagTest(TestCase):
         ours = self._list()
         theirs = other_client.get("/api/notifications/")
         self.assertNotEqual(ours["ETag"], theirs["ETag"])
+
+
+class DeviceLoginRequestHeaderTest(TestCase):
+    """Device tracking reads the client IP and UA off the request headers."""
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="deviceheaders",
+            email="deviceheaders@example.com",
+            password="staff-secret-42",
+            is_staff=True,
+        )
+
+    def test_new_device_records_forwarded_ip_and_user_agent(self):
+        response = self.client.post(
+            reverse("login"),
+            {"username": "deviceheaders", "password": "staff-secret-42"},
+            headers={
+                "x-forwarded-for": "203.0.113.10, 198.51.100.2",
+                "user-agent": "OpenMakerSuite Test Browser",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+
+        # Behind nginx the first X-Forwarded-For hop is the real client.
+        device = KnownDevice.objects.get(user=self.staff)
+        self.assertEqual(device.ip_address, "203.0.113.10")
+        self.assertEqual(device.user_agent, "OpenMakerSuite Test Browser")
+
+        note = Notification.objects.get(user=self.staff, title="New device sign-in")
+        self.assertEqual(note.metadata["ip"], "203.0.113.10")
+        self.assertEqual(note.metadata["ua"], "OpenMakerSuite Test Browser")

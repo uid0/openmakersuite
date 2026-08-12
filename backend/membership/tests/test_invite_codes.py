@@ -176,6 +176,25 @@ class TestAnonymousRedeem:
         assert invite.redeemed_by_id == user.id
         assert invite.redeemed_at is not None
 
+    def test_forwarded_ip_is_recorded_from_first_hop(self, api_client):
+        """Behind nginx the redeemer's IP is the first X-Forwarded-For hop."""
+        invite = _open_invite()
+        response = api_client.post(
+            reverse("invite-redeem"),
+            data={
+                "code": invite.code,
+                "username": "forwarded",
+                "email": "forwarded@example.com",
+                "password": VALID_PASSWORD,
+            },
+            format="json",
+            HTTP_X_FORWARDED_FOR="203.0.113.10, 198.51.100.2",
+        )
+        assert response.status_code == status.HTTP_201_CREATED, response.data
+        invite.refresh_from_db()
+        assert invite.redeemed is True
+        assert invite.redeemed_ip == "203.0.113.10"
+
     def test_invalid_code_rejected(self, api_client):
         response = api_client.post(
             reverse("invite-redeem"),

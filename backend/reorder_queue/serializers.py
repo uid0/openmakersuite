@@ -416,6 +416,11 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     items = PurchaseOrderItemSerializer(many=True, read_only=True)
     attachments = PurchaseOrderAttachmentSerializer(many=True, read_only=True)
 
+    # Human-readable status, mirroring ``get_status_display``. The purchasing
+    # list and detail screens render this directly; without it the status text
+    # is blank in the UI even though the raw ``status`` drives the badge colour.
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+
     # Calculated fields
     total_items = serializers.IntegerField(read_only=True)
     total_quantity = serializers.IntegerField(read_only=True)
@@ -447,6 +452,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "owning_group",
             "owning_group_details",
             "status",
+            "status_label",
             "priority",
             "payment_terms",
             "freight_terms",

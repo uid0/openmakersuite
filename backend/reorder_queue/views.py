@@ -47,6 +47,7 @@ from .models import (
     WebhookAuditEvent,
 )
 from .serializers import (
+    AddPurchaseOrderItemsSerializer,
     BarcodeReceiptSerializer,
     MarkDeliveredSerializer,
     OrderDeliverySerializer,
@@ -1617,6 +1618,59 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         response_serializer = self.get_serializer(purchase_order)
         return Response(response_serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="items")
+    def add_items(self, request, pk=None):
+        """Append line items to a draft purchase order (op-4kq).
+
+        Lines could previously only be supplied at create time, so a forgotten
+        item meant deleting the order and retyping it. The payload is the same
+        per-line shape ``create`` accepts — ``item_supplier_id``, ``asset_id``
+        or ``description``, plus the optional ``work_order_id`` /
+        ``owning_group_id`` / ``at_level`` modifiers.
+
+        Draft-only: once an order is sent, its lines are the record of what the
+        supplier was actually asked for. Returns the full updated PO so the
+        detail page can repaint from the response.
+        """
+        purchase_order = self.get_object()
+
+        if purchase_order.status != PurchaseOrder.Status.DRAFT:
+            return Response(
+                {"error": services.DRAFT_ONLY_EDIT_MESSAGE},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = AddPurchaseOrderItemsSerializer(
+            data=request.data,
+            context={"purchase_order": purchase_order},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        # Per-line failures raise rest_framework ValidationError, which DRF's
+        # handler renders as a 400 — the same shape `create` returns.
+        created = services.add_line_items(
+            purchase_order,
+            serializer.validated_data["items"],
+            request.user,
+        )
+
+        record_audit_event(
+            action=PurchaseOrderAuditEvent.Action.PO_LINE_ADD,
+            actor=request.user,
+            purchase_order=purchase_order,
+            metadata={
+                "po_number": purchase_order.po_number,
+                "line_count": len(created),
+                "line_ids": [line.id for line in created],
+            },
+        )
+
+        purchase_order.refresh_from_db()
+        return Response(
+            self.get_serializer(purchase_order).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=["patch"], url_path="items/(?P<item_id>[^/.]+)")
     def update_item(self, request, pk=None, item_id=None):

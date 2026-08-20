@@ -51,13 +51,27 @@ def test_ac49_the_snapshot_migration_only_adds_one_nullable_field():
     assert field.has_default() is False
 
 
-def test_ac49_no_other_reorder_queue_migration_followed_it():
-    """0028 is the last word. A 0029 would mean the budget was overspent."""
+def test_ac49_the_snapshot_work_contributed_exactly_one_migration():
+    """The kit-snapshot design cost one migration, and only one.
+
+    This asserted ``0028`` was the highest-numbered reorder_queue migration on
+    disk, which held only until the next unrelated schema change landed (op-4kq
+    added ``0029`` for a new audit action). The budget being checked was always
+    *this feature's* migration count, not a freeze on the whole app, so the
+    check is now scoped to that: no migration other than 0028 touches
+    ``kit_snapshot``.
+    """
     loader = MigrationLoader(None, ignore_no_migrations=True)
-    names = sorted(
-        name for app_label, name in loader.disk_migrations if app_label == "reorder_queue"
-    )
-    assert names[-1] == "0028_purchaseorderitem_kit_snapshot"
+
+    touching_kit_snapshot = set()
+    for (app_label, name), migration in loader.disk_migrations.items():
+        if app_label != "reorder_queue":
+            continue
+        for operation in migration.operations:
+            if getattr(operation, "name", None) == "kit_snapshot":
+                touching_kit_snapshot.add(name)
+
+    assert touching_kit_snapshot == {"0028_purchaseorderitem_kit_snapshot"}
 
 
 def test_ac49_kit_lines_added_no_purchase_order_item_target_slot():

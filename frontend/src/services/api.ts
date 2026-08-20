@@ -2110,6 +2110,14 @@ export const purchaseOrderAPI = {
     api.get<ReorderDataResponse>('/reorders/purchase-orders/reorder_data/'),
   createOrder: (data: CreatePurchaseOrderData) =>
     api.post<any>('/reorders/purchase-orders/', data),
+  /**
+   * Append line items to a draft purchase order (op-4kq). Same per-line shapes
+   * as `createOrder`. Draft-only — the API rejects a sent order, whose lines
+   * are the record of what the supplier was actually asked for. Resolves with
+   * the full updated order so the caller can repaint from the response.
+   */
+  addLineItems: (orderId: string, items: CreatePurchaseOrderItem[]) =>
+    api.post<any>(`/reorders/purchase-orders/${orderId}/items/`, { items }),
   updateLineItem: (orderId: string, itemId: string, data: LineItemUpdate) =>
     api.patch(`/reorders/purchase-orders/${orderId}/items/${itemId}/`, data),
   voidLineItem: (orderId: string, itemId: string, reason?: string) =>

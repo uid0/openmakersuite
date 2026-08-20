@@ -116,6 +116,204 @@ def _resolve_owning_group(item_data, idx):
         )
 
 
+def create_line_item(purchase_order, item_data, idx=0):
+    """Create one line item on ``purchase_order`` from a raw ``item_data`` dict.
+
+    The per-line half of :func:`create_purchase_order`, extracted so lines can
+    also be appended to an existing draft order (:func:`add_line_items`)
+    through exactly the same validation and packaging rules. ``idx`` only
+    labels the error messages.
+
+    Handles all three line shapes — ``item_supplier_id`` (inventory),
+    ``asset_id`` (asset), ``description`` (freeform) — and raises
+    :class:`rest_framework.serializers.ValidationError` on any per-item
+    failure. Does **not** touch the PO's ``estimated_total``; callers own that
+    (see :func:`recalculate_estimated_total`).
+    """
+    quantity = item_data.get("quantity", 1)
+    notes = item_data.get("notes", "")
+
+    # Validate quantity
+    if not isinstance(quantity, (int, float)) or quantity <= 0:
+        raise serializers.ValidationError(
+            f"Item at index {idx}: quantity must be a positive number, got {quantity}"
+        )
+
+    work_order = _resolve_work_order(item_data, idx)
+    owning_group = _resolve_owning_group(item_data, idx)
+
+    # Handle inventory items
+    if "item_supplier_id" in item_data:
+        item_supplier_id = item_data["item_supplier_id"]
+        try:
+            item_supplier = ItemSupplier.objects.get(id=item_supplier_id)
+
+            # Ensure the supplier matches the PO supplier
+            if item_supplier.supplier != purchase_order.supplier:
+                raise serializers.ValidationError(
+                    f"Item supplier {item_supplier_id} does not belong to selected supplier"
+                )
+
+            # ``at_level`` lets a caller order in the item's count unit
+            # ("4 cases") instead of base units; the stored
+            # ``quantity_ordered`` is always base units (op-ev14). Absent —
+            # every caller today — the quantity passes through untouched.
+            try:
+                quantity = resolve_base_quantity(
+                    item_supplier.item,
+                    int(quantity),
+                    at_level=parse_at_level(item_data.get("at_level")),
+                )
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError(f"Item at index {idx}: {exc.messages[0]}")
+
+            # Calculate order_in_packages: prefer explicit caller value
+            # (frontend sends this when user enters whole cases), otherwise
+            # derive it from the supplier's case size, falling back to the
+            # item's own outermost packaging rung.
+            explicit_packages = item_data.get("order_in_packages")
+            if explicit_packages is not None:
+                try:
+                    order_in_packages = int(explicit_packages)
+                except (TypeError, ValueError):
+                    raise serializers.ValidationError(
+                        f"Item at index {idx}: order_in_packages must be "
+                        f"an integer, got {explicit_packages!r}"
+                    )
+                if order_in_packages < 0:
+                    raise serializers.ValidationError(
+                        f"Item at index {idx}: order_in_packages must be "
+                        f"non-negative, got {order_in_packages}"
+                    )
+            else:
+                order_in_packages = order_packages_for_line(item_supplier, int(quantity))
+
+            # Get unit_cost override if provided, otherwise use item_supplier.unit_cost
+            unit_cost_override = item_data.get("unit_cost")
+            if unit_cost_override is not None:
+                try:
+                    unit_cost_ordered = Decimal(str(unit_cost_override))
+                except (InvalidOperation, ValueError):
+                    raise serializers.ValidationError(
+                        f"Item at index {idx}: unit_cost must be numeric, "
+                        f"got {unit_cost_override!r}"
+                    )
+            else:
+                unit_cost_ordered = item_supplier.unit_cost or Decimal("0.00")
+
+            # Get expected_shipment_date if provided
+            expected_shipment_date = item_data.get("expected_shipment_date")
+
+            # Freeze what a kit contains right now (op-8n0). The BOM is
+            # editable and receipt is days or weeks away, so the line has to
+            # carry its own copy or receiving would credit today's recipe
+            # for a box packed to the old one. ``None`` for ordinary items,
+            # which is what keeps their stored row and payload unchanged.
+            kit_snapshot = build_kit_snapshot(item_supplier.item)
+
+            # Create the line item
+            line_item = PurchaseOrderItem.objects.create(
+                purchase_order=purchase_order,
+                item_supplier=item_supplier,
+                quantity_ordered=quantity,
+                unit_cost_ordered=unit_cost_ordered,
+                order_in_packages=order_in_packages,
+                notes=notes,
+                expected_shipment_date=expected_shipment_date,
+                work_order=work_order,
+                owning_group=owning_group,
+                kit_snapshot=kit_snapshot,
+            )
+
+            return line_item
+
+        except (ItemSupplier.DoesNotExist, ValueError, TypeError):
+            raise serializers.ValidationError(
+                f"ItemSupplier with id {item_supplier_id} does not exist"
+            )
+
+    # Handle assets
+    elif "asset_id" in item_data:
+        asset_id = item_data["asset_id"]
+        unit_cost = item_data.get("unit_cost")
+        if unit_cost is None:
+            raise serializers.ValidationError(
+                f"unit_cost is required when purchasing asset {asset_id}"
+            )
+        try:
+            unit_cost = Decimal(str(unit_cost))
+        except (InvalidOperation, ValueError):
+            raise serializers.ValidationError(
+                f"Item at index {idx}: unit_cost must be numeric, " f"got {unit_cost!r}"
+            )
+
+        try:
+            from inventory.models import Asset
+
+            asset = Asset.objects.get(id=asset_id)
+
+            # Ensure the asset's manufacturer matches the PO supplier (if set)
+            if asset.manufacturer and asset.manufacturer != purchase_order.supplier:
+                raise serializers.ValidationError(
+                    f"Asset {asset_id} manufacturer does not match selected supplier"
+                )
+
+            # Create the line item (assets don't have package information)
+            line_item = PurchaseOrderItem.objects.create(
+                purchase_order=purchase_order,
+                asset=asset,
+                quantity_ordered=quantity,
+                unit_cost_ordered=unit_cost,
+                order_in_packages=0,  # Assets don't have package information
+                notes=notes,
+                work_order=work_order,
+                owning_group=owning_group,
+            )
+
+            return line_item
+
+        except (Asset.DoesNotExist, DjangoValidationError, ValueError):
+            raise serializers.ValidationError(f"Invalid asset id: {asset_id}")
+
+    # Handle freeform line items
+    elif "description" in item_data:
+        description = item_data["description"]
+        unit_cost = item_data.get("unit_cost")
+
+        if not description:
+            raise serializers.ValidationError("Freeform items must have a non-empty description")
+
+        if unit_cost is None:
+            raise serializers.ValidationError(
+                f"unit_cost is required for freeform item: {description}"
+            )
+        try:
+            unit_cost = Decimal(str(unit_cost))
+        except (InvalidOperation, ValueError):
+            raise serializers.ValidationError(
+                f"Item at index {idx}: unit_cost must be numeric, " f"got {unit_cost!r}"
+            )
+
+        # Create the freeform line item (freeform items don't have package information)
+        line_item = PurchaseOrderItem.objects.create(
+            purchase_order=purchase_order,
+            description=description,
+            quantity_ordered=quantity,
+            unit_cost_ordered=unit_cost,
+            order_in_packages=0,  # Freeform items don't have package information
+            notes=notes,
+            work_order=work_order,
+            owning_group=owning_group,
+        )
+
+        return line_item
+
+    else:
+        raise serializers.ValidationError(
+            "Each item must have 'item_supplier_id', 'asset_id', or 'description'"
+        )
+
+
 @transaction.atomic
 def create_purchase_order(validated_data, items_data, user):
     """Create a purchase order with line items (inventory items, assets, freeform).
@@ -142,196 +340,51 @@ def create_purchase_order(validated_data, items_data, user):
     # Create line items
     total_cost = Decimal("0.00")
     for idx, item_data in enumerate(items_data):
-        quantity = item_data.get("quantity", 1)
-        notes = item_data.get("notes", "")
-
-        # Validate quantity
-        if not isinstance(quantity, (int, float)) or quantity <= 0:
-            raise serializers.ValidationError(
-                f"Item at index {idx}: quantity must be a positive number, got {quantity}"
-            )
-
-        work_order = _resolve_work_order(item_data, idx)
-        owning_group = _resolve_owning_group(item_data, idx)
-
-        # Handle inventory items
-        if "item_supplier_id" in item_data:
-            item_supplier_id = item_data["item_supplier_id"]
-            try:
-                item_supplier = ItemSupplier.objects.get(id=item_supplier_id)
-
-                # Ensure the supplier matches the PO supplier
-                if item_supplier.supplier != purchase_order.supplier:
-                    raise serializers.ValidationError(
-                        f"Item supplier {item_supplier_id} does not belong to selected supplier"
-                    )
-
-                # ``at_level`` lets a caller order in the item's count unit
-                # ("4 cases") instead of base units; the stored
-                # ``quantity_ordered`` is always base units (op-ev14). Absent —
-                # every caller today — the quantity passes through untouched.
-                try:
-                    quantity = resolve_base_quantity(
-                        item_supplier.item,
-                        int(quantity),
-                        at_level=parse_at_level(item_data.get("at_level")),
-                    )
-                except DjangoValidationError as exc:
-                    raise serializers.ValidationError(f"Item at index {idx}: {exc.messages[0]}")
-
-                # Calculate order_in_packages: prefer explicit caller value
-                # (frontend sends this when user enters whole cases), otherwise
-                # derive it from the supplier's case size, falling back to the
-                # item's own outermost packaging rung.
-                explicit_packages = item_data.get("order_in_packages")
-                if explicit_packages is not None:
-                    try:
-                        order_in_packages = int(explicit_packages)
-                    except (TypeError, ValueError):
-                        raise serializers.ValidationError(
-                            f"Item at index {idx}: order_in_packages must be "
-                            f"an integer, got {explicit_packages!r}"
-                        )
-                    if order_in_packages < 0:
-                        raise serializers.ValidationError(
-                            f"Item at index {idx}: order_in_packages must be "
-                            f"non-negative, got {order_in_packages}"
-                        )
-                else:
-                    order_in_packages = order_packages_for_line(item_supplier, int(quantity))
-
-                # Get unit_cost override if provided, otherwise use item_supplier.unit_cost
-                unit_cost_override = item_data.get("unit_cost")
-                if unit_cost_override is not None:
-                    try:
-                        unit_cost_ordered = Decimal(str(unit_cost_override))
-                    except (InvalidOperation, ValueError):
-                        raise serializers.ValidationError(
-                            f"Item at index {idx}: unit_cost must be numeric, "
-                            f"got {unit_cost_override!r}"
-                        )
-                else:
-                    unit_cost_ordered = item_supplier.unit_cost or Decimal("0.00")
-
-                # Get expected_shipment_date if provided
-                expected_shipment_date = item_data.get("expected_shipment_date")
-
-                # Freeze what a kit contains right now (op-8n0). The BOM is
-                # editable and receipt is days or weeks away, so the line has to
-                # carry its own copy or receiving would credit today's recipe
-                # for a box packed to the old one. ``None`` for ordinary items,
-                # which is what keeps their stored row and payload unchanged.
-                kit_snapshot = build_kit_snapshot(item_supplier.item)
-
-                # Create the line item
-                line_item = PurchaseOrderItem.objects.create(
-                    purchase_order=purchase_order,
-                    item_supplier=item_supplier,
-                    quantity_ordered=quantity,
-                    unit_cost_ordered=unit_cost_ordered,
-                    order_in_packages=order_in_packages,
-                    notes=notes,
-                    expected_shipment_date=expected_shipment_date,
-                    work_order=work_order,
-                    owning_group=owning_group,
-                    kit_snapshot=kit_snapshot,
-                )
-
-                total_cost += line_item.estimated_cost
-
-            except (ItemSupplier.DoesNotExist, ValueError, TypeError):
-                raise serializers.ValidationError(
-                    f"ItemSupplier with id {item_supplier_id} does not exist"
-                )
-
-        # Handle assets
-        elif "asset_id" in item_data:
-            asset_id = item_data["asset_id"]
-            unit_cost = item_data.get("unit_cost")
-            if unit_cost is None:
-                raise serializers.ValidationError(
-                    f"unit_cost is required when purchasing asset {asset_id}"
-                )
-            try:
-                unit_cost = Decimal(str(unit_cost))
-            except (InvalidOperation, ValueError):
-                raise serializers.ValidationError(
-                    f"Item at index {idx}: unit_cost must be numeric, " f"got {unit_cost!r}"
-                )
-
-            try:
-                from inventory.models import Asset
-
-                asset = Asset.objects.get(id=asset_id)
-
-                # Ensure the asset's manufacturer matches the PO supplier (if set)
-                if asset.manufacturer and asset.manufacturer != purchase_order.supplier:
-                    raise serializers.ValidationError(
-                        f"Asset {asset_id} manufacturer does not match selected supplier"
-                    )
-
-                # Create the line item (assets don't have package information)
-                line_item = PurchaseOrderItem.objects.create(
-                    purchase_order=purchase_order,
-                    asset=asset,
-                    quantity_ordered=quantity,
-                    unit_cost_ordered=unit_cost,
-                    order_in_packages=0,  # Assets don't have package information
-                    notes=notes,
-                    work_order=work_order,
-                    owning_group=owning_group,
-                )
-
-                total_cost += line_item.estimated_cost
-
-            except (Asset.DoesNotExist, DjangoValidationError, ValueError):
-                raise serializers.ValidationError(f"Invalid asset id: {asset_id}")
-
-        # Handle freeform line items
-        elif "description" in item_data:
-            description = item_data["description"]
-            unit_cost = item_data.get("unit_cost")
-
-            if not description:
-                raise serializers.ValidationError(
-                    "Freeform items must have a non-empty description"
-                )
-
-            if unit_cost is None:
-                raise serializers.ValidationError(
-                    f"unit_cost is required for freeform item: {description}"
-                )
-            try:
-                unit_cost = Decimal(str(unit_cost))
-            except (InvalidOperation, ValueError):
-                raise serializers.ValidationError(
-                    f"Item at index {idx}: unit_cost must be numeric, " f"got {unit_cost!r}"
-                )
-
-            # Create the freeform line item (freeform items don't have package information)
-            line_item = PurchaseOrderItem.objects.create(
-                purchase_order=purchase_order,
-                description=description,
-                quantity_ordered=quantity,
-                unit_cost_ordered=unit_cost,
-                order_in_packages=0,  # Freeform items don't have package information
-                notes=notes,
-                work_order=work_order,
-                owning_group=owning_group,
-            )
-
-            total_cost += line_item.estimated_cost
-
-        else:
-            raise serializers.ValidationError(
-                "Each item must have 'item_supplier_id', 'asset_id', or 'description'"
-            )
+        line_item = create_line_item(purchase_order, item_data, idx)
+        total_cost += line_item.estimated_cost
 
     # Update estimated total
     purchase_order.estimated_total = total_cost
     purchase_order.save()
 
     return purchase_order
+
+
+DRAFT_ONLY_EDIT_MESSAGE = (
+    "Line items can only be added while a purchase order is still a draft. "
+    "This order has already been sent to the supplier."
+)
+
+
+@transaction.atomic
+def add_line_items(purchase_order, items_data, user):
+    """Append line items to a **draft** purchase order (op-4kq).
+
+    An order is rarely complete on the first pass — someone remembers the
+    gloves after building the rest of the basket — and until now the only way
+    to add a line was to delete the PO and retype it, because lines could only
+    be supplied at create time.
+
+    Draft-only, deliberately. Once an order is sent, its lines are what the
+    supplier was actually asked for; adding to that would silently misrepresent
+    the order and hand receiving a line the supplier never saw. Correcting a
+    sent order stays the job of ``update_item``/``void_item``.
+
+    Each dict follows exactly the create payload's per-line shapes, validated
+    by :func:`create_line_item`. Atomic: one bad line rolls the whole batch
+    back, so a partial basket is never left behind.
+    """
+    if purchase_order.status != PurchaseOrder.Status.DRAFT:
+        raise serializers.ValidationError(DRAFT_ONLY_EDIT_MESSAGE)
+
+    created = [
+        create_line_item(purchase_order, item_data, idx) for idx, item_data in enumerate(items_data)
+    ]
+
+    # Re-derive rather than accumulate: the stored total was frozen at create
+    # time and may already have drifted through quantity edits on other lines.
+    recalculate_estimated_total(purchase_order)
+    return created
 
 
 def apply_line_quantity(line_item, quantity):

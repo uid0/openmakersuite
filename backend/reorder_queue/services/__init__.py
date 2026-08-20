@@ -12,9 +12,12 @@ from .approvals import (
 )
 from .numbering import next_po_number
 from .purchase_orders import (
+    DRAFT_ONLY_EDIT_MESSAGE,
     add_business_days,
+    add_line_items,
     apply_line_quantity,
     confirm_order,
+    create_line_item,
     create_purchase_order,
     mark_sent,
     recalculate_estimated_total,
@@ -34,9 +37,12 @@ __all__ = [
     "PO_ELIGIBLE_STATUSES",
     "approved_requests_prefetch",
     "get_approved_reorder_request",
+    "DRAFT_ONLY_EDIT_MESSAGE",
     "add_business_days",
+    "add_line_items",
     "apply_line_quantity",
     "confirm_order",
+    "create_line_item",
     "create_purchase_order",
     "mark_sent",
     "next_po_number",

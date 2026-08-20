@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import {
+  inventoryAPI,
   OrderingAdapter,
   OrderPadExport,
   purchaseOrderAPI,
@@ -46,6 +47,20 @@ import {
   priorityLabel,
 } from '../utils/purchaseOrderTerms';
 import { parseSerialNumbers } from '../utils/serializedComponents';
+
+/**
+ * A line staged for addition to a draft order but not yet posted (op-4kq).
+ * `item_supplier_id` marks an inventory line resolved against this order's
+ * supplier; its absence marks a freeform line carrying its own description.
+ */
+interface StagedLine {
+  key: string;
+  item_supplier_id?: number;
+  label: string;
+  description?: string;
+  quantity: number;
+  unit_cost: string;
+}
 
 interface PurchaseOrderItem {
   id: string;
@@ -109,6 +124,9 @@ interface PurchaseOrderAttachment {
 interface PurchaseOrder {
   id: string;
   po_number: string;
+  // The supplier's own id, needed to resolve an ItemSupplier when adding a
+  // line to a draft order (op-4kq); `supplier_details` is only its name.
+  supplier: number;
   supplier_details: string;
   // Selects the adapter-aware order-pad affordances (op-svpq): Amazon "Open
   // cart" vs HD Supply / generic download+copy. Read-only, from the supplier.
@@ -286,6 +304,16 @@ const PurchaseOrderPage: React.FC = () => {
   const [serialInputs, setSerialInputs] = useState<Record<string, string>>({});
   const [receiveDeliveryDate, setReceiveDeliveryDate] = useState<string>('');
   const [receiveNotes, setReceiveNotes] = useState<string>('');
+  // Adding line items to a draft order (op-4kq). Lines are staged locally and
+  // posted as one batch, so a half-built basket never reaches the order.
+  const [addingItems, setAddingItems] = useState(false);
+  const [addSearch, setAddSearch] = useState('');
+  const [addSearching, setAddSearching] = useState(false);
+  const [addDescription, setAddDescription] = useState('');
+  const [addUnitCost, setAddUnitCost] = useState('');
+  const [addQuantity, setAddQuantity] = useState('1');
+  const [stagedLines, setStagedLines] = useState<StagedLine[]>([]);
+  const [savingLines, setSavingLines] = useState(false);
   const [editingMetadata, setEditingMetadata] = useState(false);
   const [metadataSupplierOrderNumber, setMetadataSupplierOrderNumber] = useState('');
   const [metadataSalesOrderNumber, setMetadataSalesOrderNumber] = useState('');
@@ -695,6 +723,192 @@ const PurchaseOrderPage: React.FC = () => {
   const canReceiveItems = (po: PurchaseOrder) =>
     isAuthenticated && ['sent', 'confirmed', 'partially_received'].includes(po.status);
 
+  /**
+   * Why receiving is unavailable, or null when it is available.
+   *
+   * The receive affordances used to just vanish on a PO whose status did not
+   * allow receiving, which reads as a broken button rather than a finished or
+   * not-yet-sent order — especially since the status itself was invisible for
+   * a while. Saying which state the order is in, and what to do about it, is
+   * the difference between "this app is broken" and "ah, send it first".
+   */
+  const receiveUnavailableReason = (po: PurchaseOrder): string | null => {
+    if (!isAuthenticated) return 'Sign in to receive items against this order.';
+    if (['sent', 'confirmed', 'partially_received'].includes(po.status)) return null;
+    switch (po.status) {
+      case 'draft':
+        return 'This order is still a draft. Send it to the supplier before receiving against it.';
+      case 'received':
+        return 'Every line on this order has already been received in full.';
+      case 'cancelled':
+        return 'This order was cancelled, so nothing can be received against it.';
+      case 'voided':
+        return 'This order was voided, so nothing can be received against it.';
+      default:
+        return 'This order is not in a state that can receive items.';
+    }
+  };
+
+  const canAddItems = (po: PurchaseOrder) => isAuthenticated && po.status === 'draft';
+
+  const resetAddItems = () => {
+    setAddingItems(false);
+    setAddSearch('');
+    setAddDescription('');
+    setAddUnitCost('');
+    setAddQuantity('1');
+    setStagedLines([]);
+  };
+
+  const parsedAddQuantity = () => {
+    const quantity = parseInt(addQuantity, 10);
+    return Number.isFinite(quantity) && quantity > 0 ? quantity : null;
+  };
+
+  /**
+   * Resolve the typed name/SKU to an ItemSupplier for THIS order's supplier and
+   * stage it. Mirrors the create form: an item the supplier does not carry has
+   * no valid line, so it is refused here rather than 400-ing on submit.
+   */
+  const handleStageInventoryLine = async () => {
+    if (!order) return;
+    const term = addSearch.trim();
+    if (!term) {
+      showError('Enter an item name or SKU to add');
+      return;
+    }
+    const quantity = parsedAddQuantity();
+    if (quantity === null) {
+      showError('Quantity must be a positive whole number');
+      return;
+    }
+
+    setAddSearching(true);
+    try {
+      const searchResponse = await inventoryAPI.listItems({ search: term });
+      const items = searchResponse.data.results;
+      if (items.length === 0) {
+        showError(`No inventory item matches "${term}"`);
+        return;
+      }
+      if (items.length > 1) {
+        showError('Multiple items match — enter a more specific name or SKU');
+        return;
+      }
+
+      const item = items[0];
+      const suppliersResponse = await inventoryAPI.getItemSuppliers(item.id);
+      const match = suppliersResponse.data.results.find(
+        (is: any) => is.supplier === order.supplier && is.is_active && !is.is_discontinued,
+      );
+      if (!match) {
+        showError(
+          `${item.name} is not available from this supplier — add it as a freeform line instead`,
+        );
+        return;
+      }
+      if (stagedLines.some((line) => line.item_supplier_id === match.id)) {
+        showError('That item is already staged');
+        return;
+      }
+      if (order.items.some((line) => !line.is_voided && line.item_details?.id === item.id)) {
+        showError('That item is already on this order — edit the existing line instead');
+        return;
+      }
+
+      setStagedLines((prev) => [
+        ...prev,
+        {
+          key: `is-${match.id}`,
+          item_supplier_id: match.id,
+          label: item.sku ? `${item.name} (${item.sku})` : item.name,
+          quantity,
+          unit_cost: addUnitCost.trim() || (match.unit_cost?.toString() ?? '0'),
+        },
+      ]);
+      setAddSearch('');
+      setAddUnitCost('');
+      setAddQuantity('1');
+    } catch (err) {
+      showError(extractErrorMessage(err, 'Failed to look up that item'));
+    } finally {
+      setAddSearching(false);
+    }
+  };
+
+  const handleStageFreeformLine = () => {
+    const description = addDescription.trim();
+    if (!description) {
+      showError('Enter a description for the freeform line');
+      return;
+    }
+    const quantity = parsedAddQuantity();
+    if (quantity === null) {
+      showError('Quantity must be a positive whole number');
+      return;
+    }
+    const cost = addUnitCost.trim();
+    if (!cost || !Number.isFinite(parseFloat(cost))) {
+      showError('Freeform lines need a unit cost');
+      return;
+    }
+
+    setStagedLines((prev) => [
+      ...prev,
+      {
+        key: `free-${description}-${prev.length}`,
+        label: description,
+        description,
+        quantity,
+        unit_cost: cost,
+      },
+    ]);
+    setAddDescription('');
+    setAddUnitCost('');
+    setAddQuantity('1');
+  };
+
+  const handleRemoveStagedLine = (key: string) =>
+    setStagedLines((prev) => prev.filter((line) => line.key !== key));
+
+  const handleSubmitAddItems = async () => {
+    if (!order || stagedLines.length === 0) {
+      showError('Stage at least one line to add');
+      return;
+    }
+
+    setSavingLines(true);
+    try {
+      const response = await purchaseOrderAPI.addLineItems(
+        orderId!,
+        stagedLines.map((line) =>
+          line.item_supplier_id
+            ? {
+                item_supplier_id: line.item_supplier_id,
+                quantity: line.quantity,
+                unit_cost: parseFloat(line.unit_cost),
+              }
+            : {
+                description: line.description,
+                quantity: line.quantity,
+                unit_cost: parseFloat(line.unit_cost),
+              },
+        ),
+      );
+      // Repaint from the response rather than refetching — same contract as
+      // mark-delivered (docs/REACTIVE_MUTATIONS.md).
+      setOrder(response.data);
+      const count = stagedLines.length;
+      resetAddItems();
+      showSuccess(`Added ${count} line${count === 1 ? '' : 's'} to this order`);
+    } catch (err) {
+      showError(extractErrorMessage(err, 'Failed to add line items'));
+    } finally {
+      setSavingLines(false);
+    }
+  };
+
+
   const getReceivableItems = (po: PurchaseOrder) =>
     po.items.filter((item) => !item.is_voided && !item.is_fully_received);
 
@@ -1077,6 +1291,13 @@ const PurchaseOrderPage: React.FC = () => {
       </Button>,
     );
   }
+  if (canAddItems(order) && !addingItems) {
+    heroActions.push(
+      <Button key="add-items" variant="default" onClick={() => setAddingItems(true)}>
+        Add items
+      </Button>,
+    );
+  }
 
   return (
     <WorkspacePage
@@ -1230,6 +1451,121 @@ const PurchaseOrderPage: React.FC = () => {
         </section>
       )}
 
+      {isAuthenticated && receiveUnavailableReason(order) && !addingItems && (
+        <Paper
+          withBorder
+          p="sm"
+          radius="md"
+          mb="md"
+          data-testid="receive-unavailable-notice"
+        >
+          <Text size="sm">{receiveUnavailableReason(order)}</Text>
+        </Paper>
+      )}
+      {addingItems && (
+        <section className="add-items-panel" aria-label="Add line items">
+          <h2>Add Items</h2>
+          <p className="add-items-hint">
+            Lines can only be added while an order is still a draft. Once it is sent, its
+            lines are the record of what the supplier was asked for.
+          </p>
+          <div className="add-items-fields">
+            <label htmlFor="add-item-search">
+              Item name or SKU
+              <input
+                id="add-item-search"
+                type="text"
+                value={addSearch}
+                onChange={(e) => setAddSearch(e.target.value)}
+                placeholder="e.g. Shop Towels"
+              />
+            </label>
+            <label htmlFor="add-item-description">
+              or Freeform description
+              <input
+                id="add-item-description"
+                type="text"
+                value={addDescription}
+                onChange={(e) => setAddDescription(e.target.value)}
+                placeholder="e.g. Pallet surcharge"
+              />
+            </label>
+            <label htmlFor="add-item-quantity">
+              Quantity
+              <input
+                id="add-item-quantity"
+                type="number"
+                min="1"
+                value={addQuantity}
+                onChange={(e) => setAddQuantity(e.target.value)}
+              />
+            </label>
+            <label htmlFor="add-item-unit-cost">
+              Unit cost
+              <input
+                id="add-item-unit-cost"
+                type="number"
+                step="0.01"
+                min="0"
+                value={addUnitCost}
+                onChange={(e) => setAddUnitCost(e.target.value)}
+                placeholder="supplier default"
+              />
+            </label>
+          </div>
+          <Group gap="sm" mb="sm">
+            <Button onClick={handleStageInventoryLine} disabled={addSearching || savingLines}>
+              {addSearching ? 'Looking up…' : 'Stage inventory item'}
+            </Button>
+            <Button variant="default" onClick={handleStageFreeformLine} disabled={savingLines}>
+              Stage freeform line
+            </Button>
+          </Group>
+          {stagedLines.length === 0 ? (
+            <p className="no-data">No lines staged yet.</p>
+          ) : (
+            <table className="items-table add-items-table">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Quantity</th>
+                  <th>Unit cost</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stagedLines.map((line) => (
+                  <tr key={line.key}>
+                    <td>{line.label}</td>
+                    <td>{line.quantity}</td>
+                    <td>{line.unit_cost}</td>
+                    <td>
+                      <Button
+                        variant="default"
+                        onClick={() => handleRemoveStagedLine(line.key)}
+                        disabled={savingLines}
+                      >
+                        Remove
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <Group gap="sm" mt="sm">
+            <Button
+              onClick={handleSubmitAddItems}
+              disabled={savingLines || stagedLines.length === 0}
+            >
+              {savingLines ? 'Adding…' : 'Add to order'}
+            </Button>
+            <Button variant="default" onClick={resetAddItems} disabled={savingLines}>
+              Cancel
+            </Button>
+          </Group>
+        </section>
+      )}
       {receivingItems && (
         <section className="receive-items-panel" aria-label="Receive purchase order items">
           <h2>Receive Items</h2>

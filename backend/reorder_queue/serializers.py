@@ -521,6 +521,84 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
         return owning_group_identity(obj.owning_group)
 
 
+class AddPurchaseOrderItemsSerializer(serializers.Serializer):
+    """Payload for appending line items to a draft purchase order (op-4kq).
+
+    Each dict is the same per-line shape ``PurchaseOrderCreateSerializer``
+    accepts. The duplicate check spans the lines already on the order as well
+    as the incoming batch: re-adding an item the PO already carries should be a
+    quantity edit on the existing line, not a second line for the same thing.
+
+    **Voided lines count as duplicates too.** ``PurchaseOrderItem`` carries a
+    ``unique_together`` on ``(purchase_order, item_supplier)`` and
+    ``(purchase_order, asset)`` with no voided exclusion, so a voided line
+    permanently occupies that slot on the order — adding the item back would
+    hit an IntegrityError at the database. Checking it here turns that 500 into
+    an actionable 400; the way to resurrect such a line is to un-void it.
+    """
+
+    items = serializers.ListField(
+        child=serializers.DictField(),
+        allow_empty=False,
+        help_text=(
+            "Line items to append. Same shapes as the create payload: "
+            '{"item_supplier_id": 1, "quantity": 10}, {"asset_id": "uuid", ...}, '
+            'or {"description": "Custom item", "unit_cost": 5.00, ...}.'
+        ),
+    )
+
+    def validate_items(self, value):
+        purchase_order = self.context["purchase_order"]
+
+        existing_item_suppliers = set(
+            purchase_order.items.filter(item_supplier__isnull=False).values_list(
+                "item_supplier_id", flat=True
+            )
+        )
+        existing_assets = set(
+            purchase_order.items.filter(asset__isnull=False).values_list("asset_id", flat=True)
+        )
+
+        seen_item_suppliers = set()
+        seen_assets = set()
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            if "item_supplier_id" in item:
+                key = item["item_supplier_id"]
+                if key in seen_item_suppliers:
+                    raise serializers.ValidationError(
+                        f"Item supplier {key} appears more than once. "
+                        "Combine the quantities into a single line."
+                    )
+                try:
+                    already_on_order = int(key) in existing_item_suppliers
+                except (TypeError, ValueError):
+                    already_on_order = False
+                if already_on_order:
+                    raise serializers.ValidationError(
+                        f"Item supplier {key} is already a line on this order. "
+                        "Edit that line's quantity instead, or un-void it if "
+                        "it was voided."
+                    )
+                seen_item_suppliers.add(key)
+            if "asset_id" in item:
+                key = item["asset_id"]
+                if key in seen_assets:
+                    raise serializers.ValidationError(
+                        f"Asset {key} appears more than once. "
+                        "Combine the quantities into a single line."
+                    )
+                if str(key) in {str(existing) for existing in existing_assets}:
+                    raise serializers.ValidationError(
+                        f"Asset {key} is already a line on this order. "
+                        "Edit that line's quantity instead, or un-void it if "
+                        "it was voided."
+                    )
+                seen_assets.add(key)
+        return value
+
+
 class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating purchase orders with line items."""
 

@@ -2101,7 +2101,115 @@ export const kitAPI = {
   deleteKit: (id: string) => api.delete(`/inventory/kits/${id}/`),
 };
 
+/**
+ * One item a typed/scanned identifier resolved to, in the context of one
+ * purchase order's supplier (oms-po-add-item).
+ *
+ * `match_kind` is the tier that matched — `unit_barcode`, `package_barcode`,
+ * `vendor_sku`, `item_sku`, `item_name`, or a weaker `partial_*` variant — and
+ * `match_label` is that tier spelled out for the operator. `already_on_order`
+ * is non-null when this purchase order already carries a line for the item, in
+ * which case adding it again grows that line rather than creating a second one.
+ */
+export interface PurchaseOrderLineCandidate {
+  item_supplier: number;
+  match_kind: string;
+  match_label: string;
+  matched_value: string;
+  is_exact: boolean;
+  item: { id: string; name: string; sku: string; is_kit: boolean };
+  supplier_sku: string;
+  package_upc: string;
+  unit_upc: string;
+  quantity_per_package: number;
+  suggested_quantity: number;
+  suggested_unit_cost: string;
+  already_on_order: { line_item: string; quantity_ordered: number; is_voided: boolean } | null;
+}
+
+/** An item the identifier named that this order still cannot carry, and why. */
+export interface PurchaseOrderLineUnavailable {
+  item: { id: string; name: string; sku: string };
+  reason: string;
+  message: string;
+}
+
+/** Response of the supplier-scoped identifier lookup. */
+export interface PurchaseOrderItemLookup {
+  query: string;
+  supplier: { id: number; name: string };
+  purchase_order: {
+    id: string;
+    po_number: string | null;
+    status: string;
+    can_add_items: boolean;
+  };
+  best_match_kind: string | null;
+  /** True when a client may add straight from this lookup without asking. */
+  resolves: boolean;
+  candidates: PurchaseOrderLineCandidate[];
+  unavailable: PurchaseOrderLineUnavailable[];
+}
+
+/**
+ * Add-a-line request. Name the item EITHER by `identifier` (what the operator
+ * typed or the scanner emitted) OR by `item_supplier` (the row they picked out
+ * of an ambiguous response) — never both. Quantity and cost are optional; the
+ * server derives them from the supplier relationship and purchase history.
+ */
+export interface AddPurchaseOrderLinePayload {
+  identifier?: string;
+  item_supplier?: number;
+  quantity?: number;
+  unit_cost?: string | number;
+  notes?: string;
+  work_order?: string | null;
+  owning_group?: number | null;
+}
+
+/**
+ * Add-a-line response. `created` is false when an existing line was grown
+ * instead. `purchase_order` is the FULL refreshed order, so callers patch the
+ * page from it rather than re-running the initial loader
+ * (docs/REACTIVE_MUTATIONS.md).
+ */
+export interface AddPurchaseOrderLineResponse {
+  created: boolean;
+  line_item: any;
+  match: PurchaseOrderLineCandidate | null;
+  purchase_order: any;
+}
+
+/** The 400/409 body the add endpoint returns when a line cannot be added. */
+export interface AddPurchaseOrderLineError {
+  error: string;
+  code: string;
+  candidates?: PurchaseOrderLineCandidate[];
+}
+
 export const purchaseOrderAPI = {
+  /**
+   * Resolve a typed or scanned identifier against this order's supplier
+   * without adding anything (oms-po-add-item). Read-only companion to
+   * `addLineItem`, for clients that want to show what matched before
+   * committing.
+   */
+  lookupLineItem: (orderId: string, query: string) =>
+    api.get<PurchaseOrderItemLookup>(
+      `/reorders/purchase-orders/${orderId}/item-lookup/`,
+      { params: { q: query } },
+    ),
+  /**
+   * Add a line to a DRAFT purchase order. Rejects with 400 when the order is
+   * not a draft or its supplier does not supply the item, and with 409 plus a
+   * `candidates` list when the identifier matches more than one item.
+   */
+  addLineItem: (orderId: string, data: AddPurchaseOrderLinePayload) =>
+    api.post<AddPurchaseOrderLineResponse>(
+      `/reorders/purchase-orders/${orderId}/items/`,
+      data,
+    ),
+
   listOrders: (params?: { status?: string }) =>
     api.get<{ results: any[] }>('/reorders/purchase-orders/', { params }),
   getOrder: (id: string) =>

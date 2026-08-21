@@ -13,10 +13,12 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import {
+  AddPurchaseOrderLinePayload,
   OrderingAdapter,
   OrderPadExport,
   purchaseOrderAPI,
   PurchaseOrderFreightTerms,
+  PurchaseOrderLineCandidate,
   PurchaseOrderPaymentSchedule,
   PurchaseOrderPaymentTerms,
   PurchaseOrderPriority,
@@ -320,6 +322,17 @@ const PurchaseOrderPage: React.FC = () => {
   // `exportingOrderPad` disables the buttons while a fetch is in flight.
   const [orderPad, setOrderPad] = useState<OrderPadExport | null>(null);
   const [exportingOrderPad, setExportingOrderPad] = useState(false);
+  // Add-a-line entry (oms-po-add-item). One field takes whatever the operator
+  // types or the scanner emits — item name, item SKU, package or unit barcode,
+  // or the vendor's SKU — and Enter submits it, so a scan (a fast burst of
+  // characters ending in Enter) completes the add without touching the mouse.
+  // `addLineCandidates` is populated only when the server refuses to guess
+  // between several matches; `addLineNotice` reports what actually matched.
+  const [addLineIdentifier, setAddLineIdentifier] = useState('');
+  const [addingLine, setAddingLine] = useState(false);
+  const [addLineError, setAddLineError] = useState<string | null>(null);
+  const [addLineCandidates, setAddLineCandidates] = useState<PurchaseOrderLineCandidate[]>([]);
+  const [addLineNotice, setAddLineNotice] = useState<string | null>(null);
 
   const loadOrder = useCallback(async () => {
     try {
@@ -886,6 +899,64 @@ const PurchaseOrderPage: React.FC = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  /**
+   * Add one line from a typed or scanned identifier (oms-po-add-item).
+   *
+   * The server owns every rule — draft-only, does-this-supplier-supply-it, and
+   * what to do when the item is already on the order — so this handler only
+   * routes the answers: a 409 carries the candidate set to choose from, any
+   * other failure is a message to show. The success path patches the page from
+   * the response's full purchase order rather than re-running the initial
+   * loader (docs/REACTIVE_MUTATIONS.md), so the operator's scroll position and
+   * the next scan's focus survive the add.
+   */
+  const submitAddLine = async (payload: AddPurchaseOrderLinePayload) => {
+    try {
+      setAddingLine(true);
+      setAddLineError(null);
+      const response = await purchaseOrderAPI.addLineItem(orderId!, payload);
+      const { created, line_item: lineItem, match, purchase_order: refreshed } = response.data;
+
+      setOrder(refreshed);
+      setAddLineIdentifier('');
+      setAddLineCandidates([]);
+
+      const itemName = lineItem?.item_details?.name || match?.item?.name || 'Item';
+      const matchedBy = match ? ` (matched on ${match.match_label} ${match.matched_value})` : '';
+      setAddLineNotice(
+        created
+          ? `Added ${itemName} × ${lineItem.quantity_ordered}${matchedBy}`
+          : `${itemName} was already on this order — quantity is now ${lineItem.quantity_ordered}${matchedBy}`,
+      );
+      showSuccess(created ? `Added ${itemName}` : `Updated ${itemName}`);
+    } catch (err: any) {
+      const data = err?.response?.data;
+      setAddLineNotice(null);
+      if (data?.code === 'ambiguous' && Array.isArray(data.candidates)) {
+        setAddLineCandidates(data.candidates);
+      } else {
+        setAddLineCandidates([]);
+      }
+      setAddLineError(
+        typeof data?.error === 'string'
+          ? data.error
+          : extractErrorMessage(err, 'Failed to add line item'),
+      );
+    } finally {
+      setAddingLine(false);
+    }
+  };
+
+  const handleAddLineSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    const identifier = addLineIdentifier.trim();
+    if (!identifier) {
+      setAddLineError('Type or scan an item name, SKU, barcode, or supplier SKU.');
+      return;
+    }
+    void submitAddLine({ identifier });
   };
 
   const handleUploadAttachment = async () => {
@@ -1656,6 +1727,75 @@ const PurchaseOrderPage: React.FC = () => {
 
       <section className="po-items">
         <h2>Line Items</h2>
+
+        {/* Add-a-line entry (oms-po-add-item). Offered ONLY on a draft the
+            viewer can edit — once an order has gone to the supplier, what it
+            contains is a matter of record, so the control is absent rather
+            than present-and-disabled. The server enforces the same rule; this
+            is only the affordance. */}
+        {isAuthenticated && order.status === 'draft' && (
+          <form className="po-add-line" onSubmit={handleAddLineSubmit}>
+            <label htmlFor="po-add-line-identifier">
+              Add an item
+              <input
+                id="po-add-line-identifier"
+                type="text"
+                autoFocus
+                value={addLineIdentifier}
+                onChange={(e) => {
+                  setAddLineIdentifier(e.target.value);
+                  setAddLineError(null);
+                }}
+                placeholder="Scan a barcode, or type a name, SKU, or supplier SKU"
+                disabled={addingLine}
+                autoComplete="off"
+              />
+            </label>
+            <button type="submit" className="btn-primary" disabled={addingLine}>
+              {addingLine ? 'Adding…' : 'Add to order'}
+            </button>
+            <p className="po-add-line-hint">
+              A scanner works here: the scan lands in the field and its Enter submits it.
+            </p>
+
+            {addLineNotice && (
+              <p className="po-add-line-notice" role="status">
+                {addLineNotice}
+              </p>
+            )}
+
+            {addLineError && (
+              <p className="po-add-line-error" role="alert">
+                {addLineError}
+              </p>
+            )}
+
+            {addLineCandidates.length > 0 && (
+              <ul className="po-add-line-candidates">
+                {addLineCandidates.map((candidate) => (
+                  <li key={candidate.item_supplier}>
+                    <span className="po-add-line-candidate-name">{candidate.item.name}</span>
+                    <span className="po-add-line-candidate-meta">
+                      {candidate.item.sku} · supplier SKU {candidate.supplier_sku || '—'}
+                      {candidate.already_on_order
+                        ? ` · already on this order (${candidate.already_on_order.quantity_ordered})`
+                        : ''}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn-edit"
+                      disabled={addingLine}
+                      onClick={() => submitAddLine({ item_supplier: candidate.item_supplier })}
+                    >
+                      Add {candidate.item.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </form>
+        )}
+
         <table className="items-table">
           <thead>
             <tr>

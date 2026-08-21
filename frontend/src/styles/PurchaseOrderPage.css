@@ -629,3 +629,96 @@
   gap: 0.5rem;
 }
 
+
+/* Add-a-line entry on a draft order (oms-po-add-item). Laid out as a single
+   row — one field plus its button — so the scan-and-Enter path has nothing
+   else in it; everything the server says back stacks underneath. */
+.po-add-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+}
+
+.po-add-line label {
+  display: flex;
+  flex: 1 1 22rem;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.po-add-line input {
+  padding: 0.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  color: #1e293b;
+  background-color: #ffffff;
+  font-family: inherit;
+}
+
+.po-add-line-hint {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #94a3b8;
+}
+
+.po-add-line-notice,
+.po-add-line-error {
+  flex-basis: 100%;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+}
+
+.po-add-line-notice {
+  background-color: #ecfdf5;
+  color: #065f46;
+}
+
+.po-add-line-error {
+  background-color: #fef2f2;
+  color: #991b1b;
+}
+
+.po-add-line-candidates {
+  flex-basis: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.po-add-line-candidates li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.375rem;
+}
+
+.po-add-line-candidate-name {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.po-add-line-candidate-meta {
+  flex: 1 1 auto;
+  font-size: 0.8125rem;
+  color: #64748b;
+}

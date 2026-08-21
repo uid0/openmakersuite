@@ -10,6 +10,18 @@ from .approvals import (
     approved_requests_prefetch,
     get_approved_reorder_request,
 )
+from .line_entry import (
+    LineEntryError,
+    add_line_item,
+    assert_addable,
+    default_quantity,
+    default_unit_cost,
+    lookup_candidates,
+    resolve_identifier,
+    resolve_item_supplier,
+    serialize_candidate,
+    serialize_lookup,
+)
 from .numbering import next_po_number
 from .purchase_orders import (
     add_business_days,
@@ -30,6 +42,16 @@ from .receiving import (
 )
 
 __all__ = [
+    "LineEntryError",
+    "add_line_item",
+    "assert_addable",
+    "default_quantity",
+    "default_unit_cost",
+    "lookup_candidates",
+    "resolve_identifier",
+    "resolve_item_supplier",
+    "serialize_candidate",
+    "serialize_lookup",
     "APPROVED_REQUESTS_ATTR",
     "PO_ELIGIBLE_STATUSES",
     "approved_requests_prefetch",

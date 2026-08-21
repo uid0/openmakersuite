@@ -2695,6 +2695,9 @@ views:
         - IsAuthenticated
   reorder_queue.views.PurchaseOrderViewSet:
     actions:
+      add_item:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
       confirm_order:
         permission_classes:
         - IsAuthenticatedOrReadOnly
@@ -2714,6 +2717,9 @@ views:
         permission_classes:
         - IsAuthenticatedOrReadOnly
       export_order:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      item_lookup:
         permission_classes:
         - IsAuthenticatedOrReadOnly
       list:

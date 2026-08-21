@@ -76,6 +76,14 @@ class ActiveUserManager(models.Manager):
 - Use Django's built-in authentication system
 - Store settings in environment variables and access via `settings.py`
 
+### Adding a routed DRF action
+
+Every URL-routed DRF view is pinned in `backend/config/api_permission_matrix.yaml`
+and described in `docs/API_PERMISSION_MATRIX.md` (gh #328). Adding an `@action`
+to an existing viewset therefore fails `config/tests/test_permission_matrix.py`
+until you run `python manage.py check_permission_matrix --write` and update the
+Markdown row for that route in the same change.
+
 ### Django upgrade history
 
 The backend now runs **Django 6.0.7**. The notes below cover the earlier 4.2 -> 5.1
@@ -119,3 +127,10 @@ Updated packages:
 - Use custom hooks for reusable logic
 - Implement proper error boundaries and loading states
 - Optimize images and assets for mobile performance
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.

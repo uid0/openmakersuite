@@ -78,11 +78,12 @@ class ActiveUserManager(models.Manager):
 
 ### Adding a routed DRF action
 
-Every URL-routed DRF view is pinned in `backend/config/api_permission_matrix.yaml`
-and described in `docs/API_PERMISSION_MATRIX.md` (gh #328). Adding an `@action`
-to an existing viewset therefore fails `config/tests/test_permission_matrix.py`
-until you run `python manage.py check_permission_matrix --write` and update the
-Markdown row for that route in the same change.
+Every URL-routed DRF view — including each `@action` on an existing viewset — is
+pinned by a snapshot that `config/tests/test_permission_matrix.py` enforces, so
+adding one fails that test until the snapshot and its Markdown row are refreshed
+in the same change. The regeneration command and the YAML-wins rule live in
+[`docs/API_PERMISSION_MATRIX.md`](docs/API_PERMISSION_MATRIX.md) under "Drift
+detection".
 
 ### Django upgrade history
 

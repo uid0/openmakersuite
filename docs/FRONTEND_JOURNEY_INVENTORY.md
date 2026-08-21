@@ -92,7 +92,7 @@ Staff create purchase orders, receive deliveries, and track supplier relationshi
 | --- | --- | --- | --- |
 | Browse purchase orders | `/purchasing/orders` (`PurchaseOrderListPage.tsx`) | staff | Filter by status; loading + empty states |
 | Create purchase order | `/purchasing/orders/new` (`PurchaseOrderFormPage.tsx`) | staff | Multi-supplier; line-item duplicate guard |
-| View / approve / receive purchase order | `/purchasing/orders/:orderId` (`PurchaseOrderPage.tsx`) | staff/admin | `mark-delivered` and `receive` (per-line-item) patch the page from the response (no reload through the loading placeholder); receipt action gated by permission; auth expiration returns to PO |
+| View / approve / receive / add lines to purchase order | `/purchasing/orders/:orderId` (`PurchaseOrderPage.tsx`) | staff/admin | `mark-delivered`, `receive` (per-line-item), and the add-a-line entry patch the page from the response (no reload through the loading placeholder); the add-a-line field takes a typed or scanned identifier and its Enter submits, so a scanner needs no mouse, and the control is absent (not disabled) on any non-draft order; receipt action gated by permission; auth expiration returns to PO |
 | Purchasing report (CSV / charts) | `/reports/purchasing` (`PurchasingReportPage.tsx`) | staff | Empty-state when no data |
 | Browse / edit suppliers | `/inventory/suppliers`, `/inventory/suppliers/:id`, `/inventory/suppliers/:id/edit` (`SupplierListPage.tsx`, `SupplierDetailPage.tsx`, `SupplierFormPage.tsx`) | staff | Lead-time and price-trend charts have empty-state |
 

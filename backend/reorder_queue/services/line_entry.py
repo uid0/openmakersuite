@@ -31,6 +31,18 @@ operator picks, rather than the server guessing. Exact identifiers therefore
 still resolve in one shot even when a partial name match rides alongside them,
 which is what keeps the scan-and-Enter path a single round trip.
 
+**A rival vendor's barcode still finds the item.** ``ItemSupplier.unit_upc`` is
+``blank=True`` and a shop buys the same part from several vendors, so the code
+printed on the box in front of the operator routinely belongs to a *different*
+vendor's listing. Matching only against this supplier's rows would answer
+"nothing matching that is supplied by Acme" for a part Acme demonstrably
+supplies. So the identifier is resolved to the **item** first, and this
+supplier's own row for that item is what gets offered — never the rival's, so
+nothing is substituted. Such a match carries its own weakest tier
+(:data:`MATCH_OTHER_SUPPLIER_LISTING`) and a label naming the vendor whose
+listing matched, so a direct hit always wins the ladder and the operator can
+still see where the code came from.
+
 **Discontinued links are not candidates.** Voiding a line marks the
 ``ItemSupplier`` discontinued/inactive (``void_line_item``), which is the
 system's way of recording "this vendor stopped carrying it". Such a row is
@@ -85,6 +97,12 @@ MATCH_ITEM_NAME = "item_name"
 MATCH_PARTIAL_VENDOR_SKU = "partial_vendor_sku"
 MATCH_PARTIAL_ITEM_SKU = "partial_item_sku"
 MATCH_PARTIAL_ITEM_NAME = "partial_item_name"
+# The identifier is not one of THIS supplier's, but it names an item they do
+# carry — the barcode on the box in the operator's hand belongs to whichever
+# vendor that box came from, and a shop buys the same part from several. Ranked
+# last so any direct hit on this supplier's own row wins the ladder outright and
+# the single-round-trip scan path is unchanged.
+MATCH_OTHER_SUPPLIER_LISTING = "other_supplier_listing"
 
 MATCH_TIERS = (
     MATCH_UNIT_BARCODE,
@@ -95,6 +113,7 @@ MATCH_TIERS = (
     MATCH_PARTIAL_VENDOR_SKU,
     MATCH_PARTIAL_ITEM_SKU,
     MATCH_PARTIAL_ITEM_NAME,
+    MATCH_OTHER_SUPPLIER_LISTING,
 )
 
 # Human labels for the tiers above — used in the "what matched" block the API
@@ -108,6 +127,9 @@ MATCH_TIER_LABELS = {
     MATCH_PARTIAL_VENDOR_SKU: "supplier SKU (partial)",
     MATCH_PARTIAL_ITEM_SKU: "item SKU (partial)",
     MATCH_PARTIAL_ITEM_NAME: "item name (partial)",
+    # Overridden per candidate with the vendor whose listing matched — see
+    # :func:`_cross_vendor_candidates`. The generic wording is the fallback.
+    MATCH_OTHER_SUPPLIER_LISTING: "another supplier's listing",
 }
 
 _EXACT_TIERS = frozenset(
@@ -154,6 +176,11 @@ class Candidate:
     match_kind: str
     matched_value: str
     existing_line: Optional[PurchaseOrderItem] = None
+    #: Overrides :data:`MATCH_TIER_LABELS` when the tier alone does not say
+    #: enough — a cross-vendor match names the vendor whose listing matched, so
+    #: the operator can see the code came from elsewhere and that nothing was
+    #: silently swapped.
+    match_label: Optional[str] = None
 
 
 @dataclass
@@ -177,10 +204,12 @@ class LookupResult:
     best_tier_total: int = 0
     truncated: bool = False
     #: The same accounting for :attr:`unavailable`, which is capped by the same
-    #: ``limit`` on the nothing-this-supplier-carries path and would otherwise
-    #: hand back 20 explanations for 50 matching items as if that were all of
-    #: them. Discontinued rows are never capped, so they always count in full.
+    #: ``limit`` and would otherwise hand back 20 explanations for 50 matching
+    #: items as if that were all of them. :attr:`total_discontinued` splits out
+    #: the "supplier stopped carrying it" share, so a message about one reason
+    #: never quotes a count that includes the other.
     total_unavailable: int = 0
+    total_discontinued: int = 0
     unavailable_truncated: bool = False
 
     @property
@@ -256,6 +285,11 @@ def lookup_candidates(purchase_order, query, limit=DEFAULT_CANDIDATE_LIMIT):
     the case where the operator is owed an explanation rather than a list) does
     not supply them at all.
 
+    Two passes: this supplier's own rows, then — item-first — the items another
+    vendor's identifier names that this supplier also carries (see
+    :func:`_extend_with_cross_vendor`). Both lists are capped at ``limit``, with
+    the pre-cap counts kept on the result.
+
     A blank query resolves to nothing rather than to everything: an empty scan
     is a mis-scan, not a request for the whole catalogue.
     """
@@ -314,6 +348,12 @@ def lookup_candidates(purchase_order, query, limit=DEFAULT_CANDIDATE_LIMIT):
             )
         )
 
+    # Second pass: the identifier belongs to ANOTHER vendor's listing for an
+    # item this supplier does carry. Resolving item-first rather than
+    # supplier-row-first is what keeps the answer true — the supplier-scoped
+    # query above cannot see a code that only exists on a rival's row.
+    _extend_with_cross_vendor(result, purchase_order, query, existing_lines)
+
     result.candidates.sort(
         key=lambda candidate: (
             MATCH_TIERS.index(candidate.match_kind),
@@ -333,17 +373,118 @@ def lookup_candidates(purchase_order, query, limit=DEFAULT_CANDIDATE_LIMIT):
         result.candidates = result.candidates[:limit]
         result.truncated = True
 
-    # Nothing this supplier carries matched — say who *does* carry it, which is
-    # the difference between "no such item" and "wrong supplier for this order".
-    discontinued = len(result.unavailable)
+    # Nothing this supplier can put on the order matched — say who *does* carry
+    # it, which is the difference between "no such item" and "wrong supplier for
+    # this order".
+    result.total_discontinued = len(result.unavailable)
     elsewhere, elsewhere_total = (
         _items_supplied_elsewhere(supplier, query, limit) if not result.candidates else ([], 0)
     )
     result.unavailable.extend(elsewhere)
-    result.total_unavailable = discontinued + elsewhere_total
-    result.unavailable_truncated = elsewhere_total > len(elsewhere)
+    result.total_unavailable = result.total_discontinued + elsewhere_total
+    if limit is not None and len(result.unavailable) > limit:
+        result.unavailable = result.unavailable[:limit]
+    result.unavailable_truncated = result.total_unavailable > len(result.unavailable)
 
     return result
+
+
+def _classify_vendor_fields(item_supplier, query):
+    """Strongest tier ``query`` matches this row's OWN vendor identifiers at.
+
+    Deliberately narrower than :func:`_classify`: this is used on another
+    vendor's row, where only that vendor's barcodes and part number are evidence
+    the operator is holding this item. The item's own name and SKU are not —
+    those match on this supplier's row too, and the first pass already found it
+    there.
+    """
+    needle = query.casefold()
+
+    def eq(value):
+        return bool(value) and value.casefold() == needle
+
+    def contains(value):
+        return bool(value) and needle in value.casefold()
+
+    if eq(item_supplier.unit_upc):
+        return MATCH_UNIT_BARCODE
+    if eq(item_supplier.package_upc):
+        return MATCH_PACKAGE_BARCODE
+    if eq(item_supplier.supplier_sku):
+        return MATCH_VENDOR_SKU
+    if contains(item_supplier.supplier_sku):
+        return MATCH_PARTIAL_VENDOR_SKU
+    return None
+
+
+def _extend_with_cross_vendor(result, purchase_order, query, existing_lines):
+    """Route a rival vendor's identifier to THIS supplier's row for the same item.
+
+    The barcode on the box an operator is holding belongs to whichever vendor
+    that box came from, and a shop buys the same part from several — while
+    ``ItemSupplier.unit_upc`` is ``blank=True``, so this supplier's own row
+    holding no barcode is the ordinary state, not a broken one. Matching only
+    against this supplier's row therefore answers "nothing matching that is
+    supplied by Acme" for a part Acme demonstrably supplies, and points the
+    operator at creating a relationship that already exists.
+
+    Resolution is always same-ITEM, so nothing is ever substituted: the
+    candidate offered is this supplier's own row, never the rival's. Its tier is
+    the weakest one there is, so a direct hit on this supplier's own identifiers
+    always wins outright and the scan-and-Enter path is unchanged. A row this
+    supplier has marked discontinued becomes the usual ``discontinued``
+    explanation, which the supplier-scoped pass could not reach either.
+    """
+    supplier = purchase_order.supplier
+    rival_rows = (
+        ItemSupplier.objects.filter(
+            Q(unit_upc__iexact=query)
+            | Q(package_upc__iexact=query)
+            | Q(supplier_sku__icontains=query)
+        )
+        .exclude(supplier=supplier)
+        .select_related("item", "supplier")
+        .order_by("item__name", "supplier__name")
+    )
+    rivals_by_item = {}
+    for rival in rival_rows:
+        rivals_by_item.setdefault(rival.item_id, rival)
+    if not rivals_by_item:
+        return
+
+    seen = {candidate.item_supplier.item_id for candidate in result.candidates}
+    seen.update(entry.item.pk for entry in result.unavailable)
+
+    own_rows = ItemSupplier.objects.filter(
+        supplier=supplier, item_id__in=[pk for pk in rivals_by_item if pk not in seen]
+    ).select_related("item", "item__count_level", "supplier")
+
+    for own in own_rows:
+        rival = rivals_by_item[own.item_id]
+        kind = _classify_vendor_fields(rival, query)
+        if kind is None:  # pragma: no cover - the SQL filter already implies one
+            continue
+        if own.is_discontinued or not own.is_active:
+            result.unavailable.append(
+                Unavailable(
+                    item=own.item,
+                    reason=UNAVAILABLE_DISCONTINUED,
+                    message=(
+                        f"{supplier.name} no longer supplies "
+                        f"{own.item.name} (marked discontinued)."
+                    ),
+                )
+            )
+            continue
+        result.candidates.append(
+            Candidate(
+                item_supplier=own,
+                match_kind=MATCH_OTHER_SUPPLIER_LISTING,
+                matched_value=_matched_value(rival, kind),
+                existing_line=existing_lines.get(own.pk),
+                match_label=f"{rival.supplier.name}'s {MATCH_TIER_LABELS[kind]}",
+            )
+        )
 
 
 def _items_supplied_elsewhere(supplier, query, limit):
@@ -540,20 +681,16 @@ def _unavailable_error(purchase_order, identifier, result):
     Above one, naming the alphabetically first entry would present an arbitrary
     item as though it were *the* match, and say nothing about the other
     twenty-four. So the count leads instead, the same way the ambiguity path
-    counts its candidates. The count is exact per reason rather than
-    ``total_unavailable`` as a whole: discontinued rows are never capped, and
-    the capped tail is entirely the supplied-elsewhere kind.
+    counts its candidates. The count is per reason and taken from the pre-cap
+    totals, so a message about one reason never quotes a number that includes
+    the other, nor the size of the capped list.
     """
     supplier = purchase_order.supplier
     first = result.unavailable[0]
-    discontinued = sum(
-        1 for entry in result.unavailable if entry.reason == UNAVAILABLE_DISCONTINUED
-    )
-    supplied_elsewhere = len(result.unavailable) - discontinued
     if first.reason == UNAVAILABLE_DISCONTINUED:
-        total = discontinued
+        total = result.total_discontinued
     else:
-        total = max(result.total_unavailable - discontinued, supplied_elsewhere)
+        total = result.total_unavailable - result.total_discontinued
 
     if total <= 1:
         return LineEntryError(first.message, first.reason)
@@ -819,11 +956,23 @@ def add_line_item(
 def serialize_candidate(candidate):
     """API shape for one candidate — enough to render a choice row and re-post it.
 
-    ``suggested_*`` are what adding this candidate would land on, so a client can
-    show the operator the quantity and price before they commit. The cost
-    suggestion costs one extra query per candidate whose supplier relationship
-    carries no price (see :func:`default_unit_cost`); the candidate list is
-    capped at :data:`DEFAULT_CANDIDATE_LIMIT`, which bounds that.
+    ``suggested_*`` are what a **fresh** line would land on — the reorder
+    suggestion and the price — so a client can show the operator both before
+    they commit.
+
+    They are NOT what a repeat add lands on. When ``already_on_order`` is
+    non-null the add grows that line instead, by one package
+    (:func:`repeat_quantity`), so ``already_on_order`` carries the numbers a
+    confirm screen actually wants: ``repeat_increment`` and the
+    ``quantity_ordered_after`` it reaches. Both are ``null`` for a voided line,
+    which the add refuses outright rather than resurrecting.
+
+    ``match_label`` is the tier spelled out, except where the candidate carries
+    its own — a cross-vendor match names the vendor whose listing matched.
+
+    The cost suggestion costs one extra query per candidate whose supplier
+    relationship carries no price (see :func:`default_unit_cost`); the candidate
+    list is capped at :data:`DEFAULT_CANDIDATE_LIMIT`, which bounds that.
     """
     item_supplier = candidate.item_supplier
     item = item_supplier.item
@@ -831,7 +980,8 @@ def serialize_candidate(candidate):
     return {
         "item_supplier": item_supplier.pk,
         "match_kind": candidate.match_kind,
-        "match_label": MATCH_TIER_LABELS.get(candidate.match_kind, candidate.match_kind),
+        "match_label": candidate.match_label
+        or MATCH_TIER_LABELS.get(candidate.match_kind, candidate.match_kind),
         "matched_value": candidate.matched_value,
         "is_exact": candidate.match_kind in _EXACT_TIERS,
         "item": {
@@ -847,13 +997,27 @@ def serialize_candidate(candidate):
         "suggested_quantity": default_quantity(item_supplier),
         "suggested_unit_cost": str(default_unit_cost(item_supplier)),
         "already_on_order": (
-            None
-            if existing is None
-            else {
-                "line_item": str(existing.pk),
-                "quantity_ordered": existing.quantity_ordered,
-                "is_voided": existing.is_voided,
-            }
+            None if existing is None else _serialize_existing_line(item_supplier, existing)
+        ),
+    }
+
+
+def _serialize_existing_line(item_supplier, existing):
+    """What a repeat add would do to the line already on the order.
+
+    ``repeat_increment`` is the quantity an add carrying no explicit quantity
+    adds, and ``quantity_ordered_after`` where that leaves the line — the two
+    numbers a confirm screen shows. ``null`` for a voided line: that add is
+    refused, so quoting an outcome for it would be a lie.
+    """
+    increment = None if existing.is_voided else repeat_quantity(item_supplier)
+    return {
+        "line_item": str(existing.pk),
+        "quantity_ordered": existing.quantity_ordered,
+        "is_voided": existing.is_voided,
+        "repeat_increment": increment,
+        "quantity_ordered_after": (
+            None if increment is None else (existing.quantity_ordered or 0) + increment
         ),
     }
 
@@ -870,12 +1034,13 @@ def serialize_unavailable(entry):
 def serialize_lookup(purchase_order, query, result):
     """Full lookup payload: who we searched for, what matched, what cannot be added.
 
-    Both lists are capped at :data:`DEFAULT_CANDIDATE_LIMIT`, so the payload
-    carries the pre-cap accounting for each: ``total_candidates`` /
-    ``best_match_total`` / ``truncated`` for ``candidates``, and
-    ``total_unavailable`` / ``unavailable_truncated`` for ``unavailable``. A
-    client rendering either capped list has to be able to tell the operator that
-    more matched, rather than presenting the cap as the complete answer.
+    Both lists are capped at :data:`DEFAULT_CANDIDATE_LIMIT` — bounding the
+    payload of an endpoint an operator drives from the keyboard — so each
+    carries its pre-cap accounting: ``total_candidates`` / ``best_match_total``
+    / ``truncated`` for ``candidates``, and ``total_unavailable`` /
+    ``unavailable_truncated`` for ``unavailable``. A client rendering either
+    capped list has to be able to tell the operator that more matched, rather
+    than presenting the cap as the complete answer.
     """
     best_tier = result.best_tier
     return {

@@ -2106,10 +2106,16 @@ export const kitAPI = {
  * purchase order's supplier (oms-po-add-item).
  *
  * `match_kind` is the tier that matched — `unit_barcode`, `package_barcode`,
- * `vendor_sku`, `item_sku`, `item_name`, or a weaker `partial_*` variant — and
- * `match_label` is that tier spelled out for the operator. `already_on_order`
- * is non-null when this purchase order already carries a line for the item, in
- * which case adding it again grows that line rather than creating a second one.
+ * `vendor_sku`, `item_sku`, `item_name`, a weaker `partial_*` variant, or
+ * `other_supplier_listing` when the identifier came off ANOTHER vendor's
+ * listing for an item this order's supplier also carries (the candidate is
+ * always this supplier's own row; `match_label` names the vendor the code came
+ * from). `match_label` is otherwise the tier spelled out for the operator.
+ *
+ * `already_on_order` is non-null when this purchase order already carries a
+ * line for the item, in which case adding it again GROWS that line rather than
+ * creating a second one — so `repeat_increment` / `quantity_ordered_after`, not
+ * `suggested_quantity`, are the numbers to show on a confirm screen.
  */
 export interface PurchaseOrderLineCandidate {
   item_supplier: number;
@@ -2122,9 +2128,18 @@ export interface PurchaseOrderLineCandidate {
   package_upc: string;
   unit_upc: string;
   quantity_per_package: number;
+  /** What a FRESH line would land on — not what a repeat add produces. */
   suggested_quantity: number;
   suggested_unit_cost: string;
-  already_on_order: { line_item: string; quantity_ordered: number; is_voided: boolean } | null;
+  already_on_order: {
+    line_item: string;
+    quantity_ordered: number;
+    is_voided: boolean;
+    /** Quantity a repeat add with no explicit quantity adds; null if voided. */
+    repeat_increment: number | null;
+    /** Where that leaves the line; null if voided (the add is refused). */
+    quantity_ordered_after: number | null;
+  } | null;
 }
 
 /** An item the identifier named that this order still cannot carry, and why. */

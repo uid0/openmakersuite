@@ -238,6 +238,9 @@ def test_lookup_flags_an_item_already_on_the_order(staff_client, draft_po, bolt)
         "line_item": str(line.pk),
         "quantity_ordered": 5,
         "is_voided": False,
+        # What a repeat add would do next: one of Acme's cases of 5.
+        "repeat_increment": 5,
+        "quantity_ordered_after": 10,
     }
 
 
@@ -383,6 +386,128 @@ def test_adding_an_item_this_supplier_does_not_carry_is_rejected_by_identifier(
     )
 
     response = add_line(staff_client, draft_po, {"identifier": "BD-M5"})
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "not_supplied"
+    assert "Acme Fasteners does not supply M5 carriage bolt" in response.json()["error"]
+    assert not PurchaseOrderItem.objects.filter(purchase_order=draft_po).exists()
+
+
+def test_a_rival_vendors_unit_barcode_resolves_to_this_suppliers_own_row(
+    staff_client, draft_po, supplier, bolt
+):
+    """The box in the operator's hand carries the vendor's code it came from.
+
+    ``unit_upc`` is ``blank=True``, so Acme's row holding no barcode is the
+    ordinary state, and a shop buys the same bolt from more than one vendor.
+    Refusing this would tell the operator Acme does not supply a bolt Acme
+    demonstrably supplies.
+    """
+    bolt.unit_upc = ""
+    bolt.save()
+    other = Supplier.objects.create(name="Bolt Depot")
+    ItemSupplier.objects.create(
+        item=bolt.item,
+        supplier=other,
+        supplier_sku="BD-M3",
+        unit_upc="998877665544",
+        unit_cost=Decimal("2.10"),
+    )
+
+    response = add_line(staff_client, draft_po, {"identifier": "998877665544"})
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["match"]["match_kind"] == "other_supplier_listing"
+    # Provenance stays visible: nothing was silently swapped.
+    assert body["match"]["match_label"] == "Bolt Depot's unit barcode"
+    assert body["match"]["matched_value"] == "998877665544"
+    # The line is on ACME's row, never the rival's.
+    line = PurchaseOrderItem.objects.get(purchase_order=draft_po)
+    assert line.item_supplier_id == bolt.pk
+
+
+def test_a_rival_vendors_sku_resolves_to_this_suppliers_own_row(
+    staff_client, draft_po, supplier, bolt
+):
+    other = Supplier.objects.create(name="Bolt Depot")
+    ItemSupplier.objects.create(
+        item=bolt.item,
+        supplier=other,
+        supplier_sku="BD-M3-XYZ",
+        unit_cost=Decimal("2.10"),
+    )
+
+    response = add_line(staff_client, draft_po, {"identifier": "BD-M3-XYZ"})
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["match"]["match_kind"] == "other_supplier_listing"
+    assert body["match"]["match_label"] == "Bolt Depot's supplier SKU"
+    assert PurchaseOrderItem.objects.get(purchase_order=draft_po).item_supplier_id == bolt.pk
+
+
+def test_this_suppliers_own_identifier_still_wins_over_a_rivals(
+    staff_client, draft_po, supplier, bolt
+):
+    """The cross-vendor tier is the weakest, so a direct hit resolves outright."""
+    other = Supplier.objects.create(name="Bolt Depot")
+    rival_nut = ItemSupplier.objects.create(
+        item=make_item("M3 hex nut", "OMS-M3-NUT"),
+        supplier=other,
+        supplier_sku="ACME-M3-100",
+        unit_cost=Decimal("0.40"),
+    )
+    ItemSupplier.objects.create(
+        item=rival_nut.item, supplier=supplier, supplier_sku="ACME-NUT", unit_cost=Decimal("0.40")
+    )
+
+    body = lookup(staff_client, draft_po, "ACME-M3-100").json()
+
+    assert body["best_match_kind"] == "vendor_sku"
+    assert body["resolves"] is True
+    assert body["candidates"][0]["item_supplier"] == bolt.pk
+
+
+def test_a_rival_identifier_for_an_item_this_supplier_dropped_says_discontinued(
+    staff_client, draft_po, supplier, bolt
+):
+    """Item-first resolution reaches the row the supplier-scoped pass could not."""
+    bolt.unit_upc = ""
+    bolt.is_discontinued = True
+    bolt.is_active = False
+    bolt.save()
+    other = Supplier.objects.create(name="Bolt Depot")
+    ItemSupplier.objects.create(
+        item=bolt.item,
+        supplier=other,
+        supplier_sku="BD-M3",
+        unit_upc="998877665544",
+        unit_cost=Decimal("2.10"),
+    )
+
+    response = add_line(staff_client, draft_po, {"identifier": "998877665544"})
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "discontinued"
+    assert "no longer supplies M3 hex bolt" in response.json()["error"]
+    assert not PurchaseOrderItem.objects.filter(purchase_order=draft_po).exists()
+
+
+def test_a_rival_identifier_for_an_item_this_supplier_never_carried_still_refuses(
+    staff_client, draft_po, supplier
+):
+    """The genuine miss keeps its own wording — this supplier really has no row."""
+    other = Supplier.objects.create(name="Bolt Depot")
+    ItemSupplier.objects.create(
+        item=make_item("M5 carriage bolt", "OMS-M5-CAR"),
+        supplier=other,
+        supplier_sku="BD-M5",
+        unit_upc="111122223333",
+        unit_cost=Decimal("1.10"),
+    )
+
+    response = add_line(staff_client, draft_po, {"identifier": "111122223333"})
 
     assert response.status_code == 400
     assert response.json()["code"] == "not_supplied"
@@ -559,6 +684,46 @@ def test_re_adding_an_item_already_on_the_order_grows_the_existing_line(
     assert line.order_in_packages == 2
     draft_po.refresh_from_db()
     assert draft_po.estimated_total == Decimal("25.00")
+
+
+def test_a_candidate_already_on_the_order_reports_the_repeat_add_numbers(
+    staff_client, draft_po, bolt
+):
+    """A confirm screen needs the repeat outcome, not the fresh-line suggestion.
+
+    The bolt lands at 10 on a fresh line; a repeat add grows it by Acme's case
+    of 5, so 15 — neither 10 nor 20 — is what actually happens next.
+    """
+    add_line(staff_client, draft_po, {"identifier": "ACME-M3-100"})
+
+    candidate = lookup(staff_client, draft_po, "ACME-M3-100").json()["candidates"][0]
+
+    assert candidate["suggested_quantity"] == 10
+    assert candidate["already_on_order"]["quantity_ordered"] == 10
+    assert candidate["already_on_order"]["repeat_increment"] == 5
+    assert candidate["already_on_order"]["quantity_ordered_after"] == 15
+
+    add_line(staff_client, draft_po, {"identifier": "ACME-M3-100"})
+    assert PurchaseOrderItem.objects.get(purchase_order=draft_po).quantity_ordered == 15
+
+
+def test_a_voided_line_quotes_no_repeat_outcome(staff_client, staff_user, draft_po, bolt):
+    """That add is refused, so there is no outcome to promise."""
+    PurchaseOrderItem.objects.create(
+        purchase_order=draft_po,
+        item_supplier=bolt,
+        quantity_ordered=4,
+        unit_cost_ordered=Decimal("2.50"),
+        order_in_packages=1,
+        is_voided=True,
+        voided_by=staff_user,
+    )
+
+    candidate = lookup(staff_client, draft_po, "ACME-M3-100").json()["candidates"][0]
+
+    assert candidate["already_on_order"]["is_voided"] is True
+    assert candidate["already_on_order"]["repeat_increment"] is None
+    assert candidate["already_on_order"]["quantity_ordered_after"] is None
 
 
 def test_growing_a_line_keeps_its_cost_unless_a_new_one_is_given(staff_client, draft_po, bolt):
@@ -939,6 +1104,50 @@ def test_an_uncapped_unavailable_list_says_so(staff_client, draft_po, supplier, 
     assert [entry["reason"] for entry in body["unavailable"]] == ["discontinued"]
     assert body["total_unavailable"] == 1
     assert body["unavailable_truncated"] is False
+
+
+def test_a_long_discontinued_list_is_capped_and_says_so(staff_client, draft_po, supplier):
+    """The explanation payload is bounded — an operator drives this by keyboard.
+
+    Both halves of ``unavailable`` obey the same cap, so a client can size its
+    render off it, and the pre-cap total says how many really matched.
+    """
+    for index in range(25):
+        ItemSupplier.objects.create(
+            item=make_item(f"relic {index:03d}", f"OMS-REL-{index:03d}"),
+            supplier=supplier,
+            supplier_sku=f"ACME-REL-{index:03d}",
+            unit_cost=Decimal("1.00"),
+            is_discontinued=True,
+            is_active=False,
+        )
+
+    body = lookup(staff_client, draft_po, "relic").json()
+
+    assert body["candidates"] == []
+    assert len(body["unavailable"]) == 20
+    assert {entry["reason"] for entry in body["unavailable"]} == {"discontinued"}
+    assert body["total_unavailable"] == 25
+    assert body["unavailable_truncated"] is True
+
+
+def test_a_multi_match_discontinued_refusal_counts_past_the_cap(staff_client, draft_po, supplier):
+    """The count is the real one, not the size of the capped list."""
+    for index in range(25):
+        ItemSupplier.objects.create(
+            item=make_item(f"relic {index:03d}", f"OMS-REL-{index:03d}"),
+            supplier=supplier,
+            supplier_sku=f"ACME-REL-{index:03d}",
+            unit_cost=Decimal("1.00"),
+            is_discontinued=True,
+            is_active=False,
+        )
+
+    response = add_line(staff_client, draft_po, {"identifier": "relic"})
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "discontinued"
+    assert "matches 25 items Acme Fasteners no longer supplies" in response.json()["error"]
 
 
 def test_the_ambiguity_message_counts_matches_not_the_capped_list(staff_client, draft_po, supplier):

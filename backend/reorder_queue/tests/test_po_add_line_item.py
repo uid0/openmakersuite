@@ -15,7 +15,13 @@ from django.contrib.auth.models import Group
 import pytest
 from rest_framework.test import APIClient
 
-from inventory.models import InventoryItem, ItemSupplier, Supplier, WorkOrder
+from inventory.models import (
+    InventoryItem,
+    ItemSupplier,
+    PackagingLevel,
+    Supplier,
+    WorkOrder,
+)
 from inventory.tests.factories import AssetFactory, CategoryFactory, LocationFactory
 from reorder_queue.models import PurchaseOrder, PurchaseOrderAuditEvent, PurchaseOrderItem
 from reorder_queue.services import line_entry
@@ -47,6 +53,29 @@ def make_item(name, sku, *, minimum_stock=10, current_stock=0, reorder_quantity=
         minimum_stock=minimum_stock,
         reorder_quantity=reorder_quantity,
     )
+
+
+def make_pack_item(name, sku, *, case_size, count_size, minimum_stock=4, reorder_quantity=4):
+    """An item counted in whole ``count_size`` packs, bought by the ``case_size`` case.
+
+    Two rungs, outermost first: ``order_level`` reads sort_order 0 as the unit
+    the item is *bought* in, and ``count_level`` is the rung it is *counted* in.
+    """
+    item = make_item(
+        name,
+        sku,
+        minimum_stock=minimum_stock,
+        reorder_quantity=reorder_quantity,
+        current_stock=0,
+    )
+    PackagingLevel.objects.create(item=item, name="case", sort_order=0, base_units=case_size)
+    pack = PackagingLevel.objects.create(
+        item=item, name="pack", sort_order=1, base_units=count_size
+    )
+    item.count_mode = InventoryItem.CountMode.BY_LEVEL
+    item.count_level = pack
+    item.save(update_fields=["count_mode", "count_level"])
+    return item
 
 
 @pytest.fixture
@@ -582,12 +611,13 @@ def test_a_kit_line_added_this_way_freezes_its_bill_of_materials(staff_client, d
 
 
 # --------------------------------------------------------------------------
-# AC-5: the repeat-scan increment is one supplier package, not a second
-# full reorder suggestion
+# AC-5: the repeat-scan increment is ONE PACKAGE — resolved through the same
+# ladder order_in_packages uses, not a second full reorder suggestion and not
+# a bare +1
 # --------------------------------------------------------------------------
 
 
-def test_a_repeat_scan_grows_the_line_by_one_supplier_package(staff_client, draft_po, bolt):
+def test_a_repeat_scan_grows_the_line_by_the_declared_supplier_case(staff_client, draft_po, bolt):
     """A second scan means one more box, not a second reorder suggestion.
 
     The first add still lands on the full suggestion (minimum 10 - stock 0,
@@ -608,8 +638,44 @@ def test_a_repeat_scan_grows_the_line_by_one_supplier_package(staff_client, draf
     assert line.order_in_packages == 3
 
 
-def test_a_repeat_scan_of_a_singles_item_grows_the_line_by_one(staff_client, draft_po, supplier):
-    """``quantity_per_package`` of 1 degrades the package increment to +1."""
+def test_a_repeat_scan_of_a_case_counted_item_uses_the_items_own_case(
+    staff_client, draft_po, supplier
+):
+    """No supplier case declared, but the ITEM has one — one of those is added.
+
+    ``ItemSupplier.quantity_per_package`` defaults to 1, so it cannot say
+    whether this vendor sells singles or whether nobody filled the case size in.
+    Reading it literally would add a single loose bottle to a case-counted item
+    and leave the line recording two cases for one case plus one bottle. The
+    increment therefore comes from the same ladder ``order_in_packages`` is
+    derived through, and the two stay in step.
+    """
+    item = make_pack_item("Solvent", "OMS-SOLV", case_size=24, count_size=6)
+    ItemSupplier.objects.create(
+        item=item,
+        supplier=supplier,
+        supplier_sku="ACME-SOLV",
+        unit_cost=Decimal("3.00"),
+        quantity_per_package=1,
+    )
+
+    add_line(staff_client, draft_po, {"identifier": "ACME-SOLV"})
+    line = PurchaseOrderItem.objects.get(purchase_order=draft_po)
+    # 4 count-levels short × 6 bottles = 24 base units = one of the item's cases.
+    assert line.quantity_ordered == 24
+    assert line.order_in_packages == 1
+
+    add_line(staff_client, draft_po, {"identifier": "ACME-SOLV"})
+
+    line.refresh_from_db()
+    assert line.quantity_ordered == 48
+    assert line.order_in_packages == 2
+    # The line never claims more cases than its quantity actually fills.
+    assert line.quantity_ordered == line.order_in_packages * 24
+
+
+def test_a_repeat_scan_of_a_genuine_single_grows_the_line_by_one(staff_client, draft_po, supplier):
+    """No supplier case and no item packaging rung — one package IS one unit."""
     link = ItemSupplier.objects.create(
         item=make_item("Shop rag", "OMS-RAG", minimum_stock=6, reorder_quantity=6),
         supplier=supplier,
@@ -701,6 +767,11 @@ def test_a_work_order_clashing_with_the_lines_own_is_refused_and_changes_nothing
     assert body["code"] == "work_order_conflict"
     assert str(original) in body["error"]
     assert str(other) in body["error"]
+    # Only remedies that exist: (purchase_order, item_supplier) is unique, so
+    # "put it on its own line for the other job" is not one of them.
+    assert "on its own line" not in body["error"]
+    assert "Clear this line's work order first" in body["error"]
+    assert "separate purchase order" in body["error"]
 
     line = PurchaseOrderItem.objects.get(purchase_order=draft_po)
     assert line.work_order_id == original.id
@@ -729,6 +800,9 @@ def test_a_committee_clashing_with_the_lines_own_is_refused_and_changes_nothing(
     assert body["code"] == "owning_group_conflict"
     assert "Woodshop" in body["error"]
     assert "Metal shop" in body["error"]
+    assert "on its own line" not in body["error"]
+    assert "Clear this line's committee first" in body["error"]
+    assert "separate purchase order" in body["error"]
 
     line = PurchaseOrderItem.objects.get(purchase_order=draft_po)
     assert line.owning_group_id == original.pk
@@ -792,6 +866,42 @@ def test_an_uncapped_lookup_says_so(staff_client, draft_po, supplier):
     assert body["total_candidates"] == 3
     assert body["best_match_total"] == 3
     assert body["truncated"] is False
+
+
+def test_a_capped_unavailable_list_reports_the_true_count(staff_client, draft_po, supplier):
+    """The explanation list is capped by the same limit and must say so.
+
+    Nothing this order's supplier carries matches, so every hit is an
+    explanation of who *does* carry it. Handing back 20 of 25 with no total
+    would present a shortened list as the complete answer.
+    """
+    other = Supplier.objects.create(name="Bolt Depot")
+    for index in range(25):
+        ItemSupplier.objects.create(
+            item=make_item(f"gizmo {index:03d}", f"OMS-GIZ-{index:03d}"),
+            supplier=other,
+            supplier_sku=f"BD-GIZ-{index:03d}",
+            unit_cost=Decimal("1.00"),
+        )
+
+    body = lookup(staff_client, draft_po, "gizmo").json()
+
+    assert body["candidates"] == []
+    assert len(body["unavailable"]) == 20
+    assert body["total_unavailable"] == 25
+    assert body["unavailable_truncated"] is True
+
+
+def test_an_uncapped_unavailable_list_says_so(staff_client, draft_po, supplier, bolt):
+    """A discontinued row is an explanation too, and is never capped."""
+    bolt.is_discontinued = True
+    bolt.save()
+
+    body = lookup(staff_client, draft_po, "ACME-M3-100").json()
+
+    assert [entry["reason"] for entry in body["unavailable"]] == ["discontinued"]
+    assert body["total_unavailable"] == 1
+    assert body["unavailable_truncated"] is False
 
 
 def test_the_ambiguity_message_counts_matches_not_the_capped_list(staff_client, draft_po, supplier):

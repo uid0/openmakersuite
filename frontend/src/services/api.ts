@@ -2158,6 +2158,9 @@ export interface PurchaseOrderItemLookup {
   best_match_total: number;
   truncated: boolean;
   unavailable: PurchaseOrderLineUnavailable[];
+  /** The same pre-cap accounting for `unavailable`, which is capped too. */
+  total_unavailable: number;
+  unavailable_truncated: boolean;
 }
 
 /**

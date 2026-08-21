@@ -40,11 +40,14 @@ the operator gets told why instead of "no match".
 **Already on the order → the line grows by one package.** A second line is
 impossible (``(purchase_order, item_supplier)`` is unique) and scanning the same
 box twice plainly means "two of those", so a repeat add *increments* the line
-already there. Without an explicit quantity the increment is one supplier
-package (:func:`repeat_quantity`) — the unit the operator physically picked up —
-not the full reorder suggestion a fresh line lands on, so an accidental
-re-scan costs one package rather than doubling the order. An explicit quantity
-is honoured verbatim on either path.
+already there. Without an explicit quantity the increment is one package
+(:func:`repeat_quantity`) — the unit the operator physically picked up — not the
+full reorder suggestion a fresh line lands on, so an accidental re-scan costs
+one package rather than doubling the order. What counts as a package is
+:func:`~reorder_queue.services.purchase_orders.order_package_size`, the same
+ladder ``order_in_packages`` is derived through, so the grown line's quantity
+and package count always describe the same order. An explicit quantity is
+honoured verbatim on either path.
 """
 
 from __future__ import annotations
@@ -61,7 +64,11 @@ from inventory.services.kits import build_kit_snapshot
 from inventory.services.packaging import base_reorder_quantity, counts_in_packs
 
 from ..models import PurchaseOrder, PurchaseOrderItem
-from .purchase_orders import order_packages_for_line, recalculate_estimated_total
+from .purchase_orders import (
+    order_package_size,
+    order_packages_for_line,
+    recalculate_estimated_total,
+)
 
 # Match tiers, strongest first. The three barcode/vendor identifiers come ahead
 # of the item's own fields because they are what the *supplier* calls the thing,
@@ -168,6 +175,12 @@ class LookupResult:
     total_candidates: int = 0
     best_tier_total: int = 0
     truncated: bool = False
+    #: The same accounting for :attr:`unavailable`, which is capped by the same
+    #: ``limit`` on the nothing-this-supplier-carries path and would otherwise
+    #: hand back 20 explanations for 50 matching items as if that were all of
+    #: them. Discontinued rows are never capped, so they always count in full.
+    total_unavailable: int = 0
+    unavailable_truncated: bool = False
 
     @property
     def best_tier(self) -> Optional[str]:
@@ -321,8 +334,13 @@ def lookup_candidates(purchase_order, query, limit=DEFAULT_CANDIDATE_LIMIT):
 
     # Nothing this supplier carries matched — say who *does* carry it, which is
     # the difference between "no such item" and "wrong supplier for this order".
-    if not result.candidates:
-        result.unavailable.extend(_items_supplied_elsewhere(supplier, query, limit))
+    discontinued = len(result.unavailable)
+    elsewhere, elsewhere_total = (
+        _items_supplied_elsewhere(supplier, query, limit) if not result.candidates else ([], 0)
+    )
+    result.unavailable.extend(elsewhere)
+    result.total_unavailable = discontinued + elsewhere_total
+    result.unavailable_truncated = elsewhere_total > len(elsewhere)
 
     return result
 
@@ -333,8 +351,12 @@ def _items_supplied_elsewhere(supplier, query, limit):
     Searched over ``InventoryItem`` plus every *other* supplier's identifiers,
     so scanning a competitor's barcode or typing a rival part number produces
     "Acme does not supply M3 hex bolt" rather than a bare miss.
+
+    Returns ``(entries, total)`` — the capped explanations and how many items
+    actually matched — so a caller can never present a shortened list as the
+    whole answer.
     """
-    items = (
+    matching = (
         InventoryItem.objects.filter(
             Q(sku__icontains=query)
             | Q(name__icontains=query)
@@ -344,9 +366,10 @@ def _items_supplied_elsewhere(supplier, query, limit):
         )
         .exclude(item_suppliers__supplier=supplier)
         .distinct()
-        .order_by("name")[: limit or DEFAULT_CANDIDATE_LIMIT]
     )
-    return [
+    total = matching.count()
+    items = matching.order_by("name")[: limit or DEFAULT_CANDIDATE_LIMIT]
+    entries = [
         Unavailable(
             item=item,
             reason=UNAVAILABLE_NOT_SUPPLIED,
@@ -358,6 +381,7 @@ def _items_supplied_elsewhere(supplier, query, limit):
         )
         for item in items
     ]
+    return entries, total
 
 
 def default_quantity(item_supplier):
@@ -384,13 +408,23 @@ def default_quantity(item_supplier):
 def repeat_quantity(item_supplier):
     """Quantity a REPEAT add grows an existing line by, in BASE units.
 
-    One supplier package — the unit the operator physically picked up and
-    scanned. Not :func:`default_quantity`: that is the whole reorder suggestion,
-    and re-running it would double an order the moment a box got scanned twice,
-    which is the one mistake this path invites. Degrades to a single unit when
-    the supplier sells singles (``quantity_per_package`` of 1 or unset).
+    One package — the unit the operator physically picked up and scanned. Not
+    :func:`default_quantity`: that is the whole reorder suggestion, and
+    re-running it would double an order the moment a box got scanned twice,
+    which is the one mistake this path invites.
+
+    "One package" is resolved by :func:`order_package_size`, the same ladder
+    ``order_in_packages`` is derived through, and deliberately not by reading
+    ``ItemSupplier.quantity_per_package`` directly. That column DEFAULTS to 1,
+    so it cannot tell "this vendor sells singles" from "nobody filled in the
+    case size": taken literally it would add a single loose unit to a
+    case-counted item whose supplier simply never declared a case, and the line
+    would then record more packages than its quantity actually represents —
+    an order pad asking the vendor for two cases while costing and receiving
+    work off one case plus one unit. Going through the shared ladder still
+    degrades to +1 for a genuine single.
     """
-    return max(1, item_supplier.quantity_per_package or 1)
+    return max(1, order_package_size(item_supplier))
 
 
 def default_unit_cost(item_supplier):
@@ -578,6 +612,11 @@ def _apply_tag(existing, attr, supplied, noun, item_name):
     wrong: dropping the tag reports success for a request only half applied,
     and overwriting silently moves an existing line's attribution to another
     job. Each field is decided on its own current value.
+
+    The refusal offers only remedies that exist. "Put it on a second line for
+    the other job" is not one of them: ``(purchase_order, item_supplier)`` is
+    unique, so this order has exactly one line for this item and no endpoint can
+    make another.
     """
     if supplied is None:
         return
@@ -589,8 +628,9 @@ def _apply_tag(existing, attr, supplied, noun, item_name):
         raise LineEntryError(
             f"{item_name} is already on this order for {noun} "
             f"{_tag_label(current)}; this request names {noun} "
-            f"{_tag_label(supplied)}. Add it on its own line for that {noun}, "
-            f"or clear the existing line's {noun} first.",
+            f"{_tag_label(supplied)}. Clear this line's {noun} first, or order "
+            f"it on a separate purchase order for {noun} "
+            f"{_tag_label(supplied)}.",
             f"{attr}_conflict",
         )
 
@@ -651,10 +691,14 @@ def add_line_item(
     carries a ``(purchase_order, item_supplier)`` unique constraint, so a second
     line is not merely undesirable, it is impossible; and scanning the same box
     twice plainly means "two of those". An explicit ``quantity`` is added
-    verbatim; without one the line grows by **one supplier package**
-    (:func:`repeat_quantity`), which is what the operator just picked up — not
-    the full reorder suggestion :func:`default_quantity` gives a fresh line, so
-    a stray second scan costs one package rather than doubling the order. The
+    verbatim; without one the line grows by **one package**
+    (:func:`repeat_quantity`, resolved through the same
+    :func:`~reorder_queue.services.purchase_orders.order_package_size` ladder
+    that derives ``order_in_packages``), which is what the operator just picked
+    up — not the full reorder suggestion :func:`default_quantity` gives a fresh
+    line, so a stray second scan costs one package rather than doubling the
+    order, and never leaves the line recording more packages than its quantity
+    represents. The
     line's cost is left alone unless an explicit ``unit_cost`` came with the
     request. A **voided** existing line is refused instead: the constraint
     blocks a replacement line, and quietly resurrecting something an operator
@@ -783,10 +827,12 @@ def serialize_unavailable(entry):
 def serialize_lookup(purchase_order, query, result):
     """Full lookup payload: who we searched for, what matched, what cannot be added.
 
-    ``candidates`` is capped at :data:`DEFAULT_CANDIDATE_LIMIT`, so the payload
-    also carries ``total_candidates`` and ``truncated``: a client rendering a
-    capped list has to be able to tell the operator that more matched, rather
-    than presenting the cap as the complete answer.
+    Both lists are capped at :data:`DEFAULT_CANDIDATE_LIMIT`, so the payload
+    carries the pre-cap accounting for each: ``total_candidates`` /
+    ``best_match_total`` / ``truncated`` for ``candidates``, and
+    ``total_unavailable`` / ``unavailable_truncated`` for ``unavailable``. A
+    client rendering either capped list has to be able to tell the operator that
+    more matched, rather than presenting the cap as the complete answer.
     """
     best_tier = result.best_tier
     return {
@@ -808,4 +854,6 @@ def serialize_lookup(purchase_order, query, result):
         "best_match_total": result.best_tier_total,
         "truncated": result.truncated,
         "unavailable": [serialize_unavailable(entry) for entry in result.unavailable],
+        "total_unavailable": result.total_unavailable,
+        "unavailable_truncated": result.unavailable_truncated,
     }

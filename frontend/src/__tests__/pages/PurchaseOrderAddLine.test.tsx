@@ -480,6 +480,85 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
     );
   });
 
+  /**
+   * The empty submit above is a client-side refusal, and a client-side refusal
+   * has to leave this control in exactly the state a server-side one does: its
+   * own error set, its own stale confirmation cleared, the sibling untouched.
+   * It did not — the early return never reached the shared path that clears the
+   * notice, so the last "Added M3 hex bolt" stayed on screen underneath it.
+   */
+  test('an empty submit clears the confirmation the last scan earned', async () => {
+    (api.purchaseOrderAPI.addLineItem as jest.Mock).mockResolvedValueOnce({
+      data: {
+        created: true,
+        line_item: line(),
+        match: candidate(),
+        purchase_order: order({ items: [line()] }),
+      },
+    });
+
+    renderPage();
+    const field = await screen.findByLabelText(/add an item/i);
+    const scanForm = field.closest('form')!;
+    fireEvent.change(field, { target: { value: '012345678905' } });
+    fireEvent.submit(scanForm);
+
+    expect(await within(scanForm).findByRole('status')).toHaveTextContent(/Added M3 hex bolt/);
+
+    // The operator hits Enter again on the now-empty field — a scan that never
+    // landed, a stray keypress.
+    fireEvent.submit(scanForm);
+
+    expect(await within(scanForm).findByRole('alert')).toHaveTextContent(
+      /type or scan an item name, sku, barcode, or supplier sku/i
+    );
+    expect(within(scanForm).queryByRole('status')).not.toBeInTheDocument();
+    expect(within(scanForm).queryByText(/Added M3 hex bolt/)).not.toBeInTheDocument();
+    expect(api.purchaseOrderAPI.addLineItem).toHaveBeenCalledTimes(1);
+  });
+
+  test('an empty submit leaves a standing custom-line confirmation alone', async () => {
+    (api.purchaseOrderAPI.addLineItem as jest.Mock).mockResolvedValueOnce({
+      data: {
+        created: true,
+        line_item: line({
+          id: 'line-9',
+          item_type: 'freeform',
+          description: 'Pallet freight surcharge',
+          item_details: null,
+          quantity_ordered: 1,
+        }),
+        match: null,
+        purchase_order: order({ items: [] }),
+      },
+    });
+
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /add a custom line/i }));
+    fireEvent.change(screen.getByLabelText(/what is being bought/i), {
+      target: { value: 'Pallet freight surcharge' },
+    });
+    fireEvent.change(screen.getByLabelText(/unit cost/i), { target: { value: '75.00' } });
+    // Captured before the submit: the button relabels to "Adding…" in flight.
+    const customForm = screen.getByRole('button', { name: /add custom line/i }).closest('form')!;
+    fireEvent.click(within(customForm).getByRole('button', { name: /add custom line/i }));
+
+    expect(await within(customForm).findByRole('status')).toHaveTextContent(
+      /Added Pallet freight surcharge/
+    );
+
+    const scanForm = entryField().closest('form')!;
+    fireEvent.submit(scanForm);
+
+    expect(await within(scanForm).findByRole('alert')).toHaveTextContent(
+      /type or scan an item name, sku, barcode, or supplier sku/i
+    );
+    // Clearing this control's own message is not licence to clear the other's.
+    expect(within(customForm).getByRole('status')).toHaveTextContent(
+      /Added Pallet freight surcharge/
+    );
+  });
+
   test('a cross-vendor candidate row shows the listing the code came from', async () => {
     // The candidate offered is always THIS supplier's row, so without the
     // provenance nothing on screen contains what the operator scanned — which

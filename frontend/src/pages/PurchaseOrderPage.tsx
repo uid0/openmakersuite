@@ -1104,21 +1104,32 @@ const PurchaseOrderPage: React.FC = () => {
    */
   const handleAddCustomLineSubmit = (event: React.FormEvent) => {
     event.preventDefault();
+    // Not a refusal — a duplicate submit dropped on the floor. It has nothing
+    // to say, so it must not disturb any message.
     if (addingLine) {
       return;
     }
+    // A client-side refusal leaves this control in exactly the state a
+    // server-side refusal leaves it (see `submitAddLine`'s catch): its own
+    // error set, its own stale confirmation cleared, the sibling untouched.
+    // Keep that whole shape on every validation branch added below — a refusal
+    // rendered under a surviving "Added …" has the page asserting both at once.
+    const refuse = (message: string) => {
+      setCustomLineNotice(null);
+      setCustomLineError(message);
+    };
     const description = customLineDescription.trim();
     if (!description) {
-      setCustomLineError('Describe what is being bought on this line.');
+      refuse('Describe what is being bought on this line.');
       return;
     }
     if (!customLineUnitCost.trim()) {
-      setCustomLineError('A custom line needs a unit cost — there is no catalogue price to use.');
+      refuse('A custom line needs a unit cost — there is no catalogue price to use.');
       return;
     }
     const quantity = Number(customLineQuantity);
     if (!Number.isInteger(quantity) || quantity < 1) {
-      setCustomLineError('Quantity must be a whole number of one or more.');
+      refuse('Quantity must be a whole number of one or more.');
       return;
     }
     void submitAddLine(
@@ -1136,6 +1147,10 @@ const PurchaseOrderPage: React.FC = () => {
     }
     const identifier = addLineIdentifier.trim();
     if (!identifier) {
+      // Same rule as the custom-line form: a client-side refusal leaves this
+      // control exactly as a server-side one would, so the confirmation the
+      // last scan earned goes with it rather than standing above the refusal.
+      setAddLineNotice(null);
       setAddLineError('Type or scan an item name, SKU, barcode, or supplier SKU.');
       return;
     }

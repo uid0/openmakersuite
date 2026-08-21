@@ -443,4 +443,111 @@ describe('PurchaseOrderPage — adding a custom (freeform) line', () => {
       expect(alert.closest('form')).toBe(scanField.closest('form'));
     });
   });
+
+  /**
+   * A client-side refusal has to leave the screen in exactly the state a
+   * server-side refusal leaves it. It does not, on its own, do that: the early
+   * returns below never reached the shared `submitAddLine` path that clears the
+   * stale confirmation, so a green "Added Crating × 1" sat directly above a red
+   * "needs a unit cost" — the page asserting both at once.
+   */
+  describe('a client-side refusal clears its own stale confirmation', () => {
+    /**
+     * Leaves a refusal standing under the scan field and a confirmation
+     * standing under the custom-line form, which is the state the refusals
+     * below have to disturb in exactly one place.
+     */
+    const anAddOnEachControl = async () => {
+      (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
+        apiError(404, {
+          error: 'Nothing matching "wrench" is supplied by Acme Fasteners.',
+          code: 'no_match',
+        }),
+      );
+
+      renderPage();
+      const scanField = await screen.findByLabelText(/add an item/i);
+      const scanForm = scanField.closest('form')!;
+      fireEvent.change(scanField, { target: { value: 'wrench' } });
+      fireEvent.submit(scanForm);
+      await within(scanForm).findByRole('alert');
+
+      (api.purchaseOrderAPI.addLineItem as jest.Mock).mockResolvedValueOnce({
+        data: {
+          created: true,
+          line_item: freeformLine({ description: 'Crating and export packing' }),
+          match: null,
+          purchase_order: order({ items: [freeformLine()] }),
+        },
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /add a custom line/i }));
+      fireEvent.change(screen.getByLabelText(/what is being bought/i), {
+        target: { value: 'Crating and export packing' },
+      });
+      fireEvent.change(screen.getByLabelText(/unit cost/i), { target: { value: '75.00' } });
+      // Captured before the submit: the button relabels to "Adding…" in flight.
+      const customForm = screen.getByRole('button', { name: /add custom line/i }).closest('form')!;
+      fireEvent.click(within(customForm).getByRole('button', { name: /add custom line/i }));
+
+      await within(customForm).findByRole('status');
+      return { scanForm, customForm };
+    };
+
+    // Each entry re-fills the form the way the operator would after a
+    // successful add cleared it, leaving exactly one field wrong.
+    const refusals = [
+      {
+        name: 'a blank description',
+        fill: () => {
+          fireEvent.change(screen.getByLabelText(/unit cost/i), { target: { value: '9' } });
+        },
+        message: /describe what is being bought/i,
+      },
+      {
+        name: 'a missing unit cost',
+        fill: () => {
+          fireEvent.change(screen.getByLabelText(/what is being bought/i), {
+            target: { value: 'Crating and export packing' },
+          });
+        },
+        message: /needs a unit cost/i,
+      },
+      {
+        // Cleared, not "0": the field's own min="1" already blocks a submit
+        // carrying a zero, so an emptied field is how this branch is actually
+        // reached — an empty number input satisfies min and reads as Number('')
+        // === 0 on the way in.
+        name: 'a cleared quantity',
+        fill: () => {
+          fireEvent.change(screen.getByLabelText(/what is being bought/i), {
+            target: { value: 'Crating and export packing' },
+          });
+          fireEvent.change(screen.getByLabelText(/unit cost/i), { target: { value: '9' } });
+          fireEvent.change(screen.getByLabelText(/quantity/i), { target: { value: '' } });
+        },
+        message: /whole number of one or more/i,
+      },
+    ];
+
+    test.each(refusals)('$name replaces the confirmation rather than joining it', async ({
+      fill,
+      message,
+    }) => {
+      const { scanForm, customForm } = await anAddOnEachControl();
+
+      fill();
+      fireEvent.click(within(customForm).getByRole('button', { name: /add custom line/i }));
+
+      expect(await within(customForm).findByRole('alert')).toHaveTextContent(message);
+      // The claim that contradicts it is gone, not merely outranked.
+      expect(within(customForm).queryByRole('status')).not.toBeInTheDocument();
+      expect(within(customForm).queryByText(/Added Crating and export packing/)).not.toBeInTheDocument();
+      // A refusal here is still not news about the scan field.
+      expect(within(scanForm).getByRole('alert')).toHaveTextContent(
+        /is supplied by Acme Fasteners/,
+      );
+      expect(api.purchaseOrderAPI.addLineItem).toHaveBeenCalledTimes(2);
+    });
+  });
 });

@@ -1809,27 +1809,41 @@ const PurchaseOrderPage: React.FC = () => {
               </p>
             )}
 
+            {/* Every row says WHY it came up (`match_label` / `matched_value`),
+                which is the whole point on the choose-one path: a cross-vendor
+                match resolves through another vendor's listing, so without it
+                nothing on screen would contain what the operator scanned. */}
             {addLineCandidates.length > 0 && (
               <ul className="po-add-line-candidates">
-                {addLineCandidates.map((candidate) => (
-                  <li key={candidate.item_supplier}>
-                    <span className="po-add-line-candidate-name">{candidate.item.name}</span>
-                    <span className="po-add-line-candidate-meta">
-                      {candidate.item.sku} · supplier SKU {candidate.supplier_sku || '—'}
-                      {candidate.already_on_order
-                        ? ` · already on this order (${candidate.already_on_order.quantity_ordered})`
-                        : ''}
-                    </span>
-                    <button
-                      type="button"
-                      className="btn-edit"
-                      disabled={addingLine}
-                      onClick={() => submitAddLine({ item_supplier: candidate.item_supplier })}
-                    >
-                      Add {candidate.item.name}
-                    </button>
-                  </li>
-                ))}
+                {addLineCandidates.map((candidate) => {
+                  const onOrder = candidate.already_on_order;
+                  // A voided line cannot be grown — the server refuses it with
+                  // `line_voided` — so this row is a dead end, not a choice.
+                  const voided = Boolean(onOrder?.is_voided);
+                  return (
+                    <li key={candidate.item_supplier}>
+                      <span className="po-add-line-candidate-name">{candidate.item.name}</span>
+                      <span className="po-add-line-candidate-meta">
+                        {candidate.item.sku} · supplier SKU {candidate.supplier_sku || '—'} ·
+                        matched on {candidate.match_label} {candidate.matched_value}
+                        {onOrder && !voided
+                          ? ` · already on this order (${onOrder.quantity_ordered})`
+                          : ''}
+                        {voided ? ' · voided on this order — restore or remove that line first' : ''}
+                      </span>
+                      {voided ? null : (
+                        <button
+                          type="button"
+                          className="btn-edit"
+                          disabled={addingLine}
+                          onClick={() => submitAddLine({ item_supplier: candidate.item_supplier })}
+                        >
+                          Add {candidate.item.name}
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </form>

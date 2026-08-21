@@ -147,6 +147,12 @@ _EXACT_TIERS = frozenset(
 UNAVAILABLE_NOT_SUPPLIED = "not_supplied"
 UNAVAILABLE_DISCONTINUED = "discontinued"
 
+# Refusal code only — never an ``Unavailable.reason``. A match set holding both
+# reasons has no single true one, and ``code`` exists so a client can branch
+# without parsing prose: handing back ``discontinued`` for a set that is mostly
+# never-carried would have it confidently tell the operator the wrong thing.
+REFUSAL_MULTIPLE_UNAVAILABLE = "multiple_unavailable"
+
 DEFAULT_CANDIDATE_LIMIT = 20
 
 
@@ -703,6 +709,11 @@ def _unavailable_error(purchase_order, identifier, result):
     would hand back "Acme no longer supplies widget 001" for a query that also
     named twenty-five items another vendor carries. Counts come from the pre-cap
     totals, so none of them is the size of the capped list.
+
+    A set spanning both reasons answers to
+    :data:`REFUSAL_MULTIPLE_UNAVAILABLE` rather than to whichever reason happens
+    to head the list, and every branch anchors on one named item so the operator
+    has something concrete to narrow from.
     """
     supplier = purchase_order.supplier
     first = result.unavailable[0]
@@ -715,10 +726,11 @@ def _unavailable_error(purchase_order, identifier, result):
     if dropped and elsewhere:
         return LineEntryError(
             f'"{identifier}" matches {result.total_unavailable} items that cannot '
-            f"go on this order — {supplier.name} no longer supplies {dropped} of "
-            f"them and does not supply the other {elsewhere} at all. Narrow the "
-            "search to the one you want.",
-            first.reason,
+            f"go on this order — {first.item.name} is one of them. "
+            f"{supplier.name} no longer supplies {dropped} of them and does not "
+            f"supply the other {elsewhere} at all. Narrow the search to the one "
+            "you want.",
+            REFUSAL_MULTIPLE_UNAVAILABLE,
         )
 
     if first.reason == UNAVAILABLE_DISCONTINUED:

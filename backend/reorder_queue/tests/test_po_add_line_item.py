@@ -1178,7 +1178,12 @@ def test_a_mixed_reason_refusal_does_not_name_one_incidental_item(staff_client, 
     response = add_line(staff_client, draft_po, {"identifier": "widget"})
 
     assert response.status_code == 400
-    error = response.json()["error"]
+    body = response.json()
+    # A set spanning both reasons has no single true one, and `code` is what a
+    # non-browser client branches on — `discontinued` would be a lie for 25/26.
+    assert body["code"] == "multiple_unavailable"
+    error = body["error"]
+    assert "widget 001 is one of them" in error
     assert "matches 26 items" in error
     assert "no longer supplies 1 of them" in error
     assert "does not supply the other 25" in error

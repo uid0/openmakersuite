@@ -427,6 +427,81 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
     );
   });
 
+  test('a cross-vendor candidate row shows the listing the code came from', async () => {
+    // The candidate offered is always THIS supplier's row, so without the
+    // provenance nothing on screen contains what the operator scanned — which
+    // is the silent substitution the cross-vendor tier exists to rule out.
+    (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValue(
+      apiError(409, {
+        code: 'ambiguous',
+        error: '"BD-" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        candidates: [
+          candidate({
+            match_kind: 'other_supplier_listing',
+            match_label: "Bolt Depot's supplier SKU",
+            matched_value: 'BD-M3',
+          }),
+          candidate({
+            item_supplier: 13,
+            item: { id: 'item-2', name: 'M5 carriage bolt', sku: 'OMS-M5-CAR', is_kit: false },
+            match_kind: 'other_supplier_listing',
+            match_label: "Bolt Depot's supplier SKU",
+            matched_value: 'BD-M5',
+          }),
+        ],
+      })
+    );
+
+    renderPage();
+    fireEvent.change(await screen.findByLabelText(/add an item/i), { target: { value: 'BD-' } });
+    fireEvent.submit(entryField().closest('form')!);
+
+    const boltRow = (await screen.findByText('M3 hex bolt')).closest('li')!;
+    expect(
+      within(boltRow).getByText(/matched on Bolt Depot's supplier SKU BD-M3/)
+    ).toBeInTheDocument();
+    const nutRow = screen.getByText('M5 carriage bolt').closest('li')!;
+    expect(
+      within(nutRow).getByText(/matched on Bolt Depot's supplier SKU BD-M5/)
+    ).toBeInTheDocument();
+  });
+
+  test('a voided candidate is shown as a dead end, not an addable choice', async () => {
+    // Adding it could only ever come back 400 `line_voided`, and the payload
+    // already says so — the screen must not offer an action the server refuses.
+    (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValue(
+      apiError(409, {
+        code: 'ambiguous',
+        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        candidates: [
+          candidate({
+            already_on_order: {
+              line_item: 'line-1',
+              quantity_ordered: 4,
+              is_voided: true,
+              repeat_increment: null,
+              quantity_ordered_after: null,
+            },
+          }),
+          candidate({
+            item_supplier: 13,
+            item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
+          }),
+        ],
+      })
+    );
+
+    renderPage();
+    fireEvent.change(await screen.findByLabelText(/add an item/i), { target: { value: 'M3 hex' } });
+    fireEvent.submit(entryField().closest('form')!);
+
+    const boltRow = (await screen.findByText('M3 hex bolt')).closest('li')!;
+    expect(within(boltRow).getByText(/voided on this order/)).toBeInTheDocument();
+    expect(within(boltRow).queryByRole('button')).not.toBeInTheDocument();
+    // The other candidate is still a live choice.
+    expect(screen.getByRole('button', { name: /add m3 hex nut/i })).toBeInTheDocument();
+  });
+
   test('a candidate already on the order says so before it is picked', async () => {
     (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValue(
       apiError(409, {

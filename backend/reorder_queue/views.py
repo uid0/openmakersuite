@@ -1922,27 +1922,34 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 )
             new_unit_cost = price.validated_data["unit_cost_ordered"]
 
-            if line_item.is_voided:
-                return Response(
-                    {"error": "Cannot change the price of a voided line item"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if purchase_order.status != PurchaseOrder.Status.DRAFT:
-                label = PurchaseOrder.Status(purchase_order.status).label
-                return Response(
-                    {
-                        "error": (
-                            "The ordered price can only be changed while a purchase order "
-                            f"is a draft. {purchase_order.po_number or 'This order'} is "
-                            f"{label}."
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
+            # Refuse a price CHANGE, not the mere presence of the key. A client
+            # that GETs a line, edits its notes and PATCHes the whole object
+            # back echoes the price it was given, and rejecting that would fail
+            # an ordinary round trip — taking the notes edit down with it — over
+            # a figure nobody asked to move. An unchanged price is already
+            # treated as not-a-reprice below (it records nothing); the guards
+            # have to reach the same conclusion.
             current_unit_cost = line_item.unit_cost_ordered
-            if current_unit_cost is None or current_unit_cost != new_unit_cost:
+            if current_unit_cost != new_unit_cost:
+                if line_item.is_voided:
+                    return Response(
+                        {"error": "Cannot change the price of a voided line item"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                if purchase_order.status != PurchaseOrder.Status.DRAFT:
+                    label = PurchaseOrder.Status(purchase_order.status).label
+                    return Response(
+                        {
+                            "error": (
+                                "The ordered price can only be changed while a purchase order "
+                                f"is a draft. {purchase_order.po_number or 'This order'} is "
+                                f"{label}."
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
                 repriced_from = current_unit_cost
                 line_item.unit_cost_ordered = new_unit_cost
 

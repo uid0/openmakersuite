@@ -431,6 +431,44 @@ def test_repricing_a_line_on_a_sent_order_is_refused(staff_client, draft_po, acm
     assert line.unit_cost_ordered == Decimal("149.0000")
 
 
+def test_echoing_a_lines_own_price_back_to_a_sent_order_is_not_a_reprice(
+    staff_client, draft_po, acme_asset
+):
+    """The round trip a non-browser client makes: GET a line, edit it, PATCH it whole.
+
+    The serialized line carries ``unit_cost_ordered``, so a client that sends
+    the whole object back names a price it never asked to move. Refusing that
+    fails an ordinary edit — and silently drops the change it was actually
+    making — over a figure that is not changing.
+    """
+    add_line(staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "149.00"})
+    line = only_line(draft_po)
+    draft_po.status = PurchaseOrder.Status.SENT
+    draft_po.save(update_fields=["status"])
+
+    # Built from what the API actually hands a client, so this keeps covering
+    # the round trip as the serializer grows fields.
+    fetched = staff_client.get(f"/api/reorders/purchase-orders/{draft_po.id}/")
+    assert fetched.status_code == 200
+    serialized = next(i for i in fetched.json()["items"] if str(i["id"]) == str(line.id))
+    # Nulls dropped: an explicit ``"unit_cost_actual": null`` is refused by a
+    # separate, pre-existing branch of this endpoint that predates the price
+    # rules, which would mask what this test is about. Everything the line
+    # actually carries still goes back, so a new serializer field is covered.
+    payload = {key: value for key, value in serialized.items() if value is not None}
+    payload["notes"] = "Chased the vendor for a ship date"
+
+    response = patch_line(staff_client, draft_po, line, payload)
+
+    assert response.status_code == 200, response.json()
+    line.refresh_from_db()
+    assert line.notes == "Chased the vendor for a ship date"
+    assert line.unit_cost_ordered == Decimal("149.0000")
+    assert not PurchaseOrderAuditEvent.objects.filter(
+        action=PurchaseOrderAuditEvent.Action.PO_LINE_REPRICE
+    ).exists()
+
+
 def test_repricing_a_voided_line_is_refused(staff_client, draft_po, acme_asset):
     add_line(staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "149.00"})
     line = only_line(draft_po)

@@ -1166,6 +1166,7 @@ class PurchaseOrderAuditEvent(models.Model):
         PO_VOID = "po_void", "Purchase order voided"
         PO_LINE_ADD = "po_line_add", "Purchase order line item added"
         PO_LINE_VOID = "po_line_void", "Purchase order line item voided"
+        PO_LINE_REPRICE = "po_line_reprice", "Purchase order line item repriced"
         PO_MARK_DELIVERED = "po_mark_delivered", "Purchase order marked delivered"
         PO_RECEIVE_ITEMS = "po_receive_items", "Purchase order line items received"
         ATTACHMENT_ADD = "attachment_add", "Attachment added"

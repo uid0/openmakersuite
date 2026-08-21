@@ -34,6 +34,7 @@ from inventory.services.packaging import (
 
 from . import services
 from .audit import record_event as record_audit_event
+from .audit import record_line_reprice
 from .models import (
     DeliveryItem,
     LeadTimeLog,
@@ -58,6 +59,7 @@ from .serializers import (
     ReceiveItemsSerializer,
     ReorderRequestCreateSerializer,
     ReorderRequestSerializer,
+    RepricePurchaseOrderLineSerializer,
     SupplierPerformanceSerializer,
     WebHookCreateSerializer,
     WebHookSerializer,
@@ -1643,19 +1645,28 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="items")
     def add_item(self, request, pk=None):
-        """Add an inventory line to a **draft** purchase order (oms-po-add-item).
+        """Add a line to a **draft** purchase order (oms-po-add-item).
 
-        ``POST .../items/`` with either ``identifier`` (typed or scanned) or an
-        explicit ``item_supplier`` chosen from a previous ambiguous response.
-        Quantity and unit cost are optional — omitted, they are derived from the
-        supplier relationship and this item's purchase history so a bare scan
-        still produces a fully-formed line.
+        ``POST .../items/`` naming what to add exactly one way — ``identifier``
+        (typed or scanned), an explicit ``item_supplier`` chosen from a previous
+        ambiguous response, an ``asset`` id, or a freeform ``description``.
+        Those are the three shapes ``PurchaseOrderItem`` supports and the three
+        the create payload accepts, so an order that could be *created* with a
+        line can also have that line *added* — the gap that made a forgotten
+        asset or one-off charge mean retyping the order.
+
+        On the inventory shapes quantity and unit cost are optional — omitted,
+        they are derived from the supplier relationship and this item's purchase
+        history so a bare scan still produces a fully-formed line. Asset and
+        freeform lines have no such relationship, so ``unit_cost`` is required
+        on them, exactly as it is at create time.
 
         Every guard is enforced here rather than in the UI, because ScanTTY and
         any other API client reach the same code path:
 
         * the order must be DRAFT (400 ``not_draft``);
-        * the order's supplier must actually supply the item
+        * the order's supplier must actually supply the item — and, for an
+          asset, must be its recorded manufacturer
           (400 ``supplier_mismatch`` / ``not_supplied`` / ``discontinued``);
         * an identifier matching several items the supplier carries resolves to
           nothing (409 ``ambiguous``, with the candidate set to choose from).
@@ -1681,28 +1692,44 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         try:
             services.assert_addable(purchase_order)
 
-            if data.get("item_supplier") is not None:
-                item_supplier = services.resolve_item_supplier(
-                    purchase_order, data["item_supplier"]
-                )
-                match = None
-            else:
-                candidate = services.resolve_identifier(purchase_order, data["identifier"])
-                item_supplier = candidate.item_supplier
-                match = services.serialize_candidate(candidate)
-
             work_order = self._resolve_optional_work_order(data.get("work_order"))
             owning_group = self._resolve_optional_group(data.get("owning_group"))
+            shared = {
+                "quantity": data.get("quantity"),
+                "notes": data.get("notes", ""),
+                "work_order": work_order,
+                "owning_group": owning_group,
+            }
 
-            line_item, created = services.add_line_item(
-                purchase_order,
-                item_supplier,
-                quantity=data.get("quantity"),
-                unit_cost=data.get("unit_cost"),
-                notes=data.get("notes", ""),
-                work_order=work_order,
-                owning_group=owning_group,
-            )
+            # The serializer has already proved exactly one shape was named, so
+            # this dispatch is a straight three-way and needs no else-error.
+            item_supplier = None
+            match = None
+            if data.get("asset") is not None:
+                asset = services.resolve_asset(purchase_order, data["asset"])
+                line_item, created = services.add_asset_line_item(
+                    purchase_order, asset, unit_cost=data["unit_cost"], **shared
+                )
+            elif data.get("description") is not None:
+                line_item, created = services.add_freeform_line_item(
+                    purchase_order, data["description"], unit_cost=data["unit_cost"], **shared
+                )
+            else:
+                if data.get("item_supplier") is not None:
+                    item_supplier = services.resolve_item_supplier(
+                        purchase_order, data["item_supplier"]
+                    )
+                else:
+                    candidate = services.resolve_identifier(purchase_order, data["identifier"])
+                    item_supplier = candidate.item_supplier
+                    match = services.serialize_candidate(candidate)
+
+                line_item, created = services.add_line_item(
+                    purchase_order,
+                    item_supplier,
+                    unit_cost=data.get("unit_cost"),
+                    **shared,
+                )
         except services.LineEntryError as exc:
             payload = {"error": exc.message, "code": exc.code}
             if exc.code == "ambiguous":
@@ -1716,10 +1743,16 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             line_item=line_item,
             notes=data.get("notes", ""),
             metadata={
-                "item_supplier": item_supplier.pk,
-                "item_id": str(item_supplier.item_id),
-                "item_name": item_supplier.item.name,
-                "supplier_sku": item_supplier.supplier_sku,
+                # ``line_shape`` names which of the three targets was written,
+                # so an audit reader never has to infer it from which of the
+                # target keys happens to be present.
+                "line_shape": line_item.target_type,
+                "item_supplier": item_supplier.pk if item_supplier else None,
+                "item_id": str(item_supplier.item_id) if item_supplier else None,
+                "item_name": item_supplier.item.name if item_supplier else None,
+                "supplier_sku": item_supplier.supplier_sku if item_supplier else None,
+                "asset_id": str(line_item.asset_id) if line_item.asset_id else None,
+                "description": line_item.description or "",
                 "quantity_ordered": line_item.quantity_ordered,
                 "unit_cost_ordered": str(line_item.unit_cost_ordered),
                 "created": created,
@@ -1727,6 +1760,16 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 "match_kind": (match or {}).get("match_kind"),
             },
         )
+
+        # A grow that overrode a different price both added quantity AND
+        # repriced the line, so it gets both rows — see ``record_line_reprice``.
+        repriced_from = getattr(line_item, "repriced_from", None)
+        if repriced_from is not None:
+            record_line_reprice(
+                line_item=line_item,
+                previous_unit_cost=repriced_from,
+                actor=request.user,
+            )
 
         # The viewset prefetches ``items``, so the instance in hand still holds
         # the pre-add line set; re-read it so the returned order includes the
@@ -1855,6 +1898,60 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             if new_quantity != line_item.quantity_ordered:
                 services.apply_line_quantity(line_item, new_quantity)
                 quantity_changed = True
+
+        # Deliberate reprice of a line's ORDERED price (the figure the shop is
+        # committing to spend). Draft only, and deliberately stricter than the
+        # quantity edit directly above: quantity on a live order is "we need 12,
+        # not 10", a thing the supplier can still be told, whereas the ordered
+        # price is what the supplier was quoted — once the order has gone out,
+        # that is a matter of record, the same boundary ``assert_addable``
+        # draws for adding a line at all.
+        repriced_from = None
+        if "unit_cost_ordered" in request.data:
+            # Validated by the same field the add path validates it with, so
+            # the two accept-points for this figure cannot disagree about what
+            # a valid ordered price is.
+            price = RepricePurchaseOrderLineSerializer(
+                data={"unit_cost_ordered": request.data["unit_cost_ordered"]}
+            )
+            if not price.is_valid():
+                detail = " ".join(str(msg) for msg in price.errors["unit_cost_ordered"])
+                return Response(
+                    {"error": f"Invalid unit cost ordered value: {detail}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            new_unit_cost = price.validated_data["unit_cost_ordered"]
+
+            # Refuse a price CHANGE, not the mere presence of the key. A client
+            # that GETs a line, edits its notes and PATCHes the whole object
+            # back echoes the price it was given, and rejecting that would fail
+            # an ordinary round trip — taking the notes edit down with it — over
+            # a figure nobody asked to move. An unchanged price is already
+            # treated as not-a-reprice below (it records nothing); the guards
+            # have to reach the same conclusion.
+            current_unit_cost = line_item.unit_cost_ordered
+            if current_unit_cost != new_unit_cost:
+                if line_item.is_voided:
+                    return Response(
+                        {"error": "Cannot change the price of a voided line item"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                if purchase_order.status != PurchaseOrder.Status.DRAFT:
+                    label = PurchaseOrder.Status(purchase_order.status).label
+                    return Response(
+                        {
+                            "error": (
+                                "The ordered price can only be changed while a purchase order "
+                                f"is a draft. {purchase_order.po_number or 'This order'} is "
+                                f"{label}."
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                repriced_from = current_unit_cost
+                line_item.unit_cost_ordered = new_unit_cost
 
         # Allow updating expected_shipment_date and notes
         expected_shipment_date = request.data.get("expected_shipment_date")
@@ -1987,9 +2084,20 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             line_item.save()
             # The PO-level estimated_total is frozen at create time from each
-            # line's estimated_cost, so a quantity edit has to re-roll it.
-            if quantity_changed:
+            # line's estimated_cost, so a quantity or price edit has to re-roll it.
+            if quantity_changed or repriced_from is not None:
                 services.recalculate_estimated_total(purchase_order)
+
+        # Only when the price actually moved. A price change that leaves no
+        # trace is the very thing the add path's ``price_conflict`` refusal
+        # exists to prevent, so the deliberate route has to record both the
+        # figure it replaced and the one it wrote.
+        if repriced_from is not None:
+            record_line_reprice(
+                line_item=line_item,
+                previous_unit_cost=repriced_from,
+                actor=request.user,
+            )
 
         from .serializers import PurchaseOrderItemSerializer
 

@@ -59,3 +59,40 @@ def record_event(
         notes=notes,
         metadata=metadata or {},
     )
+
+
+def record_line_reprice(
+    *,
+    line_item: PurchaseOrderItem,
+    previous_unit_cost: Any,
+    actor: Optional[User] = None,
+) -> PurchaseOrderAuditEvent:
+    """Record that an existing line's ORDERED price changed, naming both figures.
+
+    The price-trace invariant: a line's ``unit_cost_ordered`` never changes
+    without one of these rows behind it. Every route that can rewrite the field
+    on an existing line — the deliberate PATCH reprice, an add that grows a line
+    while overriding its price, and the Django admin change form — emits it
+    from here, so "show me every time a price on this order changed" is ONE
+    query against ONE action rather than a hunt through several shapes of row.
+    The person asking that question is asking because the money looks wrong,
+    which is exactly when a missed second place matters.
+
+    An add that both grows a line and reprices it therefore writes two rows.
+    That is not noise: the request genuinely did both, and recording both is the
+    more truthful record.
+    """
+    return record_event(
+        action=PurchaseOrderAuditEvent.Action.PO_LINE_REPRICE,
+        actor=actor,
+        line_item=line_item,
+        metadata={
+            "line_shape": line_item.target_type,
+            "item_supplier": line_item.item_supplier_id,
+            "asset_id": str(line_item.asset_id) if line_item.asset_id else None,
+            "description": line_item.description or "",
+            "quantity_ordered": line_item.quantity_ordered,
+            "previous_unit_cost_ordered": str(previous_unit_cost),
+            "unit_cost_ordered": str(line_item.unit_cost_ordered),
+        },
+    )

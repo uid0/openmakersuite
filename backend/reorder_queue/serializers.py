@@ -203,7 +203,19 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["created_at", "updated_at", "voided_at", "voided_by"]
+        # ``unit_cost_ordered`` is read-only here so the price-trace invariant
+        # holds by construction rather than by accident of routing: nothing
+        # currently feeds this serializer input, but a future viewset that did
+        # would otherwise rewrite a line's ordered price with no audit event.
+        # The two routes that may change it — the draft-only PATCH reprice and
+        # an add that grows a line — both record what they replaced.
+        read_only_fields = [
+            "created_at",
+            "updated_at",
+            "voided_at",
+            "voided_by",
+            "unit_cost_ordered",
+        ]
 
     def get_kit_components(self, obj):
         """What receiving this line's ordered quantity will credit (op-8n0).
@@ -417,6 +429,11 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     items = PurchaseOrderItemSerializer(many=True, read_only=True)
     attachments = PurchaseOrderAttachmentSerializer(many=True, read_only=True)
 
+    # Human-readable status, mirroring ``get_status_display``. The purchasing
+    # list and detail screens render this directly; without it the status text
+    # is blank in the UI even though the raw ``status`` drives the badge colour.
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+
     # Calculated fields
     total_items = serializers.IntegerField(read_only=True)
     total_quantity = serializers.IntegerField(read_only=True)
@@ -448,6 +465,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "owning_group",
             "owning_group_details",
             "status",
+            "status_label",
             "priority",
             "payment_terms",
             "freight_terms",
@@ -771,40 +789,95 @@ class ReceiveItemsSerializer(serializers.Serializer):
     receipt_notes = serializers.CharField(required=False, allow_blank=True, default="")
 
 
+def ordered_unit_cost_field(**kwargs):
+    """The one definition of a valid ``unit_cost_ordered`` on the wire.
+
+    Both accept-points for that figure — adding a line and repricing one — take
+    the same money against the same ``decimal(10, 4)`` column, so they validate
+    through this single field rather than two hand-written checks that can drift
+    apart. It is what rejects NaN, an infinity, and an extra-zeros fat-finger
+    too wide for the column with a 400 rather than a 500.
+    """
+    return serializers.DecimalField(
+        max_digits=10, decimal_places=4, min_value=Decimal("0"), **kwargs
+    )
+
+
+class RepricePurchaseOrderLineSerializer(serializers.Serializer):
+    """The ``unit_cost_ordered`` half of a line-item PATCH.
+
+    Only that one key: the rest of ``update_item``'s body is read field by field
+    against rules of its own, and this exists so a reprice is validated exactly
+    as ``AddPurchaseOrderLineSerializer.unit_cost`` validates the same figure.
+    """
+
+    unit_cost_ordered = ordered_unit_cost_field()
+
+
 class AddPurchaseOrderLineSerializer(serializers.Serializer):
     """Request body for adding a line to a **draft** purchase order (oms-po-add-item).
 
-    Exactly one of the two ways to name the item is required:
+    Exactly **one** of the four ways to name what is being bought is required.
+    They are the three line shapes ``PurchaseOrderItem`` supports, with the
+    inventory shape offered two ways:
 
-    * ``identifier`` — what the operator typed or the scanner emitted: the
-      item's name, the item's own SKU, a package or unit barcode, or the
-      vendor's SKU. Resolved against what the order's supplier supplies (see
-      :mod:`reorder_queue.services.line_entry`).
-    * ``item_supplier`` — the exact catalogue row, used when the operator has
-      already picked one out of an ambiguous lookup.
+    * ``identifier`` — inventory. What the operator typed or the scanner
+      emitted: the item's name, the item's own SKU, a package or unit barcode,
+      or the vendor's SKU. Resolved against what the order's supplier supplies
+      (see :mod:`reorder_queue.services.line_entry`).
+    * ``item_supplier`` — inventory. The exact catalogue row, used when the
+      operator has already picked one out of an ambiguous lookup.
+    * ``asset`` — a tracked hard asset being purchased, by id.
+    * ``description`` — a freeform line for something the catalogue does not
+      know about.
 
-    Everything else is optional and has a sensible default derived from the
-    supplier relationship and this item's purchase history, so a bare scan
-    produces a fully-formed line.
+    On the inventory shapes everything else is optional and has a sensible
+    default derived from the supplier relationship and this item's purchase
+    history, so a bare scan produces a fully-formed line. The asset and freeform
+    shapes have no such relationship to derive from, so ``unit_cost`` is
+    **required** on both — the same rule ``create_purchase_order`` applies when
+    an order is created with those lines, rather than a laxer one that would
+    make a line cheaper to add late than to order up front.
     """
 
     identifier = serializers.CharField(required=False, allow_blank=False, trim_whitespace=True)
     item_supplier = serializers.IntegerField(required=False)
-    quantity = serializers.IntegerField(required=False, min_value=1)
-    unit_cost = serializers.DecimalField(
-        max_digits=10, decimal_places=4, required=False, min_value=Decimal("0")
+    asset = serializers.UUIDField(required=False)
+    description = serializers.CharField(
+        required=False, allow_blank=False, trim_whitespace=True, max_length=500
     )
+    quantity = serializers.IntegerField(required=False, min_value=1)
+    unit_cost = ordered_unit_cost_field(required=False)
     notes = serializers.CharField(required=False, allow_blank=True, default="")
     work_order = serializers.UUIDField(required=False, allow_null=True)
     owning_group = serializers.IntegerField(required=False, allow_null=True)
 
+    #: Request key → the line shape it selects. Ordered as the docstring lists
+    #: them so the error message reads the same way.
+    SHAPE_FIELDS = ("identifier", "item_supplier", "asset", "description")
+    #: Shapes with nothing to derive a price from, and what to call each in a
+    #: refusal — "a description line" is not a phrase an operator would use.
+    COST_REQUIRED_SHAPES = {"asset": "an asset", "description": "a freeform"}
+
     def validate(self, attrs):
-        has_identifier = bool(attrs.get("identifier"))
-        has_item_supplier = attrs.get("item_supplier") is not None
-        if has_identifier == has_item_supplier:
+        supplied = [name for name in self.SHAPE_FIELDS if attrs.get(name) is not None]
+        if len(supplied) != 1:
             raise serializers.ValidationError(
-                "Provide either 'identifier' (a typed or scanned name, SKU, "
-                "barcode, or supplier SKU) or 'item_supplier', but not both."
+                "Name what to add exactly one way: 'identifier' (a typed or "
+                "scanned name, SKU, barcode, or supplier SKU), 'item_supplier' "
+                "(a catalogue row picked out of an ambiguous lookup), 'asset', "
+                f"or 'description' (a freeform line). Got: {supplied or 'none'}."
+            )
+
+        label = self.COST_REQUIRED_SHAPES.get(supplied[0])
+        if label is not None and attrs.get("unit_cost") is None:
+            raise serializers.ValidationError(
+                {
+                    "unit_cost": (
+                        f"unit_cost is required on {label} line — there is no "
+                        "supplier relationship or purchase history to price it from."
+                    )
+                }
             )
         return attrs
 

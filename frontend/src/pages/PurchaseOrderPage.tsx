@@ -182,6 +182,22 @@ const getItemNameAndSku = (item: PurchaseOrderItem): { itemName: string; itemSku
   };
 };
 
+/**
+ * The two independent add-line controls on this page: the scan-and-Enter
+ * identifier field, and the "Add a custom line" freeform disclosure under it.
+ */
+type AddLineControl = 'identifier' | 'custom';
+
+/**
+ * The three states an add-line control can be put into. Every exit path of the
+ * add-line handlers names one of these rather than deciding for itself which
+ * of the errors, notices, fields and candidates to touch.
+ */
+type AddLineFormState =
+  | { kind: 'pending' }
+  | { kind: 'refused'; message: string; candidates?: PurchaseOrderLineCandidate[] }
+  | { kind: 'added'; notice: string };
+
 interface SelectOption {
   value: string;
   label: string;
@@ -333,6 +349,23 @@ const PurchaseOrderPage: React.FC = () => {
   const [addLineError, setAddLineError] = useState<string | null>(null);
   const [addLineCandidates, setAddLineCandidates] = useState<PurchaseOrderLineCandidate[]>([]);
   const [addLineNotice, setAddLineNotice] = useState<string | null>(null);
+  // The freeform half of the same control. A purchase order has always been
+  // able to carry a line the catalogue does not know about — a one-off freight
+  // charge, a part bought once and never stocked — but only at create time, so
+  // remembering one late still meant retyping the order. Kept behind a
+  // disclosure so the scan-and-Enter path above stays the obvious one: this is
+  // the exception, not the workflow.
+  const [showCustomLine, setShowCustomLine] = useState(false);
+  const [customLineDescription, setCustomLineDescription] = useState('');
+  const [customLineUnitCost, setCustomLineUnitCost] = useState('');
+  const [customLineQuantity, setCustomLineQuantity] = useState('1');
+  // Its own refusal and confirmation slots. The identifier form's messages sit
+  // inline under that field, which is the wrong place to answer a custom line
+  // the operator is still looking at further down the page — and a confirmation
+  // routed to the wrong form is worse than a refusal routed to the wrong form,
+  // because the operator has no reason to go looking for it.
+  const [customLineError, setCustomLineError] = useState<string | null>(null);
+  const [customLineNotice, setCustomLineNotice] = useState<string | null>(null);
   // The scanner loop has to stay mouse-free, so the caret goes back into the
   // entry field the moment an add settles — after a scan-and-Enter, and after a
   // click on one of the ambiguity candidates, whose button disappears with the
@@ -344,10 +377,16 @@ const PurchaseOrderPage: React.FC = () => {
   // burst plus an Enter. Appending that burst onto the old text would turn the
   // next scan into a bogus identifier and a guaranteed second refusal, so the
   // text stays visible but the next scan overwrites it.
+  //
+  // Only for adds that came from that field. A custom line is submitted from a
+  // form further down the page, and pulling the caret — and the viewport, since
+  // focus scrolls — back up to the scan field would drag the operator away from
+  // the control they are still working in.
   const addLineInputRef = useRef<HTMLInputElement>(null);
   const addLineWasInFlight = useRef(false);
+  const addLineCameFromScanField = useRef(true);
   useEffect(() => {
-    if (addLineWasInFlight.current && !addingLine) {
+    if (addLineWasInFlight.current && !addingLine && addLineCameFromScanField.current) {
       addLineInputRef.current?.focus();
       addLineInputRef.current?.select();
     }
@@ -740,6 +779,32 @@ const PurchaseOrderPage: React.FC = () => {
   const canReceiveItems = (po: PurchaseOrder) =>
     isAuthenticated && ['sent', 'confirmed', 'partially_received'].includes(po.status);
 
+  /**
+   * Why receiving is unavailable on this order, or null when it is available.
+   *
+   * The receive affordances used to simply vanish on a PO whose status did not
+   * allow receiving, which reads as a broken button rather than a finished or
+   * not-yet-sent order. Naming the state the order is in — and what to do about
+   * it — is the difference between "this app is broken" and "ah, send it
+   * first". The statuses here are the complement of `canReceiveItems`, so the
+   * two cannot disagree about when a button is offered.
+   */
+  const receiveUnavailableReason = (po: PurchaseOrder): string | null => {
+    if (canReceiveItems(po)) return null;
+    switch (po.status) {
+      case 'draft':
+        return 'This order is still a draft. Send it to the supplier before receiving against it.';
+      case 'received':
+        return 'Every line on this order has already been received in full.';
+      case 'cancelled':
+        return 'This order was cancelled, so nothing can be received against it.';
+      case 'voided':
+        return 'This order was voided, so nothing can be received against it.';
+      default:
+        return `This order is ${po.status_label || po.status}, which cannot receive items.`;
+    }
+  };
+
   const getReceivableItems = (po: PurchaseOrder) =>
     po.items.filter((item) => !item.is_voided && !item.is_fully_received);
 
@@ -934,6 +999,64 @@ const PurchaseOrderPage: React.FC = () => {
   };
 
   /**
+   * Put ONE add-line control into a named state — the single place that decides
+   * what pending, refused and added each look like.
+   *
+   * INVARIANT: a state applies to the named control and never touches the
+   * sibling's error, notice, input fields or candidates. The two controls are
+   * independent by design, and wiping the sibling's messages is worse than
+   * leaving them — an ambiguity prompt cleared while its own choose-one buttons
+   * stay on screen leaves the operator with two unexplained "Add <item>"
+   * buttons under a message about a different line, which invites putting the
+   * wrong item on the order. Equally, a scan must not wipe a half-typed custom
+   * line.
+   *
+   * - `pending` — the submit was accepted and a request is going out. Clears
+   *   this control's error and notice, leaves its fields alone so the
+   *   operator's typing survives the round trip, and leaves candidates alone.
+   * - `refused` — any refusal, client-side or server-side, identical either
+   *   way: this control's error set, its stale confirmation cleared, its fields
+   *   left alone so the operator can correct them. Candidates belong to the
+   *   identifier control only, so an ambiguous refusal shows its choose-one set
+   *   and every other refusal clears it; a custom-line refusal leaves the scan
+   *   field's pending choices exactly where they were, because a freeform line
+   *   has no identifier to be ambiguous about.
+   * - `added` — a successful add: this control's confirmation set, its error
+   *   cleared, and the fields it has just consumed emptied for the next one.
+   */
+  const setAddLineFormState = (control: AddLineControl, state: AddLineFormState) => {
+    const isCustom = control === 'custom';
+    const setError = isCustom ? setCustomLineError : setAddLineError;
+    const setNotice = isCustom ? setCustomLineNotice : setAddLineNotice;
+
+    switch (state.kind) {
+      case 'pending':
+        setError(null);
+        setNotice(null);
+        break;
+      case 'refused':
+        setNotice(null);
+        setError(state.message);
+        if (!isCustom) {
+          setAddLineCandidates(state.candidates ?? []);
+        }
+        break;
+      case 'added':
+        setError(null);
+        setNotice(state.notice);
+        if (isCustom) {
+          setCustomLineDescription('');
+          setCustomLineUnitCost('');
+          setCustomLineQuantity('1');
+        } else {
+          setAddLineIdentifier('');
+          setAddLineCandidates([]);
+        }
+        break;
+    }
+  };
+
+  /**
    * Add one line from a typed or scanned identifier (oms-po-add-item).
    *
    * The server owns every rule — draft-only, does-this-supplier-supply-it, and
@@ -944,53 +1067,113 @@ const PurchaseOrderPage: React.FC = () => {
    * loader (docs/REACTIVE_MUTATIONS.md), so the operator's scroll position and
    * the next scan's focus survive the add.
    */
-  const submitAddLine = async (payload: AddPurchaseOrderLinePayload) => {
+  const submitAddLine = async (
+    payload: AddPurchaseOrderLinePayload,
+    // Which control the add came from. Decides where a refusal is shown and
+    // whether the caret goes back to the scan field afterwards.
+    source: AddLineControl = 'identifier',
+  ) => {
+    const fromCustom = source === 'custom';
     try {
+      // Source-gated: the scanner-focus loop belongs to the identifier field.
+      addLineCameFromScanField.current = !fromCustom;
+      // Shared by decision: one in-flight flag for the whole add. Both forms
+      // read it to go read-only and to refuse re-entry, and only one add can
+      // be in flight at a time, so splitting it per control would let the
+      // second submit sail past the first.
       setAddingLine(true);
-      setAddLineError(null);
+      setAddLineFormState(source, { kind: 'pending' });
       const response = await purchaseOrderAPI.addLineItem(orderId!, payload);
       const { created, line_item: lineItem, match, purchase_order: refreshed } = response.data;
 
+      // Shared by decision: the purchase order is the page's single subject and
+      // every control on it renders from this one copy.
       setOrder(refreshed);
-      setAddLineIdentifier('');
-      setAddLineCandidates([]);
 
-      const itemName = lineItem?.item_details?.name || match?.item?.name || 'Item';
+      // The same three-way the items table renders through, so the
+      // confirmation and the table can never name one line differently.
+      const itemName = getItemNameAndSku(lineItem).itemName;
       const matchedBy = match ? ` (matched on ${match.match_label} ${match.matched_value})` : '';
-      setAddLineNotice(
-        created
-          ? `Added ${itemName} × ${lineItem.quantity_ordered}${matchedBy}`
-          : `${itemName} was already on this order — quantity is now ${lineItem.quantity_ordered}${matchedBy}`,
-      );
+      const notice = created
+        ? `Added ${itemName} × ${lineItem.quantity_ordered}${matchedBy}`
+        : `${itemName} was already on this order — quantity is now ${lineItem.quantity_ordered}${matchedBy}`;
+      // Answer the operator where they are: a custom line is confirmed under
+      // the custom-line form, not in the identifier form's status line further
+      // up the page where the operator has no reason to look for it.
+      setAddLineFormState(source, { kind: 'added', notice });
+      // Shared by decision: a page-level toast, not a per-control slot.
       showSuccess(created ? `Added ${itemName}` : `Updated ${itemName}`);
     } catch (err: any) {
       const data = err?.response?.data;
-      setAddLineNotice(null);
-      if (data?.code === 'ambiguous' && Array.isArray(data.candidates)) {
-        setAddLineCandidates(data.candidates);
-      } else {
-        setAddLineCandidates([]);
-      }
-      setAddLineError(
+      const message =
         typeof data?.error === 'string'
           ? data.error
-          : extractErrorMessage(err, 'Failed to add line item'),
-      );
+          : extractErrorMessage(err, 'Failed to add line item');
+      const candidates =
+        data?.code === 'ambiguous' && Array.isArray(data.candidates) ? data.candidates : undefined;
+      setAddLineFormState(source, { kind: 'refused', message, candidates });
     } finally {
       setAddingLine(false);
     }
   };
 
+  /**
+   * Add a freeform line — something the catalogue does not carry.
+   *
+   * A price is required here rather than optional, because there is no supplier
+   * relationship or purchase history to derive one from; the server enforces
+   * the same rule, so this only saves a round trip on an obvious mistake.
+   */
+  const handleAddCustomLineSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    // Not a refusal — a duplicate submit dropped on the floor. It has nothing
+    // to say, so it must not disturb any message.
+    if (addingLine) {
+      return;
+    }
+    // A client-side refusal goes through the same `refused` state a
+    // server-side one does, so the two are indistinguishable on screen.
+    const refuse = (message: string) =>
+      setAddLineFormState('custom', { kind: 'refused', message });
+    const description = customLineDescription.trim();
+    if (!description) {
+      refuse('Describe what is being bought on this line.');
+      return;
+    }
+    if (!customLineUnitCost.trim()) {
+      refuse('A custom line needs a unit cost — there is no catalogue price to use.');
+      return;
+    }
+    const quantity = Number(customLineQuantity);
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      refuse('Quantity must be a whole number of one or more.');
+      return;
+    }
+    void submitAddLine(
+      { description, unit_cost: customLineUnitCost.trim(), quantity },
+      'custom',
+    );
+  };
+
   const handleAddLineSubmit = (event: React.FormEvent) => {
     event.preventDefault();
     // The field stays focused (and therefore submittable) while a request is in
-    // flight, so a second Enter must not start a second add.
+    // flight, so a second Enter must not start a second add. Deliberately not a
+    // state transition: a duplicate submit dropped on the floor has nothing to
+    // say, so it must not disturb any message.
     if (addingLine) {
       return;
     }
     const identifier = addLineIdentifier.trim();
     if (!identifier) {
-      setAddLineError('Type or scan an item name, SKU, barcode, or supplier SKU.');
+      // Same rule as the custom-line form: a client-side refusal goes through
+      // the same `refused` state a server-side one does, so the confirmation
+      // the last scan earned and any pending choose-one set go with it rather
+      // than standing on under a message about something else.
+      setAddLineFormState('identifier', {
+        kind: 'refused',
+        message: 'Type or scan an item name, SKU, barcode, or supplier SKU.',
+      });
       return;
     }
     void submitAddLine({ identifier });
@@ -1335,6 +1518,19 @@ const PurchaseOrderPage: React.FC = () => {
               Cancel
             </button>
           </div>
+        </section>
+      )}
+
+      {/* Say WHY receiving is off rather than silently dropping the buttons.
+          Hidden while the receive/mark-delivered panels are open, since the
+          affordance is plainly present in that state. */}
+      {isAuthenticated && !receivingItems && !markingDelivered && receiveUnavailableReason(order) && (
+        <section
+          className="receive-unavailable-notice"
+          aria-label="Why receiving is unavailable"
+          data-testid="receive-unavailable-notice"
+        >
+          <p>{receiveUnavailableReason(order)}</p>
         </section>
       )}
 
@@ -1782,6 +1978,7 @@ const PurchaseOrderPage: React.FC = () => {
                 onChange={(e) => {
                   setAddLineIdentifier(e.target.value);
                   setAddLineError(null);
+                  setAddLineCandidates([]);
                 }}
                 placeholder="Scan a barcode, or type a name, SKU, or supplier SKU"
                 // readOnly, not disabled: disabling the focused field blurs it,
@@ -1858,6 +2055,96 @@ const PurchaseOrderPage: React.FC = () => {
               </ul>
             )}
           </form>
+        )}
+
+        {/* The freeform line. Same endpoint, same draft-only rule — a
+            different shape of line, for the thing the catalogue does not
+            carry. Behind a disclosure because the identifier field above is
+            the workflow and this is the exception; opening it does not disturb
+            anything typed or scanned into that field. */}
+        {isAuthenticated && order.status === 'draft' && (
+          <div className="po-add-custom-line">
+            <button
+              type="button"
+              className="btn-secondary"
+              aria-expanded={showCustomLine}
+              onClick={() => {
+                setShowCustomLine((open) => !open);
+                setCustomLineError(null);
+                setCustomLineNotice(null);
+              }}
+            >
+              {showCustomLine ? 'Cancel custom line' : 'Add a custom line'}
+            </button>
+
+            {showCustomLine && (
+              <form onSubmit={handleAddCustomLineSubmit}>
+                <p className="po-add-line-hint">
+                  For something the catalogue does not carry — a one-off charge, or a part
+                  bought once. It has no catalogue price, so give it one.
+                </p>
+                <label htmlFor="po-custom-line-description">
+                  What is being bought
+                  <input
+                    id="po-custom-line-description"
+                    type="text"
+                    value={customLineDescription}
+                    onChange={(e) => {
+                      setCustomLineDescription(e.target.value);
+                      setCustomLineError(null);
+                    }}
+                    placeholder="Pallet freight surcharge"
+                    maxLength={500}
+                    readOnly={addingLine}
+                  />
+                </label>
+                <label htmlFor="po-custom-line-unit-cost">
+                  Unit cost
+                  <input
+                    id="po-custom-line-unit-cost"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={customLineUnitCost}
+                    onChange={(e) => {
+                      setCustomLineUnitCost(e.target.value);
+                      setCustomLineError(null);
+                    }}
+                    readOnly={addingLine}
+                  />
+                </label>
+                <label htmlFor="po-custom-line-quantity">
+                  Quantity
+                  <input
+                    id="po-custom-line-quantity"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={customLineQuantity}
+                    onChange={(e) => {
+                      setCustomLineQuantity(e.target.value);
+                      setCustomLineError(null);
+                    }}
+                    readOnly={addingLine}
+                  />
+                </label>
+                {customLineNotice && (
+                  <p className="po-add-line-notice" role="status">
+                    {customLineNotice}
+                  </p>
+                )}
+
+                {customLineError && (
+                  <p className="po-add-line-error" role="alert">
+                    {customLineError}
+                  </p>
+                )}
+                <button type="submit" className="btn-primary" disabled={addingLine}>
+                  {addingLine ? 'Adding…' : 'Add custom line'}
+                </button>
+              </form>
+            )}
+          </div>
         )}
 
         <table className="items-table">

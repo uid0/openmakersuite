@@ -26,6 +26,7 @@ from django.contrib import admin
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
+from .audit import record_line_reprice
 from .models import (
     DeliveryItem,
     LeadTimeLog,
@@ -253,6 +254,35 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
 
     inlines = [PurchaseOrderItemInline]
 
+    def save_formset(self, request, form, formset, change):
+        """Save the line-item inline, recording any price change as one.
+
+        The inline edits ``unit_cost_ordered`` on existing lines just as the
+        line-item change form does, so it owes the same trace. Inline saves go
+        through here rather than ``save_model``, so closing one without the
+        other would leave the price-trace invariant with a hole beside it.
+        """
+        previous_unit_costs = {}
+        if formset.model is PurchaseOrderItem:
+            previous_unit_costs = dict(
+                PurchaseOrderItem.objects.filter(
+                    pk__in=[f.instance.pk for f in formset.forms if f.instance.pk]
+                ).values_list("pk", "unit_cost_ordered")
+            )
+
+        super().save_formset(request, form, formset, change)
+
+        if not previous_unit_costs:
+            return
+        for line_item in PurchaseOrderItem.objects.filter(pk__in=previous_unit_costs):
+            previous_unit_cost = previous_unit_costs[line_item.pk]
+            if previous_unit_cost != line_item.unit_cost_ordered:
+                record_line_reprice(
+                    line_item=line_item,
+                    previous_unit_cost=previous_unit_cost,
+                    actor=request.user,
+                )
+
     fieldsets = (
         (
             "Order Information",
@@ -399,6 +429,32 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     ]
+
+    def save_model(self, request, obj, form, change):
+        """Save the line, and record a price change as a price change.
+
+        ``unit_cost_ordered`` stays editable here on purpose — admin exists for
+        the exceptional correction the API's draft-only reprice cannot serve.
+        The right answer is that such a correction leaves a trace, not that it
+        becomes impossible, so it emits the same event every other route that
+        rewrites that field emits.
+        """
+        previous_unit_cost = None
+        if change and obj.pk:
+            previous_unit_cost = (
+                PurchaseOrderItem.objects.filter(pk=obj.pk)
+                .values_list("unit_cost_ordered", flat=True)
+                .first()
+            )
+
+        super().save_model(request, obj, form, change)
+
+        if previous_unit_cost is not None and previous_unit_cost != obj.unit_cost_ordered:
+            record_line_reprice(
+                line_item=obj,
+                previous_unit_cost=previous_unit_cost,
+                actor=request.user,
+            )
 
     @admin.display(description="Item")
     def item_name(self, obj):

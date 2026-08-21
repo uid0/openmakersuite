@@ -2179,14 +2179,26 @@ export interface PurchaseOrderItemLookup {
 }
 
 /**
- * Add-a-line request. Name the item EITHER by `identifier` (what the operator
- * typed or the scanner emitted) OR by `item_supplier` (the row they picked out
- * of an ambiguous response) — never both. Quantity and cost are optional; the
- * server derives them from the supplier relationship and purchase history.
+ * Add-a-line request. Name what is being bought EXACTLY ONE way — these are the
+ * three line shapes a purchase order carries, with the inventory shape offered
+ * two ways:
+ *
+ * - `identifier` — inventory, by what the operator typed or the scanner emitted;
+ * - `item_supplier` — inventory, by the catalogue row they picked out of an
+ *   ambiguous response;
+ * - `asset` — a tracked hard asset, by id;
+ * - `description` — a freeform line for something the catalogue does not know.
+ *
+ * On the inventory shapes quantity and cost are optional: the server derives
+ * them from the supplier relationship and purchase history. `asset` and
+ * `description` lines have neither, so `unit_cost` is REQUIRED on both — the
+ * same rule that applies when an order is created with such a line.
  */
 export interface AddPurchaseOrderLinePayload {
   identifier?: string;
   item_supplier?: number;
+  asset?: string;
+  description?: string;
   quantity?: number;
   unit_cost?: string | number;
   notes?: string;
@@ -2227,9 +2239,12 @@ export const purchaseOrderAPI = {
       { params: { q: query } },
     ),
   /**
-   * Add a line to a DRAFT purchase order. Rejects with 400 when the order is
-   * not a draft or its supplier does not supply the item, and with 409 plus a
-   * `candidates` list when the identifier matches more than one item.
+   * Add a line to a DRAFT purchase order, in any of its three shapes —
+   * inventory (by `identifier` or `item_supplier`), `asset`, or freeform
+   * `description`. Rejects with 400 when the order is not a draft, its
+   * supplier does not supply the item (or did not make the asset), or a
+   * priced-by-hand shape arrived without `unit_cost`; and with 409 plus a
+   * `candidates` list when an identifier matches more than one item.
    */
   addLineItem: (orderId: string, data: AddPurchaseOrderLinePayload) =>
     api.post<AddPurchaseOrderLineResponse>(

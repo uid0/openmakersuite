@@ -480,6 +480,202 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
     );
   });
 
+  /**
+   * The empty submit above is a client-side refusal, and a client-side refusal
+   * has to leave this control in exactly the state a server-side one does: its
+   * own error set, its own stale confirmation cleared, the sibling untouched.
+   * It did not — the early return never reached the shared path that clears the
+   * notice, so the last "Added M3 hex bolt" stayed on screen underneath it.
+   */
+  test('an empty submit clears the confirmation the last scan earned', async () => {
+    (api.purchaseOrderAPI.addLineItem as jest.Mock).mockResolvedValueOnce({
+      data: {
+        created: true,
+        line_item: line(),
+        match: candidate(),
+        purchase_order: order({ items: [line()] }),
+      },
+    });
+
+    renderPage();
+    const field = await screen.findByLabelText(/add an item/i);
+    const scanForm = field.closest('form')!;
+    fireEvent.change(field, { target: { value: '012345678905' } });
+    fireEvent.submit(scanForm);
+
+    expect(await within(scanForm).findByRole('status')).toHaveTextContent(/Added M3 hex bolt/);
+
+    // The operator hits Enter again on the now-empty field — a scan that never
+    // landed, a stray keypress.
+    fireEvent.submit(scanForm);
+
+    expect(await within(scanForm).findByRole('alert')).toHaveTextContent(
+      /type or scan an item name, sku, barcode, or supplier sku/i
+    );
+    expect(within(scanForm).queryByRole('status')).not.toBeInTheDocument();
+    expect(within(scanForm).queryByText(/Added M3 hex bolt/)).not.toBeInTheDocument();
+    expect(api.purchaseOrderAPI.addLineItem).toHaveBeenCalledTimes(1);
+  });
+
+  test('an empty submit leaves a standing custom-line confirmation alone', async () => {
+    (api.purchaseOrderAPI.addLineItem as jest.Mock).mockResolvedValueOnce({
+      data: {
+        created: true,
+        line_item: line({
+          id: 'line-9',
+          item_type: 'freeform',
+          description: 'Pallet freight surcharge',
+          item_details: null,
+          quantity_ordered: 1,
+        }),
+        match: null,
+        purchase_order: order({ items: [] }),
+      },
+    });
+
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /add a custom line/i }));
+    fireEvent.change(screen.getByLabelText(/what is being bought/i), {
+      target: { value: 'Pallet freight surcharge' },
+    });
+    fireEvent.change(screen.getByLabelText(/unit cost/i), { target: { value: '75.00' } });
+    // Captured before the submit: the button relabels to "Adding…" in flight.
+    const customForm = screen.getByRole('button', { name: /add custom line/i }).closest('form')!;
+    fireEvent.click(within(customForm).getByRole('button', { name: /add custom line/i }));
+
+    expect(await within(customForm).findByRole('status')).toHaveTextContent(
+      /Added Pallet freight surcharge/
+    );
+
+    const scanForm = entryField().closest('form')!;
+    fireEvent.submit(scanForm);
+
+    expect(await within(scanForm).findByRole('alert')).toHaveTextContent(
+      /type or scan an item name, sku, barcode, or supplier sku/i
+    );
+    // Clearing this control's own message is not licence to clear the other's.
+    expect(within(customForm).getByRole('status')).toHaveTextContent(
+      /Added Pallet freight surcharge/
+    );
+  });
+
+  /**
+   * The empty submit is a client-side refusal, and a refusal — from either
+   * side — clears this control's candidates. It did not: the early return set
+   * the message but left the choose-one buttons standing, leaving the operator
+   * with two unexplained "Add <item>" buttons under a message about something
+   * else, which invites putting the wrong item on the order.
+   */
+  test('an empty submit takes the pending choose-one set down with it', async () => {
+    (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
+      apiError(409, {
+        code: 'ambiguous',
+        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        candidates: [
+          candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
+          candidate({
+            item_supplier: 13,
+            item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
+          }),
+        ],
+      })
+    );
+
+    renderPage();
+    const field = await screen.findByLabelText(/add an item/i);
+    const scanForm = field.closest('form')!;
+    fireEvent.change(field, { target: { value: 'M3 hex' } });
+    fireEvent.submit(scanForm);
+
+    await screen.findByRole('button', { name: /add m3 hex nut/i });
+    expect(screen.getByRole('button', { name: /add m3 hex bolt/i })).toBeInTheDocument();
+
+    // The operator clears the field and hits Enter instead of choosing.
+    fireEvent.change(entryField(), { target: { value: '' } });
+    fireEvent.submit(scanForm);
+
+    expect(await within(scanForm).findByRole('alert')).toHaveTextContent(
+      /type or scan an item name, sku, barcode, or supplier sku/i
+    );
+    expect(screen.queryByRole('button', { name: /add m3 hex nut/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add m3 hex bolt/i })).not.toBeInTheDocument();
+    expect(api.purchaseOrderAPI.addLineItem).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * The prompt and its choose-one set have to live and die together here too.
+   * Typing cleared the alert on the first keystroke while both candidate
+   * buttons stayed on screen, leaving unexplained "Add <item>" buttons under a
+   * message about something else. (Pre-existing behaviour from #1020's
+   * handler, not something this branch introduced.)
+   */
+  test('typing a new identifier takes the pending choose-one set with the prompt', async () => {
+    (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
+      apiError(409, {
+        code: 'ambiguous',
+        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        candidates: [
+          candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
+          candidate({
+            item_supplier: 13,
+            item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
+          }),
+        ],
+      })
+    );
+
+    renderPage();
+    const field = await screen.findByLabelText(/add an item/i);
+    const scanForm = field.closest('form')!;
+    fireEvent.change(field, { target: { value: 'M3 hex' } });
+    fireEvent.submit(scanForm);
+
+    await screen.findByRole('button', { name: /add m3 hex nut/i });
+    expect(screen.getByRole('button', { name: /add m3 hex bolt/i })).toBeInTheDocument();
+
+    // The operator types a different SKU instead of choosing.
+    fireEvent.change(entryField(), { target: { value: 'ACME-M3-100' } });
+
+    expect(within(scanForm).queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add m3 hex nut/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add m3 hex bolt/i })).not.toBeInTheDocument();
+  });
+
+  test('a refused custom line leaves the scan field’s choose-one set standing', async () => {
+    (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
+      apiError(409, {
+        code: 'ambiguous',
+        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        candidates: [
+          candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
+          candidate({
+            item_supplier: 13,
+            item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
+          }),
+        ],
+      })
+    );
+
+    renderPage();
+    fireEvent.change(await screen.findByLabelText(/add an item/i), { target: { value: 'M3 hex' } });
+    fireEvent.submit(entryField().closest('form')!);
+
+    await screen.findByRole('button', { name: /add m3 hex nut/i });
+
+    // A freeform line has no identifier to be ambiguous about, so refusing one
+    // says nothing about the choice the operator still has to answer above.
+    fireEvent.click(screen.getByRole('button', { name: /add a custom line/i }));
+    const customForm = screen.getByRole('button', { name: /add custom line/i }).closest('form')!;
+    fireEvent.submit(customForm);
+
+    expect(await within(customForm).findByRole('alert')).toHaveTextContent(
+      /describe what is being bought on this line/i
+    );
+    expect(screen.getByRole('button', { name: /add m3 hex nut/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /add m3 hex bolt/i })).toBeInTheDocument();
+    expect(api.purchaseOrderAPI.addLineItem).toHaveBeenCalledTimes(1);
+  });
+
   test('a cross-vendor candidate row shows the listing the code came from', async () => {
     // The candidate offered is always THIS supplier's row, so without the
     // provenance nothing on screen contains what the operator scanned — which

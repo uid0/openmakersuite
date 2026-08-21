@@ -126,16 +126,25 @@ Behavior:
 - The add-a-line entry (draft orders only) patches the order from the
   `items/` response, which carries the full refreshed purchase order, so
   the new or grown line appears without a follow-up GET and the page does
-  not flip back to its initial "Loading purchase order…" state.
+  not flip back to its initial "Loading purchase order…" state. The
+  "Add a custom line" disclosure beneath it submits a freeform line
+  through the same call and patches the page the same way.
 - The submit button is disabled while in flight and the handler
   short-circuits on the pending flag, so a second Enter cannot start a
-  second add. The entry field is `readOnly` rather than `disabled` while
-  in flight — disabling the focused field would blur it and the next
-  scan's character burst would land nowhere.
+  second add. That in-flight flag is shared by both controls, because only
+  one add can be in flight at a time. The entry field is `readOnly` rather
+  than `disabled` while in flight — disabling the focused field would blur
+  it and the next scan's character burst would land nowhere.
 - On failure the typed identifier stays in the field (selected, so the
   next scan overwrites it rather than appending) and the refusal shows
   next to the field; an ambiguous identifier renders the server's
   candidate set to choose from instead of guessing.
+- Confirmations and refusals are routed to the control that submitted:
+  each form sets and clears only its own message slots and its own inputs,
+  so an add from one cannot wipe a half-typed line or a pending ambiguity
+  choice-set sitting in the other. The caret returns to the identifier
+  field only for adds that came from it — pulling focus (and the viewport)
+  back up the page would drag the operator out of the custom-line form.
 
 ---
 

@@ -14,6 +14,18 @@ Two operations live here:
 * :func:`add_line_item` — the write. Owns the draft-only and
   supplier-supplies-it guards, the defaults, and the already-on-the-order rule.
 
+**The other two line shapes.** ``PurchaseOrderItem`` also carries asset and
+freeform lines, and ``create_purchase_order`` accepts all three, so an order
+that can be *created* with such a line must also be able to have one *added* —
+otherwise a forgotten asset or a one-off freight charge still means deleting the
+PO and retyping it. :func:`add_asset_line_item` and
+:func:`add_freeform_line_item` are those writes. Neither has an identifier to
+resolve (an asset is named by id; a freeform line is only prose), so they skip
+the lookup ladder entirely and share only the draft guard, the coercions, the
+tag rules and the total re-derivation. Both require an explicit ``unit_cost``,
+because neither shape has a supplier relationship or purchase history to price
+itself from — the same rule the create path applies.
+
 **The supplier is the validation boundary.** ``ItemSupplier`` *is* the "this
 supplier supplies this item" relationship, so scoping every lookup to
 ``purchase_order.supplier`` means the check cannot be forgotten: a row that is
@@ -68,6 +80,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import List, Optional
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 
@@ -881,12 +894,19 @@ def _grow_existing_line(
 
     grow_by = repeat_quantity(item_supplier) if quantity is None else quantity
     apply_line_quantity(existing, (existing.quantity_ordered or 0) + grow_by)
+    previous_cost = existing.unit_cost_ordered
     if explicit_cost is not None:
         existing.unit_cost_ordered = explicit_cost
     if notes:
         existing.notes = f"{existing.notes}\n{notes}".strip() if existing.notes else notes
     existing.save()
     recalculate_estimated_total(purchase_order)
+    # An override that replaced a DIFFERENT figure is a reprice, and the
+    # caller has to be able to record it as one. Compared numerically, so
+    # restating 5.00 against a stored 5.0000 is not a price change.
+    existing.repriced_from = (
+        previous_cost if explicit_cost is not None and previous_cost != explicit_cost else None
+    )
     return existing, False
 
 
@@ -937,7 +957,9 @@ def add_line_item(
 
     The caller owns the draft guard (:func:`assert_addable`) and the audit
     event; both are applied at the view boundary alongside the other PO
-    actions.
+    actions. When growing a line overrode a *different* price, the returned
+    line carries the figure it replaced on ``repriced_from`` so the caller can
+    record that as its own event — a price never moves without a trace.
     """
     explicit_quantity = None if quantity is None else _coerce_quantity(quantity)
     explicit_cost = None if unit_cost is None else _coerce_unit_cost(unit_cost)
@@ -987,6 +1009,223 @@ def add_line_item(
             raise
         return _grow_existing_line(purchase_order, item_supplier, existing, **grow_kwargs)
 
+    recalculate_estimated_total(purchase_order)
+    return line_item, True
+
+
+def resolve_asset(purchase_order, asset_id):
+    """Load an ``Asset`` and prove this order's supplier can sell it.
+
+    The asset shape has no ``ItemSupplier`` to scope a lookup through, so the
+    supplier check that :func:`resolve_item_supplier` gets for free has to be
+    made explicitly. ``create_purchase_order`` makes exactly this check when a
+    PO is created with asset lines — an asset whose manufacturer is recorded
+    must match the order's supplier — and adding a line later cannot be laxer
+    than creating one, or the same asset would be orderable from anybody
+    provided you waited until after the PO existed.
+
+    An asset with **no** manufacturer recorded is allowed, on the same reading
+    the create path takes: unknown provenance is not evidence of a mismatch.
+    """
+    from inventory.models import Asset
+
+    try:
+        asset = Asset.objects.select_related("manufacturer").get(pk=asset_id)
+    except (Asset.DoesNotExist, DjangoValidationError, ValueError, TypeError):
+        raise LineEntryError(f"No asset with id {asset_id!r} exists.", "not_found")
+
+    supplier = purchase_order.supplier
+    if asset.manufacturer_id and asset.manufacturer_id != supplier.pk:
+        raise LineEntryError(
+            f"{supplier.name} does not supply {asset.name} — that asset is made by "
+            f"{asset.manufacturer.name}. Order it on a purchase order for "
+            f"{asset.manufacturer.name}.",
+            "supplier_mismatch",
+        )
+    return asset
+
+
+def _locked_existing_asset_line(purchase_order, asset):
+    """This order's line for ``asset``, locked for the rest of the transaction.
+
+    The asset half of what :func:`_locked_existing_line` does for inventory —
+    ``(purchase_order, asset)`` is unique_together too, so the read that decides
+    grow-or-insert has to hold the row for the same reason.
+    """
+    return (
+        PurchaseOrderItem.objects.select_for_update()
+        .filter(purchase_order=purchase_order, asset=asset)
+        .order_by()
+        .first()
+    )
+
+
+def _grow_existing_asset_line(
+    purchase_order,
+    asset,
+    existing,
+    *,
+    quantity,
+    unit_cost,
+    notes,
+    work_order,
+    owning_group,
+):
+    """Increment an asset line already on the order — see :func:`add_asset_line_item`."""
+    if existing.is_voided:
+        raise LineEntryError(
+            f"{asset.name} is already on "
+            f"{purchase_order.po_number or 'this order'} as a voided line. "
+            "Restore or remove that line before ordering it again.",
+            "line_voided",
+        )
+
+    # Before any mutation, so a refused re-add leaves the line exactly as it was.
+    #
+    # A differing price is refused for the same reason a differing tag is, only
+    # more so: this is a purchase order, and silently restating the price of the
+    # units already on the line changes what the shop believes it is committing
+    # to spend, with no refusal and no audit trace of the figure it replaced.
+    # ``unit_cost`` is mandatory on the asset shape, so the caller cannot opt out
+    # of stating one and "unstated" cannot mean "leave it alone" here the way it
+    # does on the inventory path. Compared as Decimals, so the stored four
+    # decimal places do not make 149.00 disagree with 149.0000.
+    current_cost = existing.unit_cost_ordered
+    if current_cost is not None and Decimal(current_cost) != unit_cost:
+        raise LineEntryError(
+            f"{asset.name} is already on this order at {current_cost} each; "
+            f"this request names {unit_cost}. Re-post at the price already on "
+            f"the line, or change the line's price deliberately by PATCHing "
+            f"unit_cost_ordered on this order's items/<item_id>/ endpoint "
+            f"first.",
+            "price_conflict",
+        )
+    _apply_tag(existing, "work_order", work_order, "work order", asset.name)
+    _apply_tag(existing, "owning_group", owning_group, "committee", asset.name)
+
+    apply_line_quantity(existing, (existing.quantity_ordered or 0) + quantity)
+    if notes:
+        existing.notes = f"{existing.notes}\n{notes}".strip() if existing.notes else notes
+    existing.save()
+    recalculate_estimated_total(purchase_order)
+    # Never a reprice: a differing price was refused above, before any
+    # mutation, so the price this line carries is the one it already had.
+    existing.repriced_from = None
+    return existing, False
+
+
+@transaction.atomic
+def add_asset_line_item(
+    purchase_order,
+    asset,
+    *,
+    quantity=None,
+    unit_cost,
+    notes="",
+    work_order=None,
+    owning_group=None,
+):
+    """Add ``asset`` to ``purchase_order`` as a line, or grow its line.
+
+    Returns ``(line_item, created)``, the same contract as
+    :func:`add_line_item`, so the view dispatches on shape and nothing else.
+
+    ``unit_cost`` is **required**, exactly as it is on the create path: an asset
+    carries no supplier relationship and no purchase history, so there is
+    nothing to derive a price from and a silent zero would understate the order.
+
+    An asset already on the order grows its line, because ``(purchase_order,
+    asset)`` is unique_together and a second line is therefore impossible — the
+    same reasoning :func:`add_line_item` documents. It grows by one, not by a
+    package: an asset is a discrete thing with no case size. A voided line is
+    refused rather than resurrected, and a re-add naming a *different* price is
+    refused rather than silently repricing the units already on the line.
+    """
+    quantity = 1 if quantity is None else _coerce_quantity(quantity)
+    unit_cost = _coerce_unit_cost(unit_cost)
+    grow_kwargs = {
+        "quantity": quantity,
+        "unit_cost": unit_cost,
+        "notes": notes,
+        "work_order": work_order,
+        "owning_group": owning_group,
+    }
+
+    existing = _locked_existing_asset_line(purchase_order, asset)
+    if existing is not None:
+        return _grow_existing_asset_line(purchase_order, asset, existing, **grow_kwargs)
+
+    try:
+        # Nested for the same reason as the inventory insert: a losing race must
+        # roll back only the failed INSERT, leaving a line to grow.
+        with transaction.atomic():
+            line_item = PurchaseOrderItem.objects.create(
+                purchase_order=purchase_order,
+                asset=asset,
+                quantity_ordered=quantity,
+                unit_cost_ordered=unit_cost,
+                # Assets carry no package information, matching the create path.
+                order_in_packages=0,
+                notes=notes or "",
+                work_order=work_order,
+                owning_group=owning_group,
+            )
+    except IntegrityError:
+        # A concurrent add won the (purchase_order, asset) constraint between
+        # the locked read and this insert. Take the same grow path, so a race
+        # loser is treated exactly like an ordinary repeat rather than dropping
+        # the tags and notes it came with.
+        existing = _locked_existing_asset_line(purchase_order, asset)
+        if existing is None:
+            raise
+        return _grow_existing_asset_line(purchase_order, asset, existing, **grow_kwargs)
+
+    recalculate_estimated_total(purchase_order)
+    return line_item, True
+
+
+@transaction.atomic
+def add_freeform_line_item(
+    purchase_order,
+    description,
+    *,
+    quantity=None,
+    unit_cost,
+    notes="",
+    work_order=None,
+    owning_group=None,
+):
+    """Add a freeform line — something the catalogue does not know about.
+
+    Returns ``(line_item, True)``: freeform lines carry no uniqueness
+    constraint and nothing to match on, so every call creates a line. Two
+    lines reading "shipping" are a legitimate order, and guessing that a
+    repeated description meant "grow the other one" would silently merge
+    unrelated charges.
+
+    ``unit_cost`` is required for the same reason it is on the create path:
+    there is no relationship to derive a price from.
+    """
+    description = (description or "").strip()
+    if not description:
+        raise LineEntryError(
+            "A freeform line needs a description of what is being bought.",
+            "invalid_description",
+        )
+    quantity = 1 if quantity is None else _coerce_quantity(quantity)
+    unit_cost = _coerce_unit_cost(unit_cost)
+
+    line_item = PurchaseOrderItem.objects.create(
+        purchase_order=purchase_order,
+        description=description,
+        quantity_ordered=quantity,
+        unit_cost_ordered=unit_cost,
+        # Freeform lines carry no package information, matching the create path.
+        order_in_packages=0,
+        notes=notes or "",
+        work_order=work_order,
+        owning_group=owning_group,
+    )
     recalculate_estimated_total(purchase_order)
     return line_item, True
 

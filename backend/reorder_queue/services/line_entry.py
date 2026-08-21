@@ -1071,15 +1071,29 @@ def _grow_existing_asset_line(
             "line_voided",
         )
 
-    # Before any mutation, so a refused tag leaves the line exactly as it was.
+    # Before any mutation, so a refused re-add leaves the line exactly as it was.
+    #
+    # A differing price is refused for the same reason a differing tag is, only
+    # more so: this is a purchase order, and silently restating the price of the
+    # units already on the line changes what the shop believes it is committing
+    # to spend, with no refusal and no audit trace of the figure it replaced.
+    # ``unit_cost`` is mandatory on the asset shape, so the caller cannot opt out
+    # of stating one and "unstated" cannot mean "leave it alone" here the way it
+    # does on the inventory path. Compared as Decimals, so the stored four
+    # decimal places do not make 149.00 disagree with 149.0000.
+    current_cost = existing.unit_cost_ordered
+    if current_cost is not None and Decimal(current_cost) != unit_cost:
+        raise LineEntryError(
+            f"{asset.name} is already on this order at {current_cost} each; "
+            f"this request names {unit_cost}. Re-post at the price already on "
+            f"the line, or change that price deliberately by updating the line "
+            f"item.",
+            "price_conflict",
+        )
     _apply_tag(existing, "work_order", work_order, "work order", asset.name)
     _apply_tag(existing, "owning_group", owning_group, "committee", asset.name)
 
     apply_line_quantity(existing, (existing.quantity_ordered or 0) + quantity)
-    # Unconditional, unlike the inventory path's optional override: an asset
-    # line's price is always stated by the caller, so the newest statement of it
-    # is the one to keep.
-    existing.unit_cost_ordered = unit_cost
     if notes:
         existing.notes = f"{existing.notes}\n{notes}".strip() if existing.notes else notes
     existing.save()
@@ -1111,7 +1125,8 @@ def add_asset_line_item(
     asset)`` is unique_together and a second line is therefore impossible — the
     same reasoning :func:`add_line_item` documents. It grows by one, not by a
     package: an asset is a discrete thing with no case size. A voided line is
-    refused rather than resurrected.
+    refused rather than resurrected, and a re-add naming a *different* price is
+    refused rather than silently repricing the units already on the line.
     """
     quantity = 1 if quantity is None else _coerce_quantity(quantity)
     unit_cost = _coerce_unit_cost(unit_cost)

@@ -165,25 +165,73 @@ def test_an_unknown_asset_id_is_a_clean_refusal(staff_client, draft_po):
     assert response.json()["code"] == "not_found"
 
 
-def test_re_adding_an_asset_grows_the_existing_line(staff_client, draft_po, acme_asset):
+@pytest.mark.parametrize(
+    "re_add_cost",
+    [
+        pytest.param("149.00", id="identical-string"),
+        pytest.param("149", id="no-decimal-places"),
+        pytest.param("149.0000", id="stored-precision"),
+    ],
+)
+def test_re_adding_an_asset_at_the_same_price_grows_the_existing_line(
+    staff_client, draft_po, acme_asset, re_add_cost
+):
     """``(purchase_order, asset)`` is unique_together, so a second line is impossible.
 
     Same resolution the inventory path documents: grow the line rather than
     surface the database's IntegrityError. By one, not by a package — an asset
     is a discrete thing with no case size.
+
+    The parametrised prices all name the same money as the stored 149.0000, so
+    they must all be accepted: the comparison is numeric, not textual.
     """
-    first = add_line(staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "10.00"})
+    first = add_line(staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "149.00"})
     assert first.status_code == 201
 
-    second = add_line(staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "10.00"})
+    second = add_line(
+        staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": re_add_cost}
+    )
 
     assert second.status_code == 200
     assert second.json()["created"] is False
     assert PurchaseOrderItem.objects.filter(purchase_order=draft_po).count() == 1
     line = PurchaseOrderItem.objects.get(purchase_order=draft_po)
     assert line.quantity_ordered == 2
+    assert line.unit_cost_ordered == Decimal("149.0000")
     draft_po.refresh_from_db()
-    assert draft_po.estimated_total == Decimal("20.00")
+    assert draft_po.estimated_total == Decimal("298.00")
+
+
+def test_re_adding_an_asset_at_a_different_price_is_refused(staff_client, draft_po, acme_asset):
+    """A re-add may grow a line; it may not silently reprice the units on it.
+
+    This function already refuses to overwrite an existing work order or
+    committee. A price is the more consequential field — quietly rewriting an
+    asset line from 149.00 to 1.00 changes what the shop believes it is
+    committing to spend — so a conflicting price is refused the same way, and
+    the refused request leaves the line exactly as it was.
+    """
+    assert (
+        add_line(
+            staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "149.00"}
+        ).status_code
+        == 201
+    )
+
+    response = add_line(staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "1.00"})
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["code"] == "price_conflict"
+    assert "149" in body["error"]
+    assert "1.00" in body["error"]
+
+    assert PurchaseOrderItem.objects.filter(purchase_order=draft_po).count() == 1
+    line = PurchaseOrderItem.objects.get(purchase_order=draft_po)
+    assert line.quantity_ordered == 1
+    assert line.unit_cost_ordered == Decimal("149.0000")
+    draft_po.refresh_from_db()
+    assert draft_po.estimated_total == Decimal("149.00")
 
 
 def test_a_voided_asset_line_is_refused_rather_than_resurrected(staff_client, draft_po, acme_asset):

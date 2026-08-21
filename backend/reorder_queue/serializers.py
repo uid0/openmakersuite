@@ -3,6 +3,7 @@ Serializers for reorder queue API.
 """
 
 from datetime import timedelta
+from decimal import Decimal
 
 from django.utils import timezone
 
@@ -768,6 +769,44 @@ class ReceiveItemsSerializer(serializers.Serializer):
     )
     carrier = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
     receipt_notes = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class AddPurchaseOrderLineSerializer(serializers.Serializer):
+    """Request body for adding a line to a **draft** purchase order (oms-po-add-item).
+
+    Exactly one of the two ways to name the item is required:
+
+    * ``identifier`` — what the operator typed or the scanner emitted: the
+      item's name, the item's own SKU, a package or unit barcode, or the
+      vendor's SKU. Resolved against what the order's supplier supplies (see
+      :mod:`reorder_queue.services.line_entry`).
+    * ``item_supplier`` — the exact catalogue row, used when the operator has
+      already picked one out of an ambiguous lookup.
+
+    Everything else is optional and has a sensible default derived from the
+    supplier relationship and this item's purchase history, so a bare scan
+    produces a fully-formed line.
+    """
+
+    identifier = serializers.CharField(required=False, allow_blank=False, trim_whitespace=True)
+    item_supplier = serializers.IntegerField(required=False)
+    quantity = serializers.IntegerField(required=False, min_value=1)
+    unit_cost = serializers.DecimalField(
+        max_digits=10, decimal_places=4, required=False, min_value=Decimal("0")
+    )
+    notes = serializers.CharField(required=False, allow_blank=True, default="")
+    work_order = serializers.UUIDField(required=False, allow_null=True)
+    owning_group = serializers.IntegerField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        has_identifier = bool(attrs.get("identifier"))
+        has_item_supplier = attrs.get("item_supplier") is not None
+        if has_identifier == has_item_supplier:
+            raise serializers.ValidationError(
+                "Provide either 'identifier' (a typed or scanned name, SKU, "
+                "barcode, or supplier SKU) or 'item_supplier', but not both."
+            )
+        return attrs
 
 
 # Lead Time and Analytics Serializers

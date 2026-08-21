@@ -9,14 +9,16 @@
  * that state.
  */
 import { Button, Group, Paper, Text } from '@mantine/core';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import {
+  AddPurchaseOrderLinePayload,
   OrderingAdapter,
   OrderPadExport,
   purchaseOrderAPI,
   PurchaseOrderFreightTerms,
+  PurchaseOrderLineCandidate,
   PurchaseOrderPaymentSchedule,
   PurchaseOrderPaymentTerms,
   PurchaseOrderPriority,
@@ -320,6 +322,49 @@ const PurchaseOrderPage: React.FC = () => {
   // `exportingOrderPad` disables the buttons while a fetch is in flight.
   const [orderPad, setOrderPad] = useState<OrderPadExport | null>(null);
   const [exportingOrderPad, setExportingOrderPad] = useState(false);
+  // Add-a-line entry (oms-po-add-item). One field takes whatever the operator
+  // types or the scanner emits — item name, item SKU, package or unit barcode,
+  // or the vendor's SKU — and Enter submits it, so a scan (a fast burst of
+  // characters ending in Enter) completes the add without touching the mouse.
+  // `addLineCandidates` is populated only when the server refuses to guess
+  // between several matches; `addLineNotice` reports what actually matched.
+  const [addLineIdentifier, setAddLineIdentifier] = useState('');
+  const [addingLine, setAddingLine] = useState(false);
+  const [addLineError, setAddLineError] = useState<string | null>(null);
+  const [addLineCandidates, setAddLineCandidates] = useState<PurchaseOrderLineCandidate[]>([]);
+  const [addLineNotice, setAddLineNotice] = useState<string | null>(null);
+  // The scanner loop has to stay mouse-free, so the caret goes back into the
+  // entry field the moment an add settles — after a scan-and-Enter, and after a
+  // click on one of the ambiguity candidates, whose button disappears with the
+  // list that held it. Done in an effect rather than in `submitAddLine` so it
+  // runs after the re-render that re-enables the controls.
+  //
+  // `select()`, not a bare `focus()`: a refusal deliberately leaves the typed
+  // text in place so the operator can correct it, and a scanner delivers a
+  // burst plus an Enter. Appending that burst onto the old text would turn the
+  // next scan into a bogus identifier and a guaranteed second refusal, so the
+  // text stays visible but the next scan overwrites it.
+  const addLineInputRef = useRef<HTMLInputElement>(null);
+  const addLineWasInFlight = useRef(false);
+  useEffect(() => {
+    if (addLineWasInFlight.current && !addingLine) {
+      addLineInputRef.current?.focus();
+      addLineInputRef.current?.select();
+    }
+    addLineWasInFlight.current = addingLine;
+  }, [addingLine]);
+
+  // First scan of the session needs no mouse either, so the field takes focus
+  // as soon as the control exists. `preventScroll` rather than the `autoFocus`
+  // attribute: the control sits below the header, details and attachments, so
+  // letting the browser scroll it into view would land every draft order —
+  // including one opened just to check its supplier or dates — at Line Items.
+  const canAddLine = isAuthenticated && order?.status === 'draft';
+  useEffect(() => {
+    if (canAddLine) {
+      addLineInputRef.current?.focus({ preventScroll: true });
+    }
+  }, [canAddLine]);
 
   const loadOrder = useCallback(async () => {
     try {
@@ -886,6 +931,69 @@ const PurchaseOrderPage: React.FC = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  /**
+   * Add one line from a typed or scanned identifier (oms-po-add-item).
+   *
+   * The server owns every rule — draft-only, does-this-supplier-supply-it, and
+   * what to do when the item is already on the order — so this handler only
+   * routes the answers: a 409 carries the candidate set to choose from, any
+   * other failure is a message to show. The success path patches the page from
+   * the response's full purchase order rather than re-running the initial
+   * loader (docs/REACTIVE_MUTATIONS.md), so the operator's scroll position and
+   * the next scan's focus survive the add.
+   */
+  const submitAddLine = async (payload: AddPurchaseOrderLinePayload) => {
+    try {
+      setAddingLine(true);
+      setAddLineError(null);
+      const response = await purchaseOrderAPI.addLineItem(orderId!, payload);
+      const { created, line_item: lineItem, match, purchase_order: refreshed } = response.data;
+
+      setOrder(refreshed);
+      setAddLineIdentifier('');
+      setAddLineCandidates([]);
+
+      const itemName = lineItem?.item_details?.name || match?.item?.name || 'Item';
+      const matchedBy = match ? ` (matched on ${match.match_label} ${match.matched_value})` : '';
+      setAddLineNotice(
+        created
+          ? `Added ${itemName} × ${lineItem.quantity_ordered}${matchedBy}`
+          : `${itemName} was already on this order — quantity is now ${lineItem.quantity_ordered}${matchedBy}`,
+      );
+      showSuccess(created ? `Added ${itemName}` : `Updated ${itemName}`);
+    } catch (err: any) {
+      const data = err?.response?.data;
+      setAddLineNotice(null);
+      if (data?.code === 'ambiguous' && Array.isArray(data.candidates)) {
+        setAddLineCandidates(data.candidates);
+      } else {
+        setAddLineCandidates([]);
+      }
+      setAddLineError(
+        typeof data?.error === 'string'
+          ? data.error
+          : extractErrorMessage(err, 'Failed to add line item'),
+      );
+    } finally {
+      setAddingLine(false);
+    }
+  };
+
+  const handleAddLineSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    // The field stays focused (and therefore submittable) while a request is in
+    // flight, so a second Enter must not start a second add.
+    if (addingLine) {
+      return;
+    }
+    const identifier = addLineIdentifier.trim();
+    if (!identifier) {
+      setAddLineError('Type or scan an item name, SKU, barcode, or supplier SKU.');
+      return;
+    }
+    void submitAddLine({ identifier });
   };
 
   const handleUploadAttachment = async () => {
@@ -1656,6 +1764,102 @@ const PurchaseOrderPage: React.FC = () => {
 
       <section className="po-items">
         <h2>Line Items</h2>
+
+        {/* Add-a-line entry (oms-po-add-item). Offered ONLY on a draft the
+            viewer can edit — once an order has gone to the supplier, what it
+            contains is a matter of record, so the control is absent rather
+            than present-and-disabled. The server enforces the same rule; this
+            is only the affordance. */}
+        {isAuthenticated && order.status === 'draft' && (
+          <form className="po-add-line" onSubmit={handleAddLineSubmit}>
+            <label htmlFor="po-add-line-identifier">
+              Add an item
+              <input
+                id="po-add-line-identifier"
+                type="text"
+                ref={addLineInputRef}
+                value={addLineIdentifier}
+                onChange={(e) => {
+                  setAddLineIdentifier(e.target.value);
+                  setAddLineError(null);
+                }}
+                placeholder="Scan a barcode, or type a name, SKU, or supplier SKU"
+                // readOnly, not disabled: disabling the focused field blurs it,
+                // and the next scan's character burst would land nowhere.
+                readOnly={addingLine}
+                autoComplete="off"
+              />
+            </label>
+            <button type="submit" className="btn-primary" disabled={addingLine}>
+              {addingLine ? 'Adding…' : 'Add to order'}
+            </button>
+            <p className="po-add-line-hint">
+              A scanner works here: the scan lands in the field and its Enter submits it.
+            </p>
+
+            {addLineNotice && (
+              <p className="po-add-line-notice" role="status">
+                {addLineNotice}
+              </p>
+            )}
+
+            {addLineError && (
+              <p className="po-add-line-error" role="alert">
+                {addLineError}
+              </p>
+            )}
+
+            {/* Every row says WHY it came up (`match_label` / `matched_value`),
+                which is the whole point on the choose-one path: a cross-vendor
+                match resolves through another vendor's listing, so without it
+                nothing on screen would contain what the operator scanned. */}
+            {addLineCandidates.length > 0 && (
+              <ul className="po-add-line-candidates">
+                {addLineCandidates.map((candidate) => {
+                  const onOrder = candidate.already_on_order;
+                  // A voided line cannot be grown — the server refuses it with
+                  // `line_voided` — so this row is a dead end, not a choice.
+                  const voided = Boolean(onOrder?.is_voided);
+                  return (
+                    <li key={candidate.item_supplier}>
+                      <span className="po-add-line-candidate-name">{candidate.item.name}</span>
+                      <span className="po-add-line-candidate-meta">
+                        {candidate.item.sku} · supplier SKU {candidate.supplier_sku || '—'} ·
+                        matched on {candidate.match_label} {candidate.matched_value}
+                        {onOrder && !voided
+                          ? ` · already on this order (${onOrder.quantity_ordered})`
+                          : ''}
+                        {voided ? ' · voided on this order — restore or remove that line first' : ''}
+                      </span>
+                      {voided ? null : (
+                        // `btn-primary`, the same class this form's "Add to
+                        // order" submit uses. Not `btn-edit`: that resolves to
+                        // `background: none` on this page while a global
+                        // `color: white` wins the cascade, so these buttons
+                        // rendered white-on-white — invisible in both the dev
+                        // server and a production build. Clickable-if-you-guess
+                        // is not a shop-floor control, and the choose-one list
+                        // is worthless if the operator cannot see the choices.
+                        // Reusing the page's proven submit class rather than
+                        // adding a third button appearance is also the right
+                        // design: this button adds an item, like that one does.
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          disabled={addingLine}
+                          onClick={() => submitAddLine({ item_supplier: candidate.item_supplier })}
+                        >
+                          Add {candidate.item.name}
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </form>
+        )}
+
         <table className="items-table">
           <thead>
             <tr>

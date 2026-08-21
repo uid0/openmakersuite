@@ -70,28 +70,43 @@ def _resolve_work_order(item_data, idx):
         )
 
 
-def order_packages_for_line(item_supplier, base_quantity):
-    """How many packages ``base_quantity`` base units represents on a line.
+def order_package_size(item_supplier):
+    """Base units in ONE package of ``item_supplier``, per the op-ev14 ladder.
 
     The supplier's case size when that supplier declares one, the item's own
-    outermost packaging rung when it does not (op-ev14 — see the module
-    docstring for why that order). An item counted in base units has no rung, so
-    it keeps exactly the previous ceil-divide by ``quantity_per_package or 1``.
+    outermost packaging rung when it does not (see the module docstring for why
+    that order), and ``1`` when neither pack size is declared — an item counted
+    in base units has no rung, so one "package" is one unit.
+
+    The single place that ladder is resolved. Every caller that needs to talk
+    about a package — :func:`order_packages_for_line` converting a quantity into
+    a package count, ``line_entry.repeat_quantity`` deciding how much one more
+    scanned package is worth — reads it from here, so the two cannot drift into
+    disagreeing about what a package is and leave a line whose package count and
+    quantity describe different orders.
 
     Costs no extra query for an ``each`` item: :func:`order_level` reads
     ``count_mode`` and short-circuits before touching the chain.
     """
     quantity_per_package = item_supplier.quantity_per_package or 1
     if quantity_per_package > 1:
-        return -(-base_quantity // quantity_per_package)
+        return quantity_per_package
 
     rung = order_level(item_supplier.item)
     if rung is not None:
-        return -(-base_quantity // rung.base_units)
+        return rung.base_units
 
-    # Neither pack size is declared: the previous ceil-divide by 1, i.e. the
-    # base-unit count itself.
-    return base_quantity
+    return 1
+
+
+def order_packages_for_line(item_supplier, base_quantity):
+    """How many packages ``base_quantity`` base units represents on a line.
+
+    Ceil-divide by :func:`order_package_size`, which owns the supplier-case /
+    item-rung / base-unit ladder (op-ev14). A base-unit item divides by 1, i.e.
+    keeps the base-unit count itself.
+    """
+    return -(-base_quantity // order_package_size(item_supplier))
 
 
 def _resolve_owning_group(item_data, idx):

@@ -123,6 +123,19 @@ Behavior:
   the same receipt.
 - On failure the receive panel stays open with the entered quantities
   intact so the operator can correct and retry.
+- The add-a-line entry (draft orders only) patches the order from the
+  `items/` response, which carries the full refreshed purchase order, so
+  the new or grown line appears without a follow-up GET and the page does
+  not flip back to its initial "Loading purchase order…" state.
+- The submit button is disabled while in flight and the handler
+  short-circuits on the pending flag, so a second Enter cannot start a
+  second add. The entry field is `readOnly` rather than `disabled` while
+  in flight — disabling the focused field would blur it and the next
+  scan's character burst would land nowhere.
+- On failure the typed identifier stays in the field (selected, so the
+  next scan overwrites it rather than appending) and the refusal shows
+  next to the field; an ambiguous identifier renders the server's
+  candidate set to choose from instead of guessing.
 
 ---
 
@@ -154,7 +167,7 @@ Each row lists the file, the mutation, and the loader being called.
 | Status | File | Mutation | Currently calls |
 | --- | --- | --- | --- |
 | ✅ migrated | `pages/AdminDashboard.tsx` | reorder approve / mark ordered / mark received / cancel / update tracking | (now patches row from response) |
-| ✅ migrated | `pages/PurchaseOrderPage.tsx` | `mark-delivered` / `receive` (per-line-item) | (now patches order from response) |
+| ✅ migrated | `pages/PurchaseOrderPage.tsx` | `mark-delivered` / `receive` (per-line-item) / add-a-line (`items/`) | (now patches order from response) |
 | ✅ migrated | `pages/LocationProblemDetailPage.tsx` | resolve / promote-standard / promote-third-party | (now patches problem from response) |
 | refresh-y | `pages/WorkOrderPage.tsx` | work-order status transition + save | `loadWorkOrder()` |
 | refresh-y | `pages/ChecklistCompletionPage.tsx` | submit checklist item | `loadData()` |

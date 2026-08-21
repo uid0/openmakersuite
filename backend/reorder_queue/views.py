@@ -47,6 +47,7 @@ from .models import (
     WebhookAuditEvent,
 )
 from .serializers import (
+    AddPurchaseOrderLineSerializer,
     BarcodeReceiptSerializer,
     MarkDeliveredSerializer,
     OrderDeliverySerializer,
@@ -1617,6 +1618,158 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         response_serializer = self.get_serializer(purchase_order)
         return Response(response_serializer.data)
+
+    @action(detail=True, methods=["get"], url_path="item-lookup")
+    def item_lookup(self, request, pk=None):
+        """Resolve a typed/scanned identifier against this order's supplier.
+
+        ``GET .../item-lookup/?q=<identifier>`` where the identifier is whatever
+        the operator has in front of them — the item's name, the item's own SKU,
+        a package or unit barcode, or the vendor's SKU for it (oms-po-add-item).
+
+        Read-only and deliberately non-committal: it never adds anything and it
+        never picks between equally-good matches. ``candidates`` comes back
+        strongest-match-first with the reason each one matched, ``resolves``
+        says whether a client may add straight from it without asking the
+        operator, and ``unavailable`` explains items the identifier really does
+        name that this order still cannot carry — the supplier does not supply
+        them, or supplies them no longer. Non-browser clients (ScanTTY) drive
+        the same endpoint the web UI does.
+        """
+        purchase_order = self.get_object()
+        query = request.query_params.get("q", "")
+        result = services.lookup_candidates(purchase_order, query)
+        return Response(services.serialize_lookup(purchase_order, query.strip(), result))
+
+    @action(detail=True, methods=["post"], url_path="items")
+    def add_item(self, request, pk=None):
+        """Add an inventory line to a **draft** purchase order (oms-po-add-item).
+
+        ``POST .../items/`` with either ``identifier`` (typed or scanned) or an
+        explicit ``item_supplier`` chosen from a previous ambiguous response.
+        Quantity and unit cost are optional — omitted, they are derived from the
+        supplier relationship and this item's purchase history so a bare scan
+        still produces a fully-formed line.
+
+        Every guard is enforced here rather than in the UI, because ScanTTY and
+        any other API client reach the same code path:
+
+        * the order must be DRAFT (400 ``not_draft``);
+        * the order's supplier must actually supply the item
+          (400 ``supplier_mismatch`` / ``not_supplied`` / ``discontinued``);
+        * an identifier matching several items the supplier carries resolves to
+          nothing (409 ``ambiguous``, with the candidate set to choose from).
+
+        Re-adding something already on the order grows the existing line rather
+        than creating a second one — by one supplier package when no explicit
+        quantity is given — and a ``work_order``/``owning_group`` that clashes
+        with one the existing line already carries is refused
+        (400 ``work_order_conflict`` / ``owning_group_conflict``) rather than
+        silently dropped or silently reassigned. See
+        :func:`reorder_queue.services.line_entry.add_line_item`.
+
+        Returns the created/updated line, what matched, and the **full**
+        refreshed purchase order so the caller can patch its view in place
+        (docs/REACTIVE_MUTATIONS.md).
+        """
+        purchase_order = self.get_object()
+
+        serializer = AddPurchaseOrderLineSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        try:
+            services.assert_addable(purchase_order)
+
+            if data.get("item_supplier") is not None:
+                item_supplier = services.resolve_item_supplier(
+                    purchase_order, data["item_supplier"]
+                )
+                match = None
+            else:
+                candidate = services.resolve_identifier(purchase_order, data["identifier"])
+                item_supplier = candidate.item_supplier
+                match = services.serialize_candidate(candidate)
+
+            work_order = self._resolve_optional_work_order(data.get("work_order"))
+            owning_group = self._resolve_optional_group(data.get("owning_group"))
+
+            line_item, created = services.add_line_item(
+                purchase_order,
+                item_supplier,
+                quantity=data.get("quantity"),
+                unit_cost=data.get("unit_cost"),
+                notes=data.get("notes", ""),
+                work_order=work_order,
+                owning_group=owning_group,
+            )
+        except services.LineEntryError as exc:
+            payload = {"error": exc.message, "code": exc.code}
+            if exc.code == "ambiguous":
+                payload["candidates"] = exc.candidates
+                return Response(payload, status=status.HTTP_409_CONFLICT)
+            return Response(payload, status=status.HTTP_400_BAD_REQUEST)
+
+        record_audit_event(
+            action=PurchaseOrderAuditEvent.Action.PO_LINE_ADD,
+            actor=request.user,
+            line_item=line_item,
+            notes=data.get("notes", ""),
+            metadata={
+                "item_supplier": item_supplier.pk,
+                "item_id": str(item_supplier.item_id),
+                "item_name": item_supplier.item.name,
+                "supplier_sku": item_supplier.supplier_sku,
+                "quantity_ordered": line_item.quantity_ordered,
+                "unit_cost_ordered": str(line_item.unit_cost_ordered),
+                "created": created,
+                "identifier": data.get("identifier", ""),
+                "match_kind": (match or {}).get("match_kind"),
+            },
+        )
+
+        # The viewset prefetches ``items``, so the instance in hand still holds
+        # the pre-add line set; re-read it so the returned order includes the
+        # new line and the re-rolled estimated total.
+        refreshed = self.get_queryset().get(pk=purchase_order.pk)
+
+        from .serializers import PurchaseOrderItemSerializer
+
+        return Response(
+            {
+                "created": created,
+                "line_item": PurchaseOrderItemSerializer(line_item).data,
+                "match": match,
+                "purchase_order": PurchaseOrderSerializer(
+                    refreshed, context=self.get_serializer_context()
+                ).data,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    def _resolve_optional_work_order(self, work_order_id):
+        """Resolve an optional line-level work order, mirroring ``update_item``."""
+        if work_order_id in (None, ""):
+            return None
+        from inventory.models import WorkOrder
+
+        try:
+            return WorkOrder.objects.get(id=work_order_id)
+        except (WorkOrder.DoesNotExist, DjangoValidationError, ValueError, TypeError):
+            raise services.LineEntryError(
+                f"Work order {work_order_id} not found.", "work_order_not_found"
+            )
+
+    def _resolve_optional_group(self, group_id):
+        """Resolve an optional line-level committee, mirroring ``update_item``."""
+        if group_id in (None, ""):
+            return None
+        from django.contrib.auth.models import Group
+
+        try:
+            return Group.objects.get(id=group_id)
+        except (Group.DoesNotExist, DjangoValidationError, ValueError, TypeError):
+            raise services.LineEntryError(f"Committee {group_id} not found.", "group_not_found")
 
     @action(detail=True, methods=["patch"], url_path="items/(?P<item_id>[^/.]+)")
     def update_item(self, request, pk=None, item_id=None):

@@ -51,13 +51,33 @@ def test_ac49_the_snapshot_migration_only_adds_one_nullable_field():
     assert field.has_default() is False
 
 
-def test_ac49_no_other_reorder_queue_migration_followed_it():
-    """0028 is the last word. A 0029 would mean the budget was overspent."""
+def test_ac49_no_later_migration_touched_purchase_order_item():
+    """0028 is the last word *on this table*.
+
+    Originally "0028 is the last reorder_queue migration at all", which only
+    held while op-8n0 was the newest work in the app. The budget it was pinning
+    is the ``PurchaseOrderItem`` schema, not the app's migration counter — a
+    later, unrelated migration elsewhere in ``reorder_queue`` (oms-po-add-item
+    adds an audit-action choice, which touches ``PurchaseOrderAuditEvent``) is
+    not an overspend. So the assertion is now what it always meant: after 0028,
+    nothing else altered the PO line table.
+    """
     loader = MigrationLoader(None, ignore_no_migrations=True)
     names = sorted(
         name for app_label, name in loader.disk_migrations if app_label == "reorder_queue"
     )
-    assert names[-1] == "0028_purchaseorderitem_kit_snapshot"
+    later = [name for name in names if name > "0028_purchaseorderitem_kit_snapshot"]
+
+    for name in later:
+        migration = loader.disk_migrations[("reorder_queue", name)]
+        touched = {
+            getattr(operation, "model_name", getattr(operation, "name", "")).lower()
+            for operation in migration.operations
+        }
+        assert "purchaseorderitem" not in touched, (
+            f"{name} alters PurchaseOrderItem — the kit snapshot budget (AC-49) "
+            "was one additive field on that table and nothing more."
+        )
 
 
 def test_ac49_kit_lines_added_no_purchase_order_item_target_slot():

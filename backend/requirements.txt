@@ -26,7 +26,7 @@ Pillow==12.3.0
 # Forced to the headless Agg backend in code so this does not pull GUI deps.
 matplotlib==3.11.1
 pyzbar==0.1.9  # Optional: for QR code validation (requires system zbar library)
-pypdf==6.14.2   # PDF text/form extraction for inbound work-order ingestion
+pypdf==6.15.0   # PDF text/form extraction for inbound work-order ingestion
 opencv-python-headless==5.0.0.93  # cv2.QRCodeDetector for image-based PDF ingestion
 
 # Authentication

@@ -777,6 +777,31 @@ class ReceiveItemsSerializer(serializers.Serializer):
     receipt_notes = serializers.CharField(required=False, allow_blank=True, default="")
 
 
+def ordered_unit_cost_field(**kwargs):
+    """The one definition of a valid ``unit_cost_ordered`` on the wire.
+
+    Both accept-points for that figure — adding a line and repricing one — take
+    the same money against the same ``decimal(10, 4)`` column, so they validate
+    through this single field rather than two hand-written checks that can drift
+    apart. It is what rejects NaN, an infinity, and an extra-zeros fat-finger
+    too wide for the column with a 400 rather than a 500.
+    """
+    return serializers.DecimalField(
+        max_digits=10, decimal_places=4, min_value=Decimal("0"), **kwargs
+    )
+
+
+class RepricePurchaseOrderLineSerializer(serializers.Serializer):
+    """The ``unit_cost_ordered`` half of a line-item PATCH.
+
+    Only that one key: the rest of ``update_item``'s body is read field by field
+    against rules of its own, and this exists so a reprice is validated exactly
+    as ``AddPurchaseOrderLineSerializer.unit_cost`` validates the same figure.
+    """
+
+    unit_cost_ordered = ordered_unit_cost_field()
+
+
 class AddPurchaseOrderLineSerializer(serializers.Serializer):
     """Request body for adding a line to a **draft** purchase order (oms-po-add-item).
 
@@ -810,9 +835,7 @@ class AddPurchaseOrderLineSerializer(serializers.Serializer):
         required=False, allow_blank=False, trim_whitespace=True, max_length=500
     )
     quantity = serializers.IntegerField(required=False, min_value=1)
-    unit_cost = serializers.DecimalField(
-        max_digits=10, decimal_places=4, required=False, min_value=Decimal("0")
-    )
+    unit_cost = ordered_unit_cost_field(required=False)
     notes = serializers.CharField(required=False, allow_blank=True, default="")
     work_order = serializers.UUIDField(required=False, allow_null=True)
     owning_group = serializers.IntegerField(required=False, allow_null=True)

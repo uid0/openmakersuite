@@ -58,6 +58,7 @@ from .serializers import (
     ReceiveItemsSerializer,
     ReorderRequestCreateSerializer,
     ReorderRequestSerializer,
+    RepricePurchaseOrderLineSerializer,
     SupplierPerformanceSerializer,
     WebHookCreateSerializer,
     WebHookSerializer,
@@ -1896,22 +1897,19 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         # draws for adding a line at all.
         repriced_from = None
         if "unit_cost_ordered" in request.data:
-            from decimal import Decimal, InvalidOperation
-
-            raw_unit_cost = request.data["unit_cost_ordered"]
-            try:
-                new_unit_cost = Decimal(str(raw_unit_cost))
-            except (InvalidOperation, ValueError, TypeError):
+            # Validated by the same field the add path validates it with, so
+            # the two accept-points for this figure cannot disagree about what
+            # a valid ordered price is.
+            price = RepricePurchaseOrderLineSerializer(
+                data={"unit_cost_ordered": request.data["unit_cost_ordered"]}
+            )
+            if not price.is_valid():
+                detail = " ".join(str(msg) for msg in price.errors["unit_cost_ordered"])
                 return Response(
-                    {"error": f"Invalid unit cost ordered value: {raw_unit_cost!r}"},
+                    {"error": f"Invalid unit cost ordered value: {detail}"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-
-            if new_unit_cost < 0:
-                return Response(
-                    {"error": "Unit cost ordered cannot be negative"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+            new_unit_cost = price.validated_data["unit_cost_ordered"]
 
             if line_item.is_voided:
                 return Response(
@@ -1933,7 +1931,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 )
 
             current_unit_cost = line_item.unit_cost_ordered
-            if current_unit_cost is None or Decimal(current_unit_cost) != new_unit_cost:
+            if current_unit_cost is None or current_unit_cost != new_unit_cost:
                 repriced_from = current_unit_cost
                 line_item.unit_cost_ordered = new_unit_cost
 

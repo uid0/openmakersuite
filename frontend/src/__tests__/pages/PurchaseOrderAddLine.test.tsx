@@ -602,6 +602,45 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
     expect(api.purchaseOrderAPI.addLineItem).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * The prompt and its choose-one set have to live and die together here too.
+   * Typing cleared the alert on the first keystroke while both candidate
+   * buttons stayed on screen, leaving unexplained "Add <item>" buttons under a
+   * message about something else. (Pre-existing behaviour from #1020's
+   * handler, not something this branch introduced.)
+   */
+  test('typing a new identifier takes the pending choose-one set with the prompt', async () => {
+    (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
+      apiError(409, {
+        code: 'ambiguous',
+        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        candidates: [
+          candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
+          candidate({
+            item_supplier: 13,
+            item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
+          }),
+        ],
+      })
+    );
+
+    renderPage();
+    const field = await screen.findByLabelText(/add an item/i);
+    const scanForm = field.closest('form')!;
+    fireEvent.change(field, { target: { value: 'M3 hex' } });
+    fireEvent.submit(scanForm);
+
+    await screen.findByRole('button', { name: /add m3 hex nut/i });
+    expect(screen.getByRole('button', { name: /add m3 hex bolt/i })).toBeInTheDocument();
+
+    // The operator types a different SKU instead of choosing.
+    fireEvent.change(entryField(), { target: { value: 'ACME-M3-100' } });
+
+    expect(within(scanForm).queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add m3 hex nut/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add m3 hex bolt/i })).not.toBeInTheDocument();
+  });
+
   test('a refused custom line leaves the scan field’s choose-one set standing', async () => {
     (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
       apiError(409, {

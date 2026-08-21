@@ -1978,6 +1978,7 @@ const PurchaseOrderPage: React.FC = () => {
                 onChange={(e) => {
                   setAddLineIdentifier(e.target.value);
                   setAddLineError(null);
+                  setAddLineCandidates([]);
                 }}
                 placeholder="Scan a barcode, or type a name, SKU, or supplier SKU"
                 // readOnly, not disabled: disabling the focused field blurs it,

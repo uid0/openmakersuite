@@ -445,7 +445,21 @@ def test_repricing_a_voided_line_is_refused(staff_client, draft_po, acme_asset):
     assert line.unit_cost_ordered == Decimal("149.0000")
 
 
-@pytest.mark.parametrize("bad_cost", ["free", "-1.00"])
+@pytest.mark.parametrize(
+    "bad_cost",
+    [
+        pytest.param("free", id="not-a-number"),
+        pytest.param("-1.00", id="negative"),
+        # The three that used to escape the hand-rolled guards as a 500:
+        # ``Decimal("NaN") < 0`` raises rather than returning False, an infinity
+        # passes the comparison and then blows up adapting to decimal(10, 4),
+        # and an extra-zeros typo is too wide for the column — which is exactly
+        # the mistake this route exists to correct.
+        pytest.param("NaN", id="not-a-finite-number"),
+        pytest.param("Infinity", id="infinite"),
+        pytest.param("1490000.00", id="wider-than-the-column"),
+    ],
+)
 def test_a_reprice_must_name_a_valid_price(staff_client, draft_po, acme_asset, bad_cost):
     add_line(staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "149.00"})
     line = only_line(draft_po)
@@ -453,8 +467,24 @@ def test_a_reprice_must_name_a_valid_price(staff_client, draft_po, acme_asset, b
     response = patch_line(staff_client, draft_po, line, {"unit_cost_ordered": bad_cost})
 
     assert response.status_code == 400
+    assert response.json()["error"]
     line.refresh_from_db()
     assert line.unit_cost_ordered == Decimal("149.0000")
+    draft_po.refresh_from_db()
+    assert draft_po.estimated_total == Decimal("149.00")
+
+
+@pytest.mark.parametrize("bad_cost", ["NaN", "Infinity", "1490000.00", "-1.00", "free"])
+def test_the_add_path_refuses_the_same_prices_the_reprice_path_does(
+    staff_client, draft_po, acme_asset, bad_cost
+):
+    """One definition of a valid ordered price, so the two accept-points agree."""
+    response = add_line(
+        staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": bad_cost}
+    )
+
+    assert response.status_code == 400
+    assert not PurchaseOrderItem.objects.filter(purchase_order=draft_po).exists()
 
 
 def test_a_reprice_records_both_the_old_and_the_new_price(staff_client, draft_po, acme_asset):

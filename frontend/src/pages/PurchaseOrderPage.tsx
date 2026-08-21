@@ -1832,9 +1832,20 @@ const PurchaseOrderPage: React.FC = () => {
                         {voided ? ' · voided on this order — restore or remove that line first' : ''}
                       </span>
                       {voided ? null : (
+                        // `btn-primary`, the same class this form's "Add to
+                        // order" submit uses. Not `btn-edit`: that resolves to
+                        // `background: none` on this page while a global
+                        // `color: white` wins the cascade, so these buttons
+                        // rendered white-on-white — invisible in both the dev
+                        // server and a production build. Clickable-if-you-guess
+                        // is not a shop-floor control, and the choose-one list
+                        // is worthless if the operator cannot see the choices.
+                        // Reusing the page's proven submit class rather than
+                        // adding a third button appearance is also the right
+                        // design: this button adds an item, like that one does.
                         <button
                           type="button"
-                          className="btn-edit"
+                          className="btn-primary"
                           disabled={addingLine}
                           onClick={() => submitAddLine({ item_supplier: candidate.item_supplier })}
                         >

@@ -254,6 +254,59 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
     expect(screen.queryByRole('button', { name: /add m3 hex nut/i })).not.toBeInTheDocument();
   });
 
+  /**
+   * The candidate "Add <item>" controls must carry the same class as this
+   * page's own submit control, so the two cannot silently drift apart.
+   *
+   * These buttons once used `btn-edit`, which on this page is
+   * `background: none; opacity: 0.6` while a global `color: white` won the
+   * cascade — white text on the white candidate card, so the operator could
+   * not see the control the choose-one flow depends on.
+   *
+   * Limit, stated honestly: this pins class PARITY between the two controls,
+   * which is what would have caught that regression. It does NOT prove
+   * computed visibility — jsdom does not apply the external stylesheets whose
+   * cascade produced the white-on-white result. That is the lesson the bug
+   * carries: every component-level test here passed while the rendered page
+   * was broken, and only rendering the real page surfaced it.
+   */
+  test('candidate buttons look like the page’s own submit control', async () => {
+    (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
+      apiError(409, {
+        code: 'ambiguous',
+        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        candidates: [
+          candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
+          candidate({
+            item_supplier: 13,
+            item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
+            supplier_sku: 'ACME-M3-200',
+          }),
+        ],
+      })
+    );
+
+    renderPage();
+    fireEvent.change(await screen.findByLabelText(/add an item/i), { target: { value: 'M3 hex' } });
+    fireEvent.submit(entryField().closest('form')!);
+
+    await screen.findByRole('button', { name: /add m3 hex nut/i });
+
+    // Derived from the rendered submit button, not hard-coded, so the
+    // assertion survives a rename of the page's button class.
+    const submitClasses = screen
+      .getByRole('button', { name: /add to order/i })
+      .className.split(/\s+/)
+      .filter(Boolean);
+    expect(submitClasses).not.toHaveLength(0);
+
+    for (const name of [/add m3 hex bolt/i, /add m3 hex nut/i]) {
+      expect(screen.getByRole('button', { name }).className.split(/\s+/).filter(Boolean)).toEqual(
+        submitClasses
+      );
+    }
+  });
+
   test('re-adding something already on the order reports the grown line', async () => {
     (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
       data: order({ items: [line()] }),

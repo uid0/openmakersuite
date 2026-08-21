@@ -559,6 +559,84 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
     );
   });
 
+  /**
+   * The empty submit is a client-side refusal, and a refusal — from either
+   * side — clears this control's candidates. It did not: the early return set
+   * the message but left the choose-one buttons standing, leaving the operator
+   * with two unexplained "Add <item>" buttons under a message about something
+   * else, which invites putting the wrong item on the order.
+   */
+  test('an empty submit takes the pending choose-one set down with it', async () => {
+    (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
+      apiError(409, {
+        code: 'ambiguous',
+        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        candidates: [
+          candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
+          candidate({
+            item_supplier: 13,
+            item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
+          }),
+        ],
+      })
+    );
+
+    renderPage();
+    const field = await screen.findByLabelText(/add an item/i);
+    const scanForm = field.closest('form')!;
+    fireEvent.change(field, { target: { value: 'M3 hex' } });
+    fireEvent.submit(scanForm);
+
+    await screen.findByRole('button', { name: /add m3 hex nut/i });
+    expect(screen.getByRole('button', { name: /add m3 hex bolt/i })).toBeInTheDocument();
+
+    // The operator clears the field and hits Enter instead of choosing.
+    fireEvent.change(entryField(), { target: { value: '' } });
+    fireEvent.submit(scanForm);
+
+    expect(await within(scanForm).findByRole('alert')).toHaveTextContent(
+      /type or scan an item name, sku, barcode, or supplier sku/i
+    );
+    expect(screen.queryByRole('button', { name: /add m3 hex nut/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add m3 hex bolt/i })).not.toBeInTheDocument();
+    expect(api.purchaseOrderAPI.addLineItem).toHaveBeenCalledTimes(1);
+  });
+
+  test('a refused custom line leaves the scan field’s choose-one set standing', async () => {
+    (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
+      apiError(409, {
+        code: 'ambiguous',
+        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        candidates: [
+          candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
+          candidate({
+            item_supplier: 13,
+            item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
+          }),
+        ],
+      })
+    );
+
+    renderPage();
+    fireEvent.change(await screen.findByLabelText(/add an item/i), { target: { value: 'M3 hex' } });
+    fireEvent.submit(entryField().closest('form')!);
+
+    await screen.findByRole('button', { name: /add m3 hex nut/i });
+
+    // A freeform line has no identifier to be ambiguous about, so refusing one
+    // says nothing about the choice the operator still has to answer above.
+    fireEvent.click(screen.getByRole('button', { name: /add a custom line/i }));
+    const customForm = screen.getByRole('button', { name: /add custom line/i }).closest('form')!;
+    fireEvent.submit(customForm);
+
+    expect(await within(customForm).findByRole('alert')).toHaveTextContent(
+      /describe what is being bought on this line/i
+    );
+    expect(screen.getByRole('button', { name: /add m3 hex nut/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /add m3 hex bolt/i })).toBeInTheDocument();
+    expect(api.purchaseOrderAPI.addLineItem).toHaveBeenCalledTimes(1);
+  });
+
   test('a cross-vendor candidate row shows the listing the code came from', async () => {
     // The candidate offered is always THIS supplier's row, so without the
     // provenance nothing on screen contains what the operator scanned — which

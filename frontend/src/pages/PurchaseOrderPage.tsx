@@ -182,6 +182,22 @@ const getItemNameAndSku = (item: PurchaseOrderItem): { itemName: string; itemSku
   };
 };
 
+/**
+ * The two independent add-line controls on this page: the scan-and-Enter
+ * identifier field, and the "Add a custom line" freeform disclosure under it.
+ */
+type AddLineControl = 'identifier' | 'custom';
+
+/**
+ * The three states an add-line control can be put into. Every exit path of the
+ * add-line handlers names one of these rather than deciding for itself which
+ * of the errors, notices, fields and candidates to touch.
+ */
+type AddLineFormState =
+  | { kind: 'pending' }
+  | { kind: 'refused'; message: string; candidates?: PurchaseOrderLineCandidate[] }
+  | { kind: 'added'; notice: string };
+
 interface SelectOption {
   value: string;
   label: string;
@@ -983,6 +999,64 @@ const PurchaseOrderPage: React.FC = () => {
   };
 
   /**
+   * Put ONE add-line control into a named state — the single place that decides
+   * what pending, refused and added each look like.
+   *
+   * INVARIANT: a state applies to the named control and never touches the
+   * sibling's error, notice, input fields or candidates. The two controls are
+   * independent by design, and wiping the sibling's messages is worse than
+   * leaving them — an ambiguity prompt cleared while its own choose-one buttons
+   * stay on screen leaves the operator with two unexplained "Add <item>"
+   * buttons under a message about a different line, which invites putting the
+   * wrong item on the order. Equally, a scan must not wipe a half-typed custom
+   * line.
+   *
+   * - `pending` — the submit was accepted and a request is going out. Clears
+   *   this control's error and notice, leaves its fields alone so the
+   *   operator's typing survives the round trip, and leaves candidates alone.
+   * - `refused` — any refusal, client-side or server-side, identical either
+   *   way: this control's error set, its stale confirmation cleared, its fields
+   *   left alone so the operator can correct them. Candidates belong to the
+   *   identifier control only, so an ambiguous refusal shows its choose-one set
+   *   and every other refusal clears it; a custom-line refusal leaves the scan
+   *   field's pending choices exactly where they were, because a freeform line
+   *   has no identifier to be ambiguous about.
+   * - `added` — a successful add: this control's confirmation set, its error
+   *   cleared, and the fields it has just consumed emptied for the next one.
+   */
+  const setAddLineFormState = (control: AddLineControl, state: AddLineFormState) => {
+    const isCustom = control === 'custom';
+    const setError = isCustom ? setCustomLineError : setAddLineError;
+    const setNotice = isCustom ? setCustomLineNotice : setAddLineNotice;
+
+    switch (state.kind) {
+      case 'pending':
+        setError(null);
+        setNotice(null);
+        break;
+      case 'refused':
+        setNotice(null);
+        setError(state.message);
+        if (!isCustom) {
+          setAddLineCandidates(state.candidates ?? []);
+        }
+        break;
+      case 'added':
+        setError(null);
+        setNotice(state.notice);
+        if (isCustom) {
+          setCustomLineDescription('');
+          setCustomLineUnitCost('');
+          setCustomLineQuantity('1');
+        } else {
+          setAddLineIdentifier('');
+          setAddLineCandidates([]);
+        }
+        break;
+    }
+  };
+
+  /**
    * Add one line from a typed or scanned identifier (oms-po-add-item).
    *
    * The server owns every rule — draft-only, does-this-supplier-supply-it, and
@@ -997,7 +1071,7 @@ const PurchaseOrderPage: React.FC = () => {
     payload: AddPurchaseOrderLinePayload,
     // Which control the add came from. Decides where a refusal is shown and
     // whether the caret goes back to the scan field afterwards.
-    source: 'identifier' | 'custom' = 'identifier',
+    source: AddLineControl = 'identifier',
   ) => {
     const fromCustom = source === 'custom';
     try {
@@ -1008,88 +1082,41 @@ const PurchaseOrderPage: React.FC = () => {
       // be in flight at a time, so splitting it per control would let the
       // second submit sail past the first.
       setAddingLine(true);
-      // Source-gated: each control clears only its own refusal. Wiping the
-      // sibling's is worse than leaving it — an ambiguity prompt cleared while
-      // its own choose-one buttons stay on screen leaves the operator with two
-      // unexplained "Add <item>" buttons under a message about a different
-      // line, which invites putting the wrong item on the order.
-      if (fromCustom) {
-        setCustomLineError(null);
-      } else {
-        setAddLineError(null);
-      }
+      setAddLineFormState(source, { kind: 'pending' });
       const response = await purchaseOrderAPI.addLineItem(orderId!, payload);
       const { created, line_item: lineItem, match, purchase_order: refreshed } = response.data;
 
       // Shared by decision: the purchase order is the page's single subject and
       // every control on it renders from this one copy.
       setOrder(refreshed);
-      // Source-gated: each control clears only its own fields. The two are
-      // independent by design — opening the disclosure does not disturb the
-      // scan field, and `source` exists for no other purpose — so an add from
-      // one must not throw away work sitting in the other: a scan must not
-      // wipe a half-typed custom line, and a custom line must not discard a
-      // pending ambiguity choice-set the operator still has to answer.
-      if (fromCustom) {
-        setCustomLineDescription('');
-        setCustomLineUnitCost('');
-        setCustomLineQuantity('1');
-      } else {
-        setAddLineIdentifier('');
-        setAddLineCandidates([]);
-      }
 
-      // A freeform line has no catalogue item behind it, so its description is
-      // the only name it will ever have.
+      // The same three-way the items table renders through, so the
+      // confirmation and the table can never name one line differently.
+      // `match` is the remaining fallback for a server that sent a match but
+      // no line detail.
       const itemName =
-        lineItem?.item_details?.name ||
+        (lineItem ? getItemNameAndSku(lineItem).itemName : undefined) ||
         match?.item?.name ||
-        lineItem?.asset_details?.name ||
-        lineItem?.description ||
         'Item';
       const matchedBy = match ? ` (matched on ${match.match_label} ${match.matched_value})` : '';
       const notice = created
         ? `Added ${itemName} × ${lineItem.quantity_ordered}${matchedBy}`
         : `${itemName} was already on this order — quantity is now ${lineItem.quantity_ordered}${matchedBy}`;
-      // Source-routed, the same rule the refusal below follows: answer the
-      // operator where they are. A custom line is confirmed under the
-      // custom-line form, not in the identifier form's status line further up
-      // the page where the operator has no reason to look for it.
-      if (fromCustom) {
-        setCustomLineNotice(notice);
-      } else {
-        setAddLineNotice(notice);
-      }
+      // Answer the operator where they are: a custom line is confirmed under
+      // the custom-line form, not in the identifier form's status line further
+      // up the page where the operator has no reason to look for it.
+      setAddLineFormState(source, { kind: 'added', notice });
       // Shared by decision: a page-level toast, not a per-control slot.
       showSuccess(created ? `Added ${itemName}` : `Updated ${itemName}`);
     } catch (err: any) {
       const data = err?.response?.data;
-      // Source-gated, as on the success path. A stale confirmation belongs to
-      // the control that earned it, and a choose-one set can only ever come
-      // back from the identifier control — a freeform line has no identifier
-      // to be ambiguous about — so a refused custom line leaves the scan
-      // field's confirmation and pending choices exactly where they were.
-      if (fromCustom) {
-        setCustomLineNotice(null);
-      } else {
-        setAddLineNotice(null);
-        if (data?.code === 'ambiguous' && Array.isArray(data.candidates)) {
-          setAddLineCandidates(data.candidates);
-        } else {
-          setAddLineCandidates([]);
-        }
-      }
       const message =
         typeof data?.error === 'string'
           ? data.error
           : extractErrorMessage(err, 'Failed to add line item');
-      // Source-routed: a refusal of a custom line belongs under the custom-line
-      // form, not under the scan field further up.
-      if (fromCustom) {
-        setCustomLineError(message);
-      } else {
-        setAddLineError(message);
-      }
+      const candidates =
+        data?.code === 'ambiguous' && Array.isArray(data.candidates) ? data.candidates : undefined;
+      setAddLineFormState(source, { kind: 'refused', message, candidates });
     } finally {
       setAddingLine(false);
     }
@@ -1109,15 +1136,10 @@ const PurchaseOrderPage: React.FC = () => {
     if (addingLine) {
       return;
     }
-    // A client-side refusal leaves this control in exactly the state a
-    // server-side refusal leaves it (see `submitAddLine`'s catch): its own
-    // error set, its own stale confirmation cleared, the sibling untouched.
-    // Keep that whole shape on every validation branch added below — a refusal
-    // rendered under a surviving "Added …" has the page asserting both at once.
-    const refuse = (message: string) => {
-      setCustomLineNotice(null);
-      setCustomLineError(message);
-    };
+    // A client-side refusal goes through the same `refused` state a
+    // server-side one does, so the two are indistinguishable on screen.
+    const refuse = (message: string) =>
+      setAddLineFormState('custom', { kind: 'refused', message });
     const description = customLineDescription.trim();
     if (!description) {
       refuse('Describe what is being bought on this line.');
@@ -1141,17 +1163,22 @@ const PurchaseOrderPage: React.FC = () => {
   const handleAddLineSubmit = (event: React.FormEvent) => {
     event.preventDefault();
     // The field stays focused (and therefore submittable) while a request is in
-    // flight, so a second Enter must not start a second add.
+    // flight, so a second Enter must not start a second add. Deliberately not a
+    // state transition: a duplicate submit dropped on the floor has nothing to
+    // say, so it must not disturb any message.
     if (addingLine) {
       return;
     }
     const identifier = addLineIdentifier.trim();
     if (!identifier) {
-      // Same rule as the custom-line form: a client-side refusal leaves this
-      // control exactly as a server-side one would, so the confirmation the
-      // last scan earned goes with it rather than standing above the refusal.
-      setAddLineNotice(null);
-      setAddLineError('Type or scan an item name, SKU, barcode, or supplier SKU.');
+      // Same rule as the custom-line form: a client-side refusal goes through
+      // the same `refused` state a server-side one does, so the confirmation
+      // the last scan earned and any pending choose-one set go with it rather
+      // than standing on under a message about something else.
+      setAddLineFormState('identifier', {
+        kind: 'refused',
+        message: 'Type or scan an item name, SKU, barcode, or supplier SKU.',
+      });
       return;
     }
     void submitAddLine({ identifier });

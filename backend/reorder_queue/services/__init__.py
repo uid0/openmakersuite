@@ -12,12 +12,15 @@ from .approvals import (
 )
 from .line_entry import (
     LineEntryError,
+    add_asset_line_item,
+    add_freeform_line_item,
     add_line_item,
     assert_addable,
     default_quantity,
     default_unit_cost,
     lookup_candidates,
     repeat_quantity,
+    resolve_asset,
     resolve_identifier,
     resolve_item_supplier,
     serialize_candidate,
@@ -44,12 +47,15 @@ from .receiving import (
 
 __all__ = [
     "LineEntryError",
+    "add_asset_line_item",
+    "add_freeform_line_item",
     "add_line_item",
     "assert_addable",
     "default_quantity",
     "default_unit_cost",
     "lookup_candidates",
     "repeat_quantity",
+    "resolve_asset",
     "resolve_identifier",
     "resolve_item_supplier",
     "serialize_candidate",

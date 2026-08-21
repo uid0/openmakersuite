@@ -1643,19 +1643,28 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="items")
     def add_item(self, request, pk=None):
-        """Add an inventory line to a **draft** purchase order (oms-po-add-item).
+        """Add a line to a **draft** purchase order (oms-po-add-item).
 
-        ``POST .../items/`` with either ``identifier`` (typed or scanned) or an
-        explicit ``item_supplier`` chosen from a previous ambiguous response.
-        Quantity and unit cost are optional — omitted, they are derived from the
-        supplier relationship and this item's purchase history so a bare scan
-        still produces a fully-formed line.
+        ``POST .../items/`` naming what to add exactly one way — ``identifier``
+        (typed or scanned), an explicit ``item_supplier`` chosen from a previous
+        ambiguous response, an ``asset`` id, or a freeform ``description``.
+        Those are the three shapes ``PurchaseOrderItem`` supports and the three
+        the create payload accepts, so an order that could be *created* with a
+        line can also have that line *added* — the gap that made a forgotten
+        asset or one-off charge mean retyping the order.
+
+        On the inventory shapes quantity and unit cost are optional — omitted,
+        they are derived from the supplier relationship and this item's purchase
+        history so a bare scan still produces a fully-formed line. Asset and
+        freeform lines have no such relationship, so ``unit_cost`` is required
+        on them, exactly as it is at create time.
 
         Every guard is enforced here rather than in the UI, because ScanTTY and
         any other API client reach the same code path:
 
         * the order must be DRAFT (400 ``not_draft``);
-        * the order's supplier must actually supply the item
+        * the order's supplier must actually supply the item — and, for an
+          asset, must be its recorded manufacturer
           (400 ``supplier_mismatch`` / ``not_supplied`` / ``discontinued``);
         * an identifier matching several items the supplier carries resolves to
           nothing (409 ``ambiguous``, with the candidate set to choose from).
@@ -1681,28 +1690,44 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         try:
             services.assert_addable(purchase_order)
 
-            if data.get("item_supplier") is not None:
-                item_supplier = services.resolve_item_supplier(
-                    purchase_order, data["item_supplier"]
-                )
-                match = None
-            else:
-                candidate = services.resolve_identifier(purchase_order, data["identifier"])
-                item_supplier = candidate.item_supplier
-                match = services.serialize_candidate(candidate)
-
             work_order = self._resolve_optional_work_order(data.get("work_order"))
             owning_group = self._resolve_optional_group(data.get("owning_group"))
+            shared = {
+                "quantity": data.get("quantity"),
+                "notes": data.get("notes", ""),
+                "work_order": work_order,
+                "owning_group": owning_group,
+            }
 
-            line_item, created = services.add_line_item(
-                purchase_order,
-                item_supplier,
-                quantity=data.get("quantity"),
-                unit_cost=data.get("unit_cost"),
-                notes=data.get("notes", ""),
-                work_order=work_order,
-                owning_group=owning_group,
-            )
+            # The serializer has already proved exactly one shape was named, so
+            # this dispatch is a straight three-way and needs no else-error.
+            item_supplier = None
+            match = None
+            if data.get("asset") is not None:
+                asset = services.resolve_asset(purchase_order, data["asset"])
+                line_item, created = services.add_asset_line_item(
+                    purchase_order, asset, unit_cost=data["unit_cost"], **shared
+                )
+            elif data.get("description") is not None:
+                line_item, created = services.add_freeform_line_item(
+                    purchase_order, data["description"], unit_cost=data["unit_cost"], **shared
+                )
+            else:
+                if data.get("item_supplier") is not None:
+                    item_supplier = services.resolve_item_supplier(
+                        purchase_order, data["item_supplier"]
+                    )
+                else:
+                    candidate = services.resolve_identifier(purchase_order, data["identifier"])
+                    item_supplier = candidate.item_supplier
+                    match = services.serialize_candidate(candidate)
+
+                line_item, created = services.add_line_item(
+                    purchase_order,
+                    item_supplier,
+                    unit_cost=data.get("unit_cost"),
+                    **shared,
+                )
         except services.LineEntryError as exc:
             payload = {"error": exc.message, "code": exc.code}
             if exc.code == "ambiguous":
@@ -1716,10 +1741,16 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             line_item=line_item,
             notes=data.get("notes", ""),
             metadata={
-                "item_supplier": item_supplier.pk,
-                "item_id": str(item_supplier.item_id),
-                "item_name": item_supplier.item.name,
-                "supplier_sku": item_supplier.supplier_sku,
+                # ``line_shape`` names which of the three targets was written,
+                # so an audit reader never has to infer it from which of the
+                # target keys happens to be present.
+                "line_shape": line_item.target_type,
+                "item_supplier": item_supplier.pk if item_supplier else None,
+                "item_id": str(item_supplier.item_id) if item_supplier else None,
+                "item_name": item_supplier.item.name if item_supplier else None,
+                "supplier_sku": item_supplier.supplier_sku if item_supplier else None,
+                "asset_id": str(line_item.asset_id) if line_item.asset_id else None,
+                "description": line_item.description or "",
                 "quantity_ordered": line_item.quantity_ordered,
                 "unit_cost_ordered": str(line_item.unit_cost_ordered),
                 "created": created,

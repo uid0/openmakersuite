@@ -417,6 +417,11 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     items = PurchaseOrderItemSerializer(many=True, read_only=True)
     attachments = PurchaseOrderAttachmentSerializer(many=True, read_only=True)
 
+    # Human-readable status, mirroring ``get_status_display``. The purchasing
+    # list and detail screens render this directly; without it the status text
+    # is blank in the UI even though the raw ``status`` drives the badge colour.
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+
     # Calculated fields
     total_items = serializers.IntegerField(read_only=True)
     total_quantity = serializers.IntegerField(read_only=True)
@@ -448,6 +453,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "owning_group",
             "owning_group_details",
             "status",
+            "status_label",
             "priority",
             "payment_terms",
             "freight_terms",
@@ -774,22 +780,35 @@ class ReceiveItemsSerializer(serializers.Serializer):
 class AddPurchaseOrderLineSerializer(serializers.Serializer):
     """Request body for adding a line to a **draft** purchase order (oms-po-add-item).
 
-    Exactly one of the two ways to name the item is required:
+    Exactly **one** of the four ways to name what is being bought is required.
+    They are the three line shapes ``PurchaseOrderItem`` supports, with the
+    inventory shape offered two ways:
 
-    * ``identifier`` — what the operator typed or the scanner emitted: the
-      item's name, the item's own SKU, a package or unit barcode, or the
-      vendor's SKU. Resolved against what the order's supplier supplies (see
-      :mod:`reorder_queue.services.line_entry`).
-    * ``item_supplier`` — the exact catalogue row, used when the operator has
-      already picked one out of an ambiguous lookup.
+    * ``identifier`` — inventory. What the operator typed or the scanner
+      emitted: the item's name, the item's own SKU, a package or unit barcode,
+      or the vendor's SKU. Resolved against what the order's supplier supplies
+      (see :mod:`reorder_queue.services.line_entry`).
+    * ``item_supplier`` — inventory. The exact catalogue row, used when the
+      operator has already picked one out of an ambiguous lookup.
+    * ``asset`` — a tracked hard asset being purchased, by id.
+    * ``description`` — a freeform line for something the catalogue does not
+      know about.
 
-    Everything else is optional and has a sensible default derived from the
-    supplier relationship and this item's purchase history, so a bare scan
-    produces a fully-formed line.
+    On the inventory shapes everything else is optional and has a sensible
+    default derived from the supplier relationship and this item's purchase
+    history, so a bare scan produces a fully-formed line. The asset and freeform
+    shapes have no such relationship to derive from, so ``unit_cost`` is
+    **required** on both — the same rule ``create_purchase_order`` applies when
+    an order is created with those lines, rather than a laxer one that would
+    make a line cheaper to add late than to order up front.
     """
 
     identifier = serializers.CharField(required=False, allow_blank=False, trim_whitespace=True)
     item_supplier = serializers.IntegerField(required=False)
+    asset = serializers.UUIDField(required=False)
+    description = serializers.CharField(
+        required=False, allow_blank=False, trim_whitespace=True, max_length=500
+    )
     quantity = serializers.IntegerField(required=False, min_value=1)
     unit_cost = serializers.DecimalField(
         max_digits=10, decimal_places=4, required=False, min_value=Decimal("0")
@@ -798,13 +817,32 @@ class AddPurchaseOrderLineSerializer(serializers.Serializer):
     work_order = serializers.UUIDField(required=False, allow_null=True)
     owning_group = serializers.IntegerField(required=False, allow_null=True)
 
+    #: Request key → the line shape it selects. Ordered as the docstring lists
+    #: them so the error message reads the same way.
+    SHAPE_FIELDS = ("identifier", "item_supplier", "asset", "description")
+    #: Shapes with nothing to derive a price from, and what to call each in a
+    #: refusal — "a description line" is not a phrase an operator would use.
+    COST_REQUIRED_SHAPES = {"asset": "an asset", "description": "a freeform"}
+
     def validate(self, attrs):
-        has_identifier = bool(attrs.get("identifier"))
-        has_item_supplier = attrs.get("item_supplier") is not None
-        if has_identifier == has_item_supplier:
+        supplied = [name for name in self.SHAPE_FIELDS if attrs.get(name) is not None]
+        if len(supplied) != 1:
             raise serializers.ValidationError(
-                "Provide either 'identifier' (a typed or scanned name, SKU, "
-                "barcode, or supplier SKU) or 'item_supplier', but not both."
+                "Name what to add exactly one way: 'identifier' (a typed or "
+                "scanned name, SKU, barcode, or supplier SKU), 'item_supplier' "
+                "(a catalogue row picked out of an ambiguous lookup), 'asset', "
+                f"or 'description' (a freeform line). Got: {supplied or 'none'}."
+            )
+
+        label = self.COST_REQUIRED_SHAPES.get(supplied[0])
+        if label is not None and attrs.get("unit_cost") is None:
+            raise serializers.ValidationError(
+                {
+                    "unit_cost": (
+                        f"unit_cost is required on {label} line — there is no "
+                        "supplier relationship or purchase history to price it from."
+                    )
+                }
             )
         return attrs
 

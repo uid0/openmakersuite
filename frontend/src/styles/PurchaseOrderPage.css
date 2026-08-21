@@ -691,6 +691,49 @@
   color: #991b1b;
 }
 
+/* The freeform line, behind its disclosure. Same panel treatment as
+   `.po-add-line` so the two read as one control, but only once opened — closed,
+   it is a single quiet button and the scan field above stays the obvious path. */
+.po-add-custom-line {
+  margin-bottom: 1rem;
+}
+
+.po-add-custom-line form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding: 1rem;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+}
+
+.po-add-custom-line label {
+  display: flex;
+  flex: 1 1 12rem;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.po-add-custom-line label:first-of-type {
+  flex: 2 1 20rem;
+}
+
+.po-add-custom-line input {
+  padding: 0.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  color: #1e293b;
+  background-color: #ffffff;
+  font-family: inherit;
+}
+
 .po-add-line-candidates {
   flex-basis: 100%;
   margin: 0;
@@ -721,4 +764,21 @@
   flex: 1 1 auto;
   font-size: 0.8125rem;
   color: #64748b;
+}
+
+/* Why receiving is unavailable. Deliberately quieter than the receive panel —
+   it explains an absence, it is not itself a workflow. */
+.receive-unavailable-notice {
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #94a3b8;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  margin: 1rem 0;
+}
+
+.receive-unavailable-notice p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #475569;
 }

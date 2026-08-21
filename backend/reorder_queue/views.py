@@ -1661,7 +1661,11 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
           nothing (409 ``ambiguous``, with the candidate set to choose from).
 
         Re-adding something already on the order grows the existing line rather
-        than creating a second one — see
+        than creating a second one — by one supplier package when no explicit
+        quantity is given — and a ``work_order``/``owning_group`` that clashes
+        with one the existing line already carries is refused
+        (400 ``work_order_conflict`` / ``owning_group_conflict``) rather than
+        silently dropped or silently reassigned. See
         :func:`reorder_queue.services.line_entry.add_line_item`.
 
         Returns the created/updated line, what matched, and the **full**

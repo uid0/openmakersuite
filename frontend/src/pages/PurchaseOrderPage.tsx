@@ -9,7 +9,7 @@
  * that state.
  */
 import { Button, Group, Paper, Text } from '@mantine/core';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import {
@@ -333,6 +333,19 @@ const PurchaseOrderPage: React.FC = () => {
   const [addLineError, setAddLineError] = useState<string | null>(null);
   const [addLineCandidates, setAddLineCandidates] = useState<PurchaseOrderLineCandidate[]>([]);
   const [addLineNotice, setAddLineNotice] = useState<string | null>(null);
+  // The scanner loop has to stay mouse-free, so the caret goes back into the
+  // entry field the moment an add settles — after a scan-and-Enter, and after a
+  // click on one of the ambiguity candidates, whose button disappears with the
+  // list that held it. Done in an effect rather than in `submitAddLine` so it
+  // runs after the re-render that re-enables the controls.
+  const addLineInputRef = useRef<HTMLInputElement>(null);
+  const addLineWasInFlight = useRef(false);
+  useEffect(() => {
+    if (addLineWasInFlight.current && !addingLine) {
+      addLineInputRef.current?.focus();
+    }
+    addLineWasInFlight.current = addingLine;
+  }, [addingLine]);
 
   const loadOrder = useCallback(async () => {
     try {
@@ -951,6 +964,11 @@ const PurchaseOrderPage: React.FC = () => {
 
   const handleAddLineSubmit = (event: React.FormEvent) => {
     event.preventDefault();
+    // The field stays focused (and therefore submittable) while a request is in
+    // flight, so a second Enter must not start a second add.
+    if (addingLine) {
+      return;
+    }
     const identifier = addLineIdentifier.trim();
     if (!identifier) {
       setAddLineError('Type or scan an item name, SKU, barcode, or supplier SKU.');
@@ -1741,13 +1759,16 @@ const PurchaseOrderPage: React.FC = () => {
                 id="po-add-line-identifier"
                 type="text"
                 autoFocus
+                ref={addLineInputRef}
                 value={addLineIdentifier}
                 onChange={(e) => {
                   setAddLineIdentifier(e.target.value);
                   setAddLineError(null);
                 }}
                 placeholder="Scan a barcode, or type a name, SKU, or supplier SKU"
-                disabled={addingLine}
+                // readOnly, not disabled: disabling the focused field blurs it,
+                // and the next scan's character burst would land nowhere.
+                readOnly={addingLine}
                 autoComplete="off"
               />
             </label>

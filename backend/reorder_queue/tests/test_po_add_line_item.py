@@ -10,13 +10,15 @@ web UI does.
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 
 import pytest
 from rest_framework.test import APIClient
 
-from inventory.models import InventoryItem, ItemSupplier, Supplier
-from inventory.tests.factories import CategoryFactory, LocationFactory
+from inventory.models import InventoryItem, ItemSupplier, Supplier, WorkOrder
+from inventory.tests.factories import AssetFactory, CategoryFactory, LocationFactory
 from reorder_queue.models import PurchaseOrder, PurchaseOrderAuditEvent, PurchaseOrderItem
+from reorder_queue.services import line_entry
 
 User = get_user_model()
 pytestmark = pytest.mark.django_db
@@ -577,3 +579,274 @@ def test_a_kit_line_added_this_way_freezes_its_bill_of_materials(staff_client, d
     assert line.is_kit_line is True
     assert line.kit_snapshot["components"][0]["component"] == str(component.pk)
     assert line.kit_snapshot["components"][0]["quantity_per_kit"] == 2
+
+
+# --------------------------------------------------------------------------
+# AC-5: the repeat-scan increment is one supplier package, not a second
+# full reorder suggestion
+# --------------------------------------------------------------------------
+
+
+def test_a_repeat_scan_grows_the_line_by_one_supplier_package(staff_client, draft_po, bolt):
+    """A second scan means one more box, not a second reorder suggestion.
+
+    The first add still lands on the full suggestion (minimum 10 - stock 0,
+    rounded up to Acme's case of 5). Re-scanning the same box adds that one
+    case, so an accidental double-scan costs a package rather than doubling the
+    order.
+    """
+    first = add_line(staff_client, draft_po, {"identifier": "012345678905"})
+    assert first.status_code == 201
+    assert PurchaseOrderItem.objects.get(purchase_order=draft_po).quantity_ordered == 10
+
+    second = add_line(staff_client, draft_po, {"identifier": "012345678905"})
+
+    assert second.status_code == 200
+    assert second.json()["created"] is False
+    line = PurchaseOrderItem.objects.get(purchase_order=draft_po)
+    assert line.quantity_ordered == 15
+    assert line.order_in_packages == 3
+
+
+def test_a_repeat_scan_of_a_singles_item_grows_the_line_by_one(staff_client, draft_po, supplier):
+    """``quantity_per_package`` of 1 degrades the package increment to +1."""
+    link = ItemSupplier.objects.create(
+        item=make_item("Shop rag", "OMS-RAG", minimum_stock=6, reorder_quantity=6),
+        supplier=supplier,
+        supplier_sku="ACME-RAG",
+        unit_cost=Decimal("1.00"),
+        quantity_per_package=1,
+    )
+
+    add_line(staff_client, draft_po, {"identifier": "ACME-RAG"})
+    assert PurchaseOrderItem.objects.get(purchase_order=draft_po).quantity_ordered == 6
+
+    add_line(staff_client, draft_po, {"identifier": "ACME-RAG"})
+
+    line = PurchaseOrderItem.objects.get(purchase_order=draft_po)
+    assert line.quantity_ordered == 7
+    assert line.item_supplier_id == link.pk
+
+
+def test_an_explicit_quantity_still_wins_on_the_repeat_path(staff_client, draft_po, bolt):
+    """The package increment is only the *default* — an explicit ask is verbatim."""
+    add_line(staff_client, draft_po, {"identifier": "ACME-M3-100", "quantity": 2})
+
+    add_line(staff_client, draft_po, {"identifier": "ACME-M3-100", "quantity": 3})
+
+    assert PurchaseOrderItem.objects.get(purchase_order=draft_po).quantity_ordered == 5
+
+
+# --------------------------------------------------------------------------
+# AC-5 / AC-9: a work order or committee on a line being grown
+# --------------------------------------------------------------------------
+
+
+def test_growing_an_untagged_line_applies_the_supplied_work_order(staff_client, draft_po, bolt):
+    """A tag on a grow request is applied, not silently dropped."""
+    work_order = WorkOrder.objects.create(maintenance_item=None, asset=AssetFactory())
+    add_line(staff_client, draft_po, {"identifier": "ACME-M3-100", "quantity": 2})
+
+    response = add_line(
+        staff_client,
+        draft_po,
+        {"identifier": "ACME-M3-100", "quantity": 2, "work_order": str(work_order.id)},
+    )
+
+    assert response.status_code == 200
+    line = PurchaseOrderItem.objects.get(purchase_order=draft_po)
+    assert line.work_order_id == work_order.id
+    assert line.quantity_ordered == 4
+
+
+def test_growing_an_untagged_line_applies_the_supplied_committee(staff_client, draft_po, bolt):
+    committee = Group.objects.create(name="Woodshop")
+    add_line(staff_client, draft_po, {"identifier": "ACME-M3-100", "quantity": 2})
+
+    response = add_line(
+        staff_client,
+        draft_po,
+        {"identifier": "ACME-M3-100", "quantity": 2, "owning_group": committee.pk},
+    )
+
+    assert response.status_code == 200
+    assert PurchaseOrderItem.objects.get(purchase_order=draft_po).owning_group_id == committee.pk
+
+
+def test_a_work_order_clashing_with_the_lines_own_is_refused_and_changes_nothing(
+    staff_client, draft_po, bolt
+):
+    """Neither silent outcome is acceptable, so the request is refused instead.
+
+    Dropping the tag would report success for a half-applied request;
+    overwriting would move an existing line's attribution to another job behind
+    the operator's back. The message names both work orders.
+    """
+    original = WorkOrder.objects.create(maintenance_item=None, asset=AssetFactory())
+    other = WorkOrder.objects.create(maintenance_item=None, asset=AssetFactory())
+    add_line(
+        staff_client,
+        draft_po,
+        {"identifier": "ACME-M3-100", "quantity": 2, "work_order": str(original.id)},
+    )
+
+    response = add_line(
+        staff_client,
+        draft_po,
+        {"identifier": "ACME-M3-100", "quantity": 2, "work_order": str(other.id)},
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["code"] == "work_order_conflict"
+    assert str(original) in body["error"]
+    assert str(other) in body["error"]
+
+    line = PurchaseOrderItem.objects.get(purchase_order=draft_po)
+    assert line.work_order_id == original.id
+    assert line.quantity_ordered == 2
+
+
+def test_a_committee_clashing_with_the_lines_own_is_refused_and_changes_nothing(
+    staff_client, draft_po, bolt
+):
+    original = Group.objects.create(name="Woodshop")
+    other = Group.objects.create(name="Metal shop")
+    add_line(
+        staff_client,
+        draft_po,
+        {"identifier": "ACME-M3-100", "quantity": 2, "owning_group": original.pk},
+    )
+
+    response = add_line(
+        staff_client,
+        draft_po,
+        {"identifier": "ACME-M3-100", "quantity": 2, "owning_group": other.pk},
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["code"] == "owning_group_conflict"
+    assert "Woodshop" in body["error"]
+    assert "Metal shop" in body["error"]
+
+    line = PurchaseOrderItem.objects.get(purchase_order=draft_po)
+    assert line.owning_group_id == original.pk
+    assert line.quantity_ordered == 2
+
+
+def test_re_supplying_the_tag_a_line_already_carries_is_not_a_conflict(
+    staff_client, draft_po, bolt
+):
+    work_order = WorkOrder.objects.create(maintenance_item=None, asset=AssetFactory())
+    payload = {"identifier": "ACME-M3-100", "quantity": 2, "work_order": str(work_order.id)}
+    add_line(staff_client, draft_po, payload)
+
+    response = add_line(staff_client, draft_po, payload)
+
+    assert response.status_code == 200
+    line = PurchaseOrderItem.objects.get(purchase_order=draft_po)
+    assert line.work_order_id == work_order.id
+    assert line.quantity_ordered == 4
+
+
+# --------------------------------------------------------------------------
+# AC-2: a capped candidate list is reported as capped
+# --------------------------------------------------------------------------
+
+
+def _many_siblings(supplier, count):
+    """``count`` items whose names all contain "widget", so one query matches all."""
+    return [
+        ItemSupplier.objects.create(
+            item=make_item(f"widget {index:03d}", f"OMS-WID-{index:03d}"),
+            supplier=supplier,
+            supplier_sku=f"ACME-WID-{index:03d}",
+            unit_cost=Decimal("1.00"),
+        )
+        for index in range(count)
+    ]
+
+
+def test_lookup_reports_the_true_match_count_when_the_list_is_capped(
+    staff_client, draft_po, supplier
+):
+    """The cap must never be presented as the total — see DEFAULT_CANDIDATE_LIMIT."""
+    _many_siblings(supplier, 25)
+
+    body = lookup(staff_client, draft_po, "widget").json()
+
+    assert len(body["candidates"]) == 20
+    assert body["total_candidates"] == 25
+    assert body["best_match_total"] == 25
+    assert body["truncated"] is True
+    assert body["resolves"] is False
+
+
+def test_an_uncapped_lookup_says_so(staff_client, draft_po, supplier):
+    _many_siblings(supplier, 3)
+
+    body = lookup(staff_client, draft_po, "widget").json()
+
+    assert len(body["candidates"]) == 3
+    assert body["total_candidates"] == 3
+    assert body["best_match_total"] == 3
+    assert body["truncated"] is False
+
+
+def test_the_ambiguity_message_counts_matches_not_the_capped_list(staff_client, draft_po, supplier):
+    _many_siblings(supplier, 25)
+
+    response = add_line(staff_client, draft_po, {"identifier": "widget"})
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["code"] == "ambiguous"
+    assert "matches 25 items" in body["error"]
+    # The operator is told the offered choice set is only part of the matches.
+    assert "The first 20" in body["error"]
+    assert len(body["candidates"]) == 20
+
+
+# --------------------------------------------------------------------------
+# AC-5: a concurrent duplicate add cannot lose a quantity or 500
+# --------------------------------------------------------------------------
+
+
+def test_a_duplicate_insert_racing_the_add_falls_back_to_growing_the_line(
+    monkeypatch, staff_user, draft_po, bolt
+):
+    """The unique constraint firing means someone else got there first, not a 500.
+
+    Simulates the lost race directly: another client's line is committed
+    between this add's existence check and its INSERT. The constraint then
+    fires, and the documented grow-the-line behaviour has to take over instead
+    of the IntegrityError escaping as a server error.
+    """
+    real_locked = line_entry._locked_existing_line
+    calls = {"n": 0}
+
+    def racing_lookup(purchase_order, item_supplier):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # The pre-insert check answers "nothing there"...
+            assert real_locked(purchase_order, item_supplier) is None
+            # ...and the rival's line lands before we insert.
+            PurchaseOrderItem.objects.create(
+                purchase_order=purchase_order,
+                item_supplier=item_supplier,
+                quantity_ordered=7,
+                unit_cost_ordered=Decimal("2.50"),
+                order_in_packages=2,
+            )
+            return None
+        return real_locked(purchase_order, item_supplier)
+
+    monkeypatch.setattr(line_entry, "_locked_existing_line", racing_lookup)
+
+    line, created = line_entry.add_line_item(draft_po, bolt, quantity=4)
+
+    assert created is False
+    assert PurchaseOrderItem.objects.filter(purchase_order=draft_po).count() == 1
+    line.refresh_from_db()
+    assert line.quantity_ordered == 11

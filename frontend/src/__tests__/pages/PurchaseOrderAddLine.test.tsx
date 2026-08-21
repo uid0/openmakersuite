@@ -278,6 +278,94 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
     ).toBeInTheDocument();
   });
 
+  test('focus returns to the entry field after a completed add', async () => {
+    // The scanner loop is a burst of characters plus Enter, over and over. If
+    // the field loses focus when the add settles, the second scan lands
+    // nowhere and the operator has to reach for the mouse.
+    (api.purchaseOrderAPI.addLineItem as jest.Mock).mockResolvedValue({
+      data: {
+        created: true,
+        line_item: line(),
+        match: candidate(),
+        purchase_order: order({ items: [line()], estimated_total: '25.00' }),
+      },
+    });
+
+    renderPage();
+    const field = (await screen.findByLabelText(/add an item/i)) as HTMLInputElement;
+    field.focus();
+    fireEvent.change(field, { target: { value: '012345678905' } });
+    fireEvent.submit(field.closest('form')!);
+
+    await screen.findByText(/Added M3 hex bolt/);
+    await waitFor(() => expect(document.activeElement).toBe(entryField()));
+  });
+
+  test('picking a candidate puts focus back in the entry field for the next scan', async () => {
+    (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
+      apiError(409, {
+        code: 'ambiguous',
+        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        candidates: [
+          candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
+          candidate({
+            item_supplier: 13,
+            item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
+          }),
+        ],
+      })
+    );
+
+    renderPage();
+    fireEvent.change(await screen.findByLabelText(/add an item/i), { target: { value: 'M3 hex' } });
+    fireEvent.submit(entryField().closest('form')!);
+
+    const nutButton = await screen.findByRole('button', { name: /add m3 hex nut/i });
+    (api.purchaseOrderAPI.addLineItem as jest.Mock).mockResolvedValueOnce({
+      data: {
+        created: true,
+        line_item: line({ id: 'line-2', quantity_ordered: 20 }),
+        match: null,
+        purchase_order: order({ items: [line({ id: 'line-2' })] }),
+      },
+    });
+    // Clicking the candidate is the one mouse action; the loop resumes on the
+    // keyboard from there.
+    nutButton.focus();
+    fireEvent.click(nutButton);
+
+    await waitFor(() => expect(document.activeElement).toBe(entryField()));
+  });
+
+  test('a second Enter while the add is in flight does not double-post', async () => {
+    let resolveAdd: (value: unknown) => void = () => {};
+    (api.purchaseOrderAPI.addLineItem as jest.Mock).mockReturnValue(
+      new Promise((resolve) => {
+        resolveAdd = resolve;
+      })
+    );
+
+    renderPage();
+    const field = await screen.findByLabelText(/add an item/i);
+    fireEvent.change(field, { target: { value: '012345678905' } });
+    fireEvent.submit(field.closest('form')!);
+    // The field stays focused (and submittable) during the request, so a
+    // trigger-happy second Enter has to be ignored rather than add twice.
+    fireEvent.submit(field.closest('form')!);
+
+    expect(api.purchaseOrderAPI.addLineItem).toHaveBeenCalledTimes(1);
+
+    resolveAdd({
+      data: {
+        created: true,
+        line_item: line(),
+        match: candidate(),
+        purchase_order: order({ items: [line()] }),
+      },
+    });
+    await screen.findByText(/Added M3 hex bolt/);
+  });
+
   test('an empty submit never reaches the API', async () => {
     renderPage();
     const field = await screen.findByLabelText(/add an item/i);

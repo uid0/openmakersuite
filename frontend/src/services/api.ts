@@ -2148,6 +2148,15 @@ export interface PurchaseOrderItemLookup {
   /** True when a client may add straight from this lookup without asking. */
   resolves: boolean;
   candidates: PurchaseOrderLineCandidate[];
+  /**
+   * `candidates` is capped server-side, so these report the match counts
+   * BEFORE the cap: `total_candidates` across every tier, `best_match_total`
+   * within `best_match_kind`, and `truncated` when the list really was
+   * shortened. A capped list must be shown as capped, never as the whole set.
+   */
+  total_candidates: number;
+  best_match_total: number;
+  truncated: boolean;
   unavailable: PurchaseOrderLineUnavailable[];
 }
 

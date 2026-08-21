@@ -36,6 +36,15 @@ which is what keeps the scan-and-Enter path a single round trip.
 system's way of recording "this vendor stopped carrying it". Such a row is
 reported as *unavailable* with its own reason rather than silently missing, so
 the operator gets told why instead of "no match".
+
+**Already on the order → the line grows by one package.** A second line is
+impossible (``(purchase_order, item_supplier)`` is unique) and scanning the same
+box twice plainly means "two of those", so a repeat add *increments* the line
+already there. Without an explicit quantity the increment is one supplier
+package (:func:`repeat_quantity`) — the unit the operator physically picked up —
+not the full reorder suggestion a fresh line lands on, so an accidental
+re-scan costs one package rather than doubling the order. An explicit quantity
+is honoured verbatim on either path.
 """
 
 from __future__ import annotations
@@ -44,7 +53,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import List, Optional
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 
 from inventory.models import InventoryItem, ItemSupplier
@@ -152,6 +161,13 @@ class Unavailable:
 class LookupResult:
     candidates: List[Candidate] = field(default_factory=list)
     unavailable: List[Unavailable] = field(default_factory=list)
+    #: How many candidates matched BEFORE ``limit`` capped the list, in total
+    #: and within :attr:`best_tier`. A capped list must never be presented as
+    #: the whole story: the operator is told the real count and that there is
+    #: more, rather than being quietly handed the cap as if it were the total.
+    total_candidates: int = 0
+    best_tier_total: int = 0
+    truncated: bool = False
 
     @property
     def best_tier(self) -> Optional[str]:
@@ -290,8 +306,18 @@ def lookup_candidates(purchase_order, query, limit=DEFAULT_CANDIDATE_LIMIT):
             candidate.item_supplier.item.name.casefold(),
         )
     )
-    if limit is not None:
+    # Counted before the cap, so "matches N items" is the number of matches and
+    # not the number we happened to keep. Sorting put the strongest tier at the
+    # head, so capping never changes which tier is best — only how much of it
+    # the caller sees.
+    result.total_candidates = len(result.candidates)
+    best_tier = result.best_tier
+    result.best_tier_total = sum(
+        1 for candidate in result.candidates if candidate.match_kind == best_tier
+    )
+    if limit is not None and len(result.candidates) > limit:
         result.candidates = result.candidates[:limit]
+        result.truncated = True
 
     # Nothing this supplier carries matched — say who *does* carry it, which is
     # the difference between "no such item" and "wrong supplier for this order".
@@ -353,6 +379,18 @@ def default_quantity(item_supplier):
             quantity = -(-quantity // case_size) * case_size
 
     return max(1, quantity)
+
+
+def repeat_quantity(item_supplier):
+    """Quantity a REPEAT add grows an existing line by, in BASE units.
+
+    One supplier package — the unit the operator physically picked up and
+    scanned. Not :func:`default_quantity`: that is the whole reorder suggestion,
+    and re-running it would double an order the moment a box got scanned twice,
+    which is the one mistake this path invites. Degrades to a single unit when
+    the supplier sells singles (``quantity_per_package`` of 1 or unset).
+    """
+    return max(1, item_supplier.quantity_per_package or 1)
 
 
 def default_unit_cost(item_supplier):
@@ -466,6 +504,12 @@ def resolve_identifier(purchase_order, identifier):
     when weaker partial-name matches came back alongside it. Two candidates in
     the same tier raise ``ambiguous`` carrying the whole choice set; the
     operator picks and re-posts by ``item_supplier``.
+
+    The count in the ambiguity message is the number of matches, not the number
+    of candidates that survived :data:`DEFAULT_CANDIDATE_LIMIT`, and the message
+    says so when the choice set attached to it is only part of them — being told
+    "20" when 63 matched would send the operator hunting for an item that was
+    never in the list.
     """
     identifier = (identifier or "").strip()
     if not identifier:
@@ -486,12 +530,106 @@ def resolve_identifier(purchase_order, identifier):
             "no_match",
         )
 
+    total = max(result.best_tier_total, len(best))
+    shown = (
+        ""
+        if total == len(best)
+        else f" The first {len(best)} are offered here — narrow the search to see the rest."
+    )
     raise LineEntryError(
-        f'"{identifier}" matches {len(best)} items {purchase_order.supplier.name} '
-        "supplies. Choose which one to add.",
+        f'"{identifier}" matches {total} items {purchase_order.supplier.name} '
+        f"supplies. Choose which one to add.{shown}",
         "ambiguous",
         candidates=[serialize_candidate(candidate) for candidate in best],
     )
+
+
+def _locked_existing_line(purchase_order, item_supplier):
+    """This order's line for ``item_supplier``, locked for the rest of the transaction.
+
+    ``select_for_update`` for the same reason ``mark_received`` takes it: the
+    read decides whether the next statement grows a line or inserts one, and two
+    adds in flight at once (two operators on one order, a re-posted scan from a
+    non-browser client) would otherwise both read the old quantity and one of
+    the two writes would be lost.
+
+    ``order_by()`` clears the model's default ordering, which joins the nullable
+    ``item_supplier``/``asset`` sides — Postgres refuses ``FOR UPDATE`` over an
+    outer join.
+    """
+    return (
+        PurchaseOrderItem.objects.select_for_update()
+        .filter(purchase_order=purchase_order, item_supplier=item_supplier)
+        .order_by()
+        .first()
+    )
+
+
+def _tag_label(tagged):
+    """Operator-facing name for a work order or committee, for conflict messages."""
+    return getattr(tagged, "name", None) or str(tagged)
+
+
+def _apply_tag(existing, attr, supplied, noun, item_name):
+    """Set a line-level ``work_order``/``owning_group`` on a line being grown.
+
+    Untagged line → the supplied tag lands on it. Same tag → nothing to do.
+    *Different* tag → refused, naming both, because either silent outcome is
+    wrong: dropping the tag reports success for a request only half applied,
+    and overwriting silently moves an existing line's attribution to another
+    job. Each field is decided on its own current value.
+    """
+    if supplied is None:
+        return
+    current = getattr(existing, attr)
+    if current is None:
+        setattr(existing, attr, supplied)
+        return
+    if current.pk != supplied.pk:
+        raise LineEntryError(
+            f"{item_name} is already on this order for {noun} "
+            f"{_tag_label(current)}; this request names {noun} "
+            f"{_tag_label(supplied)}. Add it on its own line for that {noun}, "
+            f"or clear the existing line's {noun} first.",
+            f"{attr}_conflict",
+        )
+
+
+def _grow_existing_line(
+    purchase_order,
+    item_supplier,
+    existing,
+    *,
+    quantity,
+    explicit_cost,
+    notes,
+    work_order,
+    owning_group,
+):
+    """Increment a line already on the order — see :func:`add_line_item`."""
+    if existing.is_voided:
+        raise LineEntryError(
+            f"{item_supplier.item.name} is already on "
+            f"{purchase_order.po_number or 'this order'} as a voided line. "
+            "Restore or remove that line before ordering it again.",
+            "line_voided",
+        )
+
+    # Before any mutation, so a refused tag leaves the line exactly as it was.
+    item_name = item_supplier.item.name
+    _apply_tag(existing, "work_order", work_order, "work order", item_name)
+    _apply_tag(existing, "owning_group", owning_group, "committee", item_name)
+
+    grow_by = repeat_quantity(item_supplier) if quantity is None else quantity
+    existing.quantity_ordered = (existing.quantity_ordered or 0) + grow_by
+    existing.order_in_packages = order_packages_for_line(item_supplier, existing.quantity_ordered)
+    if explicit_cost is not None:
+        existing.unit_cost_ordered = explicit_cost
+    if notes:
+        existing.notes = f"{existing.notes}\n{notes}".strip() if existing.notes else notes
+    existing.save()
+    recalculate_estimated_total(purchase_order)
+    return existing, False
 
 
 @transaction.atomic
@@ -512,63 +650,81 @@ def add_line_item(
     **Already on the order → the existing line grows.** ``PurchaseOrderItem``
     carries a ``(purchase_order, item_supplier)`` unique constraint, so a second
     line is not merely undesirable, it is impossible; and scanning the same box
-    twice plainly means "two of those". The requested quantity — explicit, or
-    the same default a fresh line would get — is *added* to the line already
-    there, and the line's cost is left alone unless an explicit ``unit_cost``
-    came with the request. A **voided** existing line is refused instead: the
-    constraint blocks a replacement line, and quietly resurrecting something an
-    operator deliberately struck off the order would be worse than saying so.
+    twice plainly means "two of those". An explicit ``quantity`` is added
+    verbatim; without one the line grows by **one supplier package**
+    (:func:`repeat_quantity`), which is what the operator just picked up — not
+    the full reorder suggestion :func:`default_quantity` gives a fresh line, so
+    a stray second scan costs one package rather than doubling the order. The
+    line's cost is left alone unless an explicit ``unit_cost`` came with the
+    request. A **voided** existing line is refused instead: the constraint
+    blocks a replacement line, and quietly resurrecting something an operator
+    deliberately struck off the order would be worse than saying so.
 
-    Defaults come from the supplier relationship and purchase history — see
-    :func:`default_quantity` / :func:`default_unit_cost` — so a line never lands
-    at zero just because the operator only scanned a barcode.
+    **Tags on a line being grown.** ``work_order`` and ``owning_group`` are
+    applied to the existing line when it carries none for that field, and the
+    request is *refused* (``work_order_conflict`` / ``owning_group_conflict``,
+    naming both values) when the line already carries a different one. Neither
+    silent outcome is acceptable: dropping the tag would report success for a
+    request only half applied, and overwriting would move an existing line's
+    attribution to another job behind the operator's back. Each field is judged
+    independently on its own current value. ``notes`` are appended, as always.
+
+    Defaults for a *new* line come from the supplier relationship and purchase
+    history — see :func:`default_quantity` / :func:`default_unit_cost` — so a
+    line never lands at zero just because the operator only scanned a barcode.
 
     The caller owns the draft guard (:func:`assert_addable`) and the audit
     event; both are applied at the view boundary alongside the other PO
     actions.
     """
-    quantity = default_quantity(item_supplier) if quantity is None else _coerce_quantity(quantity)
+    explicit_quantity = None if quantity is None else _coerce_quantity(quantity)
     explicit_cost = None if unit_cost is None else _coerce_unit_cost(unit_cost)
+    grow_kwargs = {
+        "quantity": explicit_quantity,
+        "explicit_cost": explicit_cost,
+        "notes": notes,
+        "work_order": work_order,
+        "owning_group": owning_group,
+    }
 
-    existing = PurchaseOrderItem.objects.filter(
-        purchase_order=purchase_order, item_supplier=item_supplier
-    ).first()
-
+    existing = _locked_existing_line(purchase_order, item_supplier)
     if existing is not None:
-        if existing.is_voided:
-            raise LineEntryError(
-                f"{item_supplier.item.name} is already on "
-                f"{purchase_order.po_number or 'this order'} as a voided line. "
-                "Restore or remove that line before ordering it again.",
-                "line_voided",
-            )
-        existing.quantity_ordered = (existing.quantity_ordered or 0) + quantity
-        existing.order_in_packages = order_packages_for_line(
-            item_supplier, existing.quantity_ordered
-        )
-        if explicit_cost is not None:
-            existing.unit_cost_ordered = explicit_cost
-        if notes:
-            existing.notes = f"{existing.notes}\n{notes}".strip() if existing.notes else notes
-        existing.save()
-        recalculate_estimated_total(purchase_order)
-        return existing, False
+        return _grow_existing_line(purchase_order, item_supplier, existing, **grow_kwargs)
 
-    line_item = PurchaseOrderItem.objects.create(
-        purchase_order=purchase_order,
-        item_supplier=item_supplier,
-        quantity_ordered=quantity,
-        unit_cost_ordered=(
-            explicit_cost if explicit_cost is not None else default_unit_cost(item_supplier)
-        ),
-        order_in_packages=order_packages_for_line(item_supplier, quantity),
-        notes=notes or "",
-        work_order=work_order,
-        owning_group=owning_group,
-        # Same reason create_purchase_order freezes it: the BOM is editable and
-        # receipt is weeks away, so the line has to carry what it bought.
-        kit_snapshot=build_kit_snapshot(item_supplier.item),
+    new_quantity = (
+        default_quantity(item_supplier) if explicit_quantity is None else explicit_quantity
     )
+    try:
+        # Nested so a losing race rolls back only the failed INSERT: an
+        # IntegrityError would otherwise poison the whole transaction and there
+        # would be nothing left to grow.
+        with transaction.atomic():
+            line_item = PurchaseOrderItem.objects.create(
+                purchase_order=purchase_order,
+                item_supplier=item_supplier,
+                quantity_ordered=new_quantity,
+                unit_cost_ordered=(
+                    explicit_cost if explicit_cost is not None else default_unit_cost(item_supplier)
+                ),
+                order_in_packages=order_packages_for_line(item_supplier, new_quantity),
+                notes=notes or "",
+                work_order=work_order,
+                owning_group=owning_group,
+                # Same reason create_purchase_order freezes it: the BOM is
+                # editable and receipt is weeks away, so the line has to carry
+                # what it bought.
+                kit_snapshot=build_kit_snapshot(item_supplier.item),
+            )
+    except IntegrityError:
+        # A concurrent add won the (purchase_order, item_supplier) constraint
+        # between our locked read and this insert. Its row is committed by the
+        # time the constraint fires, so re-read and take the documented
+        # grow-the-line path rather than surfacing a 500.
+        existing = _locked_existing_line(purchase_order, item_supplier)
+        if existing is None:
+            raise
+        return _grow_existing_line(purchase_order, item_supplier, existing, **grow_kwargs)
+
     recalculate_estimated_total(purchase_order)
     return line_item, True
 
@@ -625,7 +781,13 @@ def serialize_unavailable(entry):
 
 
 def serialize_lookup(purchase_order, query, result):
-    """Full lookup payload: who we searched for, what matched, what cannot be added."""
+    """Full lookup payload: who we searched for, what matched, what cannot be added.
+
+    ``candidates`` is capped at :data:`DEFAULT_CANDIDATE_LIMIT`, so the payload
+    also carries ``total_candidates`` and ``truncated``: a client rendering a
+    capped list has to be able to tell the operator that more matched, rather
+    than presenting the cap as the complete answer.
+    """
     best_tier = result.best_tier
     return {
         "query": query,
@@ -639,7 +801,11 @@ def serialize_lookup(purchase_order, query, result):
         "best_match_kind": best_tier,
         # True when a client may add straight from this lookup without asking
         # the operator anything — exactly the rule resolve_identifier applies.
-        "resolves": len(result.best_tier_candidates()) == 1,
+        "resolves": result.best_tier_total == 1,
         "candidates": [serialize_candidate(candidate) for candidate in result.candidates],
+        # Pre-cap counts, so a shortened list is never mistaken for all of them.
+        "total_candidates": result.total_candidates,
+        "best_match_total": result.best_tier_total,
+        "truncated": result.truncated,
         "unavailable": [serialize_unavailable(entry) for entry in result.unavailable],
     }

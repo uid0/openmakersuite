@@ -390,6 +390,33 @@ def test_adding_an_item_this_supplier_does_not_carry_is_rejected_by_identifier(
     assert not PurchaseOrderItem.objects.filter(purchase_order=draft_po).exists()
 
 
+def test_a_multi_match_not_supplied_refusal_counts_instead_of_naming_one(
+    staff_client, draft_po, supplier
+):
+    """Above one match, the count leads — not an arbitrary alphabetically-first item.
+
+    Naming ``gizmo 000`` alone would read as though it were *the* match and say
+    nothing about the twenty-four others the identifier also named.
+    """
+    other = Supplier.objects.create(name="Bolt Depot")
+    for index in range(25):
+        ItemSupplier.objects.create(
+            item=make_item(f"gizmo {index:03d}", f"OMS-GIZ-{index:03d}"),
+            supplier=other,
+            supplier_sku=f"BD-GIZ-{index:03d}",
+            unit_cost=Decimal("1.00"),
+        )
+
+    response = add_line(staff_client, draft_po, {"identifier": "gizmo"})
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["code"] == "not_supplied"
+    assert "matches 25 items Acme Fasteners does not supply" in body["error"]
+    assert "gizmo 000 is one of them" in body["error"]
+    assert not PurchaseOrderItem.objects.filter(purchase_order=draft_po).exists()
+
+
 def test_a_client_cannot_bypass_the_supplier_check_with_a_raw_item_supplier_id(
     staff_client, draft_po
 ):
@@ -649,6 +676,16 @@ def test_a_repeat_scan_of_a_case_counted_item_uses_the_items_own_case(
     and leave the line recording two cases for one case plus one bottle. The
     increment therefore comes from the same ladder ``order_in_packages`` is
     derived through, and the two stay in step.
+
+    The closing equality holds for THIS fixture, whose reorder suggestion is
+    exactly one order rung, rather than as a general invariant: the create path
+    lands a pack-counted item on ``base_reorder_quantity`` without rounding to
+    the rung (``default_quantity`` mirrors ``_calculate_optimal_quantity``,
+    which AC-6 directs this change to follow), so e.g. ``reorder_quantity=5``
+    would record 30 units in 2 cases on the FIRST add. That rounding difference
+    is pre-existing in the create path and deliberately out of scope here. What
+    this test pins is the repeat increment: adding one whole package to an
+    already-consistent line leaves it consistent.
     """
     item = make_pack_item("Solvent", "OMS-SOLV", case_size=24, count_size=6)
     ItemSupplier.objects.create(
@@ -670,7 +707,7 @@ def test_a_repeat_scan_of_a_case_counted_item_uses_the_items_own_case(
     line.refresh_from_db()
     assert line.quantity_ordered == 48
     assert line.order_in_packages == 2
-    # The line never claims more cases than its quantity actually fills.
+    # For this fixture the line still claims exactly the cases it fills.
     assert line.quantity_ordered == line.order_in_packages * 24
 
 

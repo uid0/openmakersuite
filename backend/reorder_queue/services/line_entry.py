@@ -65,6 +65,7 @@ from inventory.services.packaging import base_reorder_quantity, counts_in_packs
 
 from ..models import PurchaseOrder, PurchaseOrderItem
 from .purchase_orders import (
+    apply_line_quantity,
     order_package_size,
     order_packages_for_line,
     recalculate_estimated_total,
@@ -530,6 +531,49 @@ def resolve_item_supplier(purchase_order, item_supplier_id):
     return item_supplier
 
 
+def _unavailable_error(purchase_order, identifier, result):
+    """Refusal for an identifier that named only items this order cannot carry.
+
+    One match speaks for itself, so its own message is raised verbatim — that is
+    the ordinary case, an operator holding the wrong vendor's box.
+
+    Above one, naming the alphabetically first entry would present an arbitrary
+    item as though it were *the* match, and say nothing about the other
+    twenty-four. So the count leads instead, the same way the ambiguity path
+    counts its candidates. The count is exact per reason rather than
+    ``total_unavailable`` as a whole: discontinued rows are never capped, and
+    the capped tail is entirely the supplied-elsewhere kind.
+    """
+    supplier = purchase_order.supplier
+    first = result.unavailable[0]
+    discontinued = sum(
+        1 for entry in result.unavailable if entry.reason == UNAVAILABLE_DISCONTINUED
+    )
+    supplied_elsewhere = len(result.unavailable) - discontinued
+    if first.reason == UNAVAILABLE_DISCONTINUED:
+        total = discontinued
+    else:
+        total = max(result.total_unavailable - discontinued, supplied_elsewhere)
+
+    if total <= 1:
+        return LineEntryError(first.message, first.reason)
+
+    if first.reason == UNAVAILABLE_DISCONTINUED:
+        return LineEntryError(
+            f'"{identifier}" matches {total} items {supplier.name} no longer '
+            f"supplies — {first.item.name} is one of them. Narrow the search to "
+            "the one you want.",
+            first.reason,
+        )
+    return LineEntryError(
+        f'"{identifier}" matches {total} items {supplier.name} does not supply — '
+        f"{first.item.name} is one of them. Narrow the search to the one you "
+        f"want, then add {supplier.name} as a supplier for it, or order it on a "
+        "purchase order for a supplier that carries it.",
+        first.reason,
+    )
+
+
 def resolve_identifier(purchase_order, identifier):
     """Resolve a typed/scanned identifier to exactly one candidate, or explain why not.
 
@@ -543,7 +587,8 @@ def resolve_identifier(purchase_order, identifier):
     of candidates that survived :data:`DEFAULT_CANDIDATE_LIMIT`, and the message
     says so when the choice set attached to it is only part of them — being told
     "20" when 63 matched would send the operator hunting for an item that was
-    never in the list.
+    never in the list. :func:`_unavailable_error` counts the same way when the
+    identifier named only items this order cannot carry.
     """
     identifier = (identifier or "").strip()
     if not identifier:
@@ -557,8 +602,7 @@ def resolve_identifier(purchase_order, identifier):
 
     if not best:
         if result.unavailable:
-            first = result.unavailable[0]
-            raise LineEntryError(first.message, first.reason)
+            raise _unavailable_error(purchase_order, identifier, result)
         raise LineEntryError(
             f'Nothing matching "{identifier}" is supplied by ' f"{purchase_order.supplier.name}.",
             "no_match",
@@ -661,8 +705,7 @@ def _grow_existing_line(
     _apply_tag(existing, "owning_group", owning_group, "committee", item_name)
 
     grow_by = repeat_quantity(item_supplier) if quantity is None else quantity
-    existing.quantity_ordered = (existing.quantity_ordered or 0) + grow_by
-    existing.order_in_packages = order_packages_for_line(item_supplier, existing.quantity_ordered)
+    apply_line_quantity(existing, (existing.quantity_ordered or 0) + grow_by)
     if explicit_cost is not None:
         existing.unit_cost_ordered = explicit_cost
     if notes:

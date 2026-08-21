@@ -338,14 +338,33 @@ const PurchaseOrderPage: React.FC = () => {
   // click on one of the ambiguity candidates, whose button disappears with the
   // list that held it. Done in an effect rather than in `submitAddLine` so it
   // runs after the re-render that re-enables the controls.
+  //
+  // `select()`, not a bare `focus()`: a refusal deliberately leaves the typed
+  // text in place so the operator can correct it, and a scanner delivers a
+  // burst plus an Enter. Appending that burst onto the old text would turn the
+  // next scan into a bogus identifier and a guaranteed second refusal, so the
+  // text stays visible but the next scan overwrites it.
   const addLineInputRef = useRef<HTMLInputElement>(null);
   const addLineWasInFlight = useRef(false);
   useEffect(() => {
     if (addLineWasInFlight.current && !addingLine) {
       addLineInputRef.current?.focus();
+      addLineInputRef.current?.select();
     }
     addLineWasInFlight.current = addingLine;
   }, [addingLine]);
+
+  // First scan of the session needs no mouse either, so the field takes focus
+  // as soon as the control exists. `preventScroll` rather than the `autoFocus`
+  // attribute: the control sits below the header, details and attachments, so
+  // letting the browser scroll it into view would land every draft order —
+  // including one opened just to check its supplier or dates — at Line Items.
+  const canAddLine = isAuthenticated && order?.status === 'draft';
+  useEffect(() => {
+    if (canAddLine) {
+      addLineInputRef.current?.focus({ preventScroll: true });
+    }
+  }, [canAddLine]);
 
   const loadOrder = useCallback(async () => {
     try {
@@ -1758,7 +1777,6 @@ const PurchaseOrderPage: React.FC = () => {
               <input
                 id="po-add-line-identifier"
                 type="text"
-                autoFocus
                 ref={addLineInputRef}
                 value={addLineIdentifier}
                 onChange={(e) => {

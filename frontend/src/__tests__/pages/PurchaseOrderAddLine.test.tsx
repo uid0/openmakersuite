@@ -278,6 +278,55 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
     ).toBeInTheDocument();
   });
 
+  test('the entry field takes focus on mount without scrolling the page there', async () => {
+    // First scan of the session must need no mouse either — but the control
+    // sits below the header, details and attachments, so opening a draft order
+    // just to read it must not jump the page down to Line Items.
+    const scrolled: unknown[] = [];
+    const realFocus = HTMLInputElement.prototype.focus;
+    const focusSpy = jest
+      .spyOn(HTMLInputElement.prototype, 'focus')
+      .mockImplementation(function (this: HTMLInputElement, options?: FocusOptions) {
+        scrolled.push(options?.preventScroll);
+        return realFocus.call(this, options);
+      });
+
+    try {
+      renderPage();
+      const field = await screen.findByLabelText(/add an item/i);
+
+      await waitFor(() => expect(document.activeElement).toBe(field));
+      expect(scrolled).toContain(true);
+    } finally {
+      focusSpy.mockRestore();
+    }
+  });
+
+  test('a refused add leaves the failed text selected so the next scan replaces it', async () => {
+    (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValue(
+      apiError(409, {
+        code: 'ambiguous',
+        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        candidates: [candidate(), candidate({ item_supplier: 13 })],
+      })
+    );
+
+    renderPage();
+    const field = (await screen.findByLabelText(/add an item/i)) as HTMLInputElement;
+    fireEvent.change(field, { target: { value: 'M3 hex' } });
+    fireEvent.submit(field.closest('form')!);
+
+    await screen.findByRole('alert');
+    // The text stays put so it can be corrected by hand...
+    expect((entryField() as HTMLInputElement).value).toBe('M3 hex');
+    await waitFor(() => expect(document.activeElement).toBe(entryField()));
+    // ...but it is selected, so a scanner's burst overwrites rather than
+    // appends — otherwise the next scan posts "M3 hex012345678905".
+    const refocused = entryField() as HTMLInputElement;
+    expect(refocused.selectionStart).toBe(0);
+    expect(refocused.selectionEnd).toBe('M3 hex'.length);
+  });
+
   test('focus returns to the entry field after a completed add', async () => {
     // The scanner loop is a burst of characters plus Enter, over and over. If
     // the field loses focus when the add settles, the second scan lands

@@ -1887,6 +1887,56 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 services.apply_line_quantity(line_item, new_quantity)
                 quantity_changed = True
 
+        # Deliberate reprice of a line's ORDERED price (the figure the shop is
+        # committing to spend). Draft only, and deliberately stricter than the
+        # quantity edit directly above: quantity on a live order is "we need 12,
+        # not 10", a thing the supplier can still be told, whereas the ordered
+        # price is what the supplier was quoted — once the order has gone out,
+        # that is a matter of record, the same boundary ``assert_addable``
+        # draws for adding a line at all.
+        repriced_from = None
+        if "unit_cost_ordered" in request.data:
+            from decimal import Decimal, InvalidOperation
+
+            raw_unit_cost = request.data["unit_cost_ordered"]
+            try:
+                new_unit_cost = Decimal(str(raw_unit_cost))
+            except (InvalidOperation, ValueError, TypeError):
+                return Response(
+                    {"error": f"Invalid unit cost ordered value: {raw_unit_cost!r}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if new_unit_cost < 0:
+                return Response(
+                    {"error": "Unit cost ordered cannot be negative"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if line_item.is_voided:
+                return Response(
+                    {"error": "Cannot change the price of a voided line item"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if purchase_order.status != PurchaseOrder.Status.DRAFT:
+                label = PurchaseOrder.Status(purchase_order.status).label
+                return Response(
+                    {
+                        "error": (
+                            "The ordered price can only be changed while a purchase order "
+                            f"is a draft. {purchase_order.po_number or 'This order'} is "
+                            f"{label}."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            current_unit_cost = line_item.unit_cost_ordered
+            if current_unit_cost is None or Decimal(current_unit_cost) != new_unit_cost:
+                repriced_from = current_unit_cost
+                line_item.unit_cost_ordered = new_unit_cost
+
         # Allow updating expected_shipment_date and notes
         expected_shipment_date = request.data.get("expected_shipment_date")
         if expected_shipment_date is not None:
@@ -2018,9 +2068,29 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             line_item.save()
             # The PO-level estimated_total is frozen at create time from each
-            # line's estimated_cost, so a quantity edit has to re-roll it.
-            if quantity_changed:
+            # line's estimated_cost, so a quantity or price edit has to re-roll it.
+            if quantity_changed or repriced_from is not None:
                 services.recalculate_estimated_total(purchase_order)
+
+        # Only when the price actually moved. A price change that leaves no
+        # trace is the very thing the add path's ``price_conflict`` refusal
+        # exists to prevent, so the deliberate route has to record both the
+        # figure it replaced and the one it wrote.
+        if repriced_from is not None:
+            record_audit_event(
+                action=PurchaseOrderAuditEvent.Action.PO_LINE_REPRICE,
+                actor=request.user,
+                line_item=line_item,
+                metadata={
+                    "line_shape": line_item.target_type,
+                    "item_supplier": line_item.item_supplier_id,
+                    "asset_id": str(line_item.asset_id) if line_item.asset_id else None,
+                    "description": line_item.description or "",
+                    "quantity_ordered": line_item.quantity_ordered,
+                    "previous_unit_cost_ordered": str(repriced_from),
+                    "unit_cost_ordered": str(line_item.unit_cost_ordered),
+                },
+            )
 
         from .serializers import PurchaseOrderItemSerializer
 

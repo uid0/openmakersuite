@@ -382,3 +382,142 @@ def test_there_is_exactly_one_add_lines_endpoint(staff_client, draft_po):
         and "post" in getattr(getattr(PurchaseOrderViewSet, name, None), "mapping", {})
     ]
     assert add_actions == ["add_item"]
+
+
+# --------------------------------------------------------------------------
+# Repricing a draft line — the remedy `price_conflict` names
+# --------------------------------------------------------------------------
+
+
+def patch_line(client, po, line, payload):
+    return client.patch(
+        f"/api/reorders/purchase-orders/{po.id}/items/{line.id}/", payload, format="json"
+    )
+
+
+def only_line(po):
+    return PurchaseOrderItem.objects.get(purchase_order=po)
+
+
+def test_a_draft_line_can_be_repriced_deliberately(staff_client, draft_po, acme_asset):
+    add_line(staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "1490.00"})
+    line = only_line(draft_po)
+
+    response = patch_line(staff_client, draft_po, line, {"unit_cost_ordered": "149.00"})
+
+    assert response.status_code == 200
+    line.refresh_from_db()
+    assert line.unit_cost_ordered == Decimal("149.0000")
+    draft_po.refresh_from_db()
+    assert draft_po.estimated_total == Decimal("149.00")
+
+
+def test_repricing_a_line_on_a_sent_order_is_refused(staff_client, draft_po, acme_asset):
+    """What the supplier was quoted is a matter of record once the order is out.
+
+    Deliberately stricter than the quantity edit, which stays open through
+    sent/confirmed/partially received.
+    """
+    add_line(staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "149.00"})
+    line = only_line(draft_po)
+    draft_po.status = PurchaseOrder.Status.SENT
+    draft_po.save(update_fields=["status"])
+
+    response = patch_line(staff_client, draft_po, line, {"unit_cost_ordered": "1.00"})
+
+    assert response.status_code == 400
+    assert "draft" in response.json()["error"].lower()
+    line.refresh_from_db()
+    assert line.unit_cost_ordered == Decimal("149.0000")
+
+
+def test_repricing_a_voided_line_is_refused(staff_client, draft_po, acme_asset):
+    add_line(staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "149.00"})
+    line = only_line(draft_po)
+    line.is_voided = True
+    line.save(update_fields=["is_voided"])
+
+    response = patch_line(staff_client, draft_po, line, {"unit_cost_ordered": "1.00"})
+
+    assert response.status_code == 400
+    assert "voided" in response.json()["error"].lower()
+    line.refresh_from_db()
+    assert line.unit_cost_ordered == Decimal("149.0000")
+
+
+@pytest.mark.parametrize("bad_cost", ["free", "-1.00"])
+def test_a_reprice_must_name_a_valid_price(staff_client, draft_po, acme_asset, bad_cost):
+    add_line(staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "149.00"})
+    line = only_line(draft_po)
+
+    response = patch_line(staff_client, draft_po, line, {"unit_cost_ordered": bad_cost})
+
+    assert response.status_code == 400
+    line.refresh_from_db()
+    assert line.unit_cost_ordered == Decimal("149.0000")
+
+
+def test_a_reprice_records_both_the_old_and_the_new_price(staff_client, draft_po, acme_asset):
+    """A price change that leaves no trace is what `price_conflict` refuses."""
+    add_line(staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "1490.00"})
+    line = only_line(draft_po)
+
+    patch_line(staff_client, draft_po, line, {"unit_cost_ordered": "149.00"})
+
+    event = PurchaseOrderAuditEvent.objects.filter(
+        action=PurchaseOrderAuditEvent.Action.PO_LINE_REPRICE
+    ).latest("created_at")
+    assert event.line_item_id == line.id
+    assert event.purchase_order_id == draft_po.id
+    assert Decimal(event.metadata["previous_unit_cost_ordered"]) == Decimal("1490.00")
+    assert Decimal(event.metadata["unit_cost_ordered"]) == Decimal("149.00")
+    assert event.metadata["line_shape"] == "asset"
+
+
+def test_restating_the_price_a_line_already_carries_records_nothing(
+    staff_client, draft_po, acme_asset
+):
+    add_line(staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "149.00"})
+    line = only_line(draft_po)
+
+    response = patch_line(staff_client, draft_po, line, {"unit_cost_ordered": "149.0000"})
+
+    assert response.status_code == 200
+    assert not PurchaseOrderAuditEvent.objects.filter(
+        action=PurchaseOrderAuditEvent.Action.PO_LINE_REPRICE
+    ).exists()
+
+
+def test_a_fat_fingered_asset_price_can_be_corrected_and_the_line_then_grown(
+    staff_client, draft_po, acme_asset
+):
+    """The whole loop the `price_conflict` refusal points the operator at.
+
+    Add at the wrong price, be refused on the re-add at the right one, fix the
+    line's price on the route the refusal names, then re-add successfully.
+    """
+    assert (
+        add_line(
+            staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "1490.00"}
+        ).status_code
+        == 201
+    )
+
+    refused = add_line(staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "149.00"})
+    assert refused.status_code == 400
+    assert refused.json()["code"] == "price_conflict"
+
+    line = only_line(draft_po)
+    assert (
+        patch_line(staff_client, draft_po, line, {"unit_cost_ordered": "149.00"}).status_code == 200
+    )
+
+    grown = add_line(staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "149.00"})
+
+    assert grown.status_code == 200
+    assert grown.json()["created"] is False
+    line.refresh_from_db()
+    assert line.quantity_ordered == 2
+    assert line.unit_cost_ordered == Decimal("149.0000")
+    draft_po.refresh_from_db()
+    assert draft_po.estimated_total == Decimal("298.00")

@@ -1092,12 +1092,7 @@ const PurchaseOrderPage: React.FC = () => {
 
       // The same three-way the items table renders through, so the
       // confirmation and the table can never name one line differently.
-      // `match` is the remaining fallback for a server that sent a match but
-      // no line detail.
-      const itemName =
-        (lineItem ? getItemNameAndSku(lineItem).itemName : undefined) ||
-        match?.item?.name ||
-        'Item';
+      const itemName = getItemNameAndSku(lineItem).itemName;
       const matchedBy = match ? ` (matched on ${match.match_label} ${match.matched_value})` : '';
       const notice = created
         ? `Added ${itemName} × ${lineItem.quantity_ordered}${matchedBy}`

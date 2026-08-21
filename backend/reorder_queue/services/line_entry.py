@@ -1086,8 +1086,9 @@ def _grow_existing_asset_line(
         raise LineEntryError(
             f"{asset.name} is already on this order at {current_cost} each; "
             f"this request names {unit_cost}. Re-post at the price already on "
-            f"the line, or change that price deliberately by updating the line "
-            f"item.",
+            f"the line, or change the line's price deliberately by PATCHing "
+            f"unit_cost_ordered on this order's items/<item_id>/ endpoint "
+            f"first.",
             "price_conflict",
         )
     _apply_tag(existing, "work_order", work_order, "work order", asset.name)

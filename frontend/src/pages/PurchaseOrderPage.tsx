@@ -343,10 +343,13 @@ const PurchaseOrderPage: React.FC = () => {
   const [customLineDescription, setCustomLineDescription] = useState('');
   const [customLineUnitCost, setCustomLineUnitCost] = useState('');
   const [customLineQuantity, setCustomLineQuantity] = useState('1');
-  // Its own refusal slot. The identifier form's error sits inline under that
-  // field, which is the wrong place to answer a custom line the operator is
-  // still looking at further down the page.
+  // Its own refusal and confirmation slots. The identifier form's messages sit
+  // inline under that field, which is the wrong place to answer a custom line
+  // the operator is still looking at further down the page — and a confirmation
+  // routed to the wrong form is worse than a refusal routed to the wrong form,
+  // because the operator has no reason to go looking for it.
   const [customLineError, setCustomLineError] = useState<string | null>(null);
+  const [customLineNotice, setCustomLineNotice] = useState<string | null>(null);
   // The scanner loop has to stay mouse-free, so the caret goes back into the
   // entry field the moment an add settles — after a scan-and-Enter, and after a
   // click on one of the ambiguity candidates, whose button disappears with the
@@ -996,22 +999,38 @@ const PurchaseOrderPage: React.FC = () => {
     // whether the caret goes back to the scan field afterwards.
     source: 'identifier' | 'custom' = 'identifier',
   ) => {
+    const fromCustom = source === 'custom';
     try {
-      addLineCameFromScanField.current = source !== 'custom';
+      // Source-gated: the scanner-focus loop belongs to the identifier field.
+      addLineCameFromScanField.current = !fromCustom;
+      // Shared by decision: one in-flight flag for the whole add. Both forms
+      // read it to go read-only and to refuse re-entry, and only one add can
+      // be in flight at a time, so splitting it per control would let the
+      // second submit sail past the first.
       setAddingLine(true);
-      setAddLineError(null);
-      setCustomLineError(null);
+      // Source-gated: each control clears only its own refusal. Wiping the
+      // sibling's is worse than leaving it — an ambiguity prompt cleared while
+      // its own choose-one buttons stay on screen leaves the operator with two
+      // unexplained "Add <item>" buttons under a message about a different
+      // line, which invites putting the wrong item on the order.
+      if (fromCustom) {
+        setCustomLineError(null);
+      } else {
+        setAddLineError(null);
+      }
       const response = await purchaseOrderAPI.addLineItem(orderId!, payload);
       const { created, line_item: lineItem, match, purchase_order: refreshed } = response.data;
 
+      // Shared by decision: the purchase order is the page's single subject and
+      // every control on it renders from this one copy.
       setOrder(refreshed);
-      // Each control clears only its own fields. The two are independent by
-      // design — opening the disclosure does not disturb the scan field, and
-      // `source` exists for no other purpose — so an add from one must not
-      // throw away work sitting in the other: a scan must not wipe a
-      // half-typed custom line, and a custom line must not discard a pending
-      // ambiguity choice-set the operator still has to answer.
-      if (source === 'custom') {
+      // Source-gated: each control clears only its own fields. The two are
+      // independent by design — opening the disclosure does not disturb the
+      // scan field, and `source` exists for no other purpose — so an add from
+      // one must not throw away work sitting in the other: a scan must not
+      // wipe a half-typed custom line, and a custom line must not discard a
+      // pending ambiguity choice-set the operator still has to answer.
+      if (fromCustom) {
         setCustomLineDescription('');
         setCustomLineUnitCost('');
         setCustomLineQuantity('1');
@@ -1029,20 +1048,31 @@ const PurchaseOrderPage: React.FC = () => {
         lineItem?.description ||
         'Item';
       const matchedBy = match ? ` (matched on ${match.match_label} ${match.matched_value})` : '';
-      setAddLineNotice(
-        created
-          ? `Added ${itemName} × ${lineItem.quantity_ordered}${matchedBy}`
-          : `${itemName} was already on this order — quantity is now ${lineItem.quantity_ordered}${matchedBy}`,
-      );
+      const notice = created
+        ? `Added ${itemName} × ${lineItem.quantity_ordered}${matchedBy}`
+        : `${itemName} was already on this order — quantity is now ${lineItem.quantity_ordered}${matchedBy}`;
+      // Source-routed, the same rule the refusal below follows: answer the
+      // operator where they are. A custom line is confirmed under the
+      // custom-line form, not in the identifier form's status line further up
+      // the page where the operator has no reason to look for it.
+      if (fromCustom) {
+        setCustomLineNotice(notice);
+      } else {
+        setAddLineNotice(notice);
+      }
+      // Shared by decision: a page-level toast, not a per-control slot.
       showSuccess(created ? `Added ${itemName}` : `Updated ${itemName}`);
     } catch (err: any) {
       const data = err?.response?.data;
-      setAddLineNotice(null);
-      // The same ownership rule as the success path. A choose-one set can only
-      // ever come back from the identifier control — a freeform line has no
-      // identifier to be ambiguous about — so a refused custom line leaves the
-      // scan field's pending choices exactly where they were.
-      if (source !== 'custom') {
+      // Source-gated, as on the success path. A stale confirmation belongs to
+      // the control that earned it, and a choose-one set can only ever come
+      // back from the identifier control — a freeform line has no identifier
+      // to be ambiguous about — so a refused custom line leaves the scan
+      // field's confirmation and pending choices exactly where they were.
+      if (fromCustom) {
+        setCustomLineNotice(null);
+      } else {
+        setAddLineNotice(null);
         if (data?.code === 'ambiguous' && Array.isArray(data.candidates)) {
           setAddLineCandidates(data.candidates);
         } else {
@@ -1053,9 +1083,9 @@ const PurchaseOrderPage: React.FC = () => {
         typeof data?.error === 'string'
           ? data.error
           : extractErrorMessage(err, 'Failed to add line item');
-      // Answer the operator where they are: a refusal of a custom line belongs
-      // under the custom-line form, not under the scan field further up.
-      if (source === 'custom') {
+      // Source-routed: a refusal of a custom line belongs under the custom-line
+      // form, not under the scan field further up.
+      if (fromCustom) {
         setCustomLineError(message);
       } else {
         setAddLineError(message);
@@ -2003,6 +2033,7 @@ const PurchaseOrderPage: React.FC = () => {
               onClick={() => {
                 setShowCustomLine((open) => !open);
                 setCustomLineError(null);
+                setCustomLineNotice(null);
               }}
             >
               {showCustomLine ? 'Cancel custom line' : 'Add a custom line'}
@@ -2059,6 +2090,12 @@ const PurchaseOrderPage: React.FC = () => {
                     readOnly={addingLine}
                   />
                 </label>
+                {customLineNotice && (
+                  <p className="po-add-line-notice" role="status">
+                    {customLineNotice}
+                  </p>
+                )}
+
                 {customLineError && (
                   <p className="po-add-line-error" role="alert">
                     {customLineError}

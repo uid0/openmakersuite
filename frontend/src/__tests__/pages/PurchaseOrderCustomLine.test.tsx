@@ -11,7 +11,7 @@
  * above is the workflow, and this is the exception.
  */
 import { MantineProvider } from '@mantine/core';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import PurchaseOrderPage from '../../pages/PurchaseOrderPage';
 import * as api from '../../services/api';
@@ -330,8 +330,117 @@ describe('PurchaseOrderPage — adding a custom (freeform) line', () => {
       expect(screen.getByRole('button', { name: /add m3 hex bolt/i })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /add m3 hex nut/i })).toBeInTheDocument();
       expect(screen.getByLabelText(/add an item/i)).toHaveValue('M3 hex');
+      // And so is the prompt that explains them. Buttons without their prompt
+      // are worse than no buttons: two unexplained "Add <item>" controls under
+      // a message about a different line invite adding the wrong item.
+      expect(screen.getByRole('alert')).toHaveTextContent('matches 2 items');
       // Its own fields are the ones that reset.
       expect(screen.getByLabelText(/what is being bought/i)).toHaveValue('');
+    });
+
+    test('a custom-line confirmation is rendered under the custom-line form', async () => {
+      (api.purchaseOrderAPI.addLineItem as jest.Mock).mockResolvedValue({
+        data: {
+          created: true,
+          line_item: freeformLine(),
+          match: null,
+          purchase_order: order({ items: [freeformLine()] }),
+        },
+      });
+
+      await openCustomLine();
+
+      fireEvent.change(screen.getByLabelText(/what is being bought/i), {
+        target: { value: 'Pallet freight surcharge' },
+      });
+      fireEvent.change(screen.getByLabelText(/unit cost/i), { target: { value: '75.00' } });
+      fireEvent.click(screen.getByRole('button', { name: /add custom line/i }));
+
+      // Answer the operator where they are — the same routing the refusal path
+      // already uses. A confirmation in the scan field's status line further up
+      // the page is one the operator has no reason to go looking for.
+      const status = await screen.findByRole('status');
+      expect(status).toHaveTextContent(/Added Pallet freight surcharge/);
+      expect(status.closest('form')).toBe(
+        screen.getByRole('button', { name: /add custom line/i }).closest('form'),
+      );
+      const scanForm = screen.getByLabelText(/add an item/i).closest('form')!;
+      expect(within(scanForm).queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    test('a successful identifier add leaves a custom-line refusal standing', async () => {
+      (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
+        apiError(400, {
+          error: 'A custom line needs a unit cost.',
+          code: 'unit_cost_required',
+        }),
+      );
+
+      await openCustomLine();
+
+      fireEvent.change(screen.getByLabelText(/what is being bought/i), {
+        target: { value: 'Crating' },
+      });
+      fireEvent.change(screen.getByLabelText(/unit cost/i), { target: { value: '9' } });
+      fireEvent.click(screen.getByRole('button', { name: /add custom line/i }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('A custom line needs a unit cost.');
+
+      (api.purchaseOrderAPI.addLineItem as jest.Mock).mockResolvedValueOnce({
+        data: {
+          created: true,
+          line_item: inventoryLine(),
+          match: null,
+          purchase_order: order({ items: [inventoryLine()] }),
+        },
+      });
+
+      const scanField = screen.getByLabelText(/add an item/i);
+      fireEvent.change(scanField, { target: { value: 'OMS-M3-HEX' } });
+      fireEvent.submit(scanField.closest('form')!);
+
+      await screen.findByRole('status');
+
+      // The refusal the operator has not answered yet is still in front of them.
+      expect(screen.getByRole('alert')).toHaveTextContent('A custom line needs a unit cost.');
+    });
+
+    test('a successful custom-line add leaves an identifier refusal standing', async () => {
+      (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
+        apiError(404, {
+          error: 'Nothing matching "wrench" is supplied by Acme Fasteners.',
+          code: 'no_match',
+        }),
+      );
+
+      renderPage();
+      const scanField = await screen.findByLabelText(/add an item/i);
+      fireEvent.change(scanField, { target: { value: 'wrench' } });
+      fireEvent.submit(scanField.closest('form')!);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/is supplied by Acme Fasteners/);
+
+      (api.purchaseOrderAPI.addLineItem as jest.Mock).mockResolvedValueOnce({
+        data: {
+          created: true,
+          line_item: freeformLine(),
+          match: null,
+          purchase_order: order({ items: [freeformLine()] }),
+        },
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /add a custom line/i }));
+      fireEvent.change(screen.getByLabelText(/what is being bought/i), {
+        target: { value: 'Pallet freight surcharge' },
+      });
+      fireEvent.change(screen.getByLabelText(/unit cost/i), { target: { value: '75.00' } });
+      fireEvent.click(screen.getByRole('button', { name: /add custom line/i }));
+
+      await screen.findByRole('status');
+
+      const alert = screen.getByRole('alert');
+      expect(alert).toHaveTextContent(/is supplied by Acme Fasteners/);
+      expect(alert.closest('form')).toBe(scanField.closest('form'));
     });
   });
 });

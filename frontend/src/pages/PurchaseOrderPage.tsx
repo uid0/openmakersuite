@@ -1005,11 +1005,20 @@ const PurchaseOrderPage: React.FC = () => {
       const { created, line_item: lineItem, match, purchase_order: refreshed } = response.data;
 
       setOrder(refreshed);
-      setAddLineIdentifier('');
-      setAddLineCandidates([]);
-      setCustomLineDescription('');
-      setCustomLineUnitCost('');
-      setCustomLineQuantity('1');
+      // Each control clears only its own fields. The two are independent by
+      // design — opening the disclosure does not disturb the scan field, and
+      // `source` exists for no other purpose — so an add from one must not
+      // throw away work sitting in the other: a scan must not wipe a
+      // half-typed custom line, and a custom line must not discard a pending
+      // ambiguity choice-set the operator still has to answer.
+      if (source === 'custom') {
+        setCustomLineDescription('');
+        setCustomLineUnitCost('');
+        setCustomLineQuantity('1');
+      } else {
+        setAddLineIdentifier('');
+        setAddLineCandidates([]);
+      }
 
       // A freeform line has no catalogue item behind it, so its description is
       // the only name it will ever have.
@@ -1029,10 +1038,16 @@ const PurchaseOrderPage: React.FC = () => {
     } catch (err: any) {
       const data = err?.response?.data;
       setAddLineNotice(null);
-      if (data?.code === 'ambiguous' && Array.isArray(data.candidates)) {
-        setAddLineCandidates(data.candidates);
-      } else {
-        setAddLineCandidates([]);
+      // The same ownership rule as the success path. A choose-one set can only
+      // ever come back from the identifier control — a freeform line has no
+      // identifier to be ambiguous about — so a refused custom line leaves the
+      // scan field's pending choices exactly where they were.
+      if (source !== 'custom') {
+        if (data?.code === 'ambiguous' && Array.isArray(data.candidates)) {
+          setAddLineCandidates(data.candidates);
+        } else {
+          setAddLineCandidates([]);
+        }
       }
       const message =
         typeof data?.error === 'string'

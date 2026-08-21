@@ -76,6 +76,34 @@ const order = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+const candidate = (overrides: Record<string, unknown> = {}) => ({
+  item_supplier: 12,
+  match_kind: 'partial_item_name',
+  match_label: 'item name (partial)',
+  matched_value: 'M3 hex',
+  is_exact: false,
+  item: { id: 'item-1', name: 'M3 hex bolt', sku: 'OMS-M3-HEX', is_kit: false },
+  supplier_sku: 'ACME-M3-100',
+  package_upc: '012345678905',
+  unit_upc: '998877665544',
+  quantity_per_package: 5,
+  suggested_quantity: 10,
+  suggested_unit_cost: '2.50',
+  already_on_order: null,
+  ...overrides,
+});
+
+const inventoryLine = (overrides: Record<string, unknown> = {}) => ({
+  ...freeformLine({
+    id: 'line-1',
+    item_type: 'inventory_item',
+    description: null,
+    item_details: { id: 'item-1', name: 'M3 hex bolt', sku: 'OMS-M3-HEX' },
+    quantity_ordered: 10,
+  }),
+  ...overrides,
+});
+
 const apiError = (status: number, data: Record<string, unknown>) =>
   Object.assign(new Error('request failed'), { response: { status, data } });
 
@@ -212,5 +240,98 @@ describe('PurchaseOrderPage — adding a custom (freeform) line', () => {
     await screen.findByText(/PO-2026-0007/, { exact: false });
 
     expect(screen.queryByRole('button', { name: /add a custom line/i })).not.toBeInTheDocument();
+  });
+  /**
+   * The two controls are independent. Adding from one must not silently throw
+   * away work sitting in the other — the operator gets no warning and no way
+   * back, which is the exact failure this change set exists to close.
+   */
+  describe('the scan field and the custom-line form do not clobber each other', () => {
+    test('a successful identifier add leaves a half-typed custom line alone', async () => {
+      (api.purchaseOrderAPI.addLineItem as jest.Mock).mockResolvedValue({
+        data: {
+          created: true,
+          line_item: inventoryLine(),
+          match: null,
+          purchase_order: order({ items: [inventoryLine()] }),
+        },
+      });
+
+      await openCustomLine();
+
+      fireEvent.change(screen.getByLabelText(/what is being bought/i), {
+        target: { value: 'Pallet freight surcharge' },
+      });
+      fireEvent.change(screen.getByLabelText(/unit cost/i), { target: { value: '75.00' } });
+
+      // ...and only then remembers the catalogued part that should go on first.
+      const scanField = screen.getByLabelText(/add an item/i);
+      fireEvent.change(scanField, { target: { value: 'OMS-M3-HEX' } });
+      fireEvent.submit(scanField.closest('form')!);
+
+      await screen.findByRole('status');
+
+      expect(screen.getByLabelText(/what is being bought/i)).toHaveValue(
+        'Pallet freight surcharge',
+      );
+      expect(screen.getByLabelText(/unit cost/i)).toHaveValue(75);
+      // The control the add came from does clear itself, ready for the next scan.
+      expect(screen.getByLabelText(/add an item/i)).toHaveValue('');
+    });
+
+    test('a successful custom-line add leaves a pending ambiguity choice-set standing', async () => {
+      (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
+        apiError(409, {
+          code: 'ambiguous',
+          error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+          candidates: [
+            candidate(),
+            candidate({
+              item_supplier: 13,
+              item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
+            }),
+          ],
+        }),
+      );
+
+      renderPage();
+      const scanField = await screen.findByLabelText(/add an item/i);
+      fireEvent.change(scanField, { target: { value: 'M3 hex' } });
+      fireEvent.submit(scanField.closest('form')!);
+
+      await screen.findByRole('button', { name: /add m3 hex nut/i });
+
+      (api.purchaseOrderAPI.addLineItem as jest.Mock).mockResolvedValueOnce({
+        data: {
+          created: true,
+          line_item: freeformLine(),
+          match: null,
+          purchase_order: order({ items: [freeformLine()] }),
+        },
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /add a custom line/i }));
+      fireEvent.change(screen.getByLabelText(/what is being bought/i), {
+        target: { value: 'Pallet freight surcharge' },
+      });
+      fireEvent.change(screen.getByLabelText(/unit cost/i), { target: { value: '75.00' } });
+      fireEvent.click(screen.getByRole('button', { name: /add custom line/i }));
+
+      await waitFor(() => {
+        expect(api.purchaseOrderAPI.addLineItem).toHaveBeenLastCalledWith('po-1', {
+          description: 'Pallet freight surcharge',
+          unit_cost: '75.00',
+          quantity: 1,
+        });
+      });
+
+      // The choice the operator still owes an answer to is still on screen,
+      // and so is what they scanned to raise it.
+      expect(screen.getByRole('button', { name: /add m3 hex bolt/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /add m3 hex nut/i })).toBeInTheDocument();
+      expect(screen.getByLabelText(/add an item/i)).toHaveValue('M3 hex');
+      // Its own fields are the ones that reset.
+      expect(screen.getByLabelText(/what is being bought/i)).toHaveValue('');
+    });
   });
 });

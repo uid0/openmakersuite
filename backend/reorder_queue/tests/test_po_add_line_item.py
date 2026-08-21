@@ -1095,7 +1095,7 @@ def test_a_capped_unavailable_list_reports_the_true_count(staff_client, draft_po
 
 
 def test_an_uncapped_unavailable_list_says_so(staff_client, draft_po, supplier, bolt):
-    """A discontinued row is an explanation too, and is never capped."""
+    """A single discontinued explanation is under the cap, so nothing was dropped."""
     bolt.is_discontinued = True
     bolt.save()
 
@@ -1148,6 +1148,103 @@ def test_a_multi_match_discontinued_refusal_counts_past_the_cap(staff_client, dr
     assert response.status_code == 400
     assert response.json()["code"] == "discontinued"
     assert "matches 25 items Acme Fasteners no longer supplies" in response.json()["error"]
+
+
+def test_a_mixed_reason_refusal_does_not_name_one_incidental_item(staff_client, draft_po, supplier):
+    """One discontinued row must not speak for twenty-five unrelated matches.
+
+    First-pass entries head the list, so counting only their reason would answer
+    "Acme no longer supplies widget 001" for a query that also named 25 items
+    another vendor carries — the same "names one of many" defect, across the
+    reason boundary.
+    """
+    ItemSupplier.objects.create(
+        item=make_item("widget 001", "OMS-WID-001"),
+        supplier=supplier,
+        supplier_sku="ACME-WID-001",
+        unit_cost=Decimal("1.00"),
+        is_discontinued=True,
+        is_active=False,
+    )
+    other = Supplier.objects.create(name="Bolt Depot")
+    for index in range(2, 27):
+        ItemSupplier.objects.create(
+            item=make_item(f"widget {index:03d}", f"OMS-WID-{index:03d}"),
+            supplier=other,
+            supplier_sku=f"BD-WID-{index:03d}",
+            unit_cost=Decimal("1.00"),
+        )
+
+    response = add_line(staff_client, draft_po, {"identifier": "widget"})
+
+    assert response.status_code == 400
+    error = response.json()["error"]
+    assert "matches 26 items" in error
+    assert "no longer supplies 1 of them" in error
+    assert "does not supply the other 25" in error
+    assert not PurchaseOrderItem.objects.filter(purchase_order=draft_po).exists()
+
+
+def test_the_cross_vendor_label_names_the_listing_that_actually_matched(
+    staff_client, draft_po, supplier
+):
+    """Provenance is the point of the label, so it must be the real provenance.
+
+    Two rivals list the same bolt. The alphabetically-first one only matches the
+    typed string as a substring; the later one matches it exactly. Naming the
+    first would show the operator a vendor and a value they never typed.
+    """
+    item = make_item("M5 carriage bolt", "OMS-M5-CAR")
+    own = ItemSupplier.objects.create(
+        item=item, supplier=supplier, supplier_sku="ACME-M5", unit_cost=Decimal("1.00")
+    )
+    ItemSupplier.objects.create(
+        item=item,
+        supplier=Supplier.objects.create(name="Acme Depot"),
+        supplier_sku="XBD-M5X",
+        unit_cost=Decimal("1.10"),
+    )
+    ItemSupplier.objects.create(
+        item=item,
+        supplier=Supplier.objects.create(name="Bolt Depot"),
+        supplier_sku="BD-M5",
+        unit_cost=Decimal("1.20"),
+    )
+
+    candidate = lookup(staff_client, draft_po, "BD-M5").json()["candidates"][0]
+
+    assert candidate["item_supplier"] == own.pk
+    assert candidate["match_kind"] == "other_supplier_listing"
+    assert candidate["match_label"] == "Bolt Depot's supplier SKU"
+    assert candidate["matched_value"] == "BD-M5"
+
+
+def test_a_direct_exact_hit_skips_the_cross_vendor_search(staff_client, draft_po, bolt):
+    """Nothing weaker than an exact own-row hit can change the answer.
+
+    The cross-vendor pass searches every other supplier's rows over unindexed
+    columns, so it is not run once this supplier's own rows have produced an
+    exact match: its tier is the weakest there is and could never outrank one.
+    """
+    other = Supplier.objects.create(name="Bolt Depot")
+    ItemSupplier.objects.create(
+        item=make_item("M5 carriage bolt", "OMS-M5-CAR"),
+        supplier=other,
+        supplier_sku="ACME-M3-100",
+        unit_cost=Decimal("1.10"),
+    )
+    ItemSupplier.objects.create(
+        item=InventoryItem.objects.get(sku="OMS-M5-CAR"),
+        supplier=draft_po.supplier,
+        supplier_sku="ACME-M5",
+        unit_cost=Decimal("1.00"),
+    )
+
+    body = lookup(staff_client, draft_po, "ACME-M3-100").json()
+
+    assert body["best_match_kind"] == "vendor_sku"
+    assert body["resolves"] is True
+    assert [c["item_supplier"] for c in body["candidates"]] == [bolt.pk]
 
 
 def test_the_ambiguity_message_counts_matches_not_the_capped_list(staff_client, draft_po, supplier):

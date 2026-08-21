@@ -128,7 +128,7 @@ MATCH_TIER_LABELS = {
     MATCH_PARTIAL_ITEM_SKU: "item SKU (partial)",
     MATCH_PARTIAL_ITEM_NAME: "item name (partial)",
     # Overridden per candidate with the vendor whose listing matched — see
-    # :func:`_cross_vendor_candidates`. The generic wording is the fallback.
+    # :func:`_extend_with_cross_vendor`. The generic wording is the fallback.
     MATCH_OTHER_SUPPLIER_LISTING: "another supplier's listing",
 }
 
@@ -352,7 +352,16 @@ def lookup_candidates(purchase_order, query, limit=DEFAULT_CANDIDATE_LIMIT):
     # item this supplier does carry. Resolving item-first rather than
     # supplier-row-first is what keeps the answer true — the supplier-scoped
     # query above cannot see a code that only exists on a rival's row.
-    _extend_with_cross_vendor(result, purchase_order, query, existing_lines)
+    #
+    # Skipped once this supplier's own rows produced an exact hit. That pass
+    # searches every OTHER supplier's rows over unindexed columns, and this
+    # endpoint is driven from a keyboard, so it is not worth running for an
+    # answer that cannot change: the cross-vendor tier is the weakest there is,
+    # so its candidates can never reach best_tier_candidates() while a stronger
+    # tier holds any. Resolution is identical either way; only the tail of the
+    # lookup payload is shorter.
+    if not any(candidate.match_kind in _EXACT_TIERS for candidate in result.candidates):
+        _extend_with_cross_vendor(result, purchase_order, query, existing_lines)
 
     result.candidates.sort(
         key=lambda candidate: (
@@ -446,9 +455,19 @@ def _extend_with_cross_vendor(result, purchase_order, query, existing_lines):
         .select_related("item", "supplier")
         .order_by("item__name", "supplier__name")
     )
+    # Strongest match per item, not whichever vendor sorts first: the label and
+    # matched_value below are the operator's evidence for why this candidate came
+    # up, so they have to come from the listing that actually explains the string
+    # they typed. Ties keep the first row, which the ordering makes stable.
     rivals_by_item = {}
     for rival in rival_rows:
-        rivals_by_item.setdefault(rival.item_id, rival)
+        kind = _classify_vendor_fields(rival, query)
+        if kind is None:  # pragma: no cover - the SQL filter already implies one
+            continue
+        rank = MATCH_TIERS.index(kind)
+        best = rivals_by_item.get(rival.item_id)
+        if best is None or rank < best[0]:
+            rivals_by_item[rival.item_id] = (rank, kind, rival)
     if not rivals_by_item:
         return
 
@@ -460,10 +479,7 @@ def _extend_with_cross_vendor(result, purchase_order, query, existing_lines):
     ).select_related("item", "item__count_level", "supplier")
 
     for own in own_rows:
-        rival = rivals_by_item[own.item_id]
-        kind = _classify_vendor_fields(rival, query)
-        if kind is None:  # pragma: no cover - the SQL filter already implies one
-            continue
+        _, kind, rival = rivals_by_item[own.item_id]
         if own.is_discontinued or not own.is_active:
             result.unavailable.append(
                 Unavailable(
@@ -675,38 +691,48 @@ def resolve_item_supplier(purchase_order, item_supplier_id):
 def _unavailable_error(purchase_order, identifier, result):
     """Refusal for an identifier that named only items this order cannot carry.
 
-    One match speaks for itself, so its own message is raised verbatim — that is
-    the ordinary case, an operator holding the wrong vendor's box.
+    ONE match in the whole set speaks for itself, so its own message is raised
+    verbatim — that is the ordinary case, an operator holding the wrong vendor's
+    box.
 
-    Above one, naming the alphabetically first entry would present an arbitrary
-    item as though it were *the* match, and say nothing about the other
-    twenty-four. So the count leads instead, the same way the ambiguity path
-    counts its candidates. The count is per reason and taken from the pre-cap
-    totals, so a message about one reason never quotes a number that includes
-    the other, nor the size of the capped list.
+    Above one, naming the first entry would present an arbitrary item as though
+    it were *the* match and say nothing about the rest, so the count leads
+    instead, the same way the ambiguity path counts its candidates. The gate is
+    the size of the whole set, never one reason's share of it: entries from the
+    first pass are always at the head of the list, so counting only their reason
+    would hand back "Acme no longer supplies widget 001" for a query that also
+    named twenty-five items another vendor carries. Counts come from the pre-cap
+    totals, so none of them is the size of the capped list.
     """
     supplier = purchase_order.supplier
     first = result.unavailable[0]
-    if first.reason == UNAVAILABLE_DISCONTINUED:
-        total = result.total_discontinued
-    else:
-        total = result.total_unavailable - result.total_discontinued
+    dropped = result.total_discontinued
+    elsewhere = result.total_unavailable - dropped
 
-    if total <= 1:
+    if len(result.unavailable) == 1 and result.total_unavailable == 1:
         return LineEntryError(first.message, first.reason)
+
+    if dropped and elsewhere:
+        return LineEntryError(
+            f'"{identifier}" matches {result.total_unavailable} items that cannot '
+            f"go on this order — {supplier.name} no longer supplies {dropped} of "
+            f"them and does not supply the other {elsewhere} at all. Narrow the "
+            "search to the one you want.",
+            first.reason,
+        )
 
     if first.reason == UNAVAILABLE_DISCONTINUED:
         return LineEntryError(
-            f'"{identifier}" matches {total} items {supplier.name} no longer '
+            f'"{identifier}" matches {dropped} items {supplier.name} no longer '
             f"supplies — {first.item.name} is one of them. Narrow the search to "
             "the one you want.",
             first.reason,
         )
     return LineEntryError(
-        f'"{identifier}" matches {total} items {supplier.name} does not supply — '
-        f"{first.item.name} is one of them. Narrow the search to the one you "
-        f"want, then add {supplier.name} as a supplier for it, or order it on a "
-        "purchase order for a supplier that carries it.",
+        f'"{identifier}" matches {elsewhere} items {supplier.name} does not '
+        f"supply — {first.item.name} is one of them. Narrow the search to the "
+        f"one you want, then add {supplier.name} as a supplier for it, or order "
+        "it on a purchase order for a supplier that carries it.",
         first.reason,
     )
 

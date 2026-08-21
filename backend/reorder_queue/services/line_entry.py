@@ -894,12 +894,19 @@ def _grow_existing_line(
 
     grow_by = repeat_quantity(item_supplier) if quantity is None else quantity
     apply_line_quantity(existing, (existing.quantity_ordered or 0) + grow_by)
+    previous_cost = existing.unit_cost_ordered
     if explicit_cost is not None:
         existing.unit_cost_ordered = explicit_cost
     if notes:
         existing.notes = f"{existing.notes}\n{notes}".strip() if existing.notes else notes
     existing.save()
     recalculate_estimated_total(purchase_order)
+    # An override that replaced a DIFFERENT figure is a reprice, and the
+    # caller has to be able to record it as one. Compared numerically, so
+    # restating 5.00 against a stored 5.0000 is not a price change.
+    existing.repriced_from = (
+        previous_cost if explicit_cost is not None and previous_cost != explicit_cost else None
+    )
     return existing, False
 
 
@@ -950,7 +957,9 @@ def add_line_item(
 
     The caller owns the draft guard (:func:`assert_addable`) and the audit
     event; both are applied at the view boundary alongside the other PO
-    actions.
+    actions. When growing a line overrode a *different* price, the returned
+    line carries the figure it replaced on ``repriced_from`` so the caller can
+    record that as its own event — a price never moves without a trace.
     """
     explicit_quantity = None if quantity is None else _coerce_quantity(quantity)
     explicit_cost = None if unit_cost is None else _coerce_unit_cost(unit_cost)
@@ -1099,6 +1108,9 @@ def _grow_existing_asset_line(
         existing.notes = f"{existing.notes}\n{notes}".strip() if existing.notes else notes
     existing.save()
     recalculate_estimated_total(purchase_order)
+    # Never a reprice: a differing price was refused above, before any
+    # mutation, so the price this line carries is the one it already had.
+    existing.repriced_from = None
     return existing, False
 
 

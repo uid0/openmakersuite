@@ -203,7 +203,19 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["created_at", "updated_at", "voided_at", "voided_by"]
+        # ``unit_cost_ordered`` is read-only here so the price-trace invariant
+        # holds by construction rather than by accident of routing: nothing
+        # currently feeds this serializer input, but a future viewset that did
+        # would otherwise rewrite a line's ordered price with no audit event.
+        # The two routes that may change it — the draft-only PATCH reprice and
+        # an add that grows a line — both record what they replaced.
+        read_only_fields = [
+            "created_at",
+            "updated_at",
+            "voided_at",
+            "voided_by",
+            "unit_cost_ordered",
+        ]
 
     def get_kit_components(self, obj):
         """What receiving this line's ordered quantity will credit (op-8n0).

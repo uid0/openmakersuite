@@ -1308,3 +1308,96 @@ def test_a_duplicate_insert_racing_the_add_falls_back_to_growing_the_line(
     assert PurchaseOrderItem.objects.filter(purchase_order=draft_po).count() == 1
     line.refresh_from_db()
     assert line.quantity_ordered == 11
+
+
+# --------------------------------------------------------------------------
+# The price-trace invariant: unit_cost_ordered never moves without a record
+# --------------------------------------------------------------------------
+
+
+def reprice_events(po):
+    return PurchaseOrderAuditEvent.objects.filter(
+        purchase_order=po, action=PurchaseOrderAuditEvent.Action.PO_LINE_REPRICE
+    )
+
+
+def test_growing_a_line_at_a_different_price_records_the_reprice(staff_client, draft_po, bolt):
+    """The override stays; the figure it replaced gets recorded.
+
+    A repeat add that names a new price both grows the line AND reprices it, so
+    it earns both rows — and the price change is findable by the one query that
+    asks "when did a price on this order move", rather than only from inside an
+    add row.
+    """
+    first = add_line(staff_client, draft_po, {"item_supplier": bolt.pk, "unit_cost": "5.00"})
+    assert first.status_code == 201
+    line = PurchaseOrderItem.objects.get(purchase_order=draft_po)
+    assert line.unit_cost_ordered == Decimal("5.0000")
+
+    response = add_line(staff_client, draft_po, {"item_supplier": bolt.pk, "unit_cost": "0.01"})
+
+    assert response.status_code == 200
+    line.refresh_from_db()
+    assert line.unit_cost_ordered == Decimal("0.0100")
+
+    # Still one add row per add — the reprice row is additional, not instead.
+    assert (
+        PurchaseOrderAuditEvent.objects.filter(
+            purchase_order=draft_po, action=PurchaseOrderAuditEvent.Action.PO_LINE_ADD
+        ).count()
+        == 2
+    )
+    event = reprice_events(draft_po).get()
+    assert event.line_item_id == line.id
+    assert Decimal(event.metadata["previous_unit_cost_ordered"]) == Decimal("5.00")
+    assert Decimal(event.metadata["unit_cost_ordered"]) == Decimal("0.01")
+    assert event.metadata["line_shape"] == "inventory_item"
+
+
+@pytest.mark.parametrize(
+    "second_payload",
+    [
+        pytest.param({"unit_cost": "5.00"}, id="same-price"),
+        pytest.param({"unit_cost": "5.0000"}, id="same-price-restated-precision"),
+        pytest.param({}, id="no-price-supplied"),
+    ],
+)
+def test_a_grow_that_does_not_move_the_price_records_no_reprice(
+    staff_client, draft_po, bolt, second_payload
+):
+    add_line(staff_client, draft_po, {"item_supplier": bolt.pk, "unit_cost": "5.00"})
+
+    response = add_line(staff_client, draft_po, {"item_supplier": bolt.pk, **second_payload})
+
+    assert response.status_code == 200
+    line = PurchaseOrderItem.objects.get(purchase_order=draft_po)
+    assert line.unit_cost_ordered == Decimal("5.0000")
+    assert not reprice_events(draft_po).exists()
+
+
+def test_a_new_line_is_not_a_reprice(staff_client, draft_po, bolt):
+    """There is no prior figure on a line being created."""
+    assert (
+        add_line(
+            staff_client, draft_po, {"item_supplier": bolt.pk, "unit_cost": "5.00"}
+        ).status_code
+        == 201
+    )
+
+    assert not reprice_events(draft_po).exists()
+
+
+def test_the_line_serializer_will_not_take_a_price_from_the_wire(staff_client, draft_po, bolt):
+    """`unit_cost_ordered` is output-only, so no future route can write it unaudited."""
+    from reorder_queue.serializers import PurchaseOrderItemSerializer
+
+    add_line(staff_client, draft_po, {"item_supplier": bolt.pk, "unit_cost": "5.00"})
+    line = PurchaseOrderItem.objects.get(purchase_order=draft_po)
+
+    serializer = PurchaseOrderItemSerializer(line, data={"unit_cost_ordered": "0.01"}, partial=True)
+    assert serializer.is_valid(), serializer.errors
+    assert "unit_cost_ordered" not in serializer.validated_data
+
+    serializer.save()
+    line.refresh_from_db()
+    assert line.unit_cost_ordered == Decimal("5.0000")

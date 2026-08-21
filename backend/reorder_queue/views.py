@@ -34,6 +34,7 @@ from inventory.services.packaging import (
 
 from . import services
 from .audit import record_event as record_audit_event
+from .audit import record_line_reprice
 from .models import (
     DeliveryItem,
     LeadTimeLog,
@@ -1760,6 +1761,16 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             },
         )
 
+        # A grow that overrode a different price both added quantity AND
+        # repriced the line, so it gets both rows — see ``record_line_reprice``.
+        repriced_from = getattr(line_item, "repriced_from", None)
+        if repriced_from is not None:
+            record_line_reprice(
+                line_item=line_item,
+                previous_unit_cost=repriced_from,
+                actor=request.user,
+            )
+
         # The viewset prefetches ``items``, so the instance in hand still holds
         # the pre-add line set; re-read it so the returned order includes the
         # new line and the re-rolled estimated total.
@@ -2075,19 +2086,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         # exists to prevent, so the deliberate route has to record both the
         # figure it replaced and the one it wrote.
         if repriced_from is not None:
-            record_audit_event(
-                action=PurchaseOrderAuditEvent.Action.PO_LINE_REPRICE,
-                actor=request.user,
+            record_line_reprice(
                 line_item=line_item,
-                metadata={
-                    "line_shape": line_item.target_type,
-                    "item_supplier": line_item.item_supplier_id,
-                    "asset_id": str(line_item.asset_id) if line_item.asset_id else None,
-                    "description": line_item.description or "",
-                    "quantity_ordered": line_item.quantity_ordered,
-                    "previous_unit_cost_ordered": str(repriced_from),
-                    "unit_cost_ordered": str(line_item.unit_cost_ordered),
-                },
+                previous_unit_cost=repriced_from,
+                actor=request.user,
             )
 
         from .serializers import PurchaseOrderItemSerializer

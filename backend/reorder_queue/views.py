@@ -1347,18 +1347,28 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # An ABSENT key is not a supplied null. The web app confirms with no
+        # request body at all (PurchaseOrderPage.tsx -> confirmOrder(orderId)),
+        # so reading the key with a None default and passing it on wiped the
+        # expected delivery date the operator had already set — silently, with a
+        # 200, taking the due_on_receipt/cod payment due date and receiving's
+        # expected date down with it. Only a key the client actually sent is
+        # forwarded; an explicit null still clears the date as before.
+        #
         # Same coercion trap as inventory generate_work_order (BACKEND-18): the
         # client's date arrives as a string, and handing it straight to the
         # service persists fine but leaves a str on the in-memory PO, so
         # render_payment_schedule() calls .isoformat() on it and 500s while
         # serializing the response — after the PO has already been confirmed.
-        raw_expected = request.data.get("expected_delivery_date")
-        if raw_expected:
-            expected_delivery_date = serializers.DateField().to_internal_value(raw_expected)
+        if "expected_delivery_date" in request.data:
+            raw_expected = request.data["expected_delivery_date"]
+            if raw_expected:
+                expected_delivery_date = serializers.DateField().to_internal_value(raw_expected)
+            else:
+                expected_delivery_date = None
+            services.confirm_order(purchase_order, expected_delivery_date)
         else:
-            expected_delivery_date = raw_expected
-
-        services.confirm_order(purchase_order, expected_delivery_date)
+            services.confirm_order(purchase_order)
 
         serializer = self.get_serializer(purchase_order)
         return Response(serializer.data)

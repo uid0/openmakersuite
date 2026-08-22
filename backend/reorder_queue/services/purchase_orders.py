@@ -486,13 +486,28 @@ def mark_sent(purchase_order, user):
     update_reorder_requests_from_po(purchase_order)
 
 
-def confirm_order(purchase_order, expected_delivery_date):
+#: Sentinel for "the caller supplied no value", distinct from an explicitly
+#: supplied ``None``. A confirm that names no delivery date must leave the one
+#: the operator already set alone; a confirm that explicitly sends ``null`` is
+#: asking to clear it. Collapsing the two silently erased the date on every
+#: confirm from the web UI, which posts no body at all.
+UNCHANGED = object()
+
+
+def confirm_order(purchase_order, expected_delivery_date=UNCHANGED):
     """Mark a purchase order as confirmed by the supplier.
 
     The caller owns the SENT precondition.
+
+    ``expected_delivery_date`` is written only when the caller actually supplies
+    one. Omit it to confirm without touching the date already on the order —
+    the delivery-anchored payment terms (``due_on_receipt`` / ``cod``) and
+    :func:`reorder_queue.services.receiving.create_lead_time_log` both read that
+    field, so overwriting it with a value nobody sent loses more than the field.
     """
     purchase_order.status = PurchaseOrder.Status.CONFIRMED
-    purchase_order.expected_delivery_date = expected_delivery_date
+    if expected_delivery_date is not UNCHANGED:
+        purchase_order.expected_delivery_date = expected_delivery_date
     purchase_order.save()
 
 

@@ -97,6 +97,17 @@ so a retrying operator accumulates duplicate rows. Worked examples:
 `inventory/tests/test_generate_work_order_due_date.py` and
 `reorder_queue/tests/test_po_confirm_expected_delivery_date.py`.
 
+The companion rule on the same read: a key the client did **not** send is not a
+supplied `null`. `request.data.get("field")` collapses the two, so a hand-rolled
+action that assigns the result unconditionally silently erases whatever the
+record already held whenever a client posts a partial (or empty) body — and the
+web app posts no body at all on several of these actions. Gate the write on
+`if "field" in request.data`, and where the service needs to tell "unsupplied"
+from "explicitly cleared" give it an `UNCHANGED` sentinel default rather than
+`None` (`reorder_queue.services.purchase_orders.confirm_order`). The convention
+is stated in `ReorderRequestViewSet.mark_ordered`'s docstring and pinned by
+`reorder_queue/tests/test_po_confirm_preserves_expected_delivery_date.py`.
+
 ### Django upgrade history
 
 The backend now runs **Django 6.0.7**. The notes below cover the earlier 4.2 -> 5.1

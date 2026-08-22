@@ -1338,7 +1338,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def confirm_order(self, request, pk=None):
-        """Mark purchase order as confirmed by supplier."""
+        """Mark purchase order as confirmed by supplier.
+
+        ``expected_delivery_date`` is optional: omit it and the date already on
+        the order is left untouched, so a bare confirm never wipes what the
+        operator set at create or edit time. Send a date to override it, or an
+        explicit ``null`` to clear it deliberately.
+        """
         purchase_order = self.get_object()
 
         if purchase_order.status != PurchaseOrder.Status.SENT:

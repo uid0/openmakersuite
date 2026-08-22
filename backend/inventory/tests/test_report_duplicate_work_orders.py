@@ -17,6 +17,7 @@ report to tell apart:
 """
 
 import ast
+import itertools
 import json
 import pathlib
 from datetime import date, datetime, timedelta
@@ -31,6 +32,8 @@ import pytest
 
 from inventory.models import (
     LocationProblem,
+    WorkOrderOmrTemplate,
+    WorkOrderPhoto,
     MaintenanceAuditEvent,
     MaintenanceItem,
     MaintenanceTask,
@@ -723,7 +726,68 @@ def test_an_unreceived_purchase_order_line_is_not_treated_as_untouched(seeded):
     # The captain is told this is an attachment, not somebody working the job.
     text = _run()
     assert "YES — as ATTACHED RECORDS, not as recorded work: purchase_order_items" in text
-    assert "would silently detach those records" in text
+    assert "Deleting this work order would silently detach them" in text
+    # Nothing indeterminate here, so the verdict makes no claim beyond what fired.
+    assert ordered_row["cannot_tell_because"] == []
+    assert "CANNOT TELL" not in text
+
+
+def test_a_worked_row_still_reports_what_it_could_not_tell(seeded):
+    """A positive finding must not swallow an unknown computed on the same row.
+
+    A tech orders a seal kit against WO#2 and prints its OMR paper form. The
+    order is a positive finding; the printed form is an explicit unknown — a
+    paper copy may have been worked and never scanned back. Reporting only the
+    order would state an absence over a case the report itself computed as
+    indeterminate.
+    """
+    from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
+
+    item = _item("Gearbox reseal", "Sumitomo Gearbox")
+    plain = _work_order(item, created_at=BASE)
+    both = _work_order(item, created_at=BASE + timedelta(seconds=13))
+
+    order = PurchaseOrder.objects.create(
+        supplier=SupplierFactory(), created_by=seeded["operator"]
+    )
+    PurchaseOrderItem.objects.create(
+        purchase_order=order,
+        description="Seal kit",
+        quantity_ordered=1,
+        quantity_received=0,
+        unit_cost_ordered=Decimal("42.00"),
+        work_order=both,
+    )
+    WorkOrderOmrTemplate.objects.create(
+        work_order=both, template_version=1, page_w_pt=595.0, page_h_pt=842.0
+    )
+
+    group = _groups()[str(item.id)]
+    rows = _rows(group)
+    both_row = rows[str(both.id)]
+
+    assert rows[str(plain.id)]["verdict"] == "no-recorded-work"
+    assert both_row["verdict"] == "worked"
+    assert both_row["worked_because"] == ["purchase_order_items"]
+    # The unknown is not swallowed: it reaches JSON...
+    assert any("never scanned back" in r for r in both_row["cannot_tell_because"])
+
+    # ...the text verdict line...
+    text = _run()
+    assert "AND CANNOT TELL:" in text
+    assert "may have been worked and never scanned back" in text
+    assert "Nobody is shown to have worked this job" not in text
+
+    # ...and CSV, where an empty cell would tell a consumer there was no doubt.
+    import csv as csv_module
+
+    csv_rows = [r for r in csv_module.reader(StringIO(_run("--format", "csv"))) if r]
+    header_index = next(i for i, r in enumerate(csv_rows) if "work_order_id" in r)
+    header = csv_rows[header_index]
+    row = next(
+        r for r in csv_rows[header_index + 1 :] if r[header.index("work_order_id")] == str(both.id)
+    )
+    assert "never scanned back" in row[header.index("cannot_tell_because")]
 
 
 def test_an_order_level_purchase_order_is_also_an_attachment(seeded):
@@ -759,6 +823,92 @@ def test_a_promoted_problem_report_is_an_attachment_not_an_absence(seeded):
     assert rows[str(promoted.id)]["work_signals"]["location_problems"] == 1
     assert rows[str(promoted.id)]["verdict"] == "worked"
     assert rows[str(promoted.id)]["worked_because"] == ["location_problems"]
+
+
+def test_a_photo_copied_in_at_creation_is_not_recorded_work():
+    """Promotion copies the reporter's photo onto the brand-new work order.
+
+    ``copy_to_work_order_photo`` sets no uploader and the row is stamped by
+    auto_now_add in the same transaction that creates the work order, so a bare
+    photo count would read two freshly promoted problems as worked.
+    """
+    user = User.objects.create_user(
+        username="walker", email="walk@example.com", password="w-password"
+    )
+    item = _item("As-needed building repair", "Main Workshop Fabric")
+    location = LocationFactory()
+    promoted = [
+        _work_order(item, created_at=BASE, due_date=None, assigned_to=user),
+        _work_order(item, created_at=BASE + timedelta(seconds=90), due_date=None, assigned_to=user),
+    ]
+    for index, wo in enumerate(promoted):
+        LocationProblem.objects.create(
+            location=location, description=f"Problem {index}", work_order=wo
+        )
+        photo = WorkOrderPhoto.objects.create(
+            work_order=wo,
+            image=f"work_order_photos/2026/07/problem-{index}.jpg",
+            caption=f"From LocationProblem {index}",
+        )
+        WorkOrderPhoto.objects.filter(pk=photo.pk).update(uploaded_at=wo.created_at)
+
+    rows = _rows(_groups()[str(item.id)])
+    for wo in promoted:
+        row = rows[str(wo.id)]
+        assert row["work_signals"]["photos_total"] == 1
+        assert row["work_signals"]["photos_uploaded"] == 0
+        assert row["work_signals"]["photos_at_creation"] == 1
+        # The promoted problem link is why it is not untouched — not the photo.
+        assert row["worked_because"] == ["location_problems"]
+        assert any("copied across at creation" in r for r in row["cannot_tell_because"])
+
+    text = _run()
+    assert "YES — photos" not in text
+    assert "photos 0/1 uploaded (1 copied in at creation)" in text
+
+
+def test_a_photo_uploaded_later_is_recorded_work(seeded):
+    """A photo with an uploader, or stamped later, could only be post-generation."""
+    item = _item("Belt guard check", "Startrite Bandsaw")
+    plain = _work_order(item, created_at=BASE)
+    photographed = _work_order(item, created_at=BASE + timedelta(seconds=8))
+    WorkOrderPhoto.objects.create(
+        work_order=photographed,
+        image="work_order_photos/2026/07/guard.jpg",
+        caption="Guard refitted",
+        uploaded_by=seeded["operator"],
+    )
+
+    rows = _rows(_groups()[str(item.id)])
+    assert rows[str(plain.id)]["verdict"] == "no-recorded-work"
+    assert rows[str(photographed.id)]["work_signals"]["photos_uploaded"] == 1
+    assert rows[str(photographed.id)]["work_signals"]["photos_at_creation"] == 0
+    assert rows[str(photographed.id)]["worked_because"] == ["photos_uploaded"]
+
+
+def test_every_reported_signal_is_classified_exactly_once(seeded):
+    """The (A1)/(A2)/(C)/context inventory must cover every key the report emits.
+
+    This is the invariant the categorisation exists to hold: a signal added
+    later cannot slip out unclassified and quietly become "we checked and found
+    nothing".
+    """
+    payload = _payload()
+    groups = {g["maintenance_item_id"]: g for g in payload["groups"]}
+    emitted = set(groups[str(seeded["item_a"].id)]["work_orders"][0]["work_signals"])
+
+    buckets = {
+        "work": set(payload["work_signals"]),
+        "attachment": set(payload["attachment_signals"]),
+        "indeterminate": set(payload["indeterminate_signal_names"]),
+        "context": set(payload["context_signals"]),
+    }
+    classified = set().union(*buckets.values())
+
+    assert emitted - classified == set(), "unclassified signal(s) reported"
+    assert classified - emitted == set(), "classified signal(s) never reported"
+    for left, right in itertools.combinations(buckets, 2):
+        assert not buckets[left] & buckets[right], f"{left} and {right} overlap"
 
 
 def test_a_missing_due_date_is_not_asserted_to_be_backend18_damage():

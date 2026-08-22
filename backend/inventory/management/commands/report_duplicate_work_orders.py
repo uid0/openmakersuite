@@ -87,10 +87,11 @@ VERDICT_UNKNOWN = "unknown"
 VERDICT_NONE = "no-recorded-work"
 
 #: (A1) POSITIVE FINDINGS — somebody WORKED this job. Membership here is a
-#: claim that the signal can ONLY be produced by a human acting on the work
-#: order after it was generated. A generation-time artifact must never be
-#: listed here — that is the ``quantity_used`` trap, and the reason
-#: ``tools_restaged`` and ``bundled_items`` live in the (C) table below.
+#: claim that the signal can only be produced by a human acting on the work
+#: order after it was generated, and that no creation-time path can manufacture
+#: it. A generation-time artifact must never be listed here — that is the
+#: ``quantity_used`` trap, and the reason ``tools_restaged``, ``bundled_items``
+#: and creation-time photo/attachment copies live in the (C) table below.
 WORK_SIGNALS = (
     "status_beyond_open",
     "tasks_completed",
@@ -110,8 +111,8 @@ WORK_SIGNALS = (
     "completed_by",
     "completed_scan",
     "maintenance_logs",
-    "photos",
-    "attachments",
+    "photos_uploaded",
+    "attachments_uploaded",
     "validations",
     "submissions",
     "edited_since_create",
@@ -173,6 +174,32 @@ INDETERMINATE_SIGNALS = (
         "those when the work order is created, so it is not by itself somebody having "
         "worked the job",
     ),
+    (
+        "photos_at_creation",
+        "{photos_at_creation} photo(s) carry no uploader and were stamped within "
+        "{slack}s of the work order being created — the signature of a promoted "
+        "problem report's photo being copied across at creation, not of anyone "
+        "photographing the job",
+    ),
+    (
+        "attachments_at_creation",
+        "{attachments_at_creation} attachment(s) carry no uploader and were stamped "
+        "within {slack}s of the work order being created, so they cannot be told apart "
+        "from files copied across at creation",
+    ),
+)
+
+#: Reported for context, never used as evidence in either direction. Row counts
+#: that generation creates, and identifiers. Listed so every key the report
+#: emits is classified: (A1) work, (A2) attachment, (C) unknown, or context.
+CONTEXT_SIGNALS = (
+    "status",
+    "tasks_total",
+    "materials_total",
+    "tools_total",
+    "loto_total",
+    "photos_total",
+    "attachments_total",
 )
 
 FALSE_POSITIVE_NOTE = """\
@@ -218,7 +245,7 @@ SIGNALS_NOTE = """\
 
 (A1) POSITIVE FINDINGS, WORK — any one of these fires and the verdict is
     WORKED. Each can only be produced by a human acting on the work order
-    after generation:
+    after generation; no creation-time path can manufacture one:
 
   status_beyond_open  status moved beyond the initial "open".
   tasks_completed     WorkOrderTaskCompletion rows with is_completed=True.
@@ -248,7 +275,13 @@ SIGNALS_NOTE = """\
   completed_by        completed_by_name from a scanned paper form.
   completed_scan      a completed paper form was scanned or emailed back in.
   maintenance_logs    MaintenanceLog rows written back from this work order.
-  photos/attachments  evidence uploaded against the work order.
+  photos_uploaded     photos that carry an uploader, or that were stamped after
+  attachments_uploaded
+                      the work order was created. Only these count as evidence:
+                      a promoted problem report's photo is copied onto the new
+                      work order at creation with no uploader, so a bare count
+                      of photos would read a creation-time artifact as work.
+                      Those copies are reported under (C) instead.
   validations         WorkOrderValidation sign-offs.
   submissions         scanned/emailed-in paper submissions.
   edited_since_create updated_at moved after created_at (someone saved the row).
@@ -290,6 +323,11 @@ SIGNALS_NOTE = """\
                       so no comparison is possible at all.
   bundled_items       sibling PMs are attached, but auto-bundling attaches them
                       at creation time, not by anyone working the job.
+  photos_at_creation  a photo with no uploader, stamped within the creation
+  attachments_at_creation
+                      slack. That is exactly what promoting a reported problem
+                      leaves behind, so it cannot be told apart from somebody
+                      photographing the job in the same second.
 
 DELIBERATELY NOT EVIDENCE, in either direction — reported for context only:
 
@@ -297,16 +335,21 @@ DELIBERATELY NOT EVIDENCE, in either direction — reported for context only:
                       it from the template's planned quantity, so every
                       untouched retry artifact carries a non-zero quantity_used,
                       and using it would mark all three retries as worked.
-  tasks_total, materials_total, tools_total, loto_total
-                      row counts created by generation, not by work.
+  status              the status string itself; status_beyond_open is the
+                      signal derived from it.
+  tasks_total, materials_total, tools_total, loto_total, photos_total,
+  attachments_total   row counts, reported so the fractions above read
+                      sensibly. A count is not evidence of anything.
 
 (B) ESTABLISHED ABSENCE is what "no recorded work" means: every (A1) and (A2)
 signal was checked and none fired, and no (C) condition was present. Read it
 strictly as "nothing found in the signals listed above" — see the coverage
 note.
 
-Every reverse relation a human can attach to a work order is accounted for
-above: task_completions, material_usage, tools, loto_completions,
+Every key this report emits appears in exactly one of the four groups above —
+(A1) work, (A2) attached records, (C) unknown, or context — and every reverse
+relation a human can attach to a work order is accounted for: task_completions,
+material_usage, tools, loto_completions,
 maintenance_logs, photos, attachments, validations, submissions, omr_templates,
 audit_events, additional_maintenance_items, purchase_orders,
 purchase_order_items, location_problems and asset_problems. Nothing a person
@@ -794,14 +837,40 @@ class Command(BaseCommand):
                 restaged += 1
         return restaged, unverifiable
 
+    def _upload_signals(self, wo, rows):
+        """Split uploads into post-generation evidence and creation-time copies.
+
+        ``promote_to_standard_work_order`` copies a reported problem's photo
+        onto the brand-new work order through ``copy_to_work_order_photo``,
+        which sets no ``uploaded_by`` and stamps ``uploaded_at`` by
+        ``auto_now_add`` — so the row exists before anyone opens the job. A row
+        with no uploader, stamped within the creation slack, is therefore
+        indeterminate, not evidence of work. Anything with an uploader, or
+        stamped later, could only have been added afterwards.
+        """
+        evidence = 0
+        at_creation = 0
+        for row in rows:
+            if row.uploaded_by_id is None and (
+                (row.uploaded_at - wo.created_at).total_seconds() <= UPDATED_SLACK_SECONDS
+            ):
+                at_creation += 1
+            else:
+                evidence += 1
+        return evidence, at_creation
+
     def _work_signals(self, wo, now):
         task_completions = list(wo.task_completions.all())
         usage = list(wo.material_usage.all())
         tools = list(wo.tools.all())
         loto = list(wo.loto_completions.all())
         audit_events = list(wo.audit_events.all())
+        photos = list(wo.photos.all())
+        attachments = list(wo.attachments.all())
 
         tools_restaged, tools_unverifiable = self._tool_signals(tools)
+        photos_uploaded, photos_at_creation = self._upload_signals(wo, photos)
+        attachments_uploaded, attachments_at_creation = self._upload_signals(wo, attachments)
         loto_notes = sum(1 for row in loto if (row.notes or "").strip())
         if (wo.loto_completion_note or "").strip():
             loto_notes += 1
@@ -845,8 +914,12 @@ class Command(BaseCommand):
             "completed_scan": bool(wo.completed_scan),
             "bundled_items": len(wo.additional_maintenance_items.all()),
             "maintenance_logs": len(wo.maintenance_logs.all()),
-            "photos": len(wo.photos.all()),
-            "attachments": len(wo.attachments.all()),
+            "photos_uploaded": photos_uploaded,
+            "photos_at_creation": photos_at_creation,
+            "photos_total": len(photos),
+            "attachments_uploaded": attachments_uploaded,
+            "attachments_at_creation": attachments_at_creation,
+            "attachments_total": len(attachments),
             "validations": len(wo.validations.all()),
             "submissions": len(wo.submissions.all()),
             "edited_since_create": edited,
@@ -872,20 +945,26 @@ class Command(BaseCommand):
         rather than a hand-written condition, so a signal added later has to be
         classified as a positive finding or an explicit unknown by construction
         — it cannot quietly become "we checked and found nothing".
-        """
-        fired = [name for name in DEFINITIVE_SIGNALS if signals[name]]
-        if fired:
-            return VERDICT_WORKED, [], fired
 
+        (C) is evaluated for EVERY row, including one that already fired a
+        positive finding. A work order can carry both a purchase order and a
+        printed OMR form; reporting the order while swallowing "a paper copy
+        exists that may have been worked and never scanned back" would state an
+        absence over a case this same function computed as indeterminate.
+        """
         context = {
             **signals,
             "assigned_to_name": str(wo.assigned_to) if wo.assigned_to_id else "",
+            "slack": UPDATED_SLACK_SECONDS,
         }
         indeterminate = [
             sentence.format(**context)
             for name, sentence in INDETERMINATE_SIGNALS
             if signals[name]
         ]
+        fired = [name for name in DEFINITIVE_SIGNALS if signals[name]]
+        if fired:
+            return VERDICT_WORKED, indeterminate, fired
         if indeterminate:
             return VERDICT_UNKNOWN, indeterminate, []
         return VERDICT_NONE, [], []
@@ -1119,12 +1198,15 @@ class Command(BaseCommand):
         if row.verdict == VERDICT_WORKED:
             fired = ", ".join(row.worked_because)
             if all(name in ATTACHMENT_SIGNALS for name in row.worked_because):
-                return (
+                line = (
                     "YES — as ATTACHED RECORDS, not as recorded work: "
-                    f"{fired}. Nobody is shown to have worked this job, but "
-                    "deleting it would silently detach those records"
+                    f"{fired}. Deleting this work order would silently detach them"
                 )
-            return f"YES — {fired}"
+            else:
+                line = f"YES — {fired}"
+            if row.cannot_tell_because:
+                line += " — AND CANNOT TELL: " + "; ".join(row.cannot_tell_because)
+            return line
         if row.verdict == VERDICT_UNKNOWN:
             return "CANNOT TELL — " + "; ".join(row.cannot_tell_because)
         return "no recorded work in the signals checked"
@@ -1338,8 +1420,10 @@ class Command(BaseCommand):
                 f"scan {'yes' if s['completed_scan'] else 'no'}",
                 f"bundled items {s['bundled_items']}",
                 f"logs {s['maintenance_logs']}",
-                f"photos {s['photos']}",
-                f"attachments {s['attachments']}",
+                f"photos {s['photos_uploaded']}/{s['photos_total']} uploaded "
+                f"({s['photos_at_creation']} copied in at creation)",
+                f"attachments {s['attachments_uploaded']}/{s['attachments_total']} "
+                f"uploaded ({s['attachments_at_creation']} copied in at creation)",
                 f"validations {s['validations']}",
                 f"submissions {s['submissions']}",
                 f"edited_since_create {'yes' if s['edited_since_create'] else 'no'}",
@@ -1365,6 +1449,8 @@ class Command(BaseCommand):
             "definitive_signals": list(DEFINITIVE_SIGNALS),
             "work_signals": list(WORK_SIGNALS),
             "attachment_signals": list(ATTACHMENT_SIGNALS),
+            "indeterminate_signal_names": [name for name, _ in INDETERMINATE_SIGNALS],
+            "context_signals": list(CONTEXT_SIGNALS),
             "indeterminate_signals": [name for name, _ in INDETERMINATE_SIGNALS],
             "burst_window_seconds": int(window.total_seconds()),
             "since": since.date().isoformat() if since else None,
@@ -1453,8 +1539,12 @@ class Command(BaseCommand):
                 "completed_scan",
                 "bundled_items",
                 "maintenance_logs",
-                "photos",
-                "attachments",
+                "photos_uploaded",
+                "photos_at_creation",
+                "photos_total",
+                "attachments_uploaded",
+                "attachments_at_creation",
+                "attachments_total",
                 "validations",
                 "submissions",
                 "edited_since_create",
@@ -1517,8 +1607,12 @@ class Command(BaseCommand):
                         "yes" if s["completed_scan"] else "no",
                         s["bundled_items"],
                         s["maintenance_logs"],
-                        s["photos"],
-                        s["attachments"],
+                        s["photos_uploaded"],
+                        s["photos_at_creation"],
+                        s["photos_total"],
+                        s["attachments_uploaded"],
+                        s["attachments_at_creation"],
+                        s["attachments_total"],
                         s["validations"],
                         s["submissions"],
                         "yes" if s["edited_since_create"] else "no",

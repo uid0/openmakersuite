@@ -60,11 +60,12 @@ class TestGenerateWorkOrderDueDate:
         """The documented ``due_date`` body field must not 500 (BACKEND-18)."""
         client, _ = _staff_client()
         item = _pm_item()
+        future = timezone.now().date() + datetime.timedelta(days=30)
 
-        resp = client.post(URL.format(item.id), {"due_date": "2026-09-01"}, format="json")
+        resp = client.post(URL.format(item.id), {"due_date": future.isoformat()}, format="json")
 
         assert resp.status_code == status.HTTP_201_CREATED, resp.data
-        assert resp.data["due_date"] == "2026-09-01"
+        assert resp.data["due_date"] == future.isoformat()
         assert resp.data["is_overdue"] is False
 
     def test_due_date_reaches_the_instance_as_a_date_not_a_string(self):

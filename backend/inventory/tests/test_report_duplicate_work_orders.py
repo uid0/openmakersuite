@@ -884,15 +884,21 @@ def test_a_promoted_problem_report_is_an_attachment_not_an_absence(seeded):
     assert rows[str(promoted.id)]["worked_because"] == ["location_problems"]
 
 
-def test_a_photo_copied_in_at_creation_is_not_recorded_work():
+@pytest.mark.parametrize("copy_delay_seconds", [0, 900])
+def test_an_uploaderless_photo_is_never_recorded_work(copy_delay_seconds):
     """Promotion copies the reporter's photo onto the brand-new work order.
 
-    ``copy_to_work_order_photo`` sets no uploader and the row is stamped by
-    auto_now_add in the same transaction that creates the work order, so a bare
-    photo count would read two freshly promoted problems as worked.
+    ``copy_to_work_order_photo`` sets no uploader and stamps ``uploaded_at``
+    only AFTER the bytes have moved through the storage backend, so on remote
+    storage a multi-megabyte phone photo can be stamped long after the work
+    order. Timing that copy would let a slow network decide between "recorded
+    work" and "cannot tell", so the classification must not consult the stamp
+    at all — hence the 15-minute case as well as the instantaneous one.
     """
     user = User.objects.create_user(
-        username="walker", email="walk@example.com", password="w-password"
+        username=f"walker{copy_delay_seconds}",
+        email=f"walk{copy_delay_seconds}@example.com",
+        password="w-password",
     )
     item = _item("As-needed building repair", "Main Workshop Fabric")
     location = LocationFactory()
@@ -909,18 +915,20 @@ def test_a_photo_copied_in_at_creation_is_not_recorded_work():
             image=f"work_order_photos/2026/07/problem-{index}.jpg",
             caption=f"From LocationProblem {index}",
         )
-        WorkOrderPhoto.objects.filter(pk=photo.pk).update(uploaded_at=wo.created_at)
+        WorkOrderPhoto.objects.filter(pk=photo.pk).update(
+            uploaded_at=wo.created_at + timedelta(seconds=copy_delay_seconds)
+        )
 
     rows = _rows(_groups()[str(item.id)])
     for wo in promoted:
         row = rows[str(wo.id)]
         assert row["work_signals"]["photos_total"] == 1
         assert row["work_signals"]["photos_uploaded"] == 0
-        assert row["work_signals"]["photos_at_creation"] == 1
+        assert row["work_signals"]["photos_unattributed"] == 1
         # The promoted problem link is why it is not untouched — not the photo.
         assert row["worked_because"] == ["location_problems"]
-        # The promotion link accounts for the creation-time copy, so it is not
-        # also reported as a doubt about this row.
+        # The promotion link accounts for the copy, so it is not also reported
+        # as a doubt about this row.
         assert row["cannot_tell_because"] == []
 
     text = _run()
@@ -928,25 +936,50 @@ def test_a_photo_copied_in_at_creation_is_not_recorded_work():
         verdict_line = _verdict_line_for(text, wo)
         assert "photos" not in verdict_line
         assert "location_problems" in verdict_line
-    assert "photos 0/1 uploaded (1 copied in at creation)" in text
+    assert "photos 0/1 uploaded (1 with no uploader)" in text
 
 
-def test_a_photo_uploaded_later_is_recorded_work(seeded):
-    """A photo with an uploader, or stamped later, could only be post-generation."""
+def test_an_uploaderless_photo_with_no_promotion_link_is_an_explicit_unknown(seeded):
+    """Nothing accounts for it, so it is a doubt — never silent, never work."""
+    item = _item("Guard inspection", "Wadkin Planer")
+    plain = _work_order(item, created_at=BASE)
+    orphan_photo = _work_order(item, created_at=BASE + timedelta(seconds=9))
+    photo = WorkOrderPhoto.objects.create(
+        work_order=orphan_photo,
+        image="work_order_photos/2026/07/orphan.jpg",
+        caption="Uploader since deleted",
+    )
+    WorkOrderPhoto.objects.filter(pk=photo.pk).update(
+        uploaded_at=orphan_photo.created_at + timedelta(days=3)
+    )
+
+    rows = _rows(_groups()[str(item.id)])
+    orphan_row = rows[str(orphan_photo.id)]
+    assert rows[str(plain.id)]["verdict"] == "no-recorded-work"
+    assert orphan_row["work_signals"]["photos_uploaded"] == 0
+    assert orphan_row["work_signals"]["photos_unattributed"] == 1
+    assert orphan_row["verdict"] == "unknown"
+    assert any("cannot be credited to anybody" in r for r in orphan_row["cannot_tell_because"])
+
+
+def test_a_photo_with_an_uploader_is_recorded_work(seeded):
+    """Every path that uploads for a person stamps uploaded_by server-side."""
     item = _item("Belt guard check", "Startrite Bandsaw")
     plain = _work_order(item, created_at=BASE)
     photographed = _work_order(item, created_at=BASE + timedelta(seconds=8))
-    WorkOrderPhoto.objects.create(
+    photo = WorkOrderPhoto.objects.create(
         work_order=photographed,
         image="work_order_photos/2026/07/guard.jpg",
         caption="Guard refitted",
         uploaded_by=seeded["operator"],
     )
+    # Even stamped in the same instant as the work order: the uploader decides.
+    WorkOrderPhoto.objects.filter(pk=photo.pk).update(uploaded_at=photographed.created_at)
 
     rows = _rows(_groups()[str(item.id)])
     assert rows[str(plain.id)]["verdict"] == "no-recorded-work"
     assert rows[str(photographed.id)]["work_signals"]["photos_uploaded"] == 1
-    assert rows[str(photographed.id)]["work_signals"]["photos_at_creation"] == 0
+    assert rows[str(photographed.id)]["work_signals"]["photos_unattributed"] == 0
     assert rows[str(photographed.id)]["worked_because"] == ["photos_uploaded"]
 
 
@@ -1028,6 +1061,46 @@ def test_a_missing_due_date_is_not_asserted_to_be_backend18_damage():
     payload = _payload()
     assert "promoting a reported location problem" in payload["false_positive_causes"]
     assert "simply omits due_date" in payload["false_positive_causes"]
+
+
+def test_an_assigned_worked_row_still_reports_the_assignment_doubt(seeded):
+    """Recorded work proves SOME of the job was done, not all of the assignee's.
+
+    So the assignment doubt is deliberately NOT dropped by a work signal, and
+    a non-empty cannot_tell_because is not a claim that the row is unworked —
+    the report says both things where both are true.
+    """
+    item = _item("Lathe way lubrication", "Harrison M300")
+    plain = _work_order(item, created_at=BASE)
+    assigned_and_worked = _work_order(
+        item,
+        created_at=BASE + timedelta(seconds=12),
+        status=WorkOrder.Status.COMPLETED,
+        assigned_to=seeded["operator"],
+        elapsed_seconds=1800,
+    )
+    MaintenanceAuditEvent.objects.create(
+        action=MaintenanceAuditEvent.Action.WO_COMPLETE,
+        actor=seeded["operator"],
+        work_order=assigned_and_worked,
+    )
+
+    rows = _rows(_groups()[str(item.id)])
+    row = rows[str(assigned_and_worked.id)]
+    assert rows[str(plain.id)]["verdict"] == "no-recorded-work"
+
+    assert row["verdict"] == "worked"
+    assert "status_beyond_open" in row["worked_because"]
+    # The wo_complete audit row IS explained by the completion and is dropped...
+    assert row["work_signals"]["other_audit_events"] == 1
+    assert not any("audit event" in r for r in row["cannot_tell_because"])
+    # ...while the assignment doubt is not, and stands alongside the finding.
+    assert any("assigned to" in r for r in row["cannot_tell_because"])
+
+    verdict_line = _verdict_line_for(_run(), assigned_and_worked)
+    assert verdict_line.startswith("     WORKED?     : YES")
+    assert "AND CANNOT TELL:" in verdict_line
+    assert "assigned to" in verdict_line
 
 
 def test_a_scanned_back_form_answers_the_printed_form_unknown(seeded):
@@ -1244,6 +1317,10 @@ def test_json_output_carries_the_suspected_caveat(seeded):
     assert "quantity_used alone is NOT evidence" in payload["worked_signal_definitions"]
     assert "NOT COVERED AT ALL" in payload["coverage_caveat"]
     assert "does NOT mean" in payload["coverage_caveat"]
+    # A reader filtering on cannot_tell_because must be told what it returns.
+    assert "not a claim that the row is" in payload["worked_signal_definitions"]
+    assert "EXPECTED to persist" in payload["worked_signal_definitions"]
+    assert "open question here" in payload["coverage_caveat"]
     assert payload["group_count"] == 5
     assert payload["total_group_count"] == 5
     assert payload["nothing_found_note"] is None

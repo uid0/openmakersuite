@@ -178,17 +178,17 @@ INDETERMINATE_SIGNALS = (
         "worked the job",
     ),
     (
-        "photos_at_creation",
-        "{photos_at_creation} photo(s) carry no uploader and were stamped within "
-        "{slack}s of the work order being created — consistent with a promoted "
-        "problem report's photo being copied across at creation, and not "
-        "distinguishable from somebody photographing the job in that second",
+        "photos_unattributed",
+        "{photos_unattributed} photo(s) carry no uploader, so they cannot be credited "
+        "to anybody: promoting a reported problem copies the reporter's photo onto the "
+        "new work order exactly that way, and a genuine upload whose uploader was since "
+        "deleted looks identical",
     ),
     (
-        "attachments_at_creation",
-        "{attachments_at_creation} attachment(s) carry no uploader and were stamped "
-        "within {slack}s of the work order being created, so they cannot be told apart "
-        "from files copied across at creation",
+        "attachments_unattributed",
+        "{attachments_unattributed} attachment(s) carry no uploader, so they cannot be "
+        "credited to anybody — a file copied across at creation and one uploaded by a "
+        "since-deleted user look identical",
     ),
 )
 
@@ -202,10 +202,10 @@ EXPLAINED_BY = {
     "other_audit_events": ("status_beyond_open", "completed_at"),
     # "may have been worked and never scanned back" — unless it came back.
     "omr_templates": ("submissions", "completed_scan"),
-    # Promotion writes the problem link and copies the photo in one go, so the
-    # link tells us where an uploader-less creation-time file came from.
-    "photos_at_creation": ("location_problems", "asset_problems"),
-    "attachments_at_creation": ("location_problems", "asset_problems"),
+    # Promotion writes the problem link and copies the file in one go, so the
+    # link says where an uploader-less file came from — whatever its timestamp.
+    "photos_unattributed": ("location_problems", "asset_problems"),
+    "attachments_unattributed": ("location_problems", "asset_problems"),
 }
 
 #: Reported for context, never used as evidence in either direction. Row counts
@@ -330,9 +330,19 @@ SIGNALS_NOTE = """\
     verdict stays WORKED and the unknown is printed beside it, because a
     positive finding does not close a separate open question. An unknown is
     dropped only where a fired (A) signal accounts for the SAME underlying
-    fact — those pairs are named in the entries below:
+    fact — those pairs are named in the entries below.
 
-  assigned_to         somebody was put on this job.
+    So a non-empty cannot_tell_because is NOT a claim that the row is
+    unworked. Read the verdict for that. Filtering on cannot_tell_because
+    returns every row carrying an open question, including rows that plainly
+    show recorded work — an assigned work order that was completed is the
+    ordinary case:
+
+  assigned_to         somebody was put on this job. EXPECTED to persist on a
+                      row that also shows recorded work, and deliberately not
+                      dropped by one: recorded work proves somebody did SOME
+                      of the job, never that everything the assignee did was
+                      written down here.
   omr_templates       a printed OMR form exists, so there may be a worked paper
                       copy that was never scanned back. Dropped when
                       submissions or completed_scan fired: a form that came
@@ -351,13 +361,18 @@ SIGNALS_NOTE = """\
                       so no comparison is possible at all.
   bundled_items       sibling PMs are attached, but auto-bundling attaches them
                       at creation time, not by anyone working the job.
-  photos_at_creation  a photo with no uploader, stamped within the creation
-  attachments_at_creation
-                      slack. Promoting a reported problem leaves exactly that,
-                      so it cannot be told apart from somebody photographing
-                      the job in the same second. Dropped when
+  photos_unattributed a file with no uploader. Every path that uploads for a
+  attachments_unattributed
+                      person stamps uploaded_by server-side, so this is either
+                      a copy made by the system — promoting a reported problem
+                      copies the reporter's photo across exactly this way — or
+                      an upload whose uploader has since been deleted. No
+                      timestamp is consulted: the promotion copy is stamped
+                      only after the bytes move through the storage backend,
+                      so timing it would let a slow network decide between
+                      "recorded work" and "cannot tell". Dropped when
                       location_problems or asset_problems fired: the promotion
-                      link then accounts for the copy.
+                      link then accounts for the file whatever its stamp.
 
 DELIBERATELY NOT EVIDENCE, in either direction — reported for context only:
 
@@ -394,7 +409,9 @@ every reverse relation that can point at a work order, so no human attachment
 to a row goes unexamined.
 
 INDETERMINATE: every condition in the (C) list above. These are reported as
-CANNOT TELL, never as absence of work.
+CANNOT TELL, never as absence of work — and a row can carry one while also
+showing recorded work, so a non-empty cannot_tell_because says "there is an
+open question here", not "this was never worked".
 
 NOT COVERED AT ALL: these signals only see what OpenMakerSuite recorded. Work
 done on paper and never scanned back, work logged against the asset rather than
@@ -878,24 +895,29 @@ class Command(BaseCommand):
     def _upload_signals(self, wo, rows):
         """Split uploads into post-generation evidence and creation-time copies.
 
-        ``promote_to_standard_work_order`` copies a reported problem's photo
-        onto the brand-new work order through ``copy_to_work_order_photo``,
-        which sets no ``uploaded_by`` and stamps ``uploaded_at`` by
-        ``auto_now_add`` — so the row exists before anyone opens the job. A row
-        with no uploader, stamped within the creation slack, is therefore
-        indeterminate, not evidence of work. Anything with an uploader, or
-        stamped later, could only have been added afterwards.
+        The uploader is the whole test, and deliberately no timestamp is
+        consulted. ``promote_to_standard_work_order`` copies a reported
+        problem's file onto the brand-new work order through
+        ``copy_to_work_order_photo``, which sets no ``uploaded_by`` and stamps
+        ``uploaded_at`` only after the bytes have been read from and written
+        back to the storage backend. On remote storage a multi-megabyte phone
+        photo can easily take longer than any save()-drift slack, so timing that
+        copy would let a slow network decide between "recorded work" and "cannot
+        tell" — a race, and one that fails towards over-claiming.
+
+        Every path that uploads a file for a person stamps ``uploaded_by``
+        server-side, so a row without one cannot be credited to anybody: it is
+        either a system copy or an upload whose uploader has since been deleted
+        (the FK is SET_NULL). Both are (C), never (A1).
         """
-        evidence = 0
-        at_creation = 0
+        attributed = 0
+        unattributed = 0
         for row in rows:
-            if row.uploaded_by_id is None and (
-                (row.uploaded_at - wo.created_at).total_seconds() <= UPDATED_SLACK_SECONDS
-            ):
-                at_creation += 1
+            if row.uploaded_by_id is None:
+                unattributed += 1
             else:
-                evidence += 1
-        return evidence, at_creation
+                attributed += 1
+        return attributed, unattributed
 
     def _work_signals(self, wo, now):
         task_completions = list(wo.task_completions.all())
@@ -907,8 +929,8 @@ class Command(BaseCommand):
         attachments = list(wo.attachments.all())
 
         tools_restaged, tools_unverifiable = self._tool_signals(tools)
-        photos_uploaded, photos_at_creation = self._upload_signals(wo, photos)
-        attachments_uploaded, attachments_at_creation = self._upload_signals(wo, attachments)
+        photos_uploaded, photos_unattributed = self._upload_signals(wo, photos)
+        attachments_uploaded, attachments_unattributed = self._upload_signals(wo, attachments)
         loto_notes = sum(1 for row in loto if (row.notes or "").strip())
         if (wo.loto_completion_note or "").strip():
             loto_notes += 1
@@ -953,10 +975,10 @@ class Command(BaseCommand):
             "bundled_items": len(wo.additional_maintenance_items.all()),
             "maintenance_logs": len(wo.maintenance_logs.all()),
             "photos_uploaded": photos_uploaded,
-            "photos_at_creation": photos_at_creation,
+            "photos_unattributed": photos_unattributed,
             "photos_total": len(photos),
             "attachments_uploaded": attachments_uploaded,
-            "attachments_at_creation": attachments_at_creation,
+            "attachments_unattributed": attachments_unattributed,
             "attachments_total": len(attachments),
             "validations": len(wo.validations.all()),
             "submissions": len(wo.submissions.all()),
@@ -1000,7 +1022,6 @@ class Command(BaseCommand):
         context = {
             **signals,
             "assigned_to_name": str(wo.assigned_to) if wo.assigned_to_id else "",
-            "slack": UPDATED_SLACK_SECONDS,
         }
         indeterminate = [
             sentence.format(**context)
@@ -1476,9 +1497,9 @@ class Command(BaseCommand):
                 f"bundled items {s['bundled_items']}",
                 f"logs {s['maintenance_logs']}",
                 f"photos {s['photos_uploaded']}/{s['photos_total']} uploaded "
-                f"({s['photos_at_creation']} copied in at creation)",
+                f"({s['photos_unattributed']} with no uploader)",
                 f"attachments {s['attachments_uploaded']}/{s['attachments_total']} "
-                f"uploaded ({s['attachments_at_creation']} copied in at creation)",
+                f"uploaded ({s['attachments_unattributed']} with no uploader)",
                 f"validations {s['validations']}",
                 f"submissions {s['submissions']}",
                 f"edited_since_create {'yes' if s['edited_since_create'] else 'no'}",
@@ -1597,10 +1618,10 @@ class Command(BaseCommand):
                 "bundled_items",
                 "maintenance_logs",
                 "photos_uploaded",
-                "photos_at_creation",
+                "photos_unattributed",
                 "photos_total",
                 "attachments_uploaded",
-                "attachments_at_creation",
+                "attachments_unattributed",
                 "attachments_total",
                 "validations",
                 "submissions",
@@ -1665,10 +1686,10 @@ class Command(BaseCommand):
                         s["bundled_items"],
                         s["maintenance_logs"],
                         s["photos_uploaded"],
-                        s["photos_at_creation"],
+                        s["photos_unattributed"],
                         s["photos_total"],
                         s["attachments_uploaded"],
-                        s["attachments_at_creation"],
+                        s["attachments_unattributed"],
                         s["attachments_total"],
                         s["validations"],
                         s["submissions"],

@@ -477,6 +477,81 @@ def test_since_counts_the_groups_it_excluded(seeded):
     assert "re-run without --since to see them" in text
 
 
+def test_the_headline_total_counts_groups_found_not_groups_selected(seeded):
+    """A key named total_group_count may never be smaller than what was found."""
+    payload = _payload(since="2026-07-01")
+
+    assert payload["searched"]["duplicate_groups_found"] == 5
+    assert payload["total_group_count"] == 5  # found, NOT the 4 that --since selected
+    assert payload["selected_group_count"] == 4
+    assert payload["groups_excluded_by_since"] == 1
+    assert payload["group_count"] == 4
+
+    text = _run("--since", "2026-07-01")
+    assert "Showing 4 of 4 selected; 5 found, 1 excluded by --since 2026-07-01." in text
+    assert "The 4 selected: 3 high, 0 medium, 0 low confidence." in text
+    # The pre---since total must never be reported as the whole picture.
+    assert "Showing 4 of 4 suspected group(s) found." not in text
+
+
+def _only_a_pre_cutoff_group():
+    """One duplicate group, both members created before the 2026-07-01 cutoff."""
+    item = _item("Quarterly inspection", "Epilog Fusion Pro 32")
+    return item, [
+        _work_order(item, created_at=BASE - timedelta(days=10)),
+        _work_order(item, created_at=BASE - timedelta(days=5)),
+    ]
+
+
+def test_since_excluding_every_group_never_claims_there_are_no_duplicates():
+    """The run found a duplicate; --since hid it. That is not an absence.
+
+    Regression for the headline reading "NO DUPLICATE GROUP FOUND" — and the
+    established-absence sentence under it — over a population the same run had
+    just proved contains a shared key.
+    """
+    item, work_orders = _only_a_pre_cutoff_group()
+
+    text = _run("--since", "2026-07-01")
+    assert "NO GROUP SURVIVED --since 2026-07-01" in text
+    assert "This run FOUND 1 duplicate group(s) (2 work order(s)) and excluded every one" in text
+    assert "Re-run without --since to see them." in text
+    assert "NO DUPLICATE GROUP FOUND" not in text
+    assert "no (maintenance item, due date) key is shared by more than one" not in text
+
+    payload = _payload(since="2026-07-01")
+    assert payload["no_groups_reason"] == "all-excluded-by-since"
+    assert payload["total_group_count"] == 1
+    assert payload["selected_group_count"] == 0
+    assert payload["group_count"] == 0
+    assert "NO GROUP SURVIVED --since 2026-07-01" in payload["nothing_found_note"]
+    assert "NO DUPLICATE GROUP FOUND" not in payload["nothing_found_note"]
+
+    csv_text = _run("--format", "csv", "--since", "2026-07-01")
+    assert "NO GROUP SURVIVED --since 2026-07-01" in csv_text
+    assert "NO DUPLICATE GROUP FOUND" not in csv_text
+
+    # ...and dropping the flag finds exactly the group it said it had found.
+    assert str(item.id) in _groups()
+    assert _groups()[str(item.id)]["count"] == len(work_orders)
+
+
+def test_min_confidence_hiding_every_group_never_claims_there_are_no_duplicates():
+    """Same principle one filter later: hidden is not absent."""
+    _only_a_pre_cutoff_group()  # two WOs five days apart -> low confidence
+
+    text = _run("--min-confidence", "high")
+    assert "NO GROUP SURVIVED THE OUTPUT FILTERS" in text
+    assert "This run FOUND 1 duplicate group(s) and selected 1" in text
+    assert "--min-confidence high hid 1" in text
+    assert "NO DUPLICATE GROUP FOUND" not in text
+
+    payload = _payload(min_confidence="high")
+    assert payload["no_groups_reason"] == "all-filtered-out"
+    assert payload["total_group_count"] == 1
+    assert payload["group_count"] == 0
+
+
 # --------------------------------------------------- "has this been worked?"
 
 
@@ -711,7 +786,9 @@ def test_limit_reports_the_full_total_alongside_the_groups_it_shows(seeded):
     assert payload["total_group_count"] == 5
     assert payload["matching_group_count"] == 5
     assert payload["groups_not_shown_due_to_limit"] == 4
-    assert payload["confidence_tally_all"] == {"high": 4, "medium": 0, "low": 1}
+    assert payload["confidence_tally_selected"] == {"high": 4, "medium": 0, "low": 1}
+    assert payload["selected_group_count"] == 5
+    assert payload["no_groups_reason"] is None
 
     text = _run("--limit", "1")
     assert "Showing 1 of 5 suspected group(s) found." in text

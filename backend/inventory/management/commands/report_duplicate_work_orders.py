@@ -374,38 +374,55 @@ class RunAccounting:
 class ReportScope:
     """How much of the picture the output actually shows.
 
-    ``--limit`` and ``--min-confidence`` shrink the printed list, and a captain
-    reading a truncated report would otherwise be told the damage is smaller
-    than it is. Every count needed to say "showing X of Y" lives here.
+    Every filter in the chain narrows the list, and a captain reading a
+    narrowed report would otherwise be told the damage is smaller than it is.
+    The counts are kept one per stage — found, then selected by ``--since``,
+    then matching ``--min-confidence``, then shown under ``--limit`` — so no
+    summary line is ever computed from a post-filter collection and then
+    phrased as if it covered the whole population.
     """
 
-    total_group_count: int
+    found_group_count: int
+    selected_group_count: int
     matching_group_count: int
     shown_group_count: int
-    total_by_confidence: dict[str, int]
+    selected_by_confidence: dict[str, int]
     shown_by_confidence: dict[str, int]
     hidden_by_min_confidence: int
     hidden_by_min_confidence_tally: dict[str, int]
     min_confidence: str
     dropped_by_limit: int
     limit: int | None
+    excluded_by_since: int
+    since: str | None
 
     @property
     def summary_line(self) -> str:
+        if self.excluded_by_since:
+            return (
+                f"Showing {self.shown_group_count} of {self.selected_group_count} "
+                f"selected; {self.found_group_count} found, {self.excluded_by_since} "
+                f"excluded by --since {self.since}."
+            )
         return (
-            f"Showing {self.shown_group_count} of {self.total_group_count} "
+            f"Showing {self.shown_group_count} of {self.found_group_count} "
             "suspected group(s) found."
         )
 
     def notes(self) -> list[str]:
         """Human-readable lines explaining anything that was left out."""
+        tally_label = (
+            f"The {self.selected_group_count} selected"
+            if self.excluded_by_since
+            else f"All {self.found_group_count} found"
+        )
         lines = [
             self.summary_line,
             (
-                f"All {self.total_group_count} found: "
-                f"{self.total_by_confidence['high']} high, "
-                f"{self.total_by_confidence['medium']} medium, "
-                f"{self.total_by_confidence['low']} low confidence."
+                f"{tally_label}: "
+                f"{self.selected_by_confidence['high']} high, "
+                f"{self.selected_by_confidence['medium']} medium, "
+                f"{self.selected_by_confidence['low']} low confidence."
             ),
         ]
         if self.hidden_by_min_confidence:
@@ -499,16 +516,19 @@ class Command(BaseCommand):
         groups = matching if limit is None else matching[: max(0, limit)]
 
         scope = ReportScope(
-            total_group_count=len(all_groups),
+            found_group_count=accounting.duplicate_groups_found,
+            selected_group_count=len(all_groups),
             matching_group_count=len(matching),
             shown_group_count=len(groups),
-            total_by_confidence=self._tally(all_groups),
+            selected_by_confidence=self._tally(all_groups),
             shown_by_confidence=self._tally(groups),
             hidden_by_min_confidence=len(hidden),
             hidden_by_min_confidence_tally=self._tally(hidden),
             min_confidence=min_confidence,
             dropped_by_limit=len(matching) - len(groups),
             limit=limit,
+            excluded_by_since=accounting.groups_excluded_by_since,
+            since=accounting.since,
         )
 
         fmt = options["format"]
@@ -1027,12 +1047,65 @@ class Command(BaseCommand):
             return "CANNOT TELL — " + "; ".join(row.cannot_tell_because)
         return "no recorded work in the signals checked"
 
+    def _no_groups_report(self, scope, accounting):
+        """Why nothing is being printed — established absence, or a filter.
+
+        "No duplicates exist", "none survived --since" and "none survived the
+        output filters" are three different answers, and only the first is an
+        absence. Returns ``(reason, lines)``, or ``(None, [])`` when there are
+        groups to print.
+        """
+        if scope.shown_group_count:
+            return None, []
+        if not accounting.duplicate_groups_found:
+            return "none-found", self._nothing_found_lines(accounting)
+        if not scope.selected_group_count:
+            return "all-excluded-by-since", self._all_excluded_by_since_lines(accounting)
+        return "all-filtered-out", self._all_filtered_out_lines(scope, accounting)
+
+    def _all_excluded_by_since_lines(self, accounting):
+        """Duplicates were found; ``--since`` removed every one of them.
+
+        This must never borrow the "no duplicate group found" wording: the run
+        proved the opposite over the very population that sentence would claim
+        to cover.
+        """
+        return [
+            f"NO GROUP SURVIVED --since {accounting.since} — this is NOT an absence of",
+            "duplicates. This run FOUND "
+            f"{accounting.duplicate_groups_found} duplicate group(s) "
+            f"({accounting.rows_in_duplicate_groups} work order(s)) and excluded every one",
+            f"of them, because no member of any group was created on or after "
+            f"{accounting.since}.",
+            "Re-run without --since to see them.",
+        ]
+
+    def _all_filtered_out_lines(self, scope, accounting):
+        """Groups survived ``--since`` but the output filters hid all of them."""
+        dropped = []
+        if scope.hidden_by_min_confidence:
+            dropped.append(
+                f"--min-confidence {scope.min_confidence} hid "
+                f"{scope.hidden_by_min_confidence}"
+            )
+        if scope.dropped_by_limit:
+            dropped.append(f"--limit {scope.limit} dropped {scope.dropped_by_limit}")
+        return [
+            "NO GROUP SURVIVED THE OUTPUT FILTERS — this is NOT an absence of duplicates.",
+            f"This run FOUND {accounting.duplicate_groups_found} duplicate group(s) and "
+            f"selected {scope.selected_group_count}; "
+            + (", ".join(dropped) if dropped else "the filters hid the rest")
+            + ".",
+            "Those groups still exist. Re-run without those flags to see them.",
+        ]
+
     def _nothing_found_lines(self, accounting):
         """What "no duplicates" means here — never a bare absolute.
 
         This is the one (B) claim the report makes at population level, so it
         names the population it covers and, immediately, the populations it does
-        not.
+        not. It is only ever reached when the run found no duplicate group at
+        all — a group that a filter removed is a different answer entirely.
         """
         lines = [
             "NO DUPLICATE GROUP FOUND — read that strictly, against the accounting above:",
@@ -1086,14 +1159,15 @@ class Command(BaseCommand):
             w(f"  {line}")
         w("")
 
-        if not scope.total_group_count:
-            for line in self._nothing_found_lines(accounting):
+        reason, reason_lines = self._no_groups_report(scope, accounting)
+        if reason == "none-found":
+            for line in reason_lines:
                 w(line)
             return
 
         for line in scope.notes():
             w(line)
-        if scope.shown_group_count != scope.total_group_count:
+        if scope.shown_group_count != scope.selected_group_count:
             shown = scope.shown_by_confidence
             w(
                 f"Shown here: {shown['high']} high, {shown['medium']} medium, "
@@ -1101,9 +1175,9 @@ class Command(BaseCommand):
             )
         w("")
 
-        if not groups:
-            w("Nothing left to print after the filters above — the groups counted there")
-            w("still exist; they were not shown, which is not the same as not found.")
+        if reason:
+            for line in reason_lines:
+                w(line)
             return
 
         for index, group in enumerate(groups, start=1):
@@ -1190,6 +1264,7 @@ class Command(BaseCommand):
         )
 
     def _render_json(self, groups, *, window, since, scope, accounting):
+        no_groups_reason, no_groups_lines = self._no_groups_report(scope, accounting)
         payload = {
             "read_only": True,
             "report": "suspected duplicate maintenance work orders (BACKEND-18)",
@@ -1204,13 +1279,14 @@ class Command(BaseCommand):
             "since_selects_whole_groups": True,
             "searched": asdict(accounting),
             "search_note": " ".join(accounting.lines()),
-            "nothing_found_note": (
-                None if scope.total_group_count else " ".join(self._nothing_found_lines(accounting))
-            ),
-            "total_group_count": scope.total_group_count,
+            "no_groups_reason": no_groups_reason,
+            "nothing_found_note": (" ".join(no_groups_lines) if no_groups_reason else None),
+            "total_group_count": scope.found_group_count,
+            "selected_group_count": scope.selected_group_count,
             "matching_group_count": scope.matching_group_count,
             "group_count": scope.shown_group_count,
-            "confidence_tally_all": scope.total_by_confidence,
+            "groups_excluded_by_since": scope.excluded_by_since,
+            "confidence_tally_selected": scope.selected_by_confidence,
             "confidence_tally_shown": scope.shown_by_confidence,
             "min_confidence": scope.min_confidence,
             "groups_hidden_by_min_confidence": scope.hidden_by_min_confidence,
@@ -1235,8 +1311,9 @@ class Command(BaseCommand):
         )
         writer.writerow(["# SEARCHED: " + " ".join(accounting.lines())])
         writer.writerow(["# " + " ".join(scope.notes())])
-        if not scope.total_group_count:
-            writer.writerow(["# " + " ".join(self._nothing_found_lines(accounting))])
+        _, no_groups_lines = self._no_groups_report(scope, accounting)
+        if no_groups_lines:
+            writer.writerow(["# " + " ".join(no_groups_lines)])
         writer.writerow(["# " + " ".join(COVERAGE_NOTE.split())])
         writer.writerow(
             [

@@ -233,6 +233,20 @@ def _rows(group):
     return {row["id"]: row for row in group["work_orders"]}
 
 
+def _verdict_line_for(text, work_order):
+    """The one "WORKED?" line the text report prints for ``work_order``.
+
+    The report opens with a long preamble — the false-positive, signals and
+    coverage notes — which necessarily *names* every verdict wording it can
+    emit. An assertion over the whole document is therefore satisfied by that
+    boilerplate rather than by the row under test, so per-row claims must be
+    scoped to the row's own block.
+    """
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if str(work_order.id) in line)
+    return next(line for line in lines[start:] if line.strip().startswith("WORKED?"))
+
+
 # --------------------------------------------------------------- the report
 
 
@@ -493,9 +507,32 @@ def test_the_headline_total_counts_groups_found_not_groups_selected(seeded):
 
     text = _run("--since", "2026-07-01")
     assert "Showing 4 of 4 selected; 5 found, 1 excluded by --since 2026-07-01." in text
-    assert "The 4 selected: 3 high, 0 medium, 0 low confidence." in text
+    # The breakdown is over the selected groups, and says so — with the
+    # found-total on the same line, so neither number can be read as the other.
+    assert "Confidence of the 4 selected (of 5 found): 4 high, 0 medium, 0 low." in text
     # The pre---since total must never be reported as the whole picture.
     assert "Showing 4 of 4 suspected group(s) found." not in text
+
+
+def test_every_confidence_tally_sums_to_the_population_it_labels(seeded):
+    """The invariant that makes the tally line readable at all.
+
+    Each breakdown counts a named population, so it must add up to that
+    population's size. An expectation that violates this cannot hold for any
+    input, whichever side of it is wrong.
+    """
+    for payload in (_payload(), _payload(since="2026-07-01"), _payload(limit=1)):
+        selected = payload["confidence_tally_selected"]
+        shown = payload["confidence_tally_shown"]
+        assert sum(selected.values()) == payload["selected_group_count"]
+        assert sum(shown.values()) == payload["group_count"]
+        # ...and the selected total can never exceed what the run found.
+        assert payload["selected_group_count"] <= payload["total_group_count"]
+
+    unfiltered = _payload()
+    assert sum(unfiltered["confidence_tally_selected"].values()) == (
+        unfiltered["total_group_count"]
+    )
 
 
 def _only_a_pre_cutoff_group():
@@ -724,12 +761,16 @@ def test_an_unreceived_purchase_order_line_is_not_treated_as_untouched(seeded):
     assert "nothing is lost either way" not in group["suggested_keep_reason"]
 
     # The captain is told this is an attachment, not somebody working the job.
-    text = _run()
-    assert "YES — as ATTACHED RECORDS, not as recorded work: purchase_order_items" in text
-    assert "Deleting this work order would silently detach them" in text
-    # Nothing indeterminate here, so the verdict makes no claim beyond what fired.
+    verdict_line = _verdict_line_for(_run(), ordered_for)
+    assert "YES — as ATTACHED RECORDS, not as recorded work: purchase_order_items" in (
+        verdict_line
+    )
+    assert "Deleting this work order would silently detach them" in verdict_line
+    # Nothing indeterminate here, so THIS row's verdict claims nothing further.
+    # Scoped to the row: the preamble names every verdict wording, so a
+    # document-wide check would pass on boilerplate whatever the row said.
     assert ordered_row["cannot_tell_because"] == []
-    assert "CANNOT TELL" not in text
+    assert "CANNOT TELL" not in verdict_line
 
 
 def test_a_worked_row_still_reports_what_it_could_not_tell(seeded):
@@ -772,10 +813,13 @@ def test_a_worked_row_still_reports_what_it_could_not_tell(seeded):
     # The unknown is not swallowed: it reaches JSON...
     assert any("never scanned back" in r for r in both_row["cannot_tell_because"])
 
-    # ...the text verdict line...
+    # ...this row's own verdict line...
     text = _run()
-    assert "AND CANNOT TELL:" in text
-    assert "may have been worked and never scanned back" in text
+    verdict_line = _verdict_line_for(text, both)
+    assert "AND CANNOT TELL:" in verdict_line
+    assert "may have been worked and never scanned back" in verdict_line
+    # The untouched sibling makes no such claim, so the wording is the row's.
+    assert "CANNOT TELL" not in _verdict_line_for(text, plain)
     assert "Nobody is shown to have worked this job" not in text
 
     # ...and CSV, where an empty cell would tell a consumer there was no doubt.
@@ -863,7 +907,10 @@ def test_a_photo_copied_in_at_creation_is_not_recorded_work():
         assert any("copied across at creation" in r for r in row["cannot_tell_because"])
 
     text = _run()
-    assert "YES — photos" not in text
+    for wo in promoted:
+        verdict_line = _verdict_line_for(text, wo)
+        assert "photos" not in verdict_line
+        assert "location_problems" in verdict_line
     assert "photos 0/1 uploaded (1 copied in at creation)" in text
 
 
@@ -900,7 +947,7 @@ def test_every_reported_signal_is_classified_exactly_once(seeded):
     buckets = {
         "work": set(payload["work_signals"]),
         "attachment": set(payload["attachment_signals"]),
-        "indeterminate": set(payload["indeterminate_signal_names"]),
+        "indeterminate": set(payload["indeterminate_signals"]),
         "context": set(payload["context_signals"]),
     }
     classified = set().union(*buckets.values())
@@ -980,6 +1027,7 @@ def test_an_assigned_duplicate_is_cannot_tell_not_untouched(seeded):
     assert assigned_row["verdict"] == "unknown"
     assert assigned_row["worked"] is False
     assert any("assigned to" in reason for reason in assigned_row["cannot_tell_because"])
+    assert assigned_row["worked_because"] == []
 
     assert group["worked_count"] == 0
     assert group["unknown_count"] == 1
@@ -990,8 +1038,7 @@ def test_an_assigned_duplicate_is_cannot_tell_not_untouched(seeded):
     assert "nothing recorded is lost either way" not in group["suggested_keep_reason"]
     assert "CANNOT BE SHOWN to be untouched" in group["suggested_keep_reason"]
 
-    text = _run()
-    assert "CANNOT TELL" in text
+    assert "CANNOT TELL — " in _verdict_line_for(_run(), assigned)
 
 
 def test_a_tool_row_whose_template_is_gone_is_indeterminate(seeded):
@@ -1128,6 +1175,7 @@ def test_json_output_carries_the_suspected_caveat(seeded):
     assert payload["group_count"] == 5
     assert payload["total_group_count"] == 5
     assert payload["nothing_found_note"] is None
+    assert "indeterminate_signal_names" not in payload  # one concept, one key
     assert "tools_restaged" in payload["indeterminate_signals"]
     assert "tools_restaged" not in payload["definitive_signals"]
     assert "bundled_items" in payload["indeterminate_signals"]

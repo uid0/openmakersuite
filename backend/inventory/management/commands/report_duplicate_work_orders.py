@@ -517,11 +517,19 @@ class ReportScope:
         )
 
     def notes(self) -> list[str]:
-        """Human-readable lines explaining anything that was left out."""
+        """Human-readable lines explaining anything that was left out.
+
+        The confidence tally is over the SELECTED groups and sums to
+        ``selected_group_count`` by construction, so its label names that
+        population and its size explicitly — and, when ``--since`` excluded
+        anything, the found-total alongside it — rather than leaving a reader
+        to work out which number the breakdown adds up to.
+        """
         tally_label = (
-            f"The {self.selected_group_count} selected"
+            f"Confidence of the {self.selected_group_count} selected "
+            f"(of {self.found_group_count} found)"
             if self.excluded_by_since
-            else f"All {self.found_group_count} found"
+            else f"Confidence of all {self.found_group_count} found"
         )
         lines = [
             self.summary_line,
@@ -529,7 +537,7 @@ class ReportScope:
                 f"{tally_label}: "
                 f"{self.selected_by_confidence['high']} high, "
                 f"{self.selected_by_confidence['medium']} medium, "
-                f"{self.selected_by_confidence['low']} low confidence."
+                f"{self.selected_by_confidence['low']} low."
             ),
         ]
         if self.hidden_by_min_confidence:
@@ -1449,7 +1457,6 @@ class Command(BaseCommand):
             "definitive_signals": list(DEFINITIVE_SIGNALS),
             "work_signals": list(WORK_SIGNALS),
             "attachment_signals": list(ATTACHMENT_SIGNALS),
-            "indeterminate_signal_names": [name for name, _ in INDETERMINATE_SIGNALS],
             "context_signals": list(CONTEXT_SIGNALS),
             "indeterminate_signals": [name for name, _ in INDETERMINATE_SIGNALS],
             "burst_window_seconds": int(window.total_seconds()),

@@ -294,13 +294,13 @@ SIGNALS_NOTE = """\
   completed_by        completed_by_name from a scanned paper form.
   completed_scan      a completed paper form was scanned or emailed back in.
   maintenance_logs    MaintenanceLog rows written back from this work order.
-  photos_uploaded     photos that carry an uploader, or that were stamped after
+  photos_uploaded     files that carry an uploader, which is the whole test —
   attachments_uploaded
-                      the work order was created. Only these count as evidence:
+                      no timestamp is consulted. Only these count as evidence:
                       a promoted problem report's photo is copied onto the new
-                      work order at creation with no uploader, so a bare count
-                      of photos would read a creation-time artifact as work.
-                      Those copies are reported under (C) instead.
+                      work order with no uploader, so a bare count of photos
+                      would read a creation-time artifact as work. Those copies
+                      are reported under (C) instead.
   validations         WorkOrderValidation sign-offs.
   submissions         scanned/emailed-in paper submissions.
   edited_since_create updated_at moved after created_at (someone saved the row).
@@ -892,8 +892,8 @@ class Command(BaseCommand):
                 restaged += 1
         return restaged, unverifiable
 
-    def _upload_signals(self, wo, rows):
-        """Split uploads into post-generation evidence and creation-time copies.
+    def _upload_signals(self, rows):
+        """Split uploads by whether they can be credited to a person.
 
         The uploader is the whole test, and deliberately no timestamp is
         consulted. ``promote_to_standard_work_order`` copies a reported
@@ -929,8 +929,8 @@ class Command(BaseCommand):
         attachments = list(wo.attachments.all())
 
         tools_restaged, tools_unverifiable = self._tool_signals(tools)
-        photos_uploaded, photos_unattributed = self._upload_signals(wo, photos)
-        attachments_uploaded, attachments_unattributed = self._upload_signals(wo, attachments)
+        photos_uploaded, photos_unattributed = self._upload_signals(photos)
+        attachments_uploaded, attachments_unattributed = self._upload_signals(attachments)
         loto_notes = sum(1 for row in loto if (row.notes or "").strip())
         if (wo.loto_completion_note or "").strip():
             loto_notes += 1

@@ -927,9 +927,11 @@ def test_an_uploaderless_photo_is_never_recorded_work(copy_delay_seconds):
         assert row["work_signals"]["photos_unattributed"] == 1
         # The promoted problem link is why it is not untouched — not the photo.
         assert row["worked_because"] == ["location_problems"]
-        # The promotion link accounts for the copy, so it is not also reported
-        # as a doubt about this row.
-        assert row["cannot_tell_because"] == []
+        # The promotion link accounts for the copy, so the photo raises no
+        # doubt here. The assignment doubt is never dropped by a fired finding,
+        # so it must still be reported beside it.
+        assert not any("uploader" in reason for reason in row["cannot_tell_because"])
+        assert any("was put on this job" in reason for reason in row["cannot_tell_because"])
 
     text = _run()
     for wo in promoted:
@@ -1318,7 +1320,7 @@ def test_json_output_carries_the_suspected_caveat(seeded):
     assert "NOT COVERED AT ALL" in payload["coverage_caveat"]
     assert "does NOT mean" in payload["coverage_caveat"]
     # A reader filtering on cannot_tell_because must be told what it returns.
-    assert "not a claim that the row is" in payload["worked_signal_definitions"]
+    assert "NOT a claim that the row is" in payload["worked_signal_definitions"]
     assert "EXPECTED to persist" in payload["worked_signal_definitions"]
     assert "open question here" in payload["coverage_caveat"]
     assert payload["group_count"] == 5

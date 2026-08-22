@@ -86,12 +86,12 @@ VERDICT_WORKED = "worked"
 VERDICT_UNKNOWN = "unknown"
 VERDICT_NONE = "no-recorded-work"
 
-#: (A) POSITIVE FINDINGS. Any one of these fires and the verdict is WORKED.
-#: Membership here is a claim that the signal can ONLY be produced by a human
-#: acting on the work order after it was generated. A generation-time artifact
-#: must never be listed here — that is the ``quantity_used`` trap, and the
-#: reason ``tools_restaged`` and ``bundled_items`` live in the (C) table below.
-DEFINITIVE_SIGNALS = (
+#: (A1) POSITIVE FINDINGS — somebody WORKED this job. Membership here is a
+#: claim that the signal can ONLY be produced by a human acting on the work
+#: order after it was generated. A generation-time artifact must never be
+#: listed here — that is the ``quantity_used`` trap, and the reason
+#: ``tools_restaged`` and ``bundled_items`` live in the (C) table below.
+WORK_SIGNALS = (
     "status_beyond_open",
     "tasks_completed",
     "task_notes",
@@ -116,6 +116,24 @@ DEFINITIVE_SIGNALS = (
     "submissions",
     "edited_since_create",
 )
+
+#: (A2) POSITIVE FINDINGS — records somebody deliberately ATTACHED to this
+#: specific work order. They do not say the job was worked, and the output
+#: never claims they do; they say real money or a real record is tied to this
+#: row. Every one of these FKs is ``on_delete=SET_NULL``, so deleting the work
+#: order does not fail loudly — it silently detaches the order or the problem
+#: report and destroys the link. That is exactly what "nothing is lost either
+#: way" would be authorising, so they count as definitive.
+ATTACHMENT_SIGNALS = (
+    "purchase_orders",
+    "purchase_order_items",
+    "location_problems",
+    "asset_problems",
+)
+
+#: Everything that makes the verdict WORKED. Split above only so the output can
+#: say WHICH kind fired; the verdict logic reads this union.
+DEFINITIVE_SIGNALS = WORK_SIGNALS + ATTACHMENT_SIGNALS
 
 #: (C) EXPLICIT UNKNOWNS. When no (A) signal fired but one of these is present,
 #: the verdict is CANNOT TELL and the matching sentence is printed verbatim, so
@@ -176,17 +194,31 @@ seconds apart. Groups whose rows are spread over hours or days are ranked LOW
 confidence and are most likely legitimate. Nothing is excluded from the report
 on that basis — ranking, not filtering, so a real duplicate is never hidden.
 
-A NULL due date is a real grouping key here, not a reason to skip a row: the
-dashboard's Generate button sends no due_date, and generate_work_order then
-falls back to the PM's next_due_at, which is NULL for a PM that has never been
-completed. Retries of that button therefore leave duplicates with no due date
-at all, and they are reported like any other group."""
+A NULL due date is a real grouping key here, not a reason to skip a row, but it
+is NOT a proof of provenance. Three different paths leave a work order with no
+due date, and this report cannot tell them apart:
+
+  * the dashboard's Generate button, which sends no due_date, so
+    generate_work_order falls back to the PM's next_due_at — NULL for a PM that
+    has never been completed. Retries of that button are the BACKEND-18 shape;
+  * promoting a reported location problem
+    (``LocationProblemViewSet.promote_to_standard_work_order``), which creates
+    the work order with no due date and writes no wo_create audit row either.
+    The target is typically a building-level "as-needed" item, so two problems
+    promoted onto the same item minutes apart look exactly like a retry burst.
+    Those rows do carry ``assigned_to`` and a ``location_problems`` link, which
+    is why the report reaches a different verdict on them;
+  * a plain POST to the work-order API that simply omits due_date, which the
+    field and the serializer both allow.
+
+Undated groups are reported like any other group, and ranked the same way."""
 
 SIGNALS_NOTE = """\
 "Worked" signals, sorted into the three kinds of answer this report gives.
 
-(A) POSITIVE FINDINGS — any one of these fires and the verdict is WORKED. Each
-    can only be produced by a human acting on the work order after generation:
+(A1) POSITIVE FINDINGS, WORK — any one of these fires and the verdict is
+    WORKED. Each can only be produced by a human acting on the work order
+    after generation:
 
   status_beyond_open  status moved beyond the initial "open".
   tasks_completed     WorkOrderTaskCompletion rows with is_completed=True.
@@ -221,6 +253,26 @@ SIGNALS_NOTE = """\
   submissions         scanned/emailed-in paper submissions.
   edited_since_create updated_at moved after created_at (someone saved the row).
 
+(A2) POSITIVE FINDINGS, ATTACHED RECORDS — these also make the verdict WORKED,
+    but they mean "somebody tied real money or a real record to THIS row",
+    NOT "somebody worked the job". The output labels them that way. Every one
+    of these foreign keys is on_delete=SET_NULL, so DELETING SUCH A WORK ORDER
+    DOES NOT FAIL — it silently detaches the record:
+
+  purchase_orders     a whole purchase order was raised against this work
+                      order. Deleting the work order detaches that order.
+  purchase_order_items
+                      a purchase-order LINE was ordered for this job. Until it
+                      is received nothing else here moves: the bridge that
+                      mirrors a line onto the work order as a material only
+                      runs at receiving time, from quantity_received. Deleting
+                      the work order detaches the line AND destroys the link
+                      that would have posted the received cost back onto it.
+  location_problems   a reported location problem was promoted onto this work
+                      order. Deleting it detaches the problem report.
+  asset_problems      a reported asset problem was promoted onto this work
+                      order. Deleting it detaches the problem report.
+
 (C) EXPLICIT UNKNOWNS — none of (A) fired, but the data cannot answer the
     question, so the verdict is CANNOT TELL and the reason is printed:
 
@@ -248,14 +300,25 @@ DELIBERATELY NOT EVIDENCE, in either direction — reported for context only:
   tasks_total, materials_total, tools_total, loto_total
                       row counts created by generation, not by work.
 
-(B) ESTABLISHED ABSENCE is what "no recorded work" means: every (A) signal was
-checked and none fired, and no (C) condition was present. Read it strictly as
-"nothing found in the signals listed above" — see the coverage note."""
+(B) ESTABLISHED ABSENCE is what "no recorded work" means: every (A1) and (A2)
+signal was checked and none fired, and no (C) condition was present. Read it
+strictly as "nothing found in the signals listed above" — see the coverage
+note.
+
+Every reverse relation a human can attach to a work order is accounted for
+above: task_completions, material_usage, tools, loto_completions,
+maintenance_logs, photos, attachments, validations, submissions, omr_templates,
+audit_events, additional_maintenance_items, purchase_orders,
+purchase_order_items, location_problems and asset_problems. Nothing a person
+can hang off a work order in this database is left unexamined; what is not
+covered is what this database never recorded at all."""
 
 COVERAGE_NOTE = """\
 What "worked" does and does not cover — read this before removing anything.
 
-CHECKED: every signal in the (A) list above.
+CHECKED: every signal in the (A1) and (A2) lists above — which together cover
+every reverse relation that can point at a work order, so no human attachment
+to a row goes unexamined.
 
 INDETERMINATE: every condition in the (C) list above. These are reported as
 CANNOT TELL, never as absence of work.
@@ -287,6 +350,7 @@ class WorkOrderRow:
     verdict: str
     worked: bool
     cannot_tell_because: list[str] = field(default_factory=list)
+    worked_because: list[str] = field(default_factory=list)
     work_signals: dict[str, Any] = field(default_factory=dict)
     is_suggested_keep: bool = False
     keep_reason: str = ""
@@ -632,6 +696,10 @@ class Command(BaseCommand):
                     "submissions",
                     "omr_templates",
                     "additional_maintenance_items",
+                    "purchase_orders",
+                    "purchase_order_items",
+                    "location_problems",
+                    "asset_problems",
                     Prefetch(
                         "audit_events",
                         queryset=MaintenanceAuditEvent.objects.select_related("actor"),
@@ -782,6 +850,10 @@ class Command(BaseCommand):
             "validations": len(wo.validations.all()),
             "submissions": len(wo.submissions.all()),
             "edited_since_create": edited,
+            "purchase_orders": len(wo.purchase_orders.all()),
+            "purchase_order_items": len(wo.purchase_order_items.all()),
+            "location_problems": len(wo.location_problems.all()),
+            "asset_problems": len(wo.asset_problems.all()),
             "assigned_to": bool(wo.assigned_to_id),
             "omr_templates": len(wo.omr_templates.all()),
             "other_audit_events": sum(
@@ -790,8 +862,8 @@ class Command(BaseCommand):
                 if event.action != MaintenanceAuditEvent.Action.WO_CREATE
             ),
         }
-        verdict, indeterminate = self._verdict(wo, signals)
-        return verdict, indeterminate, signals
+        verdict, indeterminate, fired = self._verdict(wo, signals)
+        return verdict, indeterminate, fired, signals
 
     def _verdict(self, wo, signals):
         """Three-state answer: worked, cannot tell, or nothing recorded.
@@ -801,8 +873,9 @@ class Command(BaseCommand):
         classified as a positive finding or an explicit unknown by construction
         — it cannot quietly become "we checked and found nothing".
         """
-        if any(signals[name] for name in DEFINITIVE_SIGNALS):
-            return VERDICT_WORKED, []
+        fired = [name for name in DEFINITIVE_SIGNALS if signals[name]]
+        if fired:
+            return VERDICT_WORKED, [], fired
 
         context = {
             **signals,
@@ -814,8 +887,8 @@ class Command(BaseCommand):
             if signals[name]
         ]
         if indeterminate:
-            return VERDICT_UNKNOWN, indeterminate
-        return VERDICT_NONE, []
+            return VERDICT_UNKNOWN, indeterminate, []
+        return VERDICT_NONE, [], []
 
     def _burst_analysis(self, work_orders, window):
         """The largest run of rows within ``window``, and every clustered row.
@@ -851,7 +924,7 @@ class Command(BaseCommand):
 
         rows = []
         for wo in work_orders:
-            verdict, indeterminate, signals = self._work_signals(wo, now)
+            verdict, indeterminate, fired, signals = self._work_signals(wo, now)
             created_by = self._creator(wo)
             delta = (wo.created_at - first.created_at).total_seconds()
             rows.append(
@@ -876,6 +949,7 @@ class Command(BaseCommand):
                     verdict=verdict,
                     worked=verdict == VERDICT_WORKED,
                     cannot_tell_because=indeterminate,
+                    worked_because=fired,
                     work_signals=signals,
                 )
             )
@@ -973,9 +1047,10 @@ class Command(BaseCommand):
             return (
                 newest.id,
                 (
-                    f"AMBIGUOUS — {len(worked)} of these have been worked, so real work "
-                    "would be lost whichever is dropped. The most recently created worked "
-                    "row is named only as a starting point; reconcile these by hand."
+                    f"AMBIGUOUS — {len(worked)} of these carry recorded work or attached "
+                    "records, so something real would be lost whichever is dropped. The "
+                    "most recently created of them is named only as a starting point; "
+                    "reconcile these by hand."
                     + unknown_tail
                 ),
             )
@@ -984,16 +1059,16 @@ class Command(BaseCommand):
                 worked[0].id,
                 (
                     "only work order in this group that shows any sign of having been "
-                    "worked; the others show no recorded work in any signal this report "
-                    "checks"
+                    "worked, or of having records attached to it; the others show nothing "
+                    "in any signal this report checks"
                 ),
             )
         if len(worked) == 1:
             return (
                 worked[0].id,
                 (
-                    "the only work order here that shows recorded work, but the rest are "
-                    "not all clear:" + unknown_tail
+                    "the only work order here that shows recorded work or attached "
+                    "records, but the rest are not all clear:" + unknown_tail
                 ),
             )
         if unknown:
@@ -1042,7 +1117,14 @@ class Command(BaseCommand):
 
     def _verdict_line(self, row):
         if row.verdict == VERDICT_WORKED:
-            return "YES"
+            fired = ", ".join(row.worked_because)
+            if all(name in ATTACHMENT_SIGNALS for name in row.worked_because):
+                return (
+                    "YES — as ATTACHED RECORDS, not as recorded work: "
+                    f"{fired}. Nobody is shown to have worked this job, but "
+                    "deleting it would silently detach those records"
+                )
+            return f"YES — {fired}"
         if row.verdict == VERDICT_UNKNOWN:
             return "CANNOT TELL — " + "; ".join(row.cannot_tell_because)
         return "no recorded work in the signals checked"
@@ -1190,16 +1272,20 @@ class Command(BaseCommand):
                 f"   — shared by {group.count} work orders"
             )
             if group.due_date_missing:
-                w("                 no due date was recorded on any of these — the pattern")
-                w("                 left by the dashboard Generate button on a PM that has")
-                w("                 never been completed, which is the BACKEND-18 path")
+                w("                 no due date was recorded on any of these. That is")
+                w("                 CONSISTENT WITH the dashboard Generate button on a PM")
+                w("                 that has never been completed (the BACKEND-18 path),")
+                w("                 but it does not establish it: promoting a location")
+                w("                 problem and a plain create that omits due_date leave")
+                w("                 the same shape — see the false-positive note above")
             w(
                 f"  Created span : {self._duration(group.span_seconds)}"
                 f"  (largest burst: {group.largest_burst} of {group.count})"
             )
             w(f"  Why ranked   : {group.confidence_reason}")
             w(
-                f"  Worked       : {group.worked_count} of {group.count} show recorded work, "
+                f"  Worked       : {group.worked_count} of {group.count} show recorded work "
+                f"or attached records, "
                 f"{group.unknown_count} cannot be told either way, "
                 f"{group.no_recorded_work_count} show none in the signals checked"
             )
@@ -1257,6 +1343,10 @@ class Command(BaseCommand):
                 f"validations {s['validations']}",
                 f"submissions {s['submissions']}",
                 f"edited_since_create {'yes' if s['edited_since_create'] else 'no'}",
+                f"purchase orders {s['purchase_orders']}",
+                f"purchase order lines {s['purchase_order_items']}",
+                f"location problems {s['location_problems']}",
+                f"asset problems {s['asset_problems']}",
                 f"assigned {'yes' if s['assigned_to'] else 'no'}",
                 f"omr templates {s['omr_templates']}",
                 f"other audit events {s['other_audit_events']}",
@@ -1273,6 +1363,8 @@ class Command(BaseCommand):
             "worked_signal_definitions": SIGNALS_NOTE,
             "coverage_caveat": COVERAGE_NOTE,
             "definitive_signals": list(DEFINITIVE_SIGNALS),
+            "work_signals": list(WORK_SIGNALS),
+            "attachment_signals": list(ATTACHMENT_SIGNALS),
             "indeterminate_signals": [name for name, _ in INDETERMINATE_SIGNALS],
             "burst_window_seconds": int(window.total_seconds()),
             "since": since.date().isoformat() if since else None,
@@ -1338,6 +1430,7 @@ class Command(BaseCommand):
                 "in_burst",
                 "verdict",
                 "worked",
+                "worked_because",
                 "cannot_tell_because",
                 "tasks_completed",
                 "tasks_total",
@@ -1365,6 +1458,10 @@ class Command(BaseCommand):
                 "validations",
                 "submissions",
                 "edited_since_create",
+                "purchase_orders",
+                "purchase_order_items",
+                "location_problems",
+                "asset_problems",
                 "omr_templates",
                 "other_audit_events",
                 "suggested_keep",
@@ -1397,6 +1494,7 @@ class Command(BaseCommand):
                         "yes" if row.in_burst else "no",
                         row.verdict,
                         "yes" if row.worked else "no",
+                        "; ".join(row.worked_because),
                         "; ".join(row.cannot_tell_because),
                         s["tasks_completed"],
                         s["tasks_total"],
@@ -1424,6 +1522,10 @@ class Command(BaseCommand):
                         s["validations"],
                         s["submissions"],
                         "yes" if s["edited_since_create"] else "no",
+                        s["purchase_orders"],
+                        s["purchase_order_items"],
+                        s["location_problems"],
+                        s["asset_problems"],
                         s["omr_templates"],
                         s["other_audit_events"],
                         "yes" if row.is_suggested_keep else "no",

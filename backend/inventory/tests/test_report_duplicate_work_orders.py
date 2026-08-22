@@ -30,6 +30,7 @@ from django.utils import timezone
 import pytest
 
 from inventory.models import (
+    LocationProblem,
     MaintenanceAuditEvent,
     MaintenanceItem,
     MaintenanceTask,
@@ -40,7 +41,7 @@ from inventory.models import (
     WorkOrderTaskCompletion,
     WorkOrderTool,
 )
-from inventory.tests.factories import AssetFactory
+from inventory.tests.factories import AssetFactory, LocationFactory, SupplierFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -673,6 +674,128 @@ def test_editing_a_tool_template_does_not_mark_untouched_retries_as_worked(seede
     # ...and it is still not called untouched, because it genuinely cannot tell.
     assert group["no_recorded_work_count"] == 0
     assert "CANNOT BE SHOWN to be untouched" in group["suggested_keep_reason"]
+
+
+def test_an_unreceived_purchase_order_line_is_not_treated_as_untouched(seeded):
+    """Parts ordered for a job leave no other trace until the line is received.
+
+    ``post_work_order_material`` only mirrors a PO line onto the work order at
+    receiving time, from ``quantity_received``. Until then nothing moves on the
+    work order — and ``PurchaseOrderItem.work_order`` is SET_NULL, so deleting
+    the work order silently detaches the order instead of failing.
+    """
+    from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
+
+    item = _item("Pump seal replacement", "Grundfos Circulator")
+    plain = _work_order(item, created_at=BASE)
+    ordered_for = _work_order(item, created_at=BASE + timedelta(seconds=14))
+
+    order = PurchaseOrder.objects.create(
+        supplier=SupplierFactory(), created_by=seeded["operator"]
+    )
+    PurchaseOrderItem.objects.create(
+        purchase_order=order,
+        description="Seal kit",
+        quantity_ordered=1,
+        quantity_received=0,
+        unit_cost_ordered=Decimal("42.00"),
+        work_order=ordered_for,
+    )
+
+    group = _groups()[str(item.id)]
+    rows = _rows(group)
+    ordered_row = rows[str(ordered_for.id)]
+
+    # Nothing at all moved on the work order itself...
+    assert ordered_row["work_signals"]["status_beyond_open"] is False
+    assert ordered_row["work_signals"]["edited_since_create"] is False
+    assert ordered_row["work_signals"]["materials_total"] == 0
+    # ...but the order is tied to this row and must not be called untouched.
+    assert ordered_row["work_signals"]["purchase_order_items"] == 1
+    assert ordered_row["verdict"] == "worked"
+    assert ordered_row["worked_because"] == ["purchase_order_items"]
+
+    assert rows[str(plain.id)]["verdict"] == "no-recorded-work"
+    assert group["suggested_keep_id"] == str(ordered_for.id)
+    assert "nothing recorded is lost either way" not in group["suggested_keep_reason"]
+    assert "nothing is lost either way" not in group["suggested_keep_reason"]
+
+    # The captain is told this is an attachment, not somebody working the job.
+    text = _run()
+    assert "YES — as ATTACHED RECORDS, not as recorded work: purchase_order_items" in text
+    assert "would silently detach those records" in text
+
+
+def test_an_order_level_purchase_order_is_also_an_attachment(seeded):
+    """PurchaseOrder.work_order is the same association one level up."""
+    from reorder_queue.models import PurchaseOrder
+
+    item = _item("Belt replacement", "Baldor Motor")
+    plain = _work_order(item, created_at=BASE)
+    ordered_for = _work_order(item, created_at=BASE + timedelta(seconds=9))
+    PurchaseOrder.objects.create(
+        supplier=SupplierFactory(), created_by=seeded["operator"], work_order=ordered_for
+    )
+
+    rows = _rows(_groups()[str(item.id)])
+    assert rows[str(plain.id)]["verdict"] == "no-recorded-work"
+    assert rows[str(ordered_for.id)]["work_signals"]["purchase_orders"] == 1
+    assert rows[str(ordered_for.id)]["verdict"] == "worked"
+
+
+def test_a_promoted_problem_report_is_an_attachment_not_an_absence(seeded):
+    """LocationProblem.work_order is SET_NULL: deleting the WO detaches it."""
+    item = _item("As-needed building repair", "Main Workshop Fabric")
+    plain = _work_order(item, created_at=BASE)
+    promoted = _work_order(item, created_at=BASE + timedelta(seconds=11))
+    LocationProblem.objects.create(
+        location=LocationFactory(),
+        description="Ceiling tile down over bench 4",
+        work_order=promoted,
+    )
+
+    rows = _rows(_groups()[str(item.id)])
+    assert rows[str(plain.id)]["verdict"] == "no-recorded-work"
+    assert rows[str(promoted.id)]["work_signals"]["location_problems"] == 1
+    assert rows[str(promoted.id)]["verdict"] == "worked"
+    assert rows[str(promoted.id)]["worked_because"] == ["location_problems"]
+
+
+def test_a_missing_due_date_is_not_asserted_to_be_backend18_damage():
+    """Two problems promoted onto the same as-needed item look identical to a burst.
+
+    promote_to_standard_work_order creates the work order with no due date and
+    writes no wo_create audit row, so the ranking calls it high confidence. The
+    header must present the missing due date as consistent with the BACKEND-18
+    path, not as proof of it.
+    """
+    user = User.objects.create_user(
+        username="walkthrough", email="w@example.com", password="w-password"
+    )
+    item = _item("As-needed building repair", "Main Workshop Fabric")
+    location = LocationFactory()
+    promoted = [
+        _work_order(item, created_at=BASE, due_date=None, assigned_to=user),
+        _work_order(item, created_at=BASE + timedelta(seconds=90), due_date=None, assigned_to=user),
+    ]
+    for index, wo in enumerate(promoted):
+        LocationProblem.objects.create(
+            location=location, description=f"Problem {index}", work_order=wo
+        )
+
+    group = _groups()[str(item.id)]
+    assert group["due_date_missing"] is True
+
+    text = _run()
+    assert "CONSISTENT WITH the dashboard Generate button" in text
+    assert "but it does not establish it" in text
+    assert "promoting a location" in text
+    # The flat provenance claim an earlier cut printed as fact.
+    assert "which is the BACKEND-18 path" not in text
+    # ...and the false-positive note names both other producers, in every format.
+    payload = _payload()
+    assert "promoting a reported location problem" in payload["false_positive_causes"]
+    assert "simply omits due_date" in payload["false_positive_causes"]
 
 
 def test_bundled_sibling_pms_are_not_treated_as_work(seeded):

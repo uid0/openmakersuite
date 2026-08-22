@@ -41,6 +41,19 @@ Usage::
     python manage.py report_duplicate_work_orders --window-seconds 120
     python manage.py report_duplicate_work_orders --format json > duplicates.json
     python manage.py report_duplicate_work_orders --format csv  > duplicates.csv
+
+Running this against production
+-------------------------------
+It reads every work order plus its child rows, so it is a full scan even though
+it writes nothing: run it off-peak, narrow it with ``--since``, or point it at a
+read replica or a restored backup. Nothing here needs a writable database.
+
+Every output format carries PM titles, asset names, usernames and work-order
+notes, so treat a saved ``duplicates.json``/``duplicates.csv`` as internal.
+
+``--min-confidence high`` hides the low-confidence groups. Those are the
+*likely* false positives, and likely is not certainly — run the default once
+before deciding anything on the filtered view.
 """
 
 from __future__ import annotations

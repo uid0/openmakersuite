@@ -32,15 +32,16 @@ import pytest
 
 from inventory.models import (
     LocationProblem,
-    WorkOrderOmrTemplate,
-    WorkOrderPhoto,
     MaintenanceAuditEvent,
     MaintenanceItem,
     MaintenanceTask,
     MaintenanceTool,
     WorkOrder,
+    WorkOrderAttachment,
     WorkOrderLotoCompletion,
     WorkOrderMaterialUsage,
+    WorkOrderOmrTemplate,
+    WorkOrderPhoto,
     WorkOrderTaskCompletion,
     WorkOrderTool,
 )
@@ -1072,6 +1073,124 @@ def test_an_uploaderless_photo_with_no_promotion_link_is_an_explicit_unknown(see
     assert any("cannot be credited to anybody" in r for r in orphan_row["cannot_tell_because"])
 
 
+def test_an_uploaderless_attachment_is_never_explained_by_a_promotion_link(seeded):
+    """No promotion path writes a work-order attachment, so no link excuses one.
+
+    ``copy_to_work_order_photo`` writes a WorkOrderPhoto, and the attachment
+    copy lands on a THIRD-PARTY work order, so an uploader-less
+    WorkOrderAttachment cannot be a promotion copy: every path that uploads one
+    for a person stamps uploaded_by, and that FK is SET_NULL, so this is a
+    genuine upload whose uploader was deleted afterwards. The doubt must
+    survive the problem link that explains a copied photo.
+    """
+    item = _item("Sump pump service", "Grundfos Sump Pump")
+    location = LocationFactory()
+    plain = _work_order(item, created_at=BASE)
+    promoted = _work_order(item, created_at=BASE + timedelta(seconds=12))
+    LocationProblem.objects.create(location=location, description="Pump alarm", work_order=promoted)
+    WorkOrderAttachment.objects.create(
+        work_order=promoted,
+        file="work_order_attachments/2026/07/receipt.pdf",
+        kind=WorkOrderAttachment.Kind.OTHER,
+        description="Uploaded by a tech whose account was deleted afterwards",
+    )
+
+    rows = _rows(_groups()[str(item.id)])
+    row = rows[str(promoted.id)]
+
+    assert rows[str(plain.id)]["verdict"] == "no-recorded-work"
+    assert row["work_signals"]["attachments_uploaded"] == 0
+    assert row["work_signals"]["attachments_unattributed"] == 1
+    assert row["verdict"] == "worked"
+    assert row["worked_because"] == ["location_problems"]
+    assert any("attachment(s) carry no uploader" in r for r in row["cannot_tell_because"])
+
+    verdict_line = _verdict_line_for(_run(), promoted)
+    assert "AND CANNOT TELL:" in verdict_line
+    assert "attachment(s) carry no uploader" in verdict_line
+
+
+def test_a_promoted_problem_accounts_for_one_copied_photo_and_no_more(seeded):
+    """Promotion copies at most one photo, so the second one keeps its doubt."""
+    item = _item("Chip conveyor clear", "Mazak QT-200")
+    location = LocationFactory()
+    plain = _work_order(item, created_at=BASE)
+    promoted = _work_order(item, created_at=BASE + timedelta(seconds=14))
+    LocationProblem.objects.create(
+        location=location, description="Conveyor jam", work_order=promoted
+    )
+    for index in range(2):
+        WorkOrderPhoto.objects.create(
+            work_order=promoted,
+            image=f"work_order_photos/2026/07/jam-{index}.jpg",
+            caption=f"Photo {index}",
+        )
+
+    rows = _rows(_groups()[str(item.id)])
+    row = rows[str(promoted.id)]
+
+    assert rows[str(plain.id)]["verdict"] == "no-recorded-work"
+    assert row["work_signals"]["photos_unattributed"] == 2
+    assert row["worked_because"] == ["location_problems"]
+    # The link accounts for ONE copy; the doubt that survives counts the rest.
+    assert any(
+        "1 photo(s) carry no uploader that a promoted problem link does not account for" in r
+        for r in row["cannot_tell_because"]
+    )
+
+
+def test_the_largest_burst_and_the_ranked_run_are_reported_separately(seeded):
+    """Two runs of different provenance: the biggest is not the one ranked.
+
+    Three work orders raised by hand seconds apart each write a wo_create audit
+    row; two generate_work_order retries four hours later write none. The
+    ranking turns on the unaudited pair, so the group's biggest run (3) and the
+    run the reason quotes (2) are different populations, and each number has to
+    name the rows it covers.
+    """
+    import csv as csv_module
+
+    item = _item("Chuck cleaning", "Okuma Genos L250")
+    by_hand = [_work_order(item, created_at=BASE + timedelta(seconds=o)) for o in (0, 5, 10)]
+    for index, wo in enumerate(by_hand):
+        event = MaintenanceAuditEvent.objects.create(
+            action=MaintenanceAuditEvent.Action.WO_CREATE,
+            actor=seeded["planner"] if index else seeded["operator"],
+            work_order=wo,
+        )
+        MaintenanceAuditEvent.objects.filter(pk=event.pk).update(created_at=wo.created_at)
+    retries = [
+        _work_order(item, created_at=BASE + timedelta(hours=4)),
+        _work_order(item, created_at=BASE + timedelta(hours=4, seconds=20)),
+    ]
+
+    group = _groups()[str(item.id)]
+    reason = group["confidence_reason"]
+
+    assert group["count"] == 5
+    assert group["largest_burst"] == 3
+    assert group["ranked_burst"] == 2
+    assert group["confidence"] == "high"
+    assert "none of those 2 has a WO_CREATE audit row" in reason
+    assert "hold 3 row(s) with a wo_create audit row between them" in reason
+    assert [_rows(group)[str(wo.id)]["created_by"] for wo in retries] == ["", ""]
+
+    text = _run()
+    assert "largest burst of ANY provenance: 3 of 5" in text
+    assert "confidence ranked on a run of 2" in text
+
+    csv_rows = [r for r in csv_module.reader(StringIO(_run("--format", "csv"))) if r]
+    header = next(r for r in csv_rows if "work_order_id" in r)
+    body = [
+        r
+        for r in csv_rows[csv_rows.index(header) + 1 :]
+        if r[header.index("maintenance_item_id")] == str(item.id)
+    ]
+    assert len(body) == 5
+    assert {r[header.index("largest_burst")] for r in body} == {"3"}
+    assert {r[header.index("ranked_burst")] for r in body} == {"2"}
+
+
 def test_a_photo_with_an_uploader_is_recorded_work(seeded):
     """Every path that uploads for a person stamps uploaded_by server-side."""
     item = _item("Belt guard check", "Startrite Bandsaw")
@@ -1119,12 +1238,17 @@ def test_every_reported_signal_is_classified_exactly_once(seeded):
 
     # A typo in the suppression table would silently stop dropping an unknown a
     # finding accounts for, or drop one nothing accounts for.
-    explained_by = payload["indeterminate_signals_explained_by"]
     findings = buckets["work"] | buckets["attachment"]
-    assert set(explained_by) <= buckets["indeterminate"], "explains a non-(C) signal"
-    for name, explainers in explained_by.items():
-        assert explainers, f"{name} listed with no explainer"
-        assert set(explainers) <= findings, f"{name} explained by a non-(A) signal"
+    for key in ("indeterminate_signals_explained_by", "indeterminate_signals_explained_up_to"):
+        table = payload[key]
+        assert set(table) <= buckets["indeterminate"], f"{key} explains a non-(C) signal"
+        for name, explainers in table.items():
+            assert explainers, f"{name} listed with no explainer"
+            assert set(explainers) <= findings, f"{name} explained by a non-(A) signal"
+    # The two tables are different rules, so a name must not sit in both.
+    assert not set(payload["indeterminate_signals_explained_by"]) & set(
+        payload["indeterminate_signals_explained_up_to"]
+    )
 
 
 def test_a_missing_due_date_is_not_asserted_to_be_backend18_damage():

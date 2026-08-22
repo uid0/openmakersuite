@@ -179,16 +179,16 @@ INDETERMINATE_SIGNALS = (
     ),
     (
         "photos_unattributed",
-        "{photos_unattributed} photo(s) carry no uploader, so they cannot be credited "
-        "to anybody: promoting a reported problem copies the reporter's photo onto the "
-        "new work order exactly that way, and a genuine upload whose uploader was since "
-        "deleted looks identical",
+        "{photos_unattributed} photo(s) carry no uploader that a promoted problem link "
+        "does not account for, so they cannot be credited to anybody: promoting a "
+        "reported problem copies the reporter's photo onto the new work order exactly "
+        "that way, and a genuine upload whose uploader was since deleted looks identical",
     ),
     (
         "attachments_unattributed",
         "{attachments_unattributed} attachment(s) carry no uploader, so they cannot be "
-        "credited to anybody — a file copied across at creation and one uploaded by a "
-        "since-deleted user look identical",
+        "credited to anybody, and the promotion-copy reading that covers photos does not "
+        "apply here: no path writes a work-order attachment at promotion time",
     ),
 )
 
@@ -202,10 +202,20 @@ EXPLAINED_BY = {
     "other_audit_events": ("status_beyond_open", "completed_at"),
     # "may have been worked and never scanned back" — unless it came back.
     "omr_templates": ("submissions", "completed_scan"),
-    # Promotion writes the problem link and copies the file in one go, so the
-    # link says where an uploader-less file came from — whatever its timestamp.
+}
+
+#: Unknowns a fired finding accounts for only up to a COUNT, not outright.
+#: Promoting a reported problem writes the problem link and copies ONE file in
+#: the same breath, so N problem links say where N uploader-less files came
+#: from and nothing about any beyond that: those are somebody's genuine upload
+#: whose account was deleted afterwards, and their doubt stands. Only photos
+#: appear here — ``copy_to_work_order_photo`` is the only promotion copy that
+#: lands on a work order, and it writes a WorkOrderPhoto; the attachment copy
+#: (``copy_to_tpwo_attachment``) writes a third-party work order's attachment,
+#: which is not in ``wo.attachments``. So a problem link can never account for
+#: an uploader-less WorkOrderAttachment, and that doubt is never dropped.
+EXPLAINED_UP_TO = {
     "photos_unattributed": ("location_problems", "asset_problems"),
-    "attachments_unattributed": ("location_problems", "asset_problems"),
 }
 
 #: Reported for context, never used as evidence in either direction. Row counts
@@ -361,8 +371,7 @@ SIGNALS_NOTE = """\
                       so no comparison is possible at all.
   bundled_items       sibling PMs are attached, but auto-bundling attaches them
                       at creation time, not by anyone working the job.
-  photos_unattributed a file with no uploader. Every path that uploads for a
-  attachments_unattributed
+  photos_unattributed a photo with no uploader. Every path that uploads for a
                       person stamps uploaded_by server-side, so this is either
                       a copy made by the system — promoting a reported problem
                       copies the reporter's photo across exactly this way — or
@@ -370,9 +379,15 @@ SIGNALS_NOTE = """\
                       timestamp is consulted: the promotion copy is stamped
                       only after the bytes move through the storage backend,
                       so timing it would let a slow network decide between
-                      "recorded work" and "cannot tell". Dropped when
-                      location_problems or asset_problems fired: the promotion
-                      link then accounts for the file whatever its stamp.
+                      "recorded work" and "cannot tell". A promoted problem
+                      copies at most ONE photo, so location_problems and
+                      asset_problems account for that many and NO more; every
+                      uploader-less photo past that count keeps its doubt.
+  attachments_unattributed
+                      an attachment with no uploader — read the same way, minus
+                      the promotion escape: no path writes a work-order
+                      attachment at promotion time, so a problem link cannot
+                      account for one and this doubt is never dropped.
 
 DELIBERATELY NOT EVIDENCE, in either direction — reported for context only:
 
@@ -461,6 +476,7 @@ class DuplicateGroup:
     last_created_at: str
     span_seconds: float
     largest_burst: int
+    ranked_burst: int
     confidence: str
     confidence_reason: str
     worked_count: int
@@ -1018,15 +1034,23 @@ class Command(BaseCommand):
         wo_create are recorded against it" as a reason the report cannot tell
         would turn the strongest confirmation of work into a doubt, and would
         put every completed work order into a filter on cannot_tell_because.
+
+        ``EXPLAINED_UP_TO`` is the same idea with a ceiling: the finding
+        accounts for a COUNT of the unknown, not for the whole of it, so the
+        sentence is printed for the remainder and quotes that remainder rather
+        than the raw count.
         """
         context = {
             **signals,
             "assigned_to_name": str(wo.assigned_to) if wo.assigned_to_id else "",
         }
+        for name, explainers in EXPLAINED_UP_TO.items():
+            accounted = sum(signals[explainer] for explainer in explainers)
+            context[name] = max(0, signals[name] - accounted)
         indeterminate = [
             sentence.format(**context)
             for name, sentence in INDETERMINATE_SIGNALS
-            if signals[name]
+            if context[name]
             and not any(signals[explainer] for explainer in EXPLAINED_BY.get(name, ()))
         ]
         fired = [name for name in DEFINITIVE_SIGNALS if signals[name]]
@@ -1109,7 +1133,7 @@ class Command(BaseCommand):
                 )
             )
 
-        confidence, reason = self._rank(rows, bursts=bursts, span=span, window=window)
+        confidence, reason, ranked_burst = self._rank(rows, bursts=bursts, span=span, window=window)
         keep_id, keep_reason = self._suggest_keep(rows, confidence=confidence)
         for row in rows:
             if row.id == keep_id:
@@ -1130,6 +1154,7 @@ class Command(BaseCommand):
             last_created_at=rows[-1].created_at,
             span_seconds=span,
             largest_burst=burst,
+            ranked_burst=ranked_burst,
             confidence=confidence,
             confidence_reason=reason,
             worked_count=sum(1 for r in rows if r.verdict == VERDICT_WORKED),
@@ -1169,6 +1194,7 @@ class Command(BaseCommand):
                     "re-scheduled PM is the likeliest reading of that spread; it does not "
                     "rule out an operator who came back and pressed the button again later."
                 ),
+                0,
             )
 
         unaudited = [run for run in clusters if not any(row.created_by for row in run)]
@@ -1210,6 +1236,7 @@ class Command(BaseCommand):
                     "and then 500ed, but does not establish it — see the false-positive note "
                     "for the other paths that write no wo_create row." + tail
                 ),
+                len(ranked),
             )
         audited = sum(1 for row in ranked if row.created_by)
         return (
@@ -1220,6 +1247,7 @@ class Command(BaseCommand):
                 "least some were raised through the audited create path. What produced the "
                 "rest is not established here." + tail
             ),
+            len(ranked),
         )
 
     def _suggest_keep(self, rows, *, confidence):
@@ -1481,9 +1509,19 @@ class Command(BaseCommand):
                 w("                 but it does not establish it: promoting a location")
                 w("                 problem and a plain create that omits due_date leave")
                 w("                 the same shape — see the false-positive note above")
+            w(f"  Created span : {self._duration(group.span_seconds)}")
             w(
-                f"  Created span : {self._duration(group.span_seconds)}"
-                f"  (largest burst: {group.largest_burst} of {group.count})"
+                f"                 largest burst of ANY provenance: {group.largest_burst} "
+                f"of {group.count}"
+            )
+            w(
+                "                 "
+                + (
+                    f"confidence ranked on a run of {group.ranked_burst} — the rows the "
+                    "'Why ranked' line below counts"
+                    if group.ranked_burst
+                    else "no run of two or more, so the ranking is over the spread instead"
+                )
             )
             w(f"  Why ranked   : {group.confidence_reason}")
             w(
@@ -1574,6 +1612,9 @@ class Command(BaseCommand):
             "indeterminate_signals_explained_by": {
                 name: list(explainers) for name, explainers in EXPLAINED_BY.items()
             },
+            "indeterminate_signals_explained_up_to": {
+                name: list(explainers) for name, explainers in EXPLAINED_UP_TO.items()
+            },
             "indeterminate_signals": [name for name, _ in INDETERMINATE_SIGNALS],
             "burst_window_seconds": int(window.total_seconds()),
             "since": since.date().isoformat() if since else None,
@@ -1627,6 +1668,7 @@ class Command(BaseCommand):
                 "due_date_missing",
                 "group_size",
                 "largest_burst",
+                "ranked_burst",
                 "group_span_seconds",
                 "work_order_id",
                 "work_order_number",
@@ -1695,6 +1737,7 @@ class Command(BaseCommand):
                         "yes" if group.due_date_missing else "no",
                         group.count,
                         group.largest_burst,
+                        group.ranked_burst,
                         int(group.span_seconds),
                         row.id,
                         row.number,

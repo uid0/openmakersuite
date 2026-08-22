@@ -13,7 +13,7 @@ from django.db import models, transaction
 from django.db.models import Avg, Count, F, Max, Min, Q, Sum
 from django.utils import timezone
 
-from rest_framework import status, viewsets
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -1347,7 +1347,18 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        services.confirm_order(purchase_order, request.data.get("expected_delivery_date"))
+        # Same coercion trap as inventory generate_work_order (BACKEND-18): the
+        # client's date arrives as a string, and handing it straight to the
+        # service persists fine but leaves a str on the in-memory PO, so
+        # render_payment_schedule() calls .isoformat() on it and 500s while
+        # serializing the response — after the PO has already been confirmed.
+        raw_expected = request.data.get("expected_delivery_date")
+        if raw_expected:
+            expected_delivery_date = serializers.DateField().to_internal_value(raw_expected)
+        else:
+            expected_delivery_date = raw_expected
+
+        services.confirm_order(purchase_order, expected_delivery_date)
 
         serializer = self.get_serializer(purchase_order)
         return Response(serializer.data)

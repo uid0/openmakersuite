@@ -6267,10 +6267,20 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
         """Create a work order for this maintenance item, pre-populated with tasks and materials."""
         item = self.get_object()
 
+        # A client-supplied due_date arrives as a string (ScanTTY sends one; the
+        # web dashboard sends no body at all). Handing that string straight to
+        # objects.create() persists fine but leaves a str on the in-memory
+        # instance, so WorkOrder.is_overdue compares a date to a str and 500s
+        # while serializing the 201 response — after the work order has already
+        # been committed (BACKEND-18). Parse it here, outside the atomic block,
+        # so a malformed date is a clean 400 before anything is written.
+        raw_due_date = request.data.get("due_date")
+        if raw_due_date:
+            due_date = serializers.DateField().to_internal_value(raw_due_date)
+        else:
+            due_date = item.next_due_at.date() if item.next_due_at else None
+
         with transaction.atomic():
-            due_date = request.data.get("due_date") or (
-                item.next_due_at.date() if item.next_due_at else None
-            )
             wo = WorkOrder.objects.create(
                 maintenance_item=item,
                 asset=item.asset,

@@ -91,9 +91,11 @@ write to a non-text model field must be coerced first — e.g.
 `serializers.DateField().to_internal_value(raw)` — and coerced *outside* the
 `transaction.atomic()` block, so a bad value is a clean 400 before anything is
 written. Skipping this persists the row correctly but leaves a `str` on the
-in-memory instance, and the response serializer then 500s *after* the commit;
-that was BACKEND-18 (`inventory` `generate_work_order`) and the same defect in
-`reorder_queue` `confirm_order`.
+in-memory instance, and the response serializer then 500s *after* the commit,
+so a retrying operator accumulates duplicate rows. Worked examples:
+`inventory` `generate_work_order` and `reorder_queue` `confirm_order`, pinned by
+`inventory/tests/test_generate_work_order_due_date.py` and
+`reorder_queue/tests/test_po_confirm_expected_delivery_date.py`.
 
 ### Django upgrade history
 

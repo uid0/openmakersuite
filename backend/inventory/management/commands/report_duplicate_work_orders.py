@@ -16,6 +16,20 @@ candidate query — and, for each group, prints who and what is attached to each
 row so a human can decide which one to keep. It decides nothing and changes
 nothing.
 
+Every answer it gives is one of three kinds, and it never lets one masquerade
+as another:
+
+  (A) POSITIVE FINDING   — something was established to be present.
+  (B) ESTABLISHED ABSENCE — something was established to be absent, by a check
+                            that actually covers it, over a population the
+                            report can name.
+  (C) EXPLICIT UNKNOWN   — the data cannot answer the question, and the output
+                            says so in those words.
+
+Nothing falls through to (B) because a check was not run, a row was filtered
+out, a related row was missing, or a comparison could not be made. Absence of a
+signal that was not checked is not evidence of absence.
+
 This command is deliberately, permanently READ-ONLY. There is no ``--fix``, no
 ``--merge``, no ``--delete`` and no dry-run that could be flipped to a real run.
 Cleaning up duplicates is a separate, human-authorised decision; do not wire
@@ -72,6 +86,77 @@ VERDICT_WORKED = "worked"
 VERDICT_UNKNOWN = "unknown"
 VERDICT_NONE = "no-recorded-work"
 
+#: (A) POSITIVE FINDINGS. Any one of these fires and the verdict is WORKED.
+#: Membership here is a claim that the signal can ONLY be produced by a human
+#: acting on the work order after it was generated. A generation-time artifact
+#: must never be listed here — that is the ``quantity_used`` trap, and the
+#: reason ``tools_restaged`` and ``bundled_items`` live in the (C) table below.
+DEFINITIVE_SIGNALS = (
+    "status_beyond_open",
+    "tasks_completed",
+    "task_notes",
+    "task_timers",
+    "materials_used",
+    "materials_applied",
+    "qty_edited",
+    "adhoc_materials",
+    "material_evidence",
+    "adhoc_tools",
+    "loto_completed",
+    "loto_notes",
+    "time_seconds",
+    "started_at",
+    "completed_at",
+    "completed_by",
+    "completed_scan",
+    "maintenance_logs",
+    "photos",
+    "attachments",
+    "validations",
+    "submissions",
+    "edited_since_create",
+)
+
+#: (C) EXPLICIT UNKNOWNS. When no (A) signal fired but one of these is present,
+#: the verdict is CANNOT TELL and the matching sentence is printed verbatim, so
+#: the captain reads *why* the question could not be answered rather than a
+#: silent "untouched".
+INDETERMINATE_SIGNALS = (
+    (
+        "assigned_to",
+        "assigned to {assigned_to_name} — somebody was put on this job, so what they "
+        "did may simply not have been recorded here",
+    ),
+    (
+        "omr_templates",
+        "{omr_templates} printed OMR form(s) were generated for it, so a paper copy "
+        "exists that may have been worked and never scanned back",
+    ),
+    (
+        "other_audit_events",
+        "{other_audit_events} audit event(s) other than wo_create are recorded "
+        "against it",
+    ),
+    (
+        "tools_restaged",
+        "{tools_restaged} tool row(s) hold a staging location that differs from their "
+        "PM template — that is either a tech restaging the tool for this job or "
+        "somebody editing the template afterwards, and MaintenanceTool records no "
+        "modification time, so the two cannot be told apart",
+    ),
+    (
+        "tools_unverifiable",
+        "{tools_unverifiable} tool row(s) lost the template row they were copied from, "
+        "so a per-job restage cannot be compared against anything",
+    ),
+    (
+        "bundled_items",
+        "{bundled_items} sibling PM(s) are bundled onto it — auto-bundling attaches "
+        "those when the work order is created, so it is not by itself somebody having "
+        "worked the job",
+    ),
+)
+
 FALSE_POSITIVE_NOTE = """\
 These are SUSPECTED duplicates, not proven ones. The grouping key is
 (maintenance_item, due_date), which also matches work orders that were repeated
@@ -89,40 +174,39 @@ on purpose. Known causes of a false positive:
 Timestamp clustering is what separates the two: the BACKEND-18 retries happened
 seconds apart. Groups whose rows are spread over hours or days are ranked LOW
 confidence and are most likely legitimate. Nothing is excluded from the report
-on that basis — ranking, not filtering, so a real duplicate is never hidden."""
+on that basis — ranking, not filtering, so a real duplicate is never hidden.
+
+A NULL due date is a real grouping key here, not a reason to skip a row: the
+dashboard's Generate button sends no due_date, and generate_work_order then
+falls back to the PM's next_due_at, which is NULL for a PM that has never been
+completed. Retries of that button therefore leave duplicates with no due date
+at all, and they are reported like any other group."""
 
 SIGNALS_NOTE = """\
-"Worked" signals reported per work order (each is shown separately rather than
-collapsed into one guess, because they fail differently):
+"Worked" signals, sorted into the three kinds of answer this report gives.
 
-  status              status beyond the initial "open".
+(A) POSITIVE FINDINGS — any one of these fires and the verdict is WORKED. Each
+    can only be produced by a human acting on the work order after generation:
+
+  status_beyond_open  status moved beyond the initial "open".
   tasks_completed     WorkOrderTaskCompletion rows with is_completed=True.
   task_notes          task completions carrying free-text notes. Marking a step
                       NOT done still saves its notes, and that never moves the
                       work order's own status or updated_at.
   task_timers         task completions with per-step stopwatch time, or a step
                       whose stopwatch is running right now.
-  materials_used      WorkOrderMaterialUsage rows with was_used=True. NOTE:
-                      quantity_used alone is NOT evidence — generation pre-fills
-                      it from the template's planned quantity, so a non-zero
-                      quantity_used is present on a work order nobody touched.
+  materials_used      WorkOrderMaterialUsage rows with was_used=True.
   materials_applied   usage rows with applied_quantity set, i.e. stock was
                       actually decremented against this work order. This is the
                       hardest material signal: it has an inventory side effect.
   qty_edited          usage rows whose quantity_used differs from
                       quantity_planned, i.e. somebody changed the number.
   adhoc_materials     usage rows with is_ad_hoc=True — a material typed in
-                      during the job. Generation never creates one, so its mere
-                      existence is somebody working this work order.
+                      during the job. Generation never creates one.
   material_evidence   usage rows carrying a receipt image, a unit cost or a
-                      purchase-order line: real money and real paperwork
-                      attached to this row.
+                      purchase-order line: real money and real paperwork.
   adhoc_tools         WorkOrderTool rows with is_ad_hoc=True — a tool added
                       during the job rather than copied from the template.
-  tools_restaged      tool rows whose location_hint or notes DIVERGE from the
-                      template row they were copied from. A non-empty hint is
-                      not evidence by itself: generation copies the template's
-                      value in. Only a divergence means somebody restaged it.
   loto_completed      WorkOrderLotoCompletion rows with is_completed=True.
   loto_notes          LOTO rows carrying notes, plus the work order's own
                       free-text loto_completion_note.
@@ -131,38 +215,50 @@ collapsed into one guess, because they fail differently):
   completed_at        set when the work order was marked complete.
   completed_by        completed_by_name from a scanned paper form.
   completed_scan      a completed paper form was scanned or emailed back in.
-  bundled_items       sibling PMs were bundled onto this work order.
   maintenance_logs    MaintenanceLog rows written back from this work order.
   photos/attachments  evidence uploaded against the work order.
   validations         WorkOrderValidation sign-offs.
   submissions         scanned/emailed-in paper submissions.
   edited_since_create updated_at moved after created_at (someone saved the row).
 
-A work order is called WORKED if any of those fire. If none fires but something
-INDETERMINATE is present, the verdict is CANNOT TELL rather than "untouched" —
-see the coverage note below for which is which. The retry artifacts left by
-BACKEND-18 were never opened by anyone, so they should show none."""
+(C) EXPLICIT UNKNOWNS — none of (A) fired, but the data cannot answer the
+    question, so the verdict is CANNOT TELL and the reason is printed:
+
+  assigned_to         somebody was put on this job.
+  omr_templates       a printed OMR form exists, so there may be a worked paper
+                      copy that was never scanned back.
+  other_audit_events  audit events other than wo_create are recorded on it.
+  tools_restaged      a tool row's staging location differs from its PM
+                      template's. Generation COPIES that value in and never
+                      re-syncs, and MaintenanceTool records no modification
+                      time — so a divergence is equally consistent with a tech
+                      restaging the tool and with somebody editing the template
+                      afterwards. It is therefore never counted as work.
+  tools_unverifiable  the template row a tool was copied from has been deleted,
+                      so no comparison is possible at all.
+  bundled_items       sibling PMs are attached, but auto-bundling attaches them
+                      at creation time, not by anyone working the job.
+
+DELIBERATELY NOT EVIDENCE, in either direction — reported for context only:
+
+  quantity_used       quantity_used alone is NOT evidence: generation pre-fills
+                      it from the template's planned quantity, so every
+                      untouched retry artifact carries a non-zero quantity_used,
+                      and using it would mark all three retries as worked.
+  tasks_total, materials_total, tools_total, loto_total
+                      row counts created by generation, not by work.
+
+(B) ESTABLISHED ABSENCE is what "no recorded work" means: every (A) signal was
+checked and none fired, and no (C) condition was present. Read it strictly as
+"nothing found in the signals listed above" — see the coverage note."""
 
 COVERAGE_NOTE = """\
 What "worked" does and does not cover — read this before removing anything.
 
-CHECKED (any one of these makes the verdict WORKED): status beyond open; task
-completions ticked, annotated, or carrying per-step stopwatch time; material
-rows marked used, with stock applied, with an edited quantity, added ad hoc, or
-carrying a receipt image / unit cost / purchase-order line; tool rows added ad
-hoc or restaged away from the template's staging location or notes; LOTO rows
-completed or annotated and the work order's free-text LOTO completion note;
-work-order stopwatch time, started_at, completed_at, completed_by_name; a
-completed paper form scanned back in; bundled additional maintenance items;
-maintenance logs, photos, attachments, validations and paper submissions; and
-updated_at having moved past created_at.
+CHECKED: every signal in the (A) list above.
 
-INDETERMINATE — reported as CANNOT TELL, never as absence of work: a work order
-that is assigned to somebody; one that had a printed OMR form generated for it,
-so a paper copy exists that may have been worked and never scanned back; one
-carrying audit events other than wo_create; and tool rows whose template
-counterpart has since been deleted, so a per-job restage cannot be told apart
-from the value that was copied in at generation.
+INDETERMINATE: every condition in the (C) list above. These are reported as
+CANNOT TELL, never as absence of work.
 
 NOT COVERED AT ALL: these signals only see what OpenMakerSuite recorded. Work
 done on paper and never scanned back, work logged against the asset rather than
@@ -204,7 +300,8 @@ class DuplicateGroup:
     maintenance_item_title: str
     asset: str
     asset_id: str
-    due_date: str
+    due_date: str | None
+    due_date_missing: bool
     count: int
     first_created_at: str
     last_created_at: str
@@ -218,6 +315,59 @@ class DuplicateGroup:
     suggested_keep_id: str
     suggested_keep_reason: str
     work_orders: list[WorkOrderRow] = field(default_factory=list)
+
+
+@dataclass
+class RunAccounting:
+    """What the run actually searched, so no absence is ever stated bare.
+
+    "No duplicates found" is only meaningful against a named population. These
+    counts are that population: how many work orders exist, how many this
+    report's key can group, and how many were left out and why.
+    """
+
+    work_orders_total: int
+    groupable_total: int
+    ungroupable_no_item: int
+    rows_in_duplicate_groups: int
+    lone_rows: int
+    duplicate_groups_found: int
+    groups_excluded_by_since: int
+    rows_excluded_by_since: int
+    since: str | None
+
+    def lines(self) -> list[str]:
+        out = [
+            f"Work orders in the database: {self.work_orders_total}.",
+            (
+                f"Searched by (maintenance item, due date): {self.groupable_total}. "
+                f"{self.rows_in_duplicate_groups} of those share a key with at least "
+                f"one other work order ({self.duplicate_groups_found} group(s)); the "
+                f"remaining {self.lone_rows} have no partner under that key."
+            ),
+        ]
+        if self.ungroupable_no_item:
+            out.append(
+                f"NOT SEARCHED: {self.ungroupable_no_item} work order(s) carry no "
+                "maintenance item — a corrective work order, or a PM template deleted "
+                "afterwards (the FK is SET_NULL). This report's key cannot group them "
+                "without bucketing unrelated assets together, so nothing here says "
+                "whether any of them are duplicates."
+            )
+        else:
+            out.append(
+                "Every work order in the database carries a maintenance item, so none "
+                "was left out of the search for want of one."
+            )
+        if self.groups_excluded_by_since:
+            out.append(
+                f"NOT SHOWN: --since {self.since} excluded "
+                f"{self.groups_excluded_by_since} duplicate group(s) "
+                f"({self.rows_excluded_by_since} work order(s)) whose every member was "
+                "created before the cutoff. Those may still be duplicates; re-run "
+                "without --since to see them."
+            )
+        return out
 
 
 @dataclass
@@ -302,7 +452,7 @@ class Command(BaseCommand):
                 "this date (YYYY-MM-DD). Whole groups are selected: every member is "
                 "then reported, including members created before the cutoff, so the "
                 "count and the 'earliest' designation stay truthful for a burst that "
-                "straddles it. Useful for narrowing to the period the 500s were hit."
+                "straddles it. Whatever it excludes is counted in the output."
             ),
         )
         parser.add_argument(
@@ -335,7 +485,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         window = timedelta(seconds=max(0, options["window_seconds"]))
         since = self._parse_since(options["since"])
-        all_groups = self._collect_groups(window=window, since=since)
+        all_groups, accounting = self._collect_groups(window=window, since=since)
 
         min_confidence = options["min_confidence"]
         threshold = CONFIDENCE_ORDER[min_confidence]
@@ -363,11 +513,17 @@ class Command(BaseCommand):
 
         fmt = options["format"]
         if fmt == "json":
-            self.stdout.write(self._render_json(groups, window=window, since=since, scope=scope))
+            self.stdout.write(
+                self._render_json(
+                    groups, window=window, since=since, scope=scope, accounting=accounting
+                )
+            )
         elif fmt == "csv":
-            self.stdout.write(self._render_csv(groups, scope=scope))
+            self.stdout.write(self._render_csv(groups, scope=scope, accounting=accounting))
         else:
-            self._render_text(groups, window=window, since=since, scope=scope)
+            self._render_text(
+                groups, window=window, since=since, scope=scope, accounting=accounting
+            )
 
     # ---------------------------------------------------------------- helpers
 
@@ -387,28 +543,36 @@ class Command(BaseCommand):
         return timezone.make_aware(parsed) if timezone.is_naive(parsed) else parsed
 
     def _base_queryset(self):
-        # Corrective work orders carry no maintenance_item; grouping NULLs
-        # together would bucket unrelated assets, so they are out of scope. The
-        # BACKEND-18 path always sets maintenance_item.
-        return WorkOrder.objects.filter(
-            maintenance_item__isnull=False,
-            due_date__isnull=False,
-        )
+        """Every work order this report's key can group.
 
-    def _group_keys(self, base, since):
-        """The ``(maintenance_item, due_date)`` pairs worth reporting.
+        Corrective work orders carry no ``maintenance_item``; grouping those
+        NULLs together would bucket unrelated assets, so they are out of scope
+        — but they are COUNTED and named in the accounting rather than silently
+        dropped, because a PM template deleted afterwards lands there too
+        (the FK is SET_NULL).
 
-        ``--since`` SELECTS whole groups rather than filtering individual rows:
-        a group qualifies when any one of its members was created at or after
-        the cutoff, and every member is then reported. Filtering row by row
-        would shrink a burst that straddles the boundary and make both the
-        count and the "earliest is the intended one" reasoning wrong.
+        A NULL ``due_date`` is emphatically NOT excluded. ``generate_work_order``
+        falls back to ``MaintenanceItem.next_due_at``, which is NULL for a PM
+        that has never been completed — exactly the PMs the dashboard puts a
+        Generate button next to — so retrying that button after the 500 leaves
+        duplicates with no due date. Grouping on (item, NULL) is well defined
+        and does not have the bucketing problem a NULL item would.
+        """
+        return WorkOrder.objects.filter(maintenance_item__isnull=False)
+
+    def _duplicate_keys(self, base, since):
+        """Every ``(maintenance_item, due_date)`` key shared by 2+ work orders.
+
+        ``recent`` counts the members created at or after ``--since``, so the
+        caller can SELECT whole groups rather than filtering individual rows: a
+        group qualifies when any one member is recent enough, and every member
+        is then reported. Filtering row by row would shrink a burst straddling
+        the boundary and make both the count and the "earliest is the intended
+        one" reasoning wrong.
         """
         keys = base.values("maintenance_item_id", "due_date").annotate(n=Count("id"))
         if since is not None:
-            keys = keys.annotate(recent=Count("id", filter=Q(created_at__gte=since))).filter(
-                recent__gt=0
-            )
+            keys = keys.annotate(recent=Count("id", filter=Q(created_at__gte=since)))
         return list(keys.filter(n__gt=1).order_by())
 
     def _candidates(self, base, pairs):
@@ -459,13 +623,31 @@ class Command(BaseCommand):
 
     def _collect_groups(self, *, window, since):
         base = self._base_queryset()
-        keys = self._group_keys(base, since)
-        if not keys:
-            return []
+        duplicate_keys = self._duplicate_keys(base, since)
+
+        selected = [k for k in duplicate_keys if since is None or k["recent"] > 0]
+        excluded = [k for k in duplicate_keys if since is not None and k["recent"] == 0]
+
+        groupable_total = base.count()
+        rows_in_duplicate_groups = sum(k["n"] for k in duplicate_keys)
+        accounting = RunAccounting(
+            work_orders_total=WorkOrder.objects.count(),
+            groupable_total=groupable_total,
+            ungroupable_no_item=WorkOrder.objects.filter(maintenance_item__isnull=True).count(),
+            rows_in_duplicate_groups=rows_in_duplicate_groups,
+            lone_rows=groupable_total - rows_in_duplicate_groups,
+            duplicate_groups_found=len(duplicate_keys),
+            groups_excluded_by_since=len(excluded),
+            rows_excluded_by_since=sum(k["n"] for k in excluded),
+            since=since.date().isoformat() if since else None,
+        )
+
+        if not selected:
+            return [], accounting
 
         pairs = sorted(
-            {(k["maintenance_item_id"], k["due_date"]) for k in keys},
-            key=lambda pair: (str(pair[0]), pair[1]),
+            {(k["maintenance_item_id"], k["due_date"]) for k in selected},
+            key=lambda pair: (str(pair[0]), pair[1].isoformat() if pair[1] else ""),
         )
         candidates = self._candidates(base, pairs)
 
@@ -473,11 +655,12 @@ class Command(BaseCommand):
         for wo in candidates:
             buckets.setdefault((wo.maintenance_item_id, wo.due_date), []).append(wo)
 
-        return [
+        groups = [
             self._build_group(work_orders, window=window)
             for work_orders in buckets.values()
             if len(work_orders) > 1
         ]
+        return groups, accounting
 
     def _creator(self, wo):
         """Who created this work order, per the maintenance audit log.
@@ -497,13 +680,19 @@ class Command(BaseCommand):
         return ""
 
     def _tool_signals(self, tools):
-        """Restaging evidence from the per-job tool rows.
+        """Staging divergence on the per-job tool rows — an unknown, not evidence.
 
-        ``create_work_order_tools`` copies the template's ``location_hint`` and
-        ``notes`` onto every generated row, so a NON-EMPTY value proves nothing.
-        Only a DIVERGENCE from the template means a human restaged this tool for
-        this job. When the template row is gone the comparison cannot be made at
-        all — that is indeterminate, not absence.
+        ``create_work_order_tools`` copies the template's ``location_hint`` onto
+        every generated row and deliberately never re-syncs, so a NON-EMPTY value
+        proves nothing. A DIVERGENCE proves nothing either: ``MaintenanceTool``
+        carries no ``updated_at``, so a template edited after generation is
+        indistinguishable from a tech restaging the tool for this job. Both
+        counts below therefore feed the CANNOT TELL verdict, never WORKED.
+
+        ``notes`` is left out of the comparison entirely: no work-order path
+        writes ``WorkOrderTool.notes`` (``tool_detail`` PATCHes only
+        ``location_hint``), so a notes divergence can only mean the template
+        changed.
         """
         restaged = 0
         unverifiable = 0
@@ -513,10 +702,7 @@ class Command(BaseCommand):
             template = row.tool
             if template is None:
                 unverifiable += 1
-                continue
-            copied = (template.location_hint or "", template.notes or "")
-            staged = (row.location_hint or "", row.notes or "")
-            if staged != copied:
+            elif (row.location_hint or "") != (template.location_hint or ""):
                 restaged += 1
         return restaged, unverifiable
 
@@ -590,92 +776,57 @@ class Command(BaseCommand):
     def _verdict(self, wo, signals):
         """Three-state answer: worked, cannot tell, or nothing recorded.
 
-        A boolean here would flatten "we checked every signal and found nothing"
-        into the same answer as "the data cannot tell us", and only the first of
-        those makes a work order safe to remove. Absence of a signal nobody
-        checked is not evidence of absence.
+        Driven off the ``DEFINITIVE_SIGNALS`` / ``INDETERMINATE_SIGNALS`` tables
+        rather than a hand-written condition, so a signal added later has to be
+        classified as a positive finding or an explicit unknown by construction
+        — it cannot quietly become "we checked and found nothing".
         """
-        definitive = (
-            signals["status_beyond_open"],
-            signals["tasks_completed"],
-            signals["task_notes"],
-            signals["task_timers"],
-            signals["materials_used"],
-            signals["materials_applied"],
-            signals["qty_edited"],
-            signals["adhoc_materials"],
-            signals["material_evidence"],
-            signals["adhoc_tools"],
-            signals["tools_restaged"],
-            signals["loto_completed"],
-            signals["loto_notes"],
-            signals["time_seconds"],
-            signals["started_at"],
-            signals["completed_at"],
-            signals["completed_by"],
-            signals["completed_scan"],
-            signals["bundled_items"],
-            signals["maintenance_logs"],
-            signals["photos"],
-            signals["attachments"],
-            signals["validations"],
-            signals["submissions"],
-            signals["edited_since_create"],
-        )
-        if any(definitive):
+        if any(signals[name] for name in DEFINITIVE_SIGNALS):
             return VERDICT_WORKED, []
 
-        indeterminate = []
-        if signals["assigned_to"]:
-            indeterminate.append(
-                f"assigned to {wo.assigned_to} — somebody was put on this job, so what "
-                "they did may simply not have been recorded here"
-            )
-        if signals["omr_templates"]:
-            indeterminate.append(
-                "a printed OMR form was generated for it, so a paper copy exists that "
-                "may have been worked and never scanned back"
-            )
-        if signals["other_audit_events"]:
-            indeterminate.append(
-                f"{signals['other_audit_events']} audit event(s) other than wo_create "
-                "are recorded against it"
-            )
-        if signals["tools_unverifiable"]:
-            indeterminate.append(
-                f"{signals['tools_unverifiable']} tool row(s) lost the template row they "
-                "were copied from, so a per-job restage cannot be told apart from the "
-                "copied-in value"
-            )
+        context = {
+            **signals,
+            "assigned_to_name": str(wo.assigned_to) if wo.assigned_to_id else "",
+        }
+        indeterminate = [
+            sentence.format(**context)
+            for name, sentence in INDETERMINATE_SIGNALS
+            if signals[name]
+        ]
         if indeterminate:
             return VERDICT_UNKNOWN, indeterminate
         return VERDICT_NONE, []
 
-    def _largest_burst(self, work_orders, window):
-        """Biggest run of rows created within ``window`` of each other, and who is in it.
+    def _burst_analysis(self, work_orders, window):
+        """The largest run of rows within ``window``, and every clustered row.
 
-        Returns the run size and the ids of its members, so ``in_burst`` on each
-        row agrees with the number the confidence ranking is derived from. A
-        run of one is not a burst, so it names nobody.
+        Two different questions, deliberately answered separately. The size of
+        the biggest run is the ranking number. ``in_burst`` answers "was this row
+        created seconds after (or before) another one", so it marks every row
+        adjacent to a neighbour inside the window — a group can hold two
+        separate retry bursts, and naming only the winning run would emit
+        ``in_burst: false`` on rows demonstrably created seconds apart.
         """
         stamps = [wo.created_at for wo in work_orders]
-        best_start = best_end = 0
+        largest = 1
         start = 0
         for end in range(len(stamps)):
             while stamps[end] - stamps[start] > window:
                 start += 1
-            if end - start > best_end - best_start:
-                best_start, best_end = start, end
-        size = best_end - best_start + 1
-        if size < 2:
-            return size, frozenset()
-        return size, frozenset(str(wo.id) for wo in work_orders[best_start : best_end + 1])
+            largest = max(largest, end - start + 1)
+        clustered = frozenset(
+            str(work_orders[i].id)
+            for i in range(len(stamps))
+            if (i > 0 and stamps[i] - stamps[i - 1] <= window)
+            or (i + 1 < len(stamps) and stamps[i + 1] - stamps[i] <= window)
+        )
+        return largest, clustered
 
     def _build_group(self, work_orders, *, window):
         now = timezone.now()
         first = work_orders[0]
         item = first.maintenance_item
-        burst, burst_members = self._largest_burst(work_orders, window)
+        burst, burst_members = self._burst_analysis(work_orders, window)
         span = (work_orders[-1].created_at - first.created_at).total_seconds()
 
         rows = []
@@ -726,7 +877,8 @@ class Command(BaseCommand):
                 str(item.asset) if item.asset_id else (str(first.asset) if first.asset_id else "")
             ),
             asset_id=str(item.asset_id or first.asset_id or ""),
-            due_date=first.due_date.isoformat(),
+            due_date=first.due_date.isoformat() if first.due_date else None,
+            due_date_missing=first.due_date is None,
             count=len(rows),
             first_created_at=rows[0].created_at,
             last_created_at=rows[-1].created_at,
@@ -838,10 +990,11 @@ class Command(BaseCommand):
             return (
                 rows[0].id,
                 (
-                    "none of these has been worked, but there is no retry burst here "
-                    "either, so these are more likely two intentional work orders than "
-                    "duplicates. The earliest is named for reference only — check the "
-                    "maintenance plan before treating either as spurious"
+                    "none of these shows recorded work in the signals checked, but there "
+                    "is no retry burst here either, so these are more likely two "
+                    "intentional work orders than duplicates. The earliest is named for "
+                    "reference only — check the maintenance plan before treating either "
+                    "as spurious"
                 ),
             )
         return (
@@ -874,7 +1027,38 @@ class Command(BaseCommand):
             return "CANNOT TELL — " + "; ".join(row.cannot_tell_because)
         return "no recorded work in the signals checked"
 
-    def _render_text(self, groups, *, window, since, scope):
+    def _nothing_found_lines(self, accounting):
+        """What "no duplicates" means here — never a bare absolute.
+
+        This is the one (B) claim the report makes at population level, so it
+        names the population it covers and, immediately, the populations it does
+        not.
+        """
+        lines = [
+            "NO DUPLICATE GROUP FOUND — read that strictly, against the accounting above:",
+            (
+                f"among the {accounting.groupable_total} work order(s) this report can "
+                "group, no (maintenance item, due date) key is shared by more than one "
+                "work order."
+            ),
+            "That is an established absence for those rows under that key ONLY. It is not",
+            "a statement about work orders this report could not group, about duplicates",
+            "raised under different due dates, or about anything recorded outside OMS.",
+        ]
+        if accounting.ungroupable_no_item:
+            lines.append(
+                f"In particular, {accounting.ungroupable_no_item} work order(s) with no "
+                "maintenance item were never searched — see above."
+            )
+        if accounting.groups_excluded_by_since:
+            lines.append(
+                f"And --since {accounting.since} excluded "
+                f"{accounting.groups_excluded_by_since} group(s) that were found; re-run "
+                "without it before concluding anything."
+            )
+        return lines
+
+    def _render_text(self, groups, *, window, since, scope, accounting):
         w = self.stdout.write
         w("=" * 78)
         w("SUSPECTED duplicate maintenance work orders (BACKEND-18 retry damage)")
@@ -897,10 +1081,14 @@ class Command(BaseCommand):
                 f"{since.date().isoformat()} (whole groups, every member listed)"
             )
         w("")
+        w("WHAT THIS RUN SEARCHED")
+        for line in accounting.lines():
+            w(f"  {line}")
+        w("")
 
         if not scope.total_group_count:
-            w("No (maintenance item, due date) pair has more than one work order.")
-            w("Nothing to review.")
+            for line in self._nothing_found_lines(accounting):
+                w(line)
             return
 
         for line in scope.notes():
@@ -914,7 +1102,8 @@ class Command(BaseCommand):
         w("")
 
         if not groups:
-            w("Nothing left to print after the filters above.")
+            w("Nothing left to print after the filters above — the groups counted there")
+            w("still exist; they were not shown, which is not the same as not found.")
             return
 
         for index, group in enumerate(groups, start=1):
@@ -922,7 +1111,14 @@ class Command(BaseCommand):
             w(f"[{index}/{scope.shown_group_count}] {group.confidence.upper()} confidence")
             w(f"  PM item      : {group.maintenance_item_title}  ({group.maintenance_item_id})")
             w(f"  Asset        : {group.asset or '(none recorded)'}")
-            w(f"  Due date     : {group.due_date}   — shared by {group.count} work orders")
+            w(
+                f"  Due date     : {group.due_date or '(none set)'}"
+                f"   — shared by {group.count} work orders"
+            )
+            if group.due_date_missing:
+                w("                 no due date was recorded on any of these — the pattern")
+                w("                 left by the dashboard Generate button on a PM that has")
+                w("                 never been completed, which is the BACKEND-18 path")
             w(
                 f"  Created span : {self._duration(group.span_seconds)}"
                 f"  (largest burst: {group.largest_burst} of {group.count})"
@@ -931,7 +1127,7 @@ class Command(BaseCommand):
             w(
                 f"  Worked       : {group.worked_count} of {group.count} show recorded work, "
                 f"{group.unknown_count} cannot be told either way, "
-                f"{group.no_recorded_work_count} show none"
+                f"{group.no_recorded_work_count} show none in the signals checked"
             )
             w("")
             for row in group.work_orders:
@@ -971,7 +1167,8 @@ class Command(BaseCommand):
                 f"ad-hoc materials {s['adhoc_materials']}",
                 f"material evidence {s['material_evidence']}",
                 f"tools {s['tools_total']} (ad-hoc {s['adhoc_tools']}, "
-                f"restaged {s['tools_restaged']}, unverifiable {s['tools_unverifiable']})",
+                f"staging differs {s['tools_restaged']}, "
+                f"template gone {s['tools_unverifiable']})",
                 f"loto {s['loto_completed']}/{s['loto_total']} done",
                 f"loto notes {s['loto_notes']}",
                 f"time {s['time_seconds']}s",
@@ -992,7 +1189,7 @@ class Command(BaseCommand):
             ]
         )
 
-    def _render_json(self, groups, *, window, since, scope):
+    def _render_json(self, groups, *, window, since, scope, accounting):
         payload = {
             "read_only": True,
             "report": "suspected duplicate maintenance work orders (BACKEND-18)",
@@ -1000,9 +1197,16 @@ class Command(BaseCommand):
             "false_positive_causes": FALSE_POSITIVE_NOTE,
             "worked_signal_definitions": SIGNALS_NOTE,
             "coverage_caveat": COVERAGE_NOTE,
+            "definitive_signals": list(DEFINITIVE_SIGNALS),
+            "indeterminate_signals": [name for name, _ in INDETERMINATE_SIGNALS],
             "burst_window_seconds": int(window.total_seconds()),
             "since": since.date().isoformat() if since else None,
             "since_selects_whole_groups": True,
+            "searched": asdict(accounting),
+            "search_note": " ".join(accounting.lines()),
+            "nothing_found_note": (
+                None if scope.total_group_count else " ".join(self._nothing_found_lines(accounting))
+            ),
             "total_group_count": scope.total_group_count,
             "matching_group_count": scope.matching_group_count,
             "group_count": scope.shown_group_count,
@@ -1018,7 +1222,7 @@ class Command(BaseCommand):
         }
         return json.dumps(payload, indent=2, sort_keys=False)
 
-    def _render_csv(self, groups, *, scope):
+    def _render_csv(self, groups, *, scope, accounting):
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow(
@@ -1029,7 +1233,10 @@ class Command(BaseCommand):
                 "the likely ones."
             ]
         )
+        writer.writerow(["# SEARCHED: " + " ".join(accounting.lines())])
         writer.writerow(["# " + " ".join(scope.notes())])
+        if not scope.total_group_count:
+            writer.writerow(["# " + " ".join(self._nothing_found_lines(accounting))])
         writer.writerow(["# " + " ".join(COVERAGE_NOTE.split())])
         writer.writerow(
             [
@@ -1039,6 +1246,7 @@ class Command(BaseCommand):
                 "maintenance_item",
                 "asset",
                 "due_date",
+                "due_date_missing",
                 "group_size",
                 "largest_burst",
                 "group_span_seconds",
@@ -1096,7 +1304,8 @@ class Command(BaseCommand):
                         group.maintenance_item_id,
                         group.maintenance_item_title,
                         group.asset,
-                        group.due_date,
+                        group.due_date or "",
+                        "yes" if group.due_date_missing else "no",
                         group.count,
                         group.largest_burst,
                         int(group.span_seconds),

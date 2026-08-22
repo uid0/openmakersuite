@@ -1,6 +1,6 @@
 """Tests for the read-only ``report_duplicate_work_orders`` management command.
 
-The seeded data deliberately contains all four shapes the captain needs the
+The seeded data deliberately contains all five shapes the captain needs the
 report to tell apart:
 
 * a real BACKEND-18 retry cluster (three work orders seconds apart, untouched);
@@ -10,7 +10,10 @@ report to tell apart:
   must therefore be flagged as a likely false positive rather than hidden;
 * a cluster where the only trace of work on one duplicate is an ad-hoc material
   row carrying a receipt — nothing on the work order row itself moved, which is
-  exactly the case a WorkOrder-only signal set calls "untouched".
+  exactly the case a WorkOrder-only signal set calls "untouched";
+* a cluster carrying NO due date at all, which is what the dashboard's Generate
+  button leaves behind on a PM that has never been completed — the shape an
+  earlier cut of this report filtered out before announcing "nothing to review".
 """
 
 import ast
@@ -86,7 +89,7 @@ def _run(*args):
 
 @pytest.fixture
 def seeded():
-    """Four groups: retry cluster, worked cluster, legitimate repeat, receipt-only."""
+    """Five groups: retry, worked, legitimate repeat, receipt-only, no-due-date."""
     operator = User.objects.create_user(
         username="scantty-op", email="op@example.com", password="op-password", is_staff=True
     )
@@ -177,6 +180,18 @@ def seeded():
         receipt_image="work_orders/receipts/2026/07/coolant.jpg",
     )
 
+    # --- Group F: the dashboard Generate button on a never-completed PM.
+    # MaintenanceItem.next_due_at is None while last_completed_at is null, so
+    # generate_work_order falls back to None and every retry lands with
+    # due_date NULL. Grouping on (item, NULL) is well defined; skipping those
+    # rows is how a report ends up announcing "nothing to review" over real
+    # damage.
+    item_f = _item("First-ever calibration", "Mitutoyo Height Gauge")
+    undated = [
+        _work_order(item_f, created_at=BASE + timedelta(hours=3), due_date=None),
+        _work_order(item_f, created_at=BASE + timedelta(hours=3, seconds=13), due_date=None),
+    ]
+
     # --- A lone work order that must never appear: no duplicate partner.
     item_d = _item("Annual PAT test", "Bench Grinder")
     _work_order(item_d, created_at=BASE)
@@ -189,12 +204,14 @@ def seeded():
         "item_c": item_c,
         "item_d": item_d,
         "item_e": item_e,
+        "item_f": item_f,
         "retry": retry,
         "untouched": untouched,
         "worked": worked,
         "legit": [legit_first, legit_second],
         "receipted": receipted,
         "bare": bare,
+        "undated": undated,
     }
 
 
@@ -377,6 +394,89 @@ def test_in_burst_names_the_rows_the_confidence_ranking_counted(seeded):
     assert [rows[str(wo.id)]["in_burst"] for wo in pair] == [True, True]
 
 
+def test_in_burst_marks_every_clustered_row_not_just_the_winning_run(seeded):
+    """A group can hold two separate retry bursts; both are retry damage.
+
+    Rows at t=0, +10s, +1h and +1h10s inside a 300s window are two pairs. Naming
+    only the first pair would emit ``in_burst: false`` on two rows created ten
+    seconds apart, and a captain filtering on it would lose half the damage.
+    """
+    item = _item("Chuck jaws swap", "Haas ST-20")
+    offsets = (0, 10, 3600, 3610)
+    burst_rows = [_work_order(item, created_at=BASE + timedelta(seconds=o)) for o in offsets]
+
+    group = _groups()[str(item.id)]
+    rows = _rows(group)
+
+    assert group["largest_burst"] == 2
+    assert [rows[str(wo.id)]["in_burst"] for wo in burst_rows] == [True, True, True, True]
+
+
+# ------------------------------------------------------ null-key BACKEND-18 damage
+
+
+def test_duplicates_with_no_due_date_are_found_and_reported(seeded):
+    """The dashboard Generate button leaves due_date NULL on a never-run PM."""
+    group = _groups()[str(seeded["item_f"].id)]
+
+    assert group["count"] == 2
+    assert group["due_date"] is None
+    assert group["due_date_missing"] is True
+    assert group["confidence"] == "high"
+    assert set(_rows(group)) == {str(wo.id) for wo in seeded["undated"]}
+
+    text = _run()
+    assert "Due date     : (none set)" in text
+    assert "no due date was recorded on any of these" in text
+
+
+def test_work_orders_that_cannot_be_grouped_are_counted_not_dropped():
+    """A corrective WO has no maintenance item, so this key cannot group it.
+
+    It must be named as unsearched rather than quietly vanishing into a report
+    that then announces there is nothing to review.
+    """
+    WorkOrder.objects.create(asset=AssetFactory(name="Shop Compressor"), due_date=DUE)
+
+    payload = _payload()
+    assert payload["searched"]["work_orders_total"] == 1
+    assert payload["searched"]["groupable_total"] == 0
+    assert payload["searched"]["ungroupable_no_item"] == 1
+    assert payload["total_group_count"] == 0
+
+    out = _run()
+    assert "NOT SEARCHED: 1 work order(s) carry no maintenance item" in out
+    assert "1 work order(s) with no maintenance item were never searched" in out
+
+
+def test_the_run_accounts_for_every_work_order_it_looked_at(seeded):
+    searched = _payload()["searched"]
+
+    assert searched["work_orders_total"] == WorkOrder.objects.count()
+    assert (
+        searched["groupable_total"] + searched["ungroupable_no_item"]
+        == searched["work_orders_total"]
+    )
+    assert (
+        searched["rows_in_duplicate_groups"] + searched["lone_rows"] == searched["groupable_total"]
+    )
+    # 3 + 2 + 2 + 2 + 2 duplicate rows, and the lone Annual PAT test work order.
+    assert searched["rows_in_duplicate_groups"] == 11
+    assert searched["lone_rows"] == 1
+    assert searched["duplicate_groups_found"] == 5
+
+
+def test_since_counts_the_groups_it_excluded(seeded):
+    payload = _payload(since="2026-07-01")
+
+    assert payload["searched"]["groups_excluded_by_since"] == 1
+    assert payload["searched"]["rows_excluded_by_since"] == 2
+
+    text = _run("--since", "2026-07-01")
+    assert "NOT SHOWN: --since 2026-07-01 excluded 1 duplicate group(s)" in text
+    assert "re-run without --since to see them" in text
+
+
 # --------------------------------------------------- "has this been worked?"
 
 
@@ -435,8 +535,9 @@ def test_task_notes_and_step_timers_count_as_work(seeded):
     assert rows[str(timed.id)]["verdict"] == "worked"
 
 
-def test_a_copied_tool_location_is_not_evidence_but_a_restaged_one_is(seeded):
-    """create_work_order_tools copies location_hint, so only divergence counts."""
+def test_a_tool_staging_divergence_is_cannot_tell_not_work(seeded):
+    """A hint that matches the template proves nothing; one that differs proves
+    nothing either, because MaintenanceTool records no modification time."""
     item = _item("Chuck inspection", "Colchester Lathe")
     template = MaintenanceTool.objects.create(
         maintenance_item=item,
@@ -445,7 +546,7 @@ def test_a_copied_tool_location_is_not_evidence_but_a_restaged_one_is(seeded):
         notes="Return to the crib",
     )
     copied = _work_order(item, created_at=BASE)
-    restaged = _work_order(item, created_at=BASE + timedelta(seconds=6))
+    divergent = _work_order(item, created_at=BASE + timedelta(seconds=6))
     WorkOrderTool.objects.create(
         work_order=copied,
         tool=template,
@@ -454,7 +555,7 @@ def test_a_copied_tool_location_is_not_evidence_but_a_restaged_one_is(seeded):
         notes="Return to the crib",
     )
     WorkOrderTool.objects.create(
-        work_order=restaged,
+        work_order=divergent,
         tool=template,
         name="Chuck key",
         location_hint="Bench 2",
@@ -462,10 +563,57 @@ def test_a_copied_tool_location_is_not_evidence_but_a_restaged_one_is(seeded):
     )
 
     rows = _rows(_groups()[str(item.id)])
+    divergent_row = rows[str(divergent.id)]
     assert rows[str(copied.id)]["work_signals"]["tools_restaged"] == 0
     assert rows[str(copied.id)]["verdict"] == "no-recorded-work"
-    assert rows[str(restaged.id)]["work_signals"]["tools_restaged"] == 1
-    assert rows[str(restaged.id)]["verdict"] == "worked"
+    assert divergent_row["work_signals"]["tools_restaged"] == 1
+    assert divergent_row["verdict"] == "unknown"
+    assert any("cannot be told apart" in r for r in divergent_row["cannot_tell_because"])
+
+
+def test_editing_a_tool_template_does_not_mark_untouched_retries_as_worked(seeded):
+    """The template is freely editable and never re-syncs onto work orders.
+
+    Reorganising the tool crib after a retry burst must not turn three rows
+    nobody ever opened into "AMBIGUOUS — 3 of these have been worked".
+    """
+    item = _item("Tailstock service", "Hardinge HLV")
+    template = MaintenanceTool.objects.create(
+        maintenance_item=item, name="Drift", location_hint="Crib 3"
+    )
+    retries = [
+        _work_order(item, created_at=BASE + timedelta(seconds=offset)) for offset in (0, 7, 19)
+    ]
+    for wo in retries:
+        WorkOrderTool.objects.create(
+            work_order=wo, tool=template, name="Drift", location_hint="Crib 3"
+        )
+    # The crib is reorganised long after the retries; nobody touches the WOs.
+    MaintenanceTool.objects.filter(pk=template.pk).update(location_hint="Crib 5")
+
+    group = _groups()[str(item.id)]
+    assert group["worked_count"] == 0
+    assert group["unknown_count"] == 3
+    assert "AMBIGUOUS" not in group["suggested_keep_reason"]
+    # ...and it is still not called untouched, because it genuinely cannot tell.
+    assert group["no_recorded_work_count"] == 0
+    assert "CANNOT BE SHOWN to be untouched" in group["suggested_keep_reason"]
+
+
+def test_bundled_sibling_pms_are_not_treated_as_work(seeded):
+    """Auto-bundling attaches siblings at creation, not by anyone working the job."""
+    item = _item("Coolant filter", "Doosan Lynx")
+    sibling = _item("Way cover check", "Doosan Lynx")
+    plain = _work_order(item, created_at=BASE)
+    bundled = _work_order(item, created_at=BASE + timedelta(seconds=5))
+    bundled.additional_maintenance_items.set([sibling])
+
+    rows = _rows(_groups()[str(item.id)])
+    bundled_row = rows[str(bundled.id)]
+    assert rows[str(plain.id)]["verdict"] == "no-recorded-work"
+    assert bundled_row["work_signals"]["bundled_items"] == 1
+    assert bundled_row["verdict"] == "unknown"
+    assert any("auto-bundling" in r for r in bundled_row["cannot_tell_because"])
 
 
 def test_an_assigned_duplicate_is_cannot_tell_not_untouched(seeded):
@@ -560,14 +708,14 @@ def test_limit_reports_the_full_total_alongside_the_groups_it_shows(seeded):
 
     assert payload["group_count"] == 1
     assert len(payload["groups"]) == 1
-    assert payload["total_group_count"] == 4
-    assert payload["matching_group_count"] == 4
-    assert payload["groups_not_shown_due_to_limit"] == 3
-    assert payload["confidence_tally_all"] == {"high": 3, "medium": 0, "low": 1}
+    assert payload["total_group_count"] == 5
+    assert payload["matching_group_count"] == 5
+    assert payload["groups_not_shown_due_to_limit"] == 4
+    assert payload["confidence_tally_all"] == {"high": 4, "medium": 0, "low": 1}
 
     text = _run("--limit", "1")
-    assert "Showing 1 of 4 suspected group(s) found." in text
-    assert "3 further group(s) not shown because of --limit 1." in text
+    assert "Showing 1 of 5 suspected group(s) found." in text
+    assert "4 further group(s) not shown because of --limit 1." in text
 
 
 def test_min_confidence_filters_out_the_likely_false_positives_and_says_so(seeded):
@@ -577,13 +725,13 @@ def test_min_confidence_filters_out_the_likely_false_positives_and_says_so(seede
     assert str(seeded["item_c"].id) not in shown
     assert str(seeded["item_a"].id) in shown
 
-    assert payload["total_group_count"] == 4
-    assert payload["matching_group_count"] == 3
+    assert payload["total_group_count"] == 5
+    assert payload["matching_group_count"] == 4
     assert payload["groups_hidden_by_min_confidence"] == 1
     assert payload["groups_hidden_by_min_confidence_tally"]["low"] == 1
 
     text = _run("--min-confidence", "high")
-    assert "Showing 3 of 4 suspected group(s) found." in text
+    assert "Showing 4 of 5 suspected group(s) found." in text
     assert "1 group(s) hidden by --min-confidence high" in text
 
 
@@ -603,10 +751,19 @@ def test_text_output_says_suspected_and_names_false_positive_causes(seeded):
     assert "WORKED?" in out
 
 
-def test_text_output_with_no_duplicates_still_explains_itself():
+def test_text_output_with_no_duplicates_states_what_it_searched_not_an_absolute():
+    """"Nothing to review" is a claim about a population, so name the population."""
     out = _run()
-    assert "No (maintenance item, due date) pair has more than one work order." in out
+
     assert "SUSPECTED" in out
+    assert "WHAT THIS RUN SEARCHED" in out
+    assert "Work orders in the database: 0." in out
+    assert "NO DUPLICATE GROUP FOUND — read that strictly" in out
+    assert "established absence for those rows under that key ONLY" in out
+    assert "anything recorded outside OMS" in out
+    # The bare absolutes an earlier cut printed instead.
+    assert "Nothing to review." not in out
+    assert "No (maintenance item, due date) pair has more than one work order." not in out
 
 
 def test_json_output_carries_the_suspected_caveat(seeded):
@@ -618,8 +775,13 @@ def test_json_output_carries_the_suspected_caveat(seeded):
     assert "quantity_used alone is NOT evidence" in payload["worked_signal_definitions"]
     assert "NOT COVERED AT ALL" in payload["coverage_caveat"]
     assert "does NOT mean" in payload["coverage_caveat"]
-    assert payload["group_count"] == 4
-    assert payload["total_group_count"] == 4
+    assert payload["group_count"] == 5
+    assert payload["total_group_count"] == 5
+    assert payload["nothing_found_note"] is None
+    assert "tools_restaged" in payload["indeterminate_signals"]
+    assert "tools_restaged" not in payload["definitive_signals"]
+    assert "bundled_items" in payload["indeterminate_signals"]
+    assert "materials_applied" in payload["definitive_signals"]
 
 
 def test_csv_output_is_one_row_per_work_order_and_carries_the_caveat(seeded):
@@ -630,7 +792,8 @@ def test_csv_output_is_one_row_per_work_order_and_carries_the_caveat(seeded):
 
     rows = [r for r in csv_module.reader(StringIO(text)) if r]
     preamble = [r[0] for r in rows if r[0].startswith("#")]
-    assert any("Showing 4 of 4 suspected group(s) found." in line for line in preamble)
+    assert any("Showing 5 of 5 suspected group(s) found." in line for line in preamble)
+    assert any("Work orders in the database: 12." in line for line in preamble)
     assert any("NOT COVERED AT ALL" in line for line in preamble)
 
     header_index = next(i for i, r in enumerate(rows) if "work_order_id" in r)
@@ -638,7 +801,14 @@ def test_csv_output_is_one_row_per_work_order_and_carries_the_caveat(seeded):
     body = rows[header_index + 1 :]
     assert "verdict" in header
     assert "cannot_tell_because" in header
-    assert len(body) == 9  # 3 + 2 + 2 + 2 work orders
+    assert len(body) == 11  # 3 + 2 + 2 + 2 + 2 work orders
+
+    # The no-due-date group renders as an empty cell, flagged rather than dropped.
+    due_date = header.index("due_date")
+    missing = header.index("due_date_missing")
+    undated = [r for r in body if r[missing] == "yes"]
+    assert len(undated) == 2
+    assert {r[due_date] for r in undated} == {""}
 
 
 def test_bad_since_is_rejected():
@@ -722,6 +892,28 @@ def _is_plain_container(receiver, container_locals):
     )
 
 
+def _offending_calls(tree):
+    """Every mutating ORM call in ``tree``, as source text. The guard itself.
+
+    Both the tripwire and its meta-test call THIS function, so narrowing the
+    guard cannot leave the meta-test green while the tripwire stops catching
+    writes.
+    """
+    container_locals = _container_locals(tree)
+    offenders = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        attr = node.func.attr
+        if attr in ALWAYS_FORBIDDEN:
+            offenders |= {ast.unparse(node.func)}
+        elif attr in FORBIDDEN_UNLESS_PLAIN_CONTAINER and not _is_plain_container(
+            node.func.value, container_locals
+        ):
+            offenders |= {ast.unparse(node.func)}
+    return sorted(offenders)
+
+
 def test_command_source_contains_no_mutating_orm_calls():
     """Standing tripwire: nobody wires cleanup into this command later.
 
@@ -738,50 +930,27 @@ def test_command_source_contains_no_mutating_orm_calls():
     Walks the AST rather than grepping, so the help text and docstrings are
     free to *name* the forbidden calls while the code may not make them.
     """
-    tree = ast.parse(COMMAND_SOURCE.read_text())
-    container_locals = _container_locals(tree)
-
-    offenders = set()
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
-            continue
-        attr = node.func.attr
-        if attr in ALWAYS_FORBIDDEN:
-            offenders |= {ast.unparse(node.func)}
-        elif attr in FORBIDDEN_UNLESS_PLAIN_CONTAINER and not _is_plain_container(
-            node.func.value, container_locals
-        ):
-            offenders |= {ast.unparse(node.func)}
-
-    assert not offenders, f"mutating call(s) {sorted(offenders)} must never appear in {COMMAND}"
+    offenders = _offending_calls(ast.parse(COMMAND_SOURCE.read_text()))
+    assert not offenders, f"mutating call(s) {offenders} must never appear in {COMMAND}"
 
 
 def test_the_tripwire_would_catch_a_write_wired_into_the_command(tmp_path):
-    """The guard above is only worth keeping if it actually fires."""
+    """Exercise the guard itself, not a copy of it, on a source that must fail.
+
+    ``_offending_calls`` is the same function the tripwire above calls, so a
+    change that stops it detecting writes fails here too rather than leaving a
+    green meta-test certifying a guard that no longer guards.
+    """
     source = tmp_path / "with_a_write.py"
     source.write_text(
         "def handle(self, qs, seen):\n"
         "    seen = set()\n"
         "    seen.add(1)\n"  # ordinary Python — must not be an offence
         "    qs.update(status='closed')\n"  # the write the tripwire exists for
+        "    qs.first().delete()\n"  # ...and one that is a write on any receiver
     )
-    tree = ast.parse(source.read_text())
-    container_locals = _container_locals(tree)
 
-    offences = sorted(
-        ast.unparse(node.func)
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and (
-            node.func.attr in ALWAYS_FORBIDDEN
-            or (
-                node.func.attr in FORBIDDEN_UNLESS_PLAIN_CONTAINER
-                and not _is_plain_container(node.func.value, container_locals)
-            )
-        )
-    )
-    assert offences == ["qs.update"]
+    assert _offending_calls(ast.parse(source.read_text())) == ["qs.first().delete", "qs.update"]
 
 
 def test_running_the_report_changes_nothing(seeded):
@@ -790,7 +959,7 @@ def test_running_the_report_changes_nothing(seeded):
             (
                 str(wo.id),
                 wo.status,
-                wo.due_date.isoformat(),
+                wo.due_date.isoformat() if wo.due_date else None,
                 wo.created_at.isoformat(),
                 wo.updated_at.isoformat(),
                 wo.elapsed_seconds,

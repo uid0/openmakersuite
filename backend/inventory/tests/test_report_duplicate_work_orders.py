@@ -147,6 +147,11 @@ def seeded():
         )
     WorkOrder.objects.filter(pk=untouched.pk).update(updated_at=untouched.created_at)
     WorkOrder.objects.filter(pk=worked.pk).update(completed_at=BASE + timedelta(hours=5))
+    # WorkOrderViewSet.perform_update writes this on every transition into
+    # COMPLETED, so a work order finished through the API always carries one.
+    MaintenanceAuditEvent.objects.create(
+        action=MaintenanceAuditEvent.Action.WO_COMPLETE, actor=operator, work_order=worked
+    )
 
     # --- Group C: a legitimately repeated PM. Same item and due date, but the
     # two work orders were raised five days apart through the audited create
@@ -289,7 +294,9 @@ def test_each_work_order_reports_id_number_status_and_creation(seeded):
     assert first["created_at"].startswith("2026-07-01T09:00")
     # generate_work_order writes no audit row, so there is no creator to name.
     assert first["created_by"] == ""
-    assert "not recorded" in first["created_by_source"]
+    assert "no wo_create audit row" in first["created_by_source"]
+    assert "problem promotion write none" in first["created_by_source"]
+    assert "migration 0057" in first["created_by_source"]
 
 
 def test_worked_work_order_is_distinguished_from_its_untouched_duplicate(seeded):
@@ -315,6 +322,14 @@ def test_worked_work_order_is_distinguished_from_its_untouched_duplicate(seeded)
     assert group["worked_count"] == 1
     assert group["suggested_keep_id"] == str(seeded["worked"].id)
     assert "only work order" in group["suggested_keep_reason"]
+
+    # Completing it wrote a wo_complete audit row. That is the strongest
+    # confirmation of work there is, so it must not also be reported as a
+    # reason the report cannot tell — a filter on cannot_tell_because is how
+    # the captain finds rows needing a hand check.
+    assert worked["work_signals"]["other_audit_events"] == 1
+    assert worked["cannot_tell_because"] == []
+    assert "CANNOT TELL" not in _verdict_line_for(_run(), seeded["worked"])
 
 
 def test_prefilled_material_quantity_is_not_treated_as_work(seeded):
@@ -904,7 +919,9 @@ def test_a_photo_copied_in_at_creation_is_not_recorded_work():
         assert row["work_signals"]["photos_at_creation"] == 1
         # The promoted problem link is why it is not untouched — not the photo.
         assert row["worked_because"] == ["location_problems"]
-        assert any("copied across at creation" in r for r in row["cannot_tell_because"])
+        # The promotion link accounts for the creation-time copy, so it is not
+        # also reported as a doubt about this row.
+        assert row["cannot_tell_because"] == []
 
     text = _run()
     for wo in promoted:
@@ -957,6 +974,15 @@ def test_every_reported_signal_is_classified_exactly_once(seeded):
     for left, right in itertools.combinations(buckets, 2):
         assert not buckets[left] & buckets[right], f"{left} and {right} overlap"
 
+    # A typo in the suppression table would silently stop dropping an unknown a
+    # finding accounts for, or drop one nothing accounts for.
+    explained_by = payload["indeterminate_signals_explained_by"]
+    findings = buckets["work"] | buckets["attachment"]
+    assert set(explained_by) <= buckets["indeterminate"], "explains a non-(C) signal"
+    for name, explainers in explained_by.items():
+        assert explainers, f"{name} listed with no explainer"
+        assert set(explainers) <= findings, f"{name} explained by a non-(A) signal"
+
 
 def test_a_missing_due_date_is_not_asserted_to_be_backend18_damage():
     """Two problems promoted onto the same as-needed item look identical to a burst.
@@ -983,6 +1009,15 @@ def test_a_missing_due_date_is_not_asserted_to_be_backend18_damage():
     group = _groups()[str(item.id)]
     assert group["due_date_missing"] is True
 
+    # The ranking line sits four lines under the header and reaches all three
+    # formats, so it must hedge exactly as the header does — these rows were
+    # promoted, not retried.
+    assert group["confidence"] == "high"
+    assert "CONSISTENT WITH the generate_work_order path" in group["confidence_reason"]
+    assert "does not establish it" in group["confidence_reason"]
+    assert "see the false-positive note" in group["confidence_reason"]
+    assert "the signature of the generate_work_order" not in group["confidence_reason"]
+
     text = _run()
     assert "CONSISTENT WITH the dashboard Generate button" in text
     assert "but it does not establish it" in text
@@ -993,6 +1028,43 @@ def test_a_missing_due_date_is_not_asserted_to_be_backend18_damage():
     payload = _payload()
     assert "promoting a reported location problem" in payload["false_positive_causes"]
     assert "simply omits due_date" in payload["false_positive_causes"]
+
+
+def test_a_scanned_back_form_answers_the_printed_form_unknown(seeded):
+    """"May have been worked and never scanned back" — unless it came back.
+
+    The paired direction of the completed-work-order case: an unknown a fired
+    finding genuinely accounts for must be dropped, while one it does not must
+    survive.
+    """
+    item = _item("Extraction filter swap", "Felder AF22")
+    plain = _work_order(item, created_at=BASE)
+    scanned = _work_order(
+        item,
+        created_at=BASE + timedelta(seconds=10),
+        completed_scan="work_orders/scans/2026/07/felder.pdf",
+    )
+    printed_only = _work_order(item, created_at=BASE + timedelta(seconds=21))
+    for wo in (scanned, printed_only):
+        WorkOrderOmrTemplate.objects.create(
+            work_order=wo, template_version=1, page_w_pt=595.0, page_h_pt=842.0
+        )
+
+    rows = _rows(_groups()[str(item.id)])
+    assert rows[str(plain.id)]["verdict"] == "no-recorded-work"
+
+    # The form came back, so the "never scanned back" doubt is answered.
+    assert rows[str(scanned.id)]["work_signals"]["omr_templates"] == 1
+    assert rows[str(scanned.id)]["worked_because"] == ["completed_scan"]
+    assert rows[str(scanned.id)]["cannot_tell_because"] == []
+
+    # Nothing accounts for this one, so the doubt stands — and with no (A)
+    # signal at all the verdict itself is CANNOT TELL.
+    assert rows[str(printed_only.id)]["verdict"] == "unknown"
+    assert any(
+        "never scanned back" in reason
+        for reason in rows[str(printed_only.id)]["cannot_tell_because"]
+    )
 
 
 def test_bundled_sibling_pms_are_not_treated_as_work(seeded):

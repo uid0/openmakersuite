@@ -136,10 +136,13 @@ ATTACHMENT_SIGNALS = (
 #: say WHICH kind fired; the verdict logic reads this union.
 DEFINITIVE_SIGNALS = WORK_SIGNALS + ATTACHMENT_SIGNALS
 
-#: (C) EXPLICIT UNKNOWNS. When no (A) signal fired but one of these is present,
-#: the verdict is CANNOT TELL and the matching sentence is printed verbatim, so
-#: the captain reads *why* the question could not be answered rather than a
-#: silent "untouched".
+#: (C) EXPLICIT UNKNOWNS. When one of these is present the matching sentence is
+#: printed verbatim, so the captain reads *why* a question could not be answered
+#: rather than a silent "untouched". With no (A) signal the verdict is CANNOT
+#: TELL; with one, the verdict stays WORKED and the unknown is printed beside it
+#: — a positive finding does not close a separate open question. The exception
+#: is ``EXPLAINED_BY`` below: an unknown a fired (A) signal already accounts for
+#: is not an unknown on that row.
 INDETERMINATE_SIGNALS = (
     (
         "assigned_to",
@@ -177,9 +180,9 @@ INDETERMINATE_SIGNALS = (
     (
         "photos_at_creation",
         "{photos_at_creation} photo(s) carry no uploader and were stamped within "
-        "{slack}s of the work order being created — the signature of a promoted "
-        "problem report's photo being copied across at creation, not of anyone "
-        "photographing the job",
+        "{slack}s of the work order being created — consistent with a promoted "
+        "problem report's photo being copied across at creation, and not "
+        "distinguishable from somebody photographing the job in that second",
     ),
     (
         "attachments_at_creation",
@@ -188,6 +191,22 @@ INDETERMINATE_SIGNALS = (
         "from files copied across at creation",
     ),
 )
+
+#: Which (A) findings account for a (C) unknown, so it is dropped rather than
+#: printed beside them. Not "a finding outranks an unknown" — each pair is a
+#: case where the SAME underlying fact produced both, so reporting the unknown
+#: would invent a doubt the row has already answered.
+EXPLAINED_BY = {
+    # wo_complete is the only non-wo_create action whose FK targets a work
+    # order, and the completion transition is what writes it.
+    "other_audit_events": ("status_beyond_open", "completed_at"),
+    # "may have been worked and never scanned back" — unless it came back.
+    "omr_templates": ("submissions", "completed_scan"),
+    # Promotion writes the problem link and copies the photo in one go, so the
+    # link tells us where an uploader-less creation-time file came from.
+    "photos_at_creation": ("location_problems", "asset_problems"),
+    "attachments_at_creation": ("location_problems", "asset_problems"),
+}
 
 #: Reported for context, never used as evidence in either direction. Row counts
 #: that generation creates, and identifiers. Listed so every key the report
@@ -306,13 +325,22 @@ SIGNALS_NOTE = """\
   asset_problems      a reported asset problem was promoted onto this work
                       order. Deleting it detaches the problem report.
 
-(C) EXPLICIT UNKNOWNS — none of (A) fired, but the data cannot answer the
-    question, so the verdict is CANNOT TELL and the reason is printed:
+(C) EXPLICIT UNKNOWNS — the data cannot answer the question, so the reason is
+    printed. If no (A) signal fired the verdict is CANNOT TELL; if one did, the
+    verdict stays WORKED and the unknown is printed beside it, because a
+    positive finding does not close a separate open question. An unknown is
+    dropped only where a fired (A) signal accounts for the SAME underlying
+    fact — those pairs are named in the entries below:
 
   assigned_to         somebody was put on this job.
   omr_templates       a printed OMR form exists, so there may be a worked paper
-                      copy that was never scanned back.
+                      copy that was never scanned back. Dropped when
+                      submissions or completed_scan fired: a form that came
+                      back was not lost.
   other_audit_events  audit events other than wo_create are recorded on it.
+                      Dropped when status_beyond_open or completed_at fired:
+                      wo_complete is the only such action that targets a work
+                      order, and completing the work order is what writes it.
   tools_restaged      a tool row's staging location differs from its PM
                       template's. Generation COPIES that value in and never
                       re-syncs, and MaintenanceTool records no modification
@@ -325,9 +353,11 @@ SIGNALS_NOTE = """\
                       at creation time, not by anyone working the job.
   photos_at_creation  a photo with no uploader, stamped within the creation
   attachments_at_creation
-                      slack. That is exactly what promoting a reported problem
-                      leaves behind, so it cannot be told apart from somebody
-                      photographing the job in the same second.
+                      slack. Promoting a reported problem leaves exactly that,
+                      so it cannot be told apart from somebody photographing
+                      the job in the same second. Dropped when
+                      location_problems or asset_problems fired: the promotion
+                      link then accounts for the copy.
 
 DELIBERATELY NOT EVIDENCE, in either direction — reported for context only:
 
@@ -959,6 +989,13 @@ class Command(BaseCommand):
         printed OMR form; reporting the order while swallowing "a paper copy
         exists that may have been worked and never scanned back" would state an
         absence over a case this same function computed as indeterminate.
+
+        The converse is equally wrong, so ``EXPLAINED_BY`` drops an unknown a
+        fired finding already accounts for. Completing a work order through the
+        API writes a wo_complete audit row; printing "audit events other than
+        wo_create are recorded against it" as a reason the report cannot tell
+        would turn the strongest confirmation of work into a doubt, and would
+        put every completed work order into a filter on cannot_tell_because.
         """
         context = {
             **signals,
@@ -969,6 +1006,7 @@ class Command(BaseCommand):
             sentence.format(**context)
             for name, sentence in INDETERMINATE_SIGNALS
             if signals[name]
+            and not any(signals[explainer] for explainer in EXPLAINED_BY.get(name, ()))
         ]
         fired = [name for name in DEFINITIVE_SIGNALS if signals[name]]
         if fired:
@@ -1026,7 +1064,11 @@ class Command(BaseCommand):
                     created_by_source=(
                         "maintenance audit log"
                         if created_by
-                        else "not recorded (generate_work_order writes no audit row)"
+                        else (
+                            "no wo_create audit row (generate_work_order and problem "
+                            "promotion write none; rows predating migration 0057 have "
+                            "none either)"
+                        )
                     ),
                     assigned_to=str(wo.assigned_to) if wo.assigned_to_id else "",
                     asset=str(wo.asset) if wo.asset_id else "",
@@ -1089,8 +1131,9 @@ class Command(BaseCommand):
                 "low",
                 (
                     f"no burst: no two work orders were created within {window_s}s of each "
-                    f"other (spread over {self._duration(span)}). Most likely a legitimately "
-                    "repeated or re-scheduled PM, not retry damage."
+                    f"other (spread over {self._duration(span)}). A legitimately repeated or "
+                    "re-scheduled PM is the likeliest reading of that spread; it does not "
+                    "rule out an operator who came back and pressed the button again later."
                 ),
             )
         if audited == 0:
@@ -1098,8 +1141,10 @@ class Command(BaseCommand):
                 "high",
                 (
                     f"{burst} work orders created within {window_s}s of each other, and none "
-                    "has a WO_CREATE audit row — the signature of the generate_work_order "
-                    "path, which committed the row and then 500ed."
+                    "has a WO_CREATE audit row. That is CONSISTENT WITH the "
+                    "generate_work_order path, which committed the row and then 500ed, but "
+                    "does not establish it — see the false-positive note for the other "
+                    "paths that write no wo_create row."
                 ),
             )
         return (
@@ -1107,7 +1152,7 @@ class Command(BaseCommand):
             (
                 f"{burst} work orders created within {window_s}s of each other, but {audited} "
                 "of them carry a WO_CREATE audit row, so at least some were raised through "
-                "the audited create path rather than the buggy one."
+                "the audited create path. What produced the rest is not established here."
             ),
         )
 
@@ -1183,10 +1228,12 @@ class Command(BaseCommand):
             rows[0].id,
             (
                 "none of these shows recorded work in any signal this report checks, so "
-                "nothing recorded is lost either way. The earliest is the one the operator "
-                "actually asked for — the later rows exist only because the 500 hid the "
-                "first success and they retried. (Work done on paper and never scanned "
-                "back leaves no trace here — see the coverage note.)"
+                "nothing recorded is lost either way. The earliest is named on the reading "
+                "that it is the one the operator asked for and the later rows are retries "
+                "after the 500 hid the first success — that is the likeliest story for this "
+                "shape, not an established one; see the false-positive note. (Work done on "
+                "paper and never scanned back leaves no trace here — see the coverage "
+                "note.)"
             ),
         )
 
@@ -1458,6 +1505,9 @@ class Command(BaseCommand):
             "work_signals": list(WORK_SIGNALS),
             "attachment_signals": list(ATTACHMENT_SIGNALS),
             "context_signals": list(CONTEXT_SIGNALS),
+            "indeterminate_signals_explained_by": {
+                name: list(explainers) for name, explainers in EXPLAINED_BY.items()
+            },
             "indeterminate_signals": [name for name, _ in INDETERMINATE_SIGNALS],
             "burst_window_seconds": int(window.total_seconds()),
             "since": since.date().isoformat() if since else None,

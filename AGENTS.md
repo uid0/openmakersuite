@@ -85,6 +85,18 @@ in the same change. The regeneration command and the YAML-wins rule live in
 [`docs/API_PERMISSION_MATRIX.md`](docs/API_PERMISSION_MATRIX.md) under "Drift
 detection".
 
+A hand-rolled `@action` bypasses its serializer on the way in but usually still
+serializes its response through one. Anything you read from `request.data` and
+write to a non-text model field must be coerced first — e.g.
+`serializers.DateField().to_internal_value(raw)` — and coerced *outside* the
+`transaction.atomic()` block, so a bad value is a clean 400 before anything is
+written. Skipping this persists the row correctly but leaves a `str` on the
+in-memory instance, and the response serializer then 500s *after* the commit,
+so a retrying operator accumulates duplicate rows. Worked examples:
+`inventory` `generate_work_order` and `reorder_queue` `confirm_order`, pinned by
+`inventory/tests/test_generate_work_order_due_date.py` and
+`reorder_queue/tests/test_po_confirm_expected_delivery_date.py`.
+
 ### Django upgrade history
 
 The backend now runs **Django 6.0.7**. The notes below cover the earlier 4.2 -> 5.1

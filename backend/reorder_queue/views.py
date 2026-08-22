@@ -1352,8 +1352,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         # so reading the key with a None default and passing it on wiped the
         # expected delivery date the operator had already set — silently, with a
         # 200, taking the due_on_receipt/cod payment due date and receiving's
-        # expected date down with it. Only a key the client actually sent is
-        # forwarded; an explicit null still clears the date as before.
+        # expected date down with it. Three inputs, three answers: an absent key
+        # leaves the date alone, an explicit null clears it deliberately, and
+        # anything else is validated — a malformed value (including "") is a
+        # clean 400 before any write rather than another silent wipe.
         #
         # Same coercion trap as inventory generate_work_order (BACKEND-18): the
         # client's date arrives as a string, and handing it straight to the
@@ -1362,10 +1364,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         # serializing the response — after the PO has already been confirmed.
         if "expected_delivery_date" in request.data:
             raw_expected = request.data["expected_delivery_date"]
-            if raw_expected:
-                expected_delivery_date = serializers.DateField().to_internal_value(raw_expected)
-            else:
+            if raw_expected is None:
                 expected_delivery_date = None
+            else:
+                expected_delivery_date = serializers.DateField().to_internal_value(raw_expected)
             services.confirm_order(purchase_order, expected_delivery_date)
         else:
             services.confirm_order(purchase_order)

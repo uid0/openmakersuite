@@ -119,19 +119,23 @@ class TestConfirmPreservesExistingExpectedDeliveryDate:
         """The knock-on: create_lead_time_log records the expected date."""
         client, user = _staff_client()
         supplier = SupplierFactory()
+        sent_at = timezone.now() - timedelta(days=7)
+        average_lead_time = 10
+        fallback = sent_at.date() + timedelta(days=average_lead_time)
+        expected = sent_at.date() + timedelta(days=average_lead_time + 20)
         po = PurchaseOrder.objects.create(
             supplier=supplier,
             created_by=user,
             status=PurchaseOrder.Status.SENT,
             sent_by=user,
-            sent_at=timezone.now() - timedelta(days=7),
+            sent_at=sent_at,
             estimated_total=Decimal("50.00"),
-            expected_delivery_date=EXPECTED,
+            expected_delivery_date=expected,
         )
         item_supplier = ItemSupplierFactory(
             supplier=supplier,
             quantity_per_package=1,
-            average_lead_time=10,
+            average_lead_time=average_lead_time,
             item=InventoryItemFactory(current_stock=0),
         )
         po_item = PurchaseOrderItem.objects.create(
@@ -153,7 +157,8 @@ class TestConfirmPreservesExistingExpectedDeliveryDate:
 
         log = LeadTimeLog.objects.get(purchase_order=po)
         # Not the average-lead-time fallback the wipe forced it onto.
-        assert log.expected_delivery_date == EXPECTED
+        assert log.expected_delivery_date == expected
+        assert log.expected_delivery_date != fallback
 
 
 class TestConfirmStillHonoursASuppliedValue:
@@ -182,6 +187,18 @@ class TestConfirmStillHonoursASuppliedValue:
         po.refresh_from_db()
         assert po.status == PurchaseOrder.Status.CONFIRMED
         assert po.expected_delivery_date is None
+
+    def test_empty_string_is_a_400_and_neither_confirms_nor_wipes(self):
+        """An empty string is not an explicit null: it is a malformed date."""
+        client, user = _staff_client()
+        po = _sent_po(user)
+
+        resp = client.post(CONFIRM_URL.format(po.id), {"expected_delivery_date": ""}, "json")
+
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST, resp.data
+        po.refresh_from_db()
+        assert po.status == PurchaseOrder.Status.SENT
+        assert po.expected_delivery_date == EXPECTED
 
     def test_malformed_date_is_a_400_and_leaves_the_existing_date_alone(self):
         client, user = _staff_client()

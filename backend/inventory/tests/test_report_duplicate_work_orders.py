@@ -854,9 +854,7 @@ def test_an_unreceived_purchase_order_line_is_not_treated_as_untouched(seeded):
     plain = _work_order(item, created_at=BASE)
     ordered_for = _work_order(item, created_at=BASE + timedelta(seconds=14))
 
-    order = PurchaseOrder.objects.create(
-        supplier=SupplierFactory(), created_by=seeded["operator"]
-    )
+    order = PurchaseOrder.objects.create(supplier=SupplierFactory(), created_by=seeded["operator"])
     PurchaseOrderItem.objects.create(
         purchase_order=order,
         description="Seal kit",
@@ -886,9 +884,7 @@ def test_an_unreceived_purchase_order_line_is_not_treated_as_untouched(seeded):
 
     # The captain is told this is an attachment, not somebody working the job.
     verdict_line = _verdict_line_for(_run(), ordered_for)
-    assert "YES — as ATTACHED RECORDS, not as recorded work: purchase_order_items" in (
-        verdict_line
-    )
+    assert "YES — as ATTACHED RECORDS, not as recorded work: purchase_order_items" in (verdict_line)
     assert "Deleting this work order would silently detach them" in verdict_line
     # Nothing indeterminate here, so THIS row's verdict claims nothing further.
     # Scoped to the row: the preamble names every verdict wording, so a
@@ -912,9 +908,7 @@ def test_a_worked_row_still_reports_what_it_could_not_tell(seeded):
     plain = _work_order(item, created_at=BASE)
     both = _work_order(item, created_at=BASE + timedelta(seconds=13))
 
-    order = PurchaseOrder.objects.create(
-        supplier=SupplierFactory(), created_by=seeded["operator"]
-    )
+    order = PurchaseOrder.objects.create(supplier=SupplierFactory(), created_by=seeded["operator"])
     PurchaseOrderItem.objects.create(
         purchase_order=order,
         description="Seal kit",
@@ -1392,7 +1386,7 @@ def test_an_assigned_worked_row_still_reports_the_assignment_doubt(seeded):
 
 
 def test_a_scanned_back_form_answers_the_printed_form_unknown(seeded):
-    """"May have been worked and never scanned back" — unless it came back.
+    """ "May have been worked and never scanned back" — unless it came back.
 
     The paired direction of the completed-work-order case: an unknown a fired
     finding genuinely accounts for must be dropped, while one it does not must
@@ -1445,7 +1439,7 @@ def test_bundled_sibling_pms_are_not_treated_as_work(seeded):
 
 
 def test_an_assigned_duplicate_is_cannot_tell_not_untouched(seeded):
-    """"We cannot tell" is a different answer from "we checked and found nothing"."""
+    """ "We cannot tell" is a different answer from "we checked and found nothing"."""
     item = _item("Compressor drain", "Ingersoll Rand 2475")
     plain = _work_order(item, created_at=BASE)
     assigned = _work_order(
@@ -1496,7 +1490,7 @@ def test_a_tool_row_whose_template_is_gone_is_indeterminate(seeded):
 
 
 def test_untouched_retry_rows_are_worded_as_no_recorded_work(seeded):
-    """"No evidence of work" overclaims; the report only checked its own signals."""
+    """ "No evidence of work" overclaims; the report only checked its own signals."""
     text = _run()
     assert "no recorded work in the signals checked" in text
     assert "no evidence of work" not in text
@@ -1582,7 +1576,7 @@ def test_text_output_says_suspected_and_names_false_positive_causes(seeded):
 
 
 def test_text_output_with_no_duplicates_states_what_it_searched_not_an_absolute():
-    """"Nothing to review" is a claim about a population, so name the population."""
+    """ "Nothing to review" is a claim about a population, so name the population."""
     out = _run()
 
     assert "SUSPECTED" in out

@@ -156,8 +156,7 @@ INDETERMINATE_SIGNALS = (
     ),
     (
         "other_audit_events",
-        "{other_audit_events} audit event(s) other than wo_create are recorded "
-        "against it",
+        "{other_audit_events} audit event(s) other than wo_create are recorded " "against it",
     ),
     (
         "tools_restaged",
@@ -1311,8 +1310,7 @@ class Command(BaseCommand):
                     f"AMBIGUOUS — {len(worked)} of these carry recorded work or attached "
                     "records, so something real would be lost whichever is dropped. The "
                     "most recently created of them is named only as a starting point; "
-                    "reconcile these by hand."
-                    + unknown_tail
+                    "reconcile these by hand." + unknown_tail
                 ),
             )
         if len(worked) == 1 and not unknown:
@@ -1337,9 +1335,7 @@ class Command(BaseCommand):
                 rows[0].id,
                 (
                     "none of these shows recorded work, but it is NOT true that nothing "
-                    "would be lost:"
-                    + unknown_tail
-                    + " The earliest is named for reference only"
+                    "would be lost:" + unknown_tail + " The earliest is named for reference only"
                 ),
             )
         if confidence == "low":
@@ -1433,8 +1429,7 @@ class Command(BaseCommand):
         dropped = []
         if scope.hidden_by_min_confidence:
             dropped.append(
-                f"--min-confidence {scope.min_confidence} hid "
-                f"{scope.hidden_by_min_confidence}"
+                f"--min-confidence {scope.min_confidence} hid " f"{scope.hidden_by_min_confidence}"
             )
         if scope.dropped_by_limit:
             dropped.append(f"--limit {scope.limit} dropped {scope.dropped_by_limit}")

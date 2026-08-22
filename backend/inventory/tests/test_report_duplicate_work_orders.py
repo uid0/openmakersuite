@@ -373,7 +373,7 @@ def test_legitimate_repeat_is_flagged_as_a_likely_false_positive(seeded):
     assert "legitimately repeated" in group["confidence_reason"]
 
     # ...and the "which one was intended?" line does not assume retry damage.
-    assert "more likely two intentional work orders" in group["suggested_keep_reason"]
+    assert "more likely 2 intentional work orders" in group["suggested_keep_reason"]
 
     # Creators are recoverable here because these went through the audited path.
     creators = {row["created_by"] for row in group["work_orders"]}
@@ -443,6 +443,67 @@ def test_in_burst_marks_every_clustered_row_not_just_the_winning_run(seeded):
 
     assert group["largest_burst"] == 2
     assert [rows[str(wo.id)]["in_burst"] for wo in burst_rows] == [True, True, True, True]
+
+
+def test_an_audited_row_outside_the_burst_does_not_rank_the_burst(seeded):
+    """The clustered rows are the population the ranking sentence names.
+
+    Two dashboard generations 11s apart leave no wo_create row; a third work
+    order raised by hand four hours later, under the same item and due date,
+    does. That later row says nothing about how the pair was raised, so counting
+    it would both mis-state the number the sentence quotes and demote a genuine
+    retry pair to medium — which --min-confidence high would then hide.
+    """
+    item = _item("Way oil top-up", "Bridgeport Series I")
+    retries = [
+        _work_order(item, created_at=BASE),
+        _work_order(item, created_at=BASE + timedelta(seconds=11)),
+    ]
+    by_hand = _work_order(item, created_at=BASE + timedelta(hours=4))
+    event = MaintenanceAuditEvent.objects.create(
+        action=MaintenanceAuditEvent.Action.WO_CREATE,
+        actor=seeded["operator"],
+        work_order=by_hand,
+    )
+    MaintenanceAuditEvent.objects.filter(pk=event.pk).update(created_at=by_hand.created_at)
+
+    group = _groups()[str(item.id)]
+    rows = _rows(group)
+    reason = group["confidence_reason"]
+
+    assert group["largest_burst"] == 2
+    assert [rows[str(wo.id)]["in_burst"] for wo in retries] == [True, True]
+    assert rows[str(by_hand.id)]["in_burst"] is False
+
+    assert group["confidence"] == "high"
+    assert "none of the 2 clustered row(s) has a WO_CREATE audit row" in reason
+    # The audited row is reported, but as a group-wide count that did not rank it.
+    assert "1 further work order(s) under this key do carry" in reason
+    assert rows[str(by_hand.id)]["created_by"] == "scantty-op"
+    assert [rows[str(wo.id)]["created_by"] for wo in retries] == ["", ""]
+
+    # Ranked high, so the flag the captain reaches for still shows the pair.
+    assert str(item.id) in _groups(min_confidence="high")
+
+
+def test_the_low_confidence_keep_reason_counts_the_rows_it_describes(seeded):
+    """That branch fires at any group size, so it must not assume a pair.
+
+    A never-completed PM leaves due_date NULL, so three unhurried generations
+    days apart share one key with no burst between any two of them.
+    """
+    item = _item("As-needed gutter clearing", "North Shed Roof")
+    days = (0, 3, 9)
+    spread = [_work_order(item, created_at=BASE + timedelta(days=d), due_date=None) for d in days]
+
+    group = _groups()[str(item.id)]
+
+    assert group["count"] == 3
+    assert group["largest_burst"] == 1
+    assert group["confidence"] == "low"
+    assert group["suggested_keep_id"] == str(spread[0].id)
+    assert "more likely 3 intentional work orders" in group["suggested_keep_reason"]
+    assert "treating any of them as spurious" in group["suggested_keep_reason"]
 
 
 # ------------------------------------------------------ null-key BACKEND-18 damage

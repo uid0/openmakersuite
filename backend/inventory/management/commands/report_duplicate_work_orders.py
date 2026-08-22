@@ -1104,10 +1104,7 @@ class Command(BaseCommand):
                 )
             )
 
-        audited = sum(1 for row in rows if row.created_by)
-        confidence, reason = self._rank(
-            rows, burst=burst, span=span, audited=audited, window=window
-        )
+        confidence, reason = self._rank(rows, burst=burst, span=span, window=window)
         keep_id, keep_reason = self._suggest_keep(rows, confidence=confidence)
         for row in rows:
             if row.id == keep_id:
@@ -1138,15 +1135,35 @@ class Command(BaseCommand):
             work_orders=rows,
         )
 
-    def _rank(self, rows, *, burst, span, audited, window):
+    def _rank(self, rows, *, burst, span, window):
         """Rank confidence that a group is retry damage rather than intentional.
 
         Timestamp clustering is the primary signal: the BACKEND-18 retries were
         an operator pressing the key again after a 500, seconds apart. Absence of
         a WO_CREATE audit row is a corroborating signal, because
         ``generate_work_order`` — the buggy path — never wrote one.
+
+        That corroboration is counted over the CLUSTERED rows alone, never over
+        the whole group. A mixed-provenance group is an ordinary shape — the
+        false-positive note lists a bulk generation run alongside a manual one —
+        and a hand-raised row hours later says nothing about how the rows created
+        seconds apart were raised. Counting it would both mis-state the number
+        the sentence quotes and demote a genuine retry burst to medium, which
+        ``--min-confidence high`` would then hide.
         """
         window_s = int(window.total_seconds())
+        clustered = [row for row in rows if row.in_burst]
+        audited_in_burst = sum(1 for row in clustered if row.created_by)
+        audited_elsewhere = sum(1 for row in rows if row.created_by) - audited_in_burst
+        group_tail = (
+            ""
+            if not audited_elsewhere
+            else (
+                f" Group-wide, {audited_elsewhere} further work order(s) under this key do "
+                "carry a wo_create audit row, but none of them was created inside the "
+                "window, so they do not rank it."
+            )
+        )
         if burst < 2:
             return (
                 "low",
@@ -1157,23 +1174,25 @@ class Command(BaseCommand):
                     "rule out an operator who came back and pressed the button again later."
                 ),
             )
-        if audited == 0:
+        if audited_in_burst == 0:
             return (
                 "high",
                 (
                     f"{burst} work orders created within {window_s}s of each other, and none "
-                    "has a WO_CREATE audit row. That is CONSISTENT WITH the "
-                    "generate_work_order path, which committed the row and then 500ed, but "
-                    "does not establish it — see the false-positive note for the other "
-                    "paths that write no wo_create row."
+                    f"of the {len(clustered)} clustered row(s) has a WO_CREATE audit row. "
+                    "That is CONSISTENT WITH the generate_work_order path, which committed "
+                    "the row and then 500ed, but does not establish it — see the "
+                    "false-positive note for the other paths that write no wo_create row."
+                    + group_tail
                 ),
             )
         return (
             "medium",
             (
-                f"{burst} work orders created within {window_s}s of each other, but {audited} "
-                "of them carry a WO_CREATE audit row, so at least some were raised through "
-                "the audited create path. What produced the rest is not established here."
+                f"{burst} work orders created within {window_s}s of each other, and "
+                f"{audited_in_burst} of the {len(clustered)} clustered row(s) carry a "
+                "WO_CREATE audit row, so at least some were raised through the audited "
+                "create path. What produced the rest is not established here." + group_tail
             ),
         )
 
@@ -1239,10 +1258,10 @@ class Command(BaseCommand):
                 rows[0].id,
                 (
                     "none of these shows recorded work in the signals checked, but there "
-                    "is no retry burst here either, so these are more likely two "
+                    f"is no retry burst here either, so these are more likely {len(rows)} "
                     "intentional work orders than duplicates. The earliest is named for "
-                    "reference only — check the maintenance plan before treating either "
-                    "as spurious"
+                    "reference only — check the maintenance plan before treating any of "
+                    "them as spurious"
                 ),
             )
         return (
@@ -1250,7 +1269,7 @@ class Command(BaseCommand):
             (
                 "none of these shows recorded work in any signal this report checks, so "
                 "nothing recorded is lost either way. The earliest is named on the reading "
-                "that it is the one the operator asked for and the later rows are retries "
+                "that it is the one the operator asked for and the later row(s) are retries "
                 "after the 500 hid the first success — that is the likeliest story for this "
                 "shape, not an established one; see the false-positive note. (Work done on "
                 "paper and never scanned back leaves no trace here — see the coverage "

@@ -52,7 +52,7 @@ import operator
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from functools import reduce
-from typing import Any
+from typing import Any, NamedTuple
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db.models import Count, Prefetch, Q
@@ -204,18 +204,37 @@ EXPLAINED_BY = {
     "omr_templates": ("submissions", "completed_scan"),
 }
 
+
+class ExplainedUpTo(NamedTuple):
+    """A finding that accounts for part of an unknown, and for how much of it.
+
+    ``by`` names the fired (A) findings that can account for the unknown at all.
+    ``counted_by`` names the signal saying how many it ACTUALLY accounts for —
+    a count of what was copied, never of the links that could have copied
+    something. A reported problem may carry no file at all, and a link that
+    copied nothing explains nothing.
+    """
+
+    by: tuple[str, ...]
+    counted_by: str
+
+
 #: Unknowns a fired finding accounts for only up to a COUNT, not outright.
-#: Promoting a reported problem writes the problem link and copies ONE file in
-#: the same breath, so N problem links say where N uploader-less files came
-#: from and nothing about any beyond that: those are somebody's genuine upload
-#: whose account was deleted afterwards, and their doubt stands. Only photos
-#: appear here — ``copy_to_work_order_photo`` is the only promotion copy that
-#: lands on a work order, and it writes a WorkOrderPhoto; the attachment copy
-#: (``copy_to_tpwo_attachment``) writes a third-party work order's attachment,
-#: which is not in ``wo.attachments``. So a problem link can never account for
-#: an uploader-less WorkOrderAttachment, and that doubt is never dropped.
+#: Promoting a reported problem writes the problem link and copies its file(s)
+#: in the same breath, so the copies say where that many uploader-less files
+#: came from and nothing about any beyond them: those are somebody's genuine
+#: upload whose account was deleted afterwards, and their doubt stands. Only
+#: photos appear here — ``copy_to_work_order_photo`` is the only promotion copy
+#: that lands on a work order, and it writes a WorkOrderPhoto; the attachment
+#: copy (``copy_to_tpwo_attachment``) writes a third-party work order's
+#: attachment, which is not in ``wo.attachments``. So a problem link can never
+#: account for an uploader-less WorkOrderAttachment, and that doubt is never
+#: dropped.
 EXPLAINED_UP_TO = {
-    "photos_unattributed": ("location_problems", "asset_problems"),
+    "photos_unattributed": ExplainedUpTo(
+        by=("location_problems", "asset_problems"),
+        counted_by="problem_photos_copied",
+    ),
 }
 
 #: Reported for context, never used as evidence in either direction. Row counts
@@ -223,6 +242,7 @@ EXPLAINED_UP_TO = {
 #: emits is classified: (A1) work, (A2) attachment, (C) unknown, or context.
 CONTEXT_SIGNALS = (
     "status",
+    "problem_photos_copied",
     "tasks_total",
     "materials_total",
     "tools_total",
@@ -380,9 +400,10 @@ SIGNALS_NOTE = """\
                       only after the bytes move through the storage backend,
                       so timing it would let a slow network decide between
                       "recorded work" and "cannot tell". A promoted problem
-                      copies at most ONE photo, so location_problems and
-                      asset_problems account for that many and NO more; every
-                      uploader-less photo past that count keeps its doubt.
+                      accounts for the photo(s) it actually copied and no more
+                      — that count is problem_photos_copied below, which is
+                      zero for a problem reported without one — so every
+                      uploader-less photo past it keeps its doubt.
   attachments_unattributed
                       an attachment with no uploader — read the same way, minus
                       the promotion escape: no path writes a work-order
@@ -391,6 +412,14 @@ SIGNALS_NOTE = """\
 
 DELIBERATELY NOT EVIDENCE, in either direction — reported for context only:
 
+  problem_photos_copied
+                      how many photos the promoted problems on this row
+                      actually brought with them: one for each location
+                      problem that was reported WITH a photo, and every photo
+                      on a promoted asset problem, since that path copies all
+                      of them. Not evidence in either direction — it is the
+                      ceiling on how much of the photos_unattributed doubt a
+                      problem link can account for.
   quantity_used       quantity_used alone is NOT evidence: generation pre-fills
                       it from the template's planned quantity, so every
                       untouched retry artifact carries a non-zero quantity_used,
@@ -814,6 +843,7 @@ class Command(BaseCommand):
                     "purchase_order_items",
                     "location_problems",
                     "asset_problems",
+                    "asset_problems__photos",
                     Prefetch(
                         "audit_events",
                         queryset=MaintenanceAuditEvent.objects.select_related("actor"),
@@ -943,6 +973,8 @@ class Command(BaseCommand):
         audit_events = list(wo.audit_events.all())
         photos = list(wo.photos.all())
         attachments = list(wo.attachments.all())
+        location_problems = list(wo.location_problems.all())
+        asset_problems = list(wo.asset_problems.all())
 
         tools_restaged, tools_unverifiable = self._tool_signals(tools)
         photos_uploaded, photos_unattributed = self._upload_signals(photos)
@@ -951,6 +983,9 @@ class Command(BaseCommand):
         if (wo.loto_completion_note or "").strip():
             loto_notes += 1
         edited = (wo.updated_at - wo.created_at).total_seconds() > UPDATED_SLACK_SECONDS
+        problem_photos_copied = sum(1 for problem in location_problems if problem.photo) + sum(
+            len(problem.photos.all()) for problem in asset_problems
+        )
         signals = {
             "status": wo.status,
             "status_beyond_open": wo.status != WorkOrder.Status.OPEN,
@@ -1001,8 +1036,9 @@ class Command(BaseCommand):
             "edited_since_create": edited,
             "purchase_orders": len(wo.purchase_orders.all()),
             "purchase_order_items": len(wo.purchase_order_items.all()),
-            "location_problems": len(wo.location_problems.all()),
-            "asset_problems": len(wo.asset_problems.all()),
+            "location_problems": len(location_problems),
+            "asset_problems": len(asset_problems),
+            "problem_photos_copied": problem_photos_copied,
             "assigned_to": bool(wo.assigned_to_id),
             "omr_templates": len(wo.omr_templates.all()),
             "other_audit_events": sum(
@@ -1044,9 +1080,8 @@ class Command(BaseCommand):
             **signals,
             "assigned_to_name": str(wo.assigned_to) if wo.assigned_to_id else "",
         }
-        for name, explainers in EXPLAINED_UP_TO.items():
-            accounted = sum(signals[explainer] for explainer in explainers)
-            context[name] = max(0, signals[name] - accounted)
+        for name, rule in EXPLAINED_UP_TO.items():
+            context[name] = max(0, signals[name] - signals[rule.counted_by])
         indeterminate = [
             sentence.format(**context)
             for name, sentence in INDETERMINATE_SIGNALS
@@ -1590,6 +1625,7 @@ class Command(BaseCommand):
                 f"purchase order lines {s['purchase_order_items']}",
                 f"location problems {s['location_problems']}",
                 f"asset problems {s['asset_problems']}",
+                f"problem photos copied {s['problem_photos_copied']}",
                 f"assigned {'yes' if s['assigned_to'] else 'no'}",
                 f"omr templates {s['omr_templates']}",
                 f"other audit events {s['other_audit_events']}",
@@ -1613,7 +1649,8 @@ class Command(BaseCommand):
                 name: list(explainers) for name, explainers in EXPLAINED_BY.items()
             },
             "indeterminate_signals_explained_up_to": {
-                name: list(explainers) for name, explainers in EXPLAINED_UP_TO.items()
+                name: {"by": list(rule.by), "counted_by": rule.counted_by}
+                for name, rule in EXPLAINED_UP_TO.items()
             },
             "indeterminate_signals": [name for name, _ in INDETERMINATE_SIGNALS],
             "burst_window_seconds": int(window.total_seconds()),
@@ -1717,6 +1754,7 @@ class Command(BaseCommand):
                 "purchase_order_items",
                 "location_problems",
                 "asset_problems",
+                "problem_photos_copied",
                 "omr_templates",
                 "other_audit_events",
                 "suggested_keep",
@@ -1786,6 +1824,7 @@ class Command(BaseCommand):
                         s["purchase_order_items"],
                         s["location_problems"],
                         s["asset_problems"],
+                        s["problem_photos_copied"],
                         s["omr_templates"],
                         s["other_audit_events"],
                         "yes" if row.is_suggested_keep else "no",

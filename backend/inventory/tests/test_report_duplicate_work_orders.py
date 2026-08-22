@@ -1017,7 +1017,10 @@ def test_an_uploaderless_photo_is_never_recorded_work(copy_delay_seconds):
     ]
     for index, wo in enumerate(promoted):
         LocationProblem.objects.create(
-            location=location, description=f"Problem {index}", work_order=wo
+            location=location,
+            description=f"Problem {index}",
+            photo=f"location_problems/2026/07/problem-{index}.jpg",
+            work_order=wo,
         )
         photo = WorkOrderPhoto.objects.create(
             work_order=wo,
@@ -1117,7 +1120,10 @@ def test_a_promoted_problem_accounts_for_one_copied_photo_and_no_more(seeded):
     plain = _work_order(item, created_at=BASE)
     promoted = _work_order(item, created_at=BASE + timedelta(seconds=14))
     LocationProblem.objects.create(
-        location=location, description="Conveyor jam", work_order=promoted
+        location=location,
+        description="Conveyor jam",
+        photo="location_problems/2026/07/jam.jpg",
+        work_order=promoted,
     )
     for index in range(2):
         WorkOrderPhoto.objects.create(
@@ -1131,12 +1137,53 @@ def test_a_promoted_problem_accounts_for_one_copied_photo_and_no_more(seeded):
 
     assert rows[str(plain.id)]["verdict"] == "no-recorded-work"
     assert row["work_signals"]["photos_unattributed"] == 2
+    assert row["work_signals"]["problem_photos_copied"] == 1
     assert row["worked_because"] == ["location_problems"]
     # The link accounts for ONE copy; the doubt that survives counts the rest.
     assert any(
         "1 photo(s) carry no uploader that a promoted problem link does not account for" in r
         for r in row["cannot_tell_because"]
     )
+
+
+def test_a_problem_reported_without_a_photo_accounts_for_no_photo(seeded):
+    """The cap counts files copied, not links that could have copied one.
+
+    ``LocationProblem.photo`` is optional, and promotion copies nothing when it
+    is empty. A text-only promoted problem must therefore buy no credit against
+    an uploader-less photo — that photo is somebody's genuine upload whose
+    account was deleted afterwards (uploaded_by is SET_NULL), and its doubt
+    must survive.
+    """
+    item = _item("Extractor duct check", "Nederman Extractor")
+    location = LocationFactory()
+    plain = _work_order(item, created_at=BASE)
+    promoted = _work_order(item, created_at=BASE + timedelta(seconds=16))
+    LocationProblem.objects.create(
+        location=location, description="Duct rattling, no photo taken", work_order=promoted
+    )
+    WorkOrderPhoto.objects.create(
+        work_order=promoted,
+        image="work_order_photos/2026/07/duct.jpg",
+        caption="Uploader since deleted",
+    )
+
+    rows = _rows(_groups()[str(item.id)])
+    row = rows[str(promoted.id)]
+
+    assert rows[str(plain.id)]["verdict"] == "no-recorded-work"
+    assert row["work_signals"]["location_problems"] == 1
+    assert row["work_signals"]["photos_unattributed"] == 1
+    assert row["work_signals"]["problem_photos_copied"] == 0
+    assert row["worked_because"] == ["location_problems"]
+    assert any(
+        "1 photo(s) carry no uploader that a promoted problem link does not account for" in r
+        for r in row["cannot_tell_because"]
+    )
+
+    verdict_line = _verdict_line_for(_run(), promoted)
+    assert "AND CANNOT TELL:" in verdict_line
+    assert "carry no uploader" in verdict_line
 
 
 def test_the_largest_burst_and_the_ranked_run_are_reported_separately(seeded):
@@ -1239,16 +1286,23 @@ def test_every_reported_signal_is_classified_exactly_once(seeded):
     # A typo in the suppression table would silently stop dropping an unknown a
     # finding accounts for, or drop one nothing accounts for.
     findings = buckets["work"] | buckets["attachment"]
-    for key in ("indeterminate_signals_explained_by", "indeterminate_signals_explained_up_to"):
-        table = payload[key]
-        assert set(table) <= buckets["indeterminate"], f"{key} explains a non-(C) signal"
-        for name, explainers in table.items():
-            assert explainers, f"{name} listed with no explainer"
-            assert set(explainers) <= findings, f"{name} explained by a non-(A) signal"
+    explained_by = payload["indeterminate_signals_explained_by"]
+    assert set(explained_by) <= buckets["indeterminate"], "explains a non-(C) signal"
+    for name, explainers in explained_by.items():
+        assert explainers, f"{name} listed with no explainer"
+        assert set(explainers) <= findings, f"{name} explained by a non-(A) signal"
+
+    # The capped table suppresses only as much as a fired finding actually
+    # accounts for, so its ceiling must be a counted signal, not a finding.
+    explained_up_to = payload["indeterminate_signals_explained_up_to"]
+    assert set(explained_up_to) <= buckets["indeterminate"], "caps a non-(C) signal"
+    for name, rule in explained_up_to.items():
+        assert rule["by"], f"{name} listed with no explainer"
+        assert set(rule["by"]) <= findings, f"{name} capped by a non-(A) signal"
+        assert rule["counted_by"] in buckets["context"], f"{name} cap is not a counted signal"
+
     # The two tables are different rules, so a name must not sit in both.
-    assert not set(payload["indeterminate_signals_explained_by"]) & set(
-        payload["indeterminate_signals_explained_up_to"]
-    )
+    assert not set(explained_by) & set(explained_up_to)
 
 
 def test_a_missing_due_date_is_not_asserted_to_be_backend18_damage():

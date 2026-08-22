@@ -1037,35 +1037,40 @@ class Command(BaseCommand):
         return VERDICT_NONE, [], []
 
     def _burst_analysis(self, work_orders, window):
-        """The largest run of rows within ``window``, and every clustered row.
+        """Every maximal run of rows that all fall inside one ``window``.
 
-        Two different questions, deliberately answered separately. The size of
-        the biggest run is the ranking number. ``in_burst`` answers "was this row
-        created seconds after (or before) another one", so it marks every row
-        adjacent to a neighbour inside the window — a group can hold two
-        separate retry bursts, and naming only the winning run would emit
-        ``in_burst: false`` on rows demonstrably created seconds apart.
+        A group can hold more than one run — a retry burst in the morning and a
+        pair raised by hand that afternoon is an ordinary shape, and the
+        false-positive note lists it. Returning the runs themselves rather than
+        a size and a union of clustered ids is what lets each number the report
+        prints be counted over exactly the rows the sentence quoting it names.
+
+        A run is a maximal window of consecutive rows whose first and last are
+        within ``window`` of each other, so "N work orders created within Ns of
+        each other" is true of every member, not only of adjacent pairs.
         """
         stamps = [wo.created_at for wo in work_orders]
-        largest = 1
+        starts = []
         start = 0
         for end in range(len(stamps)):
             while stamps[end] - stamps[start] > window:
                 start += 1
-            largest = max(largest, end - start + 1)
-        clustered = frozenset(
-            str(work_orders[i].id)
-            for i in range(len(stamps))
-            if (i > 0 and stamps[i] - stamps[i - 1] <= window)
-            or (i + 1 < len(stamps) and stamps[i + 1] - stamps[i] <= window)
-        )
-        return largest, clustered
+            starts.append(start)
+        runs = []
+        for end, first in enumerate(starts):
+            if end + 1 < len(starts) and starts[end + 1] <= first:
+                continue
+            runs.append(tuple(str(wo.id) for wo in work_orders[first : end + 1]))
+        return runs
 
     def _build_group(self, work_orders, *, window):
         now = timezone.now()
         first = work_orders[0]
         item = first.maintenance_item
-        burst, burst_members = self._burst_analysis(work_orders, window)
+        runs = self._burst_analysis(work_orders, window)
+        bursts = [run for run in runs if len(run) > 1]
+        burst = max((len(run) for run in runs), default=1)
+        burst_members = frozenset(wo_id for run in bursts for wo_id in run)
         span = (work_orders[-1].created_at - first.created_at).total_seconds()
 
         rows = []
@@ -1104,7 +1109,7 @@ class Command(BaseCommand):
                 )
             )
 
-        confidence, reason = self._rank(rows, burst=burst, span=span, window=window)
+        confidence, reason = self._rank(rows, bursts=bursts, span=span, window=window)
         keep_id, keep_reason = self._suggest_keep(rows, confidence=confidence)
         for row in rows:
             if row.id == keep_id:
@@ -1135,7 +1140,7 @@ class Command(BaseCommand):
             work_orders=rows,
         )
 
-    def _rank(self, rows, *, burst, span, window):
+    def _rank(self, rows, *, bursts, span, window):
         """Rank confidence that a group is retry damage rather than intentional.
 
         Timestamp clustering is the primary signal: the BACKEND-18 retries were
@@ -1143,28 +1148,19 @@ class Command(BaseCommand):
         a WO_CREATE audit row is a corroborating signal, because
         ``generate_work_order`` — the buggy path — never wrote one.
 
-        That corroboration is counted over the CLUSTERED rows alone, never over
-        the whole group. A mixed-provenance group is an ordinary shape — the
-        false-positive note lists a bulk generation run alongside a manual one —
-        and a hand-raised row hours later says nothing about how the rows created
-        seconds apart were raised. Counting it would both mis-state the number
-        the sentence quotes and demote a genuine retry burst to medium, which
-        ``--min-confidence high`` would then hide.
+        The ranking is done over ONE run, and every number in the sentence is
+        counted over that same run. A group holding an unaudited pair minutes
+        apart and an audited pair raised by hand that afternoon holds two runs,
+        not one population: counting them together would quote a figure true of
+        neither, and would demote the retry pair to medium, which
+        ``--min-confidence high`` then hides. So a group ranks high when ANY run
+        is entirely unaudited, and audited rows sitting in another run — or in no
+        run at all — are reported as exactly that rather than folded in.
         """
         window_s = int(window.total_seconds())
-        clustered = [row for row in rows if row.in_burst]
-        audited_in_burst = sum(1 for row in clustered if row.created_by)
-        audited_elsewhere = sum(1 for row in rows if row.created_by) - audited_in_burst
-        group_tail = (
-            ""
-            if not audited_elsewhere
-            else (
-                f" Group-wide, {audited_elsewhere} further work order(s) under this key do "
-                "carry a wo_create audit row, but none of them was created inside the "
-                "window, so they do not rank it."
-            )
-        )
-        if burst < 2:
+        by_id = {row.id: row for row in rows}
+        clusters = [[by_id[wo_id] for wo_id in run] for run in bursts]
+        if not clusters:
             return (
                 "low",
                 (
@@ -1174,25 +1170,55 @@ class Command(BaseCommand):
                     "rule out an operator who came back and pressed the button again later."
                 ),
             )
-        if audited_in_burst == 0:
+
+        unaudited = [run for run in clusters if not any(row.created_by for row in run)]
+        ranked = max(unaudited or clusters, key=len)
+        ranked_ids = {row.id for row in ranked}
+        others = [run for run in clusters if run is not ranked]
+
+        def audited_elsewhere(run):
+            return {row.id for row in run if row.created_by and row.id not in ranked_ids}
+
+        audited_in_other_runs = len(set().union(*(audited_elsewhere(r) for r in others or [[]])))
+        other_runs_with_audit = sum(1 for run in others if audited_elsewhere(run))
+        clustered_ids = {row.id for run in clusters for row in run}
+        audited_outside_runs = sum(
+            1 for row in rows if row.created_by and row.id not in clustered_ids
+        )
+        tail = ""
+        if audited_in_other_runs:
+            tail += (
+                f" Separately, {other_runs_with_audit} other run(s) of work orders created "
+                f"within {window_s}s of each other hold {audited_in_other_runs} row(s) with a "
+                "wo_create audit row between them; that is a different cluster, which is why "
+                "it does not rank this one."
+            )
+        if audited_outside_runs:
+            tail += (
+                f" A further {audited_outside_runs} work order(s) under this key carry a "
+                "wo_create audit row and sit in no run at all, so they do not rank this one "
+                "either."
+            )
+
+        if not any(row.created_by for row in ranked):
             return (
                 "high",
                 (
-                    f"{burst} work orders created within {window_s}s of each other, and none "
-                    f"of the {len(clustered)} clustered row(s) has a WO_CREATE audit row. "
-                    "That is CONSISTENT WITH the generate_work_order path, which committed "
-                    "the row and then 500ed, but does not establish it — see the "
-                    "false-positive note for the other paths that write no wo_create row."
-                    + group_tail
+                    f"{len(ranked)} work orders created within {window_s}s of each other, and "
+                    f"none of those {len(ranked)} has a WO_CREATE audit row. That is "
+                    "CONSISTENT WITH the generate_work_order path, which committed the row "
+                    "and then 500ed, but does not establish it — see the false-positive note "
+                    "for the other paths that write no wo_create row." + tail
                 ),
             )
+        audited = sum(1 for row in ranked if row.created_by)
         return (
             "medium",
             (
-                f"{burst} work orders created within {window_s}s of each other, and "
-                f"{audited_in_burst} of the {len(clustered)} clustered row(s) carry a "
-                "WO_CREATE audit row, so at least some were raised through the audited "
-                "create path. What produced the rest is not established here." + group_tail
+                f"{len(ranked)} work orders created within {window_s}s of each other, and a "
+                f"WO_CREATE audit row is recorded for {audited} of those {len(ranked)}, so at "
+                "least some were raised through the audited create path. What produced the "
+                "rest is not established here." + tail
             ),
         )
 

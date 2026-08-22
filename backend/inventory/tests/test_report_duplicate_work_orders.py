@@ -446,7 +446,7 @@ def test_in_burst_marks_every_clustered_row_not_just_the_winning_run(seeded):
 
 
 def test_an_audited_row_outside_the_burst_does_not_rank_the_burst(seeded):
-    """The clustered rows are the population the ranking sentence names.
+    """The ranked run is the population the ranking sentence names.
 
     Two dashboard generations 11s apart leave no wo_create row; a third work
     order raised by hand four hours later, under the same item and due date,
@@ -476,13 +476,60 @@ def test_an_audited_row_outside_the_burst_does_not_rank_the_burst(seeded):
     assert rows[str(by_hand.id)]["in_burst"] is False
 
     assert group["confidence"] == "high"
-    assert "none of the 2 clustered row(s) has a WO_CREATE audit row" in reason
-    # The audited row is reported, but as a group-wide count that did not rank it.
-    assert "1 further work order(s) under this key do carry" in reason
+    assert "none of those 2 has a WO_CREATE audit row" in reason
+    # The audited row is reported, but as a row outside every run, not folded in.
+    assert "A further 1 work order(s) under this key carry a wo_create audit row" in reason
+    assert "sit in no run at all" in reason
     assert rows[str(by_hand.id)]["created_by"] == "scantty-op"
     assert [rows[str(wo.id)]["created_by"] for wo in retries] == ["", ""]
 
     # Ranked high, so the flag the captain reaches for still shows the pair.
+    assert str(item.id) in _groups(min_confidence="high")
+
+
+def test_a_second_audited_run_does_not_rank_the_unaudited_one(seeded):
+    """A group can hold two runs, and they are two populations, not one.
+
+    Two dashboard generations 11s apart write no wo_create row; four hours later
+    two work orders are raised by hand 20s apart under the same item and due
+    date, and those DO write one. Both pairs are clusters, so counting audit rows
+    across the union would quote a figure true of neither pair and demote a
+    genuine retry burst to medium, which --min-confidence high then hides.
+    """
+    item = _item("Spindle belt check", "Hardinge HLV-H")
+    retries = [
+        _work_order(item, created_at=BASE),
+        _work_order(item, created_at=BASE + timedelta(seconds=11)),
+    ]
+    by_hand = [
+        _work_order(item, created_at=BASE + timedelta(hours=4)),
+        _work_order(item, created_at=BASE + timedelta(hours=4, seconds=20)),
+    ]
+    for wo, actor in zip(by_hand, (seeded["operator"], seeded["planner"])):
+        event = MaintenanceAuditEvent.objects.create(
+            action=MaintenanceAuditEvent.Action.WO_CREATE, actor=actor, work_order=wo
+        )
+        MaintenanceAuditEvent.objects.filter(pk=event.pk).update(created_at=wo.created_at)
+
+    group = _groups()[str(item.id)]
+    rows = _rows(group)
+    reason = group["confidence_reason"]
+
+    # Every row is clustered — with something. That is not one population.
+    assert [rows[str(wo.id)]["in_burst"] for wo in retries + by_hand] == [True] * 4
+    assert group["largest_burst"] == 2
+
+    assert group["confidence"] == "high"
+    assert "none of those 2 has a WO_CREATE audit row" in reason
+    assert "2 of the 4" not in reason
+    # ...and the audited pair is named as the separate cluster it is.
+    assert "1 other run(s) of work orders created within 300s of each other" in reason
+    assert "hold 2 row(s) with a wo_create audit row between them" in reason
+    assert "sit in no run at all" not in reason
+
+    assert [rows[str(wo.id)]["created_by"] for wo in retries] == ["", ""]
+    assert [rows[str(wo.id)]["created_by"] for wo in by_hand] == ["scantty-op", "pm-planner"]
+
     assert str(item.id) in _groups(min_confidence="high")
 
 

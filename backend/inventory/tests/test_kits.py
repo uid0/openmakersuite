@@ -7,7 +7,6 @@ the AC it proves. Receiving and purchase-order behaviour live in
 
 from decimal import Decimal
 
-from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
 from django.urls import reverse

@@ -21,12 +21,25 @@ WHAT THIS DOES **NOT** COVER, and the reason the guard in
 settlement columns straight to the database and this module never hears about
 it. ``reorder_queue.services.purchase_orders.void_po`` is exactly such a path —
 it strikes every line off with one ``update()`` — which is why it calls
-``refresh_receipt_status`` explicitly and must keep doing so. Deletes are
-different: ``queryset.delete()`` does fan out ``post_delete`` per row, so bulk
-deletion IS covered; only ``_raw_delete`` is not.
+``refresh_receipt_status`` explicitly and must keep doing so.
 
-Read that as the boundary, not as a footnote. A narrowing described as
-completeness is the failure this file is the fourth attempt at closing.
+Nor does it cover a FAST DELETE. ``queryset.delete()`` normally fans out
+``post_delete`` per row, and having a listener here is itself what forces that —
+``Collector.can_fast_delete`` returns False for a model with delete-signal
+listeners. But a collector that CAN fast-delete a set of rows issues one
+``_raw_delete`` and sends no signal at all, and ``_raw_delete`` called directly
+never does. That is a real hole, not a footnote, and the price of closing the
+ordinary case is that deleting a purchase order now materialises its lines
+instead of removing them in one statement.
+
+Read those two as the boundary. A narrowing described as completeness is the
+failure this file is the fourth attempt at closing.
+
+Nor does every save re-derive. A save that moved no settlement field and did not
+move the line to another order changes no answer, so it asks no question —
+:func:`_remember_what_this_save_moves`. Without that, editing a line's note
+would rewrite the order's status and bump its ``updated_at``, which is the same
+silent overwrite the admin formset hook had one layer up.
 
 Three properties this has to hold, all of them tested rather than asserted:
 
@@ -47,11 +60,12 @@ from __future__ import annotations
 
 import threading
 from contextlib import contextmanager
+from pathlib import Path
 
-from django.db import transaction
-from django.db.models.signals import post_delete, post_init, post_save, pre_save
+from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
+from . import models
 from .models import PurchaseOrder, PurchaseOrderItem
 
 #: Per-thread routing state. ``pending`` is ``None`` outside a batch (immediate
@@ -59,9 +73,34 @@ from .models import PurchaseOrder, PurchaseOrderItem
 #: flag.
 _state = threading.local()
 
-#: Where :func:`_remember_loaded_order` parks the parent a line was READ with,
-#: so a reparent can name the order the line left as well as the one it joined.
-_LOADED_ORDER = "_settlement_loaded_order_id"
+#: The line's FK to its order, named once so the dirty check and the reparent
+#: check read the same column.
+_PARENT_FIELD = "purchase_order"
+
+_settlement_fields_cache: frozenset[str] | None = None
+
+
+def settlement_fields() -> frozenset[str]:
+    """The columns that decide settlement, read off the model's own definition.
+
+    Derived, never typed out here. :func:`reorder_queue.settlement_sites.derive_anchor`
+    walks ``PurchaseOrderItem.is_settled`` transitively to the concrete fields,
+    which is the same closure the guard enforces the rest of the tree against —
+    so a field added to the definition joins the dirty check on its own. A tuple
+    written into this module would be a hand-maintained FIELD list one layer
+    below the hand-maintained METHOD list this module exists to delete.
+
+    Read once, lazily: the walk parses ``models.py``, and doing that at import
+    time would put a file read in every process start for a question only a line
+    save asks.
+    """
+    global _settlement_fields_cache
+    if _settlement_fields_cache is None:
+        from .settlement_sites import derive_anchor
+
+        models_path = Path(models.__file__)
+        _settlement_fields_cache = derive_anchor(models_path, models_path.name).all_fields
+    return _settlement_fields_cache
 
 
 def _refreshing() -> bool:
@@ -99,70 +138,86 @@ def _mark(order_ids) -> None:
 
 @contextmanager
 def settlement_batch():
-    """One transaction whose line writes re-derive each order once at the end.
+    """Hold the line writes in this block to ONE re-derivation per order.
 
     Correctness does not depend on using this: outside a batch every line write
     re-derives immediately, which is the same answer more times. What it buys
     is that receiving a twenty-line order asks the question once per order
     instead of once per line.
 
-    The flush runs INSIDE the transaction and before the block returns, so the
-    caller's response sees the re-derived status and a rollback takes the
-    re-derivation with it.
+    Coalescing only — it opens no transaction of its own, so wrapping a block
+    cannot quietly change whether that block is atomic. Callers that need
+    atomicity keep saying so; the flush then runs inside whatever transaction
+    they opened, and a rollback takes the re-derivation with it.
+
+    The flush runs before the block returns, never on
+    ``transaction.on_commit``: endpoints serialize the order's status into the
+    response they return after receiving, and ScanTTY reads it.
     """
     outermost = getattr(_state, "pending", None) is None
     if outermost:
         _state.pending = set()
     try:
-        with transaction.atomic():
-            yield
-            if outermost:
-                pending, _state.pending = _state.pending, set()
-                _run(pending)
+        yield
+        if outermost:
+            pending, _state.pending = _state.pending, set()
+            _run(pending)
     finally:
         if outermost:
             _state.pending = None
 
 
-@receiver(post_init, sender=PurchaseOrderItem)
-def _remember_loaded_order(sender, instance, **kwargs):
-    """Park the parent this line was LOADED with, free of charge.
-
-    Reading it here rather than querying in ``pre_save`` keeps the common path
-    query-free. ``_state.adding`` tells a row read from the database apart from
-    one merely constructed with a primary key, and only the former knows its
-    own source order; the latter falls back to a lookup in
-    :func:`_remember_source_order`. A deferred column is absent from
-    ``__dict__``, so this never triggers a load either.
-    """
-    instance.__dict__[_LOADED_ORDER] = (
-        None if instance._state.adding else instance.__dict__.get("purchase_order_id")
-    )
-
-
 @receiver(pre_save, sender=PurchaseOrderItem)
-def _remember_source_order(sender, instance, **kwargs):
-    """The order this line is leaving, if it is moving.
+def _remember_what_this_save_moves(sender, instance, update_fields=None, **kwargs):
+    """Decide, BEFORE the write, whether this save changes any answer.
 
-    Reparenting a line is a settlement transition for TWO orders: the one that
-    gains it and the one that is left owed less than it was. Only the second is
-    invisible after the save, so it has to be captured before.
+    Two things have to be known and both are invisible afterwards:
+
+    * whether a settlement field actually MOVED. A save that only rewrites a
+      note, a landed cost or a shipment date settles nothing, and re-deriving
+      the order over it would rewrite a status an operator may have chosen by
+      hand and bump the order's ``updated_at`` where previously nothing touched
+      the order at all.
+    * which order the line is LEAVING. Reparenting is a settlement transition
+      for two orders — the one that gains the line and the one left owed less
+      than it was — and only the second cannot be read back after the save.
+
+    Costs one narrow lookup per save of an existing line, skipped entirely when
+    ``update_fields`` names nothing that matters. There is no cheaper honest
+    answer: the values Django is about to write are on the instance, and the
+    ones it is about to overwrite are only in the database.
     """
     instance._settlement_source_order_id = None
+    instance._settlement_moved = True
+
+    columns = sorted(settlement_fields())
+    if update_fields is not None and not set(update_fields) & (
+        set(columns) | {_PARENT_FIELD, f"{_PARENT_FIELD}_id"}
+    ):
+        instance._settlement_moved = False
+        return
     if not instance.pk:
         return
-    loaded = instance.__dict__.get(_LOADED_ORDER)
-    if loaded is None:
-        loaded = (
-            PurchaseOrderItem.objects.filter(pk=instance.pk)
-            .values_list("purchase_order_id", flat=True)
-            .first()
-        )
-    instance._settlement_source_order_id = loaded
+
+    previous = (
+        PurchaseOrderItem.objects.filter(pk=instance.pk)
+        .values_list(f"{_PARENT_FIELD}_id", *columns)
+        .first()
+    )
+    if previous is None:
+        return
+
+    source_order_id, previous_values = previous[0], previous[1:]
+    instance._settlement_source_order_id = source_order_id
+    instance._settlement_moved = source_order_id != instance.purchase_order_id or any(
+        getattr(instance, column) != value for column, value in zip(columns, previous_values)
+    )
 
 
 @receiver(post_save, sender=PurchaseOrderItem)
 def _rederive_after_line_save(sender, instance, **kwargs):
+    if not getattr(instance, "_settlement_moved", True):
+        return
     _mark({instance.purchase_order_id, getattr(instance, "_settlement_source_order_id", None)})
 
 
@@ -171,8 +226,16 @@ def _rederive_after_line_delete(sender, instance, **kwargs):
     """A delete writes no settlement field and still changes the answer.
 
     Fires for ``queryset.delete()`` too, which is what closes the admin's bulk
-    "Delete selected" action without the admin knowing anything about it. An
-    order deleted along with its own lines simply is not there to re-derive,
-    and :func:`_run` reads the survivors rather than assuming.
+    "Delete selected" action without the admin knowing anything about it.
+
+    When a purchase order is deleted, its lines go FIRST — ``Collector`` deletes
+    a dependent model before the model it points at, and sends ``post_delete``
+    per row straight after that model's batch — so this fires while the order
+    row is still there and :func:`_run` duly re-reads it. What makes that
+    harmless is not that the order is gone: it is that every line already is, so
+    ``has_received_anything`` is False and the refresh returns without writing.
+
+    A collector that can FAST-delete sends no signal at all, and neither does
+    ``_raw_delete``; see this module's own boundary above.
     """
     _mark({instance.purchase_order_id})

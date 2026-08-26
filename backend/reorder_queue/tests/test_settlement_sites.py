@@ -46,7 +46,7 @@ from rest_framework.test import APIClient
 from inventory.models import ItemSupplier
 from inventory.services.item_metrics import compute_item_metrics
 from inventory.tests.factories import InventoryItemFactory, SupplierFactory
-from reorder_queue import services, settlement_sites
+from reorder_queue import services, settlement_signals, settlement_sites
 from reorder_queue.admin import PurchaseOrderItemAdmin, ReceiptStatusFilter
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem, PurchaseOrderItemQuerySet
 
@@ -1226,11 +1226,52 @@ class TestLineWritesReDeriveTheirOrder:
             f"{len(few)} status re-derivations for 3 lines but {len(many)} for 12 — "
             "the routing is fanning out per line instead of per unit of work"
         )
-        assert len(many) <= 2, (
-            f"{len(many)} status writes for one receipt: the signal flush coalesces to "
-            "one, and receive_delivery's own explicit refresh is the other — more than "
-            "that means something is re-deriving that should not be"
+        assert len(many) == 1, (
+            f"{len(many)} status writes for one receipt. One is the transition the "
+            "receipt actually caused; a second would mean a re-derivation that "
+            "changed nothing still wrote, which is what the no-op guard exists to stop"
         )
+
+    def test_deleting_many_lines_at_once_re_derives_the_order_once(
+        self, client, supplier, operator
+    ):
+        """The door the admin's "Delete selected" goes through.
+
+        ``queryset.delete()`` fans ``post_delete`` out per row, so without
+        coalescing an order would be asked its status once per deleted line.
+        Counted as writes to the order, and measured on a delete that really
+        does move the status so the count is of re-derivations that mattered.
+        """
+        purchase_order = make_po(supplier, operator)
+        settled = add_line(purchase_order, make_item("Hub", supplier), 5)
+        doomed = [add_line(purchase_order, make_item(f"Spoke {n}", supplier), 2) for n in range(4)]
+        receive = client.post(
+            reverse("purchaseorder-receive", args=[purchase_order.pk]),
+            {"items": [{"purchase_order_item": str(settled.pk), "quantity_received": 5}]},
+            format="json",
+        )
+        assert receive.status_code == status.HTTP_200_OK, receive.data
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.Status.PARTIALLY_RECEIVED
+
+        with CaptureQueriesContext(connection) as captured:
+            PurchaseOrderItem.objects.filter(pk__in=[line.pk for line in doomed]).delete()
+
+        # Each re-derivation re-reads its order; that read is the unit of work
+        # being counted. Counting status WRITES would prove nothing here — only
+        # the last of four deletes moves the status, so the no-op guard would
+        # collapse an uncoalesced run to one write as well.
+        rederivations = [
+            query["sql"]
+            for query in captured.captured_queries
+            if 'FROM "reorder_queue_purchaseorder"' in query["sql"] and '"id" IN (' in query["sql"]
+        ]
+        assert len(rederivations) == 1, (
+            f"{len(rederivations)} re-derivations for {len(doomed)} deleted lines — "
+            "the delete is fanning out per row instead of per unit of work"
+        )
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.Status.RECEIVED
 
     def test_the_receive_response_carries_the_re_derived_status(self, client, supplier, operator):
         """ScanTTY reads the status off the receipt's own response.
@@ -1264,32 +1305,169 @@ class TestLineWritesReDeriveTheirOrder:
 
         ``refresh_receipt_status`` writes only ``PurchaseOrder`` today, so it
         could not recurse anyway — which is a fact about this week's code and
-        not a guarantee. This makes the order's own save touch its lines, the
-        loop a future change could introduce, and drives it down the path with
-        NO batch open: outside a batch a line write re-derives immediately, so
-        without the flag the second re-derivation starts before the first has
-        returned and the stack runs out.
+        not a guarantee. This makes the order's own save MOVE a settlement field
+        on its lines, the loop a future change could introduce, and drives it
+        down the path with NO batch open: outside a batch a line write
+        re-derives immediately, so without the flag the second re-derivation
+        starts before the first has returned and the stack runs out.
+
+        The stand-in has to make the derived answer ALTERNATE, not merely move.
+        A save that changes nothing is stopped by the dirty check, and a status
+        re-derived to the value it already holds is stopped by the no-op guard;
+        either would leave this passing whether or not the flag existed.
         """
         purchase_order = make_po(supplier, operator)
         line = add_line(purchase_order, make_item("Ferrule", supplier), 4)
-        client.post(
+        receive = client.post(
             reverse("purchaseorder-receive", args=[purchase_order.pk]),
-            {"items": [{"purchase_order_item": str(line.pk), "quantity_received": 2}]},
+            {"items": [{"purchase_order_item": str(line.pk), "quantity_received": 4}]},
             format="json",
         )
+        assert receive.status_code == status.HTTP_200_OK, receive.data
+        purchase_order.refresh_from_db()
         line.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.Status.RECEIVED
 
-        def touch_the_lines(sender, instance, **kwargs):
+        def flip_the_lines(sender, instance, **kwargs):
             for item in instance.items.all():
-                item.save(update_fields=["updated_at"])
+                item.quantity_ordered = (
+                    item.quantity_received
+                    if item.quantity_ordered != item.quantity_received
+                    else item.quantity_received + 1
+                )
+                item.save()
 
-        post_save.connect(touch_the_lines, sender=PurchaseOrder)
+        post_save.connect(flip_the_lines, sender=PurchaseOrder)
         try:
-            services.void_line_item(line, operator, "discontinued")
+            line.quantity_ordered = 7
+            line.save()
         finally:
-            post_save.disconnect(touch_the_lines, sender=PurchaseOrder)
+            post_save.disconnect(flip_the_lines, sender=PurchaseOrder)
 
-        line.refresh_from_db()
-        assert line.is_voided
+        purchase_order.refresh_from_db()
+        assert purchase_order.status in {
+            PurchaseOrder.Status.RECEIVED,
+            PurchaseOrder.Status.PARTIALLY_RECEIVED,
+        }, "the routing settled somewhere; without the flag it would not have returned at all"
+
+
+@pytest.mark.django_db
+class TestOnlyASettlementChangeReDerivesTheOrder:
+    """A line save that settles nothing asks the order nothing.
+
+    Routing onto the model's save signal put the refresh behind EVERY line
+    write, including the many that move no settlement field — a note, a landed
+    cost, a shipment date. Re-deriving over those rewrites a status an operator
+    may have chosen by hand and bumps the order's ``updated_at``, which is
+    serialized. This is the same containment the admin formset hook needed one
+    layer up, applied where the writes actually are.
+    """
+
+    def _order_with_an_operator_chosen_status(self, client, supplier, operator):
+        """A received order an operator has deliberately set back to Confirmed."""
+        purchase_order = make_po(supplier, operator)
+        line = add_line(purchase_order, make_item("Grommet", supplier), 6)
+        receive = client.post(
+            reverse("purchaseorder-receive", args=[purchase_order.pk]),
+            {"items": [{"purchase_order_item": str(line.pk), "quantity_received": 6}]},
+            format="json",
+        )
+        assert receive.status_code == status.HTTP_200_OK, receive.data
         purchase_order.refresh_from_db()
         assert purchase_order.status == PurchaseOrder.Status.RECEIVED
+
+        PurchaseOrder.objects.filter(pk=purchase_order.pk).update(
+            status=PurchaseOrder.Status.CONFIRMED
+        )
+        purchase_order.refresh_from_db()
+        line.refresh_from_db()
+        return purchase_order, line
+
+    @pytest.mark.parametrize(
+        "field, value",
+        [
+            ("notes", "Chased the vendor"),
+            ("unit_cost_actual", Decimal("12.34")),
+            ("expected_shipment_date", None),
+        ],
+    )
+    def test_editing_a_non_settlement_column_leaves_the_status_alone(
+        self, client, supplier, operator, field, value
+    ):
+        purchase_order, line = self._order_with_an_operator_chosen_status(
+            client, supplier, operator
+        )
+        before = PurchaseOrder.objects.values_list("updated_at", flat=True).get(
+            pk=purchase_order.pk
+        )
+        if field == "expected_shipment_date":
+            value = timezone.now().date()
+
+        setattr(line, field, value)
+        line.save()
+
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.Status.CONFIRMED, (
+            "an edit that settles nothing re-derived the order and overwrote the "
+            "status the operator chose"
+        )
+        after = PurchaseOrder.objects.values_list("updated_at", flat=True).get(pk=purchase_order.pk)
+        assert after == before, "the order was written for a line edit that settles nothing"
+
+    def test_moving_a_settlement_column_does_re_derive(self, client, supplier, operator):
+        """The containment must not become a way to miss a real transition."""
+        purchase_order, line = self._order_with_an_operator_chosen_status(
+            client, supplier, operator
+        )
+
+        line.quantity_ordered = 9
+        line.save()
+
+        purchase_order.refresh_from_db()
+        assert purchase_order.outstanding_line_count == 1
+        assert purchase_order.status == PurchaseOrder.Status.PARTIALLY_RECEIVED
+
+    def test_moving_the_line_to_another_order_re_derives_both(self, client, supplier, operator):
+        """Reparenting moves no settlement column and still changes two answers."""
+        source = make_po(supplier, operator)
+        settled = add_line(source, make_item("Clip", supplier), 4)
+        moving = add_line(source, make_item("Pin", supplier), 3)
+        receive = client.post(
+            reverse("purchaseorder-receive", args=[source.pk]),
+            {"items": [{"purchase_order_item": str(settled.pk), "quantity_received": 4}]},
+            format="json",
+        )
+        assert receive.status_code == status.HTTP_200_OK, receive.data
+        source.refresh_from_db()
+        assert source.status == PurchaseOrder.Status.PARTIALLY_RECEIVED
+
+        destination = make_po(supplier, operator)
+        received_there = add_line(destination, make_item("Stud", supplier), 2)
+        client.post(
+            reverse("purchaseorder-receive", args=[destination.pk]),
+            {"items": [{"purchase_order_item": str(received_there.pk), "quantity_received": 2}]},
+            format="json",
+        )
+        destination.refresh_from_db()
+        assert destination.status == PurchaseOrder.Status.RECEIVED
+
+        moving.refresh_from_db()
+        moving.purchase_order = destination
+        moving.save()
+
+        source.refresh_from_db()
+        destination.refresh_from_db()
+        assert source.status == PurchaseOrder.Status.RECEIVED, "the order it left"
+        assert destination.status == PurchaseOrder.Status.PARTIALLY_RECEIVED, "the order it joined"
+
+    def test_the_dirty_check_reads_the_same_fields_the_guard_derives(self, sweep):
+        """One definition, not two.
+
+        The signal decides "did settlement move?" from the closure
+        ``settlement_sites`` walks off ``PurchaseOrderItem.is_settled`` — the
+        same one the guard enforces the rest of the tree against. A field list
+        typed into the signal module would be the hand-maintained list this
+        whole change exists to delete, one layer down.
+        """
+        assert settlement_signals.settlement_fields() == sweep.anchor.all_fields
+        assert settlement_signals.settlement_fields(), "the dirty check checks nothing"

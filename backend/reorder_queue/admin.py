@@ -23,6 +23,7 @@
 """
 
 from django.contrib import admin
+from django.db import transaction
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
@@ -287,7 +288,7 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
                 ).values_list("pk", "unit_cost_ordered")
             )
 
-        with settlement_batch():
+        with transaction.atomic(), settlement_batch():
             super().save_formset(request, form, formset, change)
 
         if not previous_unit_costs:
@@ -472,7 +473,7 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
                 .first()
             )
 
-        with settlement_batch():
+        with transaction.atomic(), settlement_batch():
             super().save_model(request, obj, form, change)
 
         if previous_unit_cost is not None and previous_unit_cost != obj.unit_cost_ordered:

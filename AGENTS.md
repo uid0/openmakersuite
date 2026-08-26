@@ -145,15 +145,18 @@ to stop.
 querysets fire no per-object save signal. `PurchaseOrderItem.objects.filter(...)
 .update(...)` and `bulk_update` write settlement columns with nothing hearing
 about it, so those paths must call `services.refresh_receipt_status` themselves
-— `services.purchase_orders.void_po` is the live example. Deletes are the
-exception: `queryset.delete()` does fan out `post_delete` per row, so bulk
-deletion is covered.
+— `services.purchase_orders.void_po` is the live example. Ordinary
+`queryset.delete()` IS covered (it fans `post_delete` out per row), but a FAST
+DELETE is not: a collector that can drop rows with one `_raw_delete` sends no
+signal, and `_raw_delete` called directly never does.
 
-Two properties the routing holds, both pinned by tests rather than asserted:
+Three properties the routing holds, all pinned by tests rather than asserted:
 receiving a twenty-line order re-derives the order ONCE (`settlement_batch()`
-coalesces inside the transaction, never on `transaction.on_commit` — endpoints
-serialize `purchase_order.status` into the response and ScanTTY reads it), and a
-refresh cannot re-enter its own signal.
+coalesces inside the caller's unit of work, never on `transaction.on_commit` —
+endpoints serialize `purchase_order.status` into the response and ScanTTY reads
+it); a save that moved no settlement field and did not move the line to another
+order re-derives NOTHING, so editing a note leaves an operator's chosen status
+alone; and a refresh cannot re-enter its own signal.
 
 Do not read a clean run as "there is nothing left". The scan prints the write
 shapes it can and cannot see on every run; that list is the honest boundary and

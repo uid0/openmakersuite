@@ -45,7 +45,7 @@ write arm is a name match, but in the safe direction: it *requires* a call to
 ``refresh_receipt_status``, so writing ``my_own_refresh()`` instead does not
 satisfy it.
 
-The write arm has now been blind FOUR separate times, and the list is here
+The write arm has now been blind FIVE separate times, and the list is here
 because each time the previous description implied a completeness it did not
 have:
 
@@ -55,7 +55,9 @@ have:
 3. a DELETE changes the answer while writing no field whatsoever;
 4. its caller graph matched BARE function names, so an unrelated function of the
    same name elsewhere in the tree could discharge a real writer's obligation —
-   the guard certifying the very thing it was built to catch.
+   the guard certifying the very thing it was built to catch;
+5. a FAST DELETE fires no ``post_delete`` at all, so the model-level routing
+   that covers ordinary deletes does not cover those.
 
 (2) and (3) are no longer this file's problem: model-level writes are routed by
 :mod:`reorder_queue.settlement_signals`, on the line's own save and delete
@@ -65,9 +67,13 @@ rather than extended. (4) is fixed at the graph — a call now resolves to targe
 in its own module, or across modules only through a name the calling module
 actually imports, and an unresolvable call buys no discharge at all.
 
+(5) cannot be closed here at all — a signal nobody sends is invisible to a
+scanner and to a receiver alike — so it is NAMED instead, in
+:data:`WRITE_SHAPES_UNSEEN` and in what :func:`main` prints.
+
 What that leaves this arm is the writes NO SIGNAL FIRES FOR: queryset-level
-``update()`` (``void_po`` is the live example), plus the explicit service
-boundaries. Read the split as the boundary, not as a footnote.
+``update()`` (``void_po`` is the live example) and fast deletes, plus the
+explicit service boundaries. Read the split as the boundary, not as a footnote.
 
 So this file does not claim to see every write, and must not be read as if it
 did. :data:`WRITE_SHAPES_SEEN` and :data:`WRITE_SHAPES_UNSEEN` enumerate both
@@ -125,7 +131,7 @@ INDEPENDENT_ARG_CALLS = frozenset({"aggregate", "annotate", "update"})
 WRITE_CALLS = frozenset({"create", "update", "get_or_create", "update_or_create", "bulk_create"})
 
 #: The write shapes this scan can actually see. Stated so the arm is never read
-#: as exhaustive — it has been surprised three times, and each surprise shipped.
+#: as exhaustive — it has been surprised five times, and each surprise shipped.
 WRITE_SHAPES_SEEN = (
     "assignment to a settlement field on a line (obj.quantity_received = ...)",
     "create()/update()/get_or_create()/update_or_create()/bulk_create() with a "
@@ -144,6 +150,9 @@ WRITE_SHAPES_UNSEEN = (
     "raw SQL, and anything reaching the database outside the ORM",
     "bulk_update(), and queryset writers not named above — querysets fire no "
     "per-object save signal either, so neither half of the routing sees them",
+    "a FAST DELETE: a collector that can drop rows with one _raw_delete sends no "
+    "post_delete, and _raw_delete called directly never does, so the model-level "
+    "routing that covers ordinary deletes does not cover those",
     "a write through a serializer or form outside the paths named above",
     "settlement fields pulled into locals by values_list() and compared later",
     "arithmetic on order-level aggregate PROPERTIES rather than on the line fields "

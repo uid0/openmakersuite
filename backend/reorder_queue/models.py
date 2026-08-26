@@ -715,6 +715,19 @@ class PurchaseOrderItemQuerySet(models.QuerySet):
             }
         )
 
+    def delete(self, *args, **kwargs):
+        """Delete these lines, asking each affected order its status once.
+
+        ``delete()`` fans ``post_delete`` out per row, and each of those is a
+        settlement transition, so removing twenty lines would otherwise re-derive
+        their order twenty times. Coalescing only — Django's own ``delete()``
+        already owns the transaction.
+        """
+        from .settlement_signals import settlement_batch
+
+        with settlement_batch():
+            return super().delete(*args, **kwargs)
+
     def settled(self):
         """Lines receiving is finished with — the queryset twin of ``is_settled``."""
         return self.filter(self.model.q_settled())

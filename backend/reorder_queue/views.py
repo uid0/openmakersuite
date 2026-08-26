@@ -2739,18 +2739,18 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         )
 
         # Items metrics. Two gross running totals — everything ever ordered,
-        # everything ever taken in — asked separately and deliberately NOT
+        # everything ever taken in — reported side by side and deliberately NOT
         # subtracted from one another. Their difference is not what is still on
         # its way: a line struck off, or one whose balance was written off as
         # never arriving, leaves a permanent gap between them, and reporting
         # that gap as "pending receipt" claims goods are coming that nobody is
         # waiting for.
-        total_items_ordered = PurchaseOrderItem.objects.aggregate(total=Sum("quantity_ordered"))[
-            "total"
-        ]
-        total_items_received = PurchaseOrderItem.objects.aggregate(total=Sum("quantity_received"))[
-            "total"
-        ]
+        item_totals = PurchaseOrderItem.objects.aggregate(
+            total_items_ordered=Sum("quantity_ordered"),
+            total_items_received=Sum("quantity_received"),
+        )
+        total_items_ordered = item_totals["total_items_ordered"]
+        total_items_received = item_totals["total_items_received"]
         # What receiving is actually still owed, off the line's own settlement
         # derivation rather than off a subtraction.
         items_pending = PurchaseOrderItem.objects.outstanding().aggregate(

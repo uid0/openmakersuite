@@ -132,6 +132,12 @@ guard: `PurchaseOrderItem.receipt_state` / `is_settled` in Python,
 off the API on the frontend. Anything that can settle a line must reach
 `services.refresh_receipt_status` before it returns.
 
+That includes the Django admin, which writes through a `ModelForm` and so names
+no field for the scanner to see. A `ModelAdmin`/inline on `PurchaseOrderItem`
+that leaves any settlement column writable owes the refresh from one of its save
+hooks (`save_model`/`save_formset`/`save_related`); making those columns
+`readonly_fields` satisfies the rule instead.
+
 ### Django upgrade history
 
 The backend now runs **Django 6.0.7**. The notes below cover the earlier 4.2 -> 5.1

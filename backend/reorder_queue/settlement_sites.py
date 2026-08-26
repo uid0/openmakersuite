@@ -45,6 +45,14 @@ write arm is a name match, but in the safe direction: it *requires* a call to
 ``refresh_receipt_status``, so writing ``my_own_refresh()`` instead does not
 satisfy it.
 
+One kind of writer neither half can see at all: a Django ``ModelAdmin`` writes
+through a ``ModelForm``, so it names no settlement field and makes no
+``create()``/``update()`` call, while an operator on its change form settles
+lines exactly as the API does. That is derived from the admin CLASS instead —
+which model it edits, and which of that model's settlement columns it leaves out
+of ``readonly_fields`` — and owes the refresh from one of its save hooks. Making
+those columns readonly satisfies the rule too: such a class is not a writer.
+
 What this does NOT cover is stated in the module's own report and in
 :mod:`reorder_queue.tests.test_settlement_sites`: raw SQL, values_list into
 local variables that are then compared, and — on the frontend — anything the
@@ -84,8 +92,28 @@ PREDICATE_CALLS = frozenset(
     {"filter", "exclude", "get", "Q", "update", "annotate", "aggregate", "When"}
 )
 
+#: The subset of :data:`PREDICATE_CALLS` whose arguments are INDEPENDENT of one
+#: another rather than one conjoined condition. ``filter(a=..., b=...)`` relates
+#: its keywords — they AND together into a single question — but
+#: ``aggregate(x=Sum("a"), y=Sum("b"))`` does not: those are two separate
+#: columns that happen to be asked for in one round-trip, and reporting two
+#: gross totals side by side is not a re-implementation of anything. So each
+#: argument of these is judged as its own expression, which still catches the
+#: real thing (``update(quantity_received=F("quantity_ordered"))`` names two
+#: settlement fields inside ONE keyword and is flagged).
+INDEPENDENT_ARG_CALLS = frozenset({"aggregate", "annotate", "update"})
+
 #: Call names that persist a field value passed as a keyword.
 WRITE_CALLS = frozenset({"create", "update", "get_or_create", "update_or_create", "bulk_create"})
+
+#: Django's admin base classes. A subclass of one of these writes through a
+#: ``ModelForm`` — never through an attribute assignment or a ``create()``
+#: keyword — so the ordinary write arm cannot see it and the admin arm below
+#: derives the obligation from the class instead.
+ADMIN_BASES = frozenset({"ModelAdmin", "InlineModelAdmin", "TabularInline", "StackedInline"})
+
+#: The hooks a ``ModelAdmin`` may discharge a settlement obligation from.
+ADMIN_SAVE_HOOKS = ("save_model", "save_formset", "save_related")
 
 _SKIP_DIR_PARTS = ("__pycache__", "node_modules", ".venv", "staticfiles", "media")
 
@@ -107,6 +135,10 @@ def _is_test_path(rel: str) -> bool:
 class Anchor:
     """The authoritative settlement definition, read off the model itself."""
 
+    #: The model class the definition lives on. Carried so arms that reason
+    #: about a model rather than about an expression — the admin arm — can name
+    #: it without a second hand-written copy.
+    model_name: str
     #: field name -> declared Django field class (e.g. ``quantity_received`` ->
     #: ``PositiveIntegerField``)
     fields: dict[str, str]
@@ -328,6 +360,7 @@ def derive_anchor(models_path: Path, rel_models_path: str) -> Anchor:
             related = value.value
 
     return Anchor(
+        model_name=cls.name,
         fields={f: fields[f] for f in sorted(reached_fields)},
         quantities=quantities,
         markers=markers,
@@ -356,6 +389,8 @@ class _PyScanner:
         self.lookup_re = re.compile(r"^(%s)(__.+)?$" % "|".join(sorted(anchor.all_fields)))
         self.findings: list[Finding] = []
         self.sites: list[tuple[str, int, str, str]] = []
+        #: Admin classes that can write settlement state through a ModelForm.
+        self.admin_obligations: list[dict] = []
         #: function qualname -> {"writes": bool, "refreshes": bool, "calls": set,
         #: "line": int}
         self.functions: dict[str, dict] = {}
@@ -467,7 +502,12 @@ class _PyScanner:
                 name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
                 if name in PREDICATE_CALLS:
                     # Arguments only: the receiver chain belongs to its own call.
-                    self._judge(node, list(node.args) + list(node.keywords), f"{name}()")
+                    arguments = list(node.args) + list(node.keywords)
+                    if name in INDEPENDENT_ARG_CALLS:
+                        for argument in arguments:
+                            self._judge(node, [argument], f"{name}()")
+                    else:
+                        self._judge(node, arguments, f"{name}()")
             elif isinstance(node, (ast.If, ast.While, ast.IfExp, ast.Assert)):
                 self._judge(node.test, [node.test], "truth test")
             elif isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
@@ -480,15 +520,30 @@ class _PyScanner:
                     for test in gen.ifs:
                         self._judge(test, [test], "truth test")
 
+    def _qualified_functions(self, node: ast.AST, prefix: str = ""):
+        """Every function in the module, named by its enclosing class.
+
+        Qualified rather than bare because two classes in one module routinely
+        define hooks of the same name — ``save_model`` on one admin and
+        ``save_model`` on another — and a bare name would let one silently
+        stand in for the other's obligation.
+        """
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                yield from self._qualified_functions(child, f"{prefix}{child.name}.")
+            elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                yield f"{prefix}{child.name}", child
+                yield from self._qualified_functions(child, f"{prefix}{child.name}.")
+            else:
+                yield from self._qualified_functions(child, prefix)
+
     def _scan_functions(self) -> None:
         """Record, per function, whether it writes settlement state and whether it
         re-derives the order's status."""
-        for node in ast.walk(self.tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
+        for dotted, node in self._qualified_functions(self.tree):
             if self._exempt(node):
                 continue
-            qual = f"{self.rel}:{node.name}"
+            qual = f"{self.rel}:{dotted}"
             writes: list[str] = []
             refreshes = False
             calls: set[str] = set()
@@ -521,6 +576,187 @@ class _PyScanner:
                 "line": node.lineno,
             }
 
+    # -- admin arm -------------------------------------------------------
+
+    def _class_assignments(self, cls: ast.ClassDef, *names: str):
+        for stmt in cls.body:
+            if isinstance(stmt, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id in names for target in stmt.targets
+            ):
+                yield stmt.value
+
+    def _class_strings(self, cls: ast.ClassDef, *names: str) -> set[str]:
+        """Every string constant assigned to one of ``names`` in the class body."""
+        return {
+            sub.value
+            for value in self._class_assignments(cls, *names)
+            for sub in ast.walk(value)
+            if isinstance(sub, ast.Constant) and isinstance(sub.value, str)
+        }
+
+    def _class_references(self, cls: ast.ClassDef, *names: str) -> set[str]:
+        """Every bare name assigned to one of ``names`` (``model = X``, ``inlines = [X]``)."""
+        return {
+            sub.id
+            for value in self._class_assignments(cls, *names)
+            for sub in ast.walk(value)
+            if isinstance(sub, ast.Name)
+        }
+
+    def _admin_kinds(self, classes: dict[str, ast.ClassDef]) -> dict[str, str | None]:
+        """Which of the module's classes are admin classes, and of which sort.
+
+        ``"inline"`` writes through its PARENT's formset and has no save hook of
+        its own; ``"modeladmin"`` writes through its own ``save_model``. Resolved
+        through locally-declared bases too, so a project-wide admin base class
+        does not hide its subclasses from the arm.
+        """
+        kinds: dict[str, str | None] = {}
+
+        def resolve(name: str, seen: frozenset[str]) -> str | None:
+            if name in kinds:
+                return kinds[name]
+            cls = classes.get(name)
+            if cls is None or name in seen:
+                return None
+            result: str | None = None
+            for base in cls.bases:
+                base_name = (
+                    base.attr if isinstance(base, ast.Attribute) else getattr(base, "id", None)
+                )
+                if base_name is None:
+                    continue
+                if base_name in ADMIN_BASES:
+                    result = "modeladmin" if base_name == "ModelAdmin" else "inline"
+                elif base_name in classes:
+                    result = resolve(base_name, seen | {name})
+                if result is not None:
+                    break
+            kinds[name] = result
+            return result
+
+        for name in classes:
+            resolve(name, frozenset())
+        return kinds
+
+    def _registrations(self, classes: dict[str, ast.ClassDef]) -> dict[str, set[str]]:
+        """admin class name -> the models it is registered for.
+
+        Covers both ``@admin.register(Model)`` on the class and the older
+        ``admin.site.register(Model, SomeAdmin)`` call form.
+        """
+        registered: dict[str, set[str]] = {}
+        for name, cls in classes.items():
+            for decorator in cls.decorator_list:
+                if not isinstance(decorator, ast.Call):
+                    continue
+                func = decorator.func
+                called = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+                if called != "register":
+                    continue
+                for arg in decorator.args:
+                    if isinstance(arg, ast.Name):
+                        registered.setdefault(name, set()).add(arg.id)
+        for node in ast.walk(self.tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            called = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+            if called != "register" or len(node.args) < 2:
+                continue
+            model, admin_class = node.args[0], node.args[1]
+            if isinstance(model, ast.Name) and isinstance(admin_class, ast.Name):
+                registered.setdefault(admin_class.id, set()).add(model.id)
+        return registered
+
+    def _editable_settlement_fields(self, cls: ast.ClassDef) -> set[str]:
+        """Which settlement fields this admin class leaves an operator able to write.
+
+        Making every settlement field ``readonly`` (or keeping them out of an
+        explicit ``fields``/``fieldsets``) is a legitimate way to satisfy the
+        rule — such a class is not a writer and is not asked for anything.
+        """
+        candidate = set(self.a.all_fields)
+        declared = self._class_strings(cls, "fields", "fieldsets")
+        if any(True for _ in self._class_assignments(cls, "fields", "fieldsets")):
+            candidate &= declared
+        return candidate - self._class_strings(cls, "readonly_fields", "exclude")
+
+    def _scan_admin(self) -> None:
+        """A Django admin that leaves settlement columns editable owes the refresh.
+
+        The admin was invisible to the write arm above because a ``ModelAdmin``
+        never writes the way that arm looks for: ``super().save_model()`` hands
+        the object to a ``ModelForm``, so there is no ``obj.quantity_ordered =``
+        assignment and no ``create()``/``update()`` keyword to see. The write is
+        real all the same — lowering ``quantity_ordered`` to what has arrived
+        settles the line — so the obligation is derived from the CLASS instead:
+        which model it edits, and which of that model's settlement fields it
+        leaves writable.
+        """
+        classes = {
+            node.name: node for node in ast.walk(self.tree) if isinstance(node, ast.ClassDef)
+        }
+        if not classes:
+            return
+        kinds = self._admin_kinds(classes)
+        if not any(kinds.values()):
+            return
+        registered = self._registrations(classes)
+
+        editors: dict[str, set[str]] = {}
+        for name, cls in classes.items():
+            if kinds.get(name) is None:
+                continue
+            targets = self._class_references(cls, "model") | registered.get(name, set())
+            if self.a.model_name not in targets:
+                continue
+            editable = self._editable_settlement_fields(cls)
+            if editable:
+                editors[name] = editable
+
+        owed: dict[str, str] = {}
+        for name, editable in sorted(editors.items()):
+            columns = ", ".join(sorted(editable))
+            if kinds[name] == "inline":
+                # An inline has no save hook of its own: its rows are written by
+                # whichever ModelAdmin hosts it, through ``save_formset``.
+                hosts = [
+                    host
+                    for host, cls in sorted(classes.items())
+                    if kinds.get(host) is not None
+                    and name in self._class_references(cls, "inlines")
+                ]
+                for host in hosts:
+                    owed.setdefault(
+                        host,
+                        f"the {name} inline it hosts leaves {columns} editable on "
+                        f"{self.a.model_name}",
+                    )
+                if not hosts:
+                    owed.setdefault(name, f"it leaves {columns} editable on {self.a.model_name}")
+            else:
+                owed.setdefault(name, f"it leaves {columns} editable on {self.a.model_name}")
+
+        for name in sorted(owed):
+            cls = classes[name]
+            defined = {
+                stmt.name
+                for stmt in cls.body
+                if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            self.admin_obligations.append(
+                {
+                    "path": self.rel,
+                    "line": cls.lineno,
+                    "admin": name,
+                    "why": owed[name],
+                    "hooks": [
+                        f"{self.rel}:{name}.{hook}" for hook in ADMIN_SAVE_HOOKS if hook in defined
+                    ],
+                }
+            )
+
     def _record_sites(self) -> None:
         """Every mention of a settlement field, so the derived set can be reported
         in full rather than only where it went wrong."""
@@ -543,6 +779,7 @@ class _PyScanner:
     def run(self) -> None:
         self._scan_predicates()
         self._scan_functions()
+        self._scan_admin()
         self._record_sites()
 
 
@@ -655,6 +892,7 @@ def scan(start: Path | None = None) -> Report:
     report = Report(anchor=anchor, scanned=[rel_to_base(backend)])
 
     functions: dict[str, dict] = {}
+    admin_obligations: list[dict] = []
     for path in _walk(backend, ".py"):
         rel = rel_to_base(path)
         try:
@@ -668,6 +906,7 @@ def scan(start: Path | None = None) -> Report:
             continue
         report.findings.extend(scanner.findings)
         functions.update(scanner.functions)
+        admin_obligations.extend(scanner.admin_obligations)
 
     if frontend is None:
         # "Not looked at" and "looked at and clean" are different facts, and the
@@ -684,12 +923,16 @@ def scan(start: Path | None = None) -> Report:
             if not _is_test_path(rel):
                 report.findings.extend(findings)
 
-    report.findings.extend(_write_arm(anchor, functions))
+    report.findings.extend(_write_arm(anchor, functions, admin_obligations))
     report.findings.sort(key=lambda f: (f.path, f.line))
     return report
 
 
-def _write_arm(anchor: Anchor, functions: dict[str, dict]) -> list[Finding]:
+def _write_arm(
+    anchor: Anchor,
+    functions: dict[str, dict],
+    admin_obligations: list[dict] | None = None,
+) -> list[Finding]:
     """Every path that can settle a line must re-derive the order's status.
 
     Writing a settlement field is not a thing a caller can be trusted to
@@ -710,6 +953,15 @@ def _write_arm(anchor: Anchor, functions: dict[str, dict]) -> list[Finding]:
     Calling one of the model's own mutating methods (``close_short``,
     ``reopen_short``) counts as writing, because from outside the class that is
     exactly what it is.
+
+    ``admin_obligations`` carries the writers this arm's shape cannot see at
+    all: a ``ModelAdmin`` writes through a ``ModelForm``, so it names no field
+    and calls nothing this arm recognises, while an operator editing that form
+    settles lines exactly as the API does. Those are derived from the admin
+    CLASS (which model, which columns still writable) in
+    :meth:`_PyScanner._scan_admin` and discharged here, through the same
+    transitive ``reaches_refresh`` closure, so a hook that reaches the refresh
+    via a helper satisfies its obligation like any other writer.
     """
     by_name: dict[str, list[str]] = {}
     callers: dict[str, set[str]] = {qual: set() for qual in functions}
@@ -768,6 +1020,24 @@ def _write_arm(anchor: Anchor, functions: dict[str, dict]) -> list[Finding]:
                 f"{name}() can change whether a line is settled ({why}), and neither it nor "
                 f"every path into it calls {REFRESH}() — so the order is left with a status "
                 f"claiming something its own lines no longer say",
+                "",
+            )
+        )
+
+    for obligation in admin_obligations or []:
+        if any(hook in reaches_refresh for hook in obligation["hooks"]):
+            continue
+        findings.append(
+            Finding(
+                obligation["path"],
+                obligation["line"],
+                "write",
+                f"{obligation['admin']} can change whether a line is settled — "
+                f"{obligation['why']} — and none of its save hooks "
+                f"({', '.join(ADMIN_SAVE_HOOKS)}) calls {REFRESH}(), so an admin edit "
+                f"that settles the last outstanding line leaves the order with a status "
+                f"claiming something its own lines no longer say. Making those columns "
+                f"readonly here would satisfy this too",
                 "",
             )
         )

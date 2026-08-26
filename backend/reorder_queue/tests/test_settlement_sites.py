@@ -25,11 +25,14 @@ So this holds three different things, and each answers a different question.
 from __future__ import annotations
 
 import itertools
-from datetime import timedelta
+import json
+from datetime import datetime, timedelta
 from decimal import Decimal
 
+from django.contrib import admin
 from django.contrib.admin.sites import AdminSite
-from django.test import RequestFactory
+from django.forms.models import model_to_dict
+from django.test import Client, RequestFactory
 from django.urls import reverse
 from django.utils import timezone
 
@@ -43,6 +46,19 @@ from inventory.tests.factories import InventoryItemFactory, SupplierFactory
 from reorder_queue import services, settlement_sites
 from reorder_queue.admin import PurchaseOrderItemAdmin, ReceiptStatusFilter
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem, PurchaseOrderItemQuerySet
+
+
+@pytest.fixture(scope="module")
+def sweep():
+    """One whole-tree sweep, shared by every test that only reads its result.
+
+    The scan re-parses every ``.py`` under ``backend/`` and every ``.ts``/
+    ``.tsx`` under ``frontend/src``; doing that once per test was seconds of
+    identical work on every run. The two tests that assert on ``main()``'s
+    printed output keep their own calls, because what they check is the
+    printing.
+    """
+    return settlement_sites.scan()
 
 
 @pytest.fixture
@@ -114,7 +130,7 @@ class TestDerivationIsHonoured:
     in the web UI — is in scope without anyone remembering to add it.
     """
 
-    def test_settlement_definition_is_derived_from_the_model(self):
+    def test_settlement_definition_is_derived_from_the_model(self, sweep):
         """The anchor is read off the model, not written down here.
 
         Asserts the SHAPE of what was derived rather than the field names: a
@@ -124,7 +140,7 @@ class TestDerivationIsHonoured:
         below pass vacuously, and "found nothing" and "could not tell" are
         different facts.
         """
-        anchor = settlement_sites.scan().anchor
+        anchor = sweep.anchor
 
         assert anchor.fields, "the walk from is_settled reached no model fields"
         assert anchor.quantities, "no quantity field in the settlement definition"
@@ -135,12 +151,12 @@ class TestDerivationIsHonoured:
         assert settlement_sites.SEED in anchor.members
         assert anchor.mutating_methods, "no model method writes settlement state"
 
-    def test_no_site_bypasses_the_derivation(self):
-        report = settlement_sites.scan()
+    def test_no_site_bypasses_the_derivation(self, sweep):
+        report = sweep
         assert report.sites, "the sweep read no settlement site at all"
         assert not report.findings, "\n\n" + "\n\n".join(str(f) for f in report.findings)
 
-    def test_the_sweep_says_what_it_could_not_read(self):
+    def test_the_sweep_says_what_it_could_not_read(self, sweep):
         """A partial run must not read as a clean one.
 
         The docker-compose CI job mounts ``backend/`` alone, so the frontend arm
@@ -148,7 +164,7 @@ class TestDerivationIsHonoured:
         matters is that the report distinguishes "looked and found nothing" from
         "could not look", rather than reporting silence as coverage.
         """
-        report = settlement_sites.scan()
+        report = sweep
         assert report.scanned, "the report claims to have read nothing"
         assert "frontend" in " ".join(
             report.scanned + report.unscanned
@@ -570,3 +586,235 @@ class TestPendingCountsOnlyWhatIsStillComing:
         rows = client.get(reverse("orderdelivery-pending-orders")).data
         row = next(r for r in rows if str(r["id"]) == str(purchase_order.pk))
         assert row["items_pending"] == 4
+
+
+@pytest.mark.django_db
+class TestAdminEditsReDeriveTheOrder:
+    """The Django admin settles lines too, and owes the same re-derivation.
+
+    ``quantity_ordered``, ``quantity_received`` and ``is_voided`` are all
+    editable on the line's change form and on the inline under a purchase
+    order, so a staff user can settle a line there exactly as ``update_item``
+    does — the first known defect reached through a different door. The write
+    happens through a ``ModelForm``, which is why the scanner's ordinary write
+    arm could not see it: there is no attribute assignment and no ``create()``
+    keyword to find.
+
+    Driven through the real admin change forms, built from the ModelAdmin's own
+    form so the payload cannot rot as the admin's field set changes.
+    """
+
+    @pytest.fixture
+    def admin_client(self, operator):
+        browser = Client()
+        browser.force_login(operator)
+        return browser
+
+    def _order_with_one_short_line(self, client, supplier, operator):
+        purchase_order = make_po(supplier, operator)
+        item = make_item("Gasket", supplier)
+        line = add_line(purchase_order, item, 10)
+        receive = client.post(
+            reverse("purchaseorder-receive", args=[purchase_order.pk]),
+            {"items": [{"purchase_order_item": str(line.pk), "quantity_received": 6}]},
+            format="json",
+        )
+        assert receive.status_code == status.HTTP_200_OK, receive.data
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.Status.PARTIALLY_RECEIVED
+        return purchase_order, line
+
+    @staticmethod
+    def _form_value(instance, name):
+        value = model_to_dict(instance, fields=[name]).get(name)
+        if value is None:
+            return ""
+        if isinstance(value, (dict, list)):
+            return json.dumps(value)
+        return value
+
+    def _line_form_data(self, line, operator, **overrides):
+        model_admin = admin.site._registry[PurchaseOrderItem]
+        request = RequestFactory().get("/")
+        request.user = operator
+        form_class = model_admin.get_form(request, obj=line, change=True)
+        data = {name: self._form_value(line, name) for name in form_class.base_fields}
+        data.update(overrides)
+        return data
+
+    def test_lowering_a_line_on_its_change_form_finishes_the_order(
+        self, admin_client, client, supplier, operator
+    ):
+        purchase_order, line = self._order_with_one_short_line(client, supplier, operator)
+
+        response = admin_client.post(
+            f"/admin/reorder_queue/purchaseorderitem/{line.pk}/change/",
+            self._line_form_data(line, operator, quantity_ordered=6),
+        )
+
+        assert response.status_code == 302, getattr(response, "context_data", None)
+        purchase_order.refresh_from_db()
+        assert purchase_order.outstanding_line_count == 0
+        assert purchase_order.status == PurchaseOrder.Status.RECEIVED
+
+    def test_settling_one_line_in_the_admin_leaves_an_order_still_owed_another(
+        self, admin_client, client, supplier, operator
+    ):
+        """Re-deriving is not advancing: the other line still counts."""
+        purchase_order, line = self._order_with_one_short_line(client, supplier, operator)
+        second = add_line(purchase_order, make_item("Shim", supplier), 3)
+
+        response = admin_client.post(
+            f"/admin/reorder_queue/purchaseorderitem/{line.pk}/change/",
+            self._line_form_data(line, operator, quantity_ordered=6),
+        )
+
+        assert response.status_code == 302
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.Status.PARTIALLY_RECEIVED
+        assert [item.pk for item in purchase_order.outstanding_items] == [second.pk]
+
+    def test_lowering_a_line_on_the_order_inline_finishes_the_order(
+        self, admin_client, client, supplier, operator
+    ):
+        """The inline writes the same columns, so it owes the same refresh.
+
+        The order admin prefetches ``items``, so this also pins that the refresh
+        re-reads rather than trusting the cached relation's pre-edit quantities.
+        """
+        purchase_order, line = self._order_with_one_short_line(client, supplier, operator)
+        model_admin = admin.site._registry[PurchaseOrder]
+        request = RequestFactory().get("/")
+        request.user = operator
+
+        data = {}
+        for name in model_admin.get_form(request, obj=purchase_order, change=True).base_fields:
+            value = model_to_dict(purchase_order, fields=[name]).get(name)
+            if isinstance(value, datetime):
+                # The admin renders datetimes through a split date/time widget.
+                data[f"{name}_0"] = value.date().isoformat()
+                data[f"{name}_1"] = value.time().isoformat()
+            else:
+                data[name] = "" if value is None else value
+
+        prefix = "items"
+        data.update(
+            {
+                f"{prefix}-TOTAL_FORMS": "1",
+                f"{prefix}-INITIAL_FORMS": "1",
+                f"{prefix}-MIN_NUM_FORMS": "0",
+                f"{prefix}-MAX_NUM_FORMS": "1000",
+            }
+        )
+        inline = model_admin.get_inline_instances(request, purchase_order)[0]
+        for name in inline.get_formset(request, purchase_order).form.base_fields:
+            data[f"{prefix}-0-{name}"] = self._form_value(line, name)
+        data[f"{prefix}-0-id"] = str(line.pk)
+        data[f"{prefix}-0-purchase_order"] = str(purchase_order.pk)
+        data[f"{prefix}-0-quantity_ordered"] = "6"
+
+        response = admin_client.post(
+            f"/admin/reorder_queue/purchaseorder/{purchase_order.pk}/change/", data
+        )
+
+        assert response.status_code == 302, getattr(response, "context_data", None)
+        line.refresh_from_db()
+        assert line.quantity_ordered == 6
+        purchase_order.refresh_from_db()
+        assert purchase_order.outstanding_line_count == 0
+        assert purchase_order.status == PurchaseOrder.Status.RECEIVED
+
+
+class TestTheGuardSeesAdminWriters:
+    """The arm that found the admin, exercised on modules built to trip it.
+
+    A ``ModelAdmin`` is invisible to the ordinary write arm — it names no
+    settlement field and calls nothing the arm recognises — so the obligation is
+    derived from the CLASS: which model it edits, and which of that model's
+    settlement columns it leaves writable. These feed the scanner admin modules
+    of each shape and assert what it says about them, which is the same
+    judgement it passes on the real tree.
+    """
+
+    def _findings(self, sweep, source):
+        scanner = settlement_sites._PyScanner(sweep.anchor, "someapp/admin.py", source)
+        scanner.run()
+        return settlement_sites._write_arm(
+            sweep.anchor, scanner.functions, scanner.admin_obligations
+        )
+
+    def test_an_admin_that_can_settle_a_line_and_never_refreshes_is_flagged(self, sweep):
+        findings = self._findings(
+            sweep,
+            """
+@admin.register(PurchaseOrderItem)
+class LineAdmin(admin.ModelAdmin):
+    readonly_fields = ["created_at"]
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+""",
+        )
+        assert [f.arm for f in findings] == ["write"]
+        assert "LineAdmin" in findings[0].detail
+
+    def test_the_same_admin_is_clean_once_its_save_hook_re_derives_the_order(self, sweep):
+        findings = self._findings(
+            sweep,
+            """
+@admin.register(PurchaseOrderItem)
+class LineAdmin(admin.ModelAdmin):
+    readonly_fields = ["created_at"]
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        refresh_receipt_status(PurchaseOrder.objects.get(pk=obj.purchase_order_id))
+""",
+        )
+        assert findings == []
+
+    def test_an_admin_that_makes_every_settlement_column_readonly_is_not_a_writer(self, sweep):
+        """Refusing the edit is a legitimate way to satisfy the rule."""
+        readonly = ", ".join(f'"{name}"' for name in sorted(sweep.anchor.all_fields))
+        findings = self._findings(
+            sweep,
+            f"""
+@admin.register(PurchaseOrderItem)
+class LineAdmin(admin.ModelAdmin):
+    readonly_fields = [{readonly}]
+""",
+        )
+        assert findings == []
+
+    def test_an_inline_puts_the_obligation_on_the_order_admin_that_hosts_it(self, sweep):
+        """An inline has no save hook of its own — its parent's formset writes it."""
+        findings = self._findings(
+            sweep,
+            """
+class LineInline(admin.TabularInline):
+    model = PurchaseOrderItem
+
+
+@admin.register(PurchaseOrder)
+class OrderAdmin(admin.ModelAdmin):
+    inlines = [LineInline]
+
+    def save_formset(self, request, form, formset, change):
+        super().save_formset(request, form, formset, change)
+""",
+        )
+        assert [f.arm for f in findings] == ["write"]
+        assert "OrderAdmin" in findings[0].detail
+        assert "LineInline" in findings[0].detail
+
+    def test_an_admin_of_another_model_entirely_is_left_alone(self, sweep):
+        findings = self._findings(
+            sweep,
+            """
+@admin.register(DeliveryItem)
+class DeliveryItemAdmin(admin.ModelAdmin):
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+""",
+        )
+        assert findings == []

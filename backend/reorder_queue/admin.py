@@ -23,6 +23,7 @@
 """
 
 from django.contrib import admin
+from django.db import transaction
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
@@ -38,6 +39,7 @@ from .models import (
     ReorderRequest,
     WebHook,
 )
+from .services.receiving import refresh_receipt_status
 
 
 class DeliveryPerformanceFilter(admin.SimpleListFilter):
@@ -258,12 +260,21 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
     inlines = [PurchaseOrderItemInline]
 
     def save_formset(self, request, form, formset, change):
-        """Save the line-item inline, recording any price change as one.
+        """Save the line-item inline, recording a price change and re-deriving status.
 
         The inline edits ``unit_cost_ordered`` on existing lines just as the
         line-item change form does, so it owes the same trace. Inline saves go
         through here rather than ``save_model``, so closing one without the
         other would leave the price-trace invariant with a hole beside it.
+
+        It edits the SETTLEMENT columns too — ``quantity_ordered``,
+        ``quantity_received``, ``is_voided`` are all editable here — so it owes
+        the same status re-derivation every other settlement write goes
+        through. Without it, lowering a line to what has already arrived leaves
+        the order at ``partially_received`` with nothing outstanding and both
+        close-out actions refusing it. The refresh shares the save's
+        transaction, and re-reads the order because ``get_queryset`` prefetches
+        ``items`` and that cached relation still holds the pre-edit quantities.
         """
         previous_unit_costs = {}
         if formset.model is PurchaseOrderItem:
@@ -273,7 +284,10 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
                 ).values_list("pk", "unit_cost_ordered")
             )
 
-        super().save_formset(request, form, formset, change)
+        with transaction.atomic():
+            super().save_formset(request, form, formset, change)
+            if formset.model is PurchaseOrderItem and form.instance.pk:
+                refresh_receipt_status(PurchaseOrder.objects.get(pk=form.instance.pk))
 
         if not previous_unit_costs:
             return
@@ -434,13 +448,20 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
     ]
 
     def save_model(self, request, obj, form, change):
-        """Save the line, and record a price change as a price change.
+        """Save the line, record a price change, and re-derive the order's status.
 
         ``unit_cost_ordered`` stays editable here on purpose — admin exists for
         the exceptional correction the API's draft-only reprice cannot serve.
         The right answer is that such a correction leaves a trace, not that it
         becomes impossible, so it emits the same event every other route that
         rewrites that field emits.
+
+        The settlement columns are editable here for the same reason, and carry
+        the same obligation ``update_item`` carries: lowering ``quantity_ordered``
+        to what has already arrived settles the line, and an order whose last
+        outstanding line has just settled must not be left claiming it is still
+        waiting. The refresh shares the save's transaction and re-reads the
+        order rather than trusting a possibly-prefetched ``items`` relation.
         """
         previous_unit_cost = None
         if change and obj.pk:
@@ -450,7 +471,9 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
                 .first()
             )
 
-        super().save_model(request, obj, form, change)
+        with transaction.atomic():
+            super().save_model(request, obj, form, change)
+            refresh_receipt_status(PurchaseOrder.objects.get(pk=obj.purchase_order_id))
 
         if previous_unit_cost is not None and previous_unit_cost != obj.unit_cost_ordered:
             record_line_reprice(

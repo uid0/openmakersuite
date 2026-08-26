@@ -495,14 +495,21 @@ def mark_delivered_receipt(
     carrier="",
     receipt_notes="",
 ):
-    """Receive every still-pending quantity on the PO as a single delivery.
+    """Receive every still-outstanding quantity on the PO as a single delivery.
 
     Thin wrapper over :func:`receive_delivery` used by the ``mark-delivered``
-    action: every line that is not yet fully received is receipted for its
-    outstanding quantity. Callers own the "already fully received" guard.
+    action: every line :func:`outstanding_lines` reports is receipted for its
+    outstanding quantity. Callers own the "nothing outstanding" guard.
+
+    The lines come from :func:`outstanding_lines` and nowhere else, because
+    "which lines does receiving still owe?" has exactly one answer. Asking it
+    here with a second predicate is what made mark-delivered stock a voided
+    line's quantity and silently receive the balance a close-short had just
+    written off.
     """
-    pending_items = [item for item in purchase_order.items.all() if not item.is_fully_received]
-    line_quantities = [(po_item, po_item.quantity_pending) for po_item in pending_items]
+    line_quantities = [
+        (po_item, po_item.quantity_pending) for po_item in outstanding_lines(purchase_order)
+    ]
     return receive_delivery(
         purchase_order,
         line_quantities,
@@ -525,9 +532,7 @@ def refresh_receipt_status(purchase_order) -> str:
 
     Returns the resulting status.
     """
-    if purchase_order.status not in PurchaseOrder.RECEIVABLE_STATUSES | {
-        PurchaseOrder.Status.RECEIVED
-    }:
+    if purchase_order.status not in PurchaseOrder.IN_RECEIVING_STATUSES:
         return purchase_order.status
 
     # Drop the per-instance aggregate cache: the caller has just mutated lines
@@ -562,14 +567,41 @@ def close_lines_short(purchase_order, closures, *, actor):
     return closed
 
 
+def reopen_lines_short(purchase_order, reopenings, *, actor):
+    """Take back the close-short on each named line, then re-derive the order's status.
+
+    ``reopenings`` is an iterable of ``(po_item, reason)``. Every reopen happens
+    in one transaction with the status refresh, so an order can never be left
+    with a line back in receiving and a status that still claims receiving has
+    finished with the order — an order that had reached ``received`` drops back
+    to ``partially_received`` here, in the same commit.
+
+    The correction, not an undo: see
+    :meth:`~reorder_queue.models.PurchaseOrderItem.reopen_short` for what stays
+    on the record.
+
+    Returns the lines that were reopened.
+    """
+    reopened = []
+    with transaction.atomic():
+        for po_item, reason in reopenings:
+            po_item.reopen_short(actor=actor, reason=reason)
+            reopened.append(po_item)
+        refresh_receipt_status(purchase_order)
+    return reopened
+
+
 def outstanding_lines(purchase_order):
     """The active lines receiving is still waiting on, in the order's own order.
 
-    Derived from each line's :attr:`~reorder_queue.models.PurchaseOrderItem.is_settled`
-    rather than from a status list, so a line that becomes settled by a route
-    added later drops out of here without this function being touched.
+    The service-layer name for
+    :attr:`~reorder_queue.models.PurchaseOrder.outstanding_items`, which holds
+    the one derivation. Every site that has to act on "the lines this order
+    still owes" — ``mark-delivered``, ``mark-received``, the worksheet — comes
+    through here or through the property itself, so none of them can drift onto
+    a predicate of its own.
     """
-    return [item for item in purchase_order.items.all() if not item.is_settled]
+    return purchase_order.outstanding_items
 
 
 def line_scan_codes(po_item) -> list[dict]:
@@ -670,6 +702,11 @@ def build_receiving_worksheet(purchase_order) -> dict:
                 "is_voided": po_item.is_voided,
                 "is_closed_short": po_item.is_closed_short,
                 "closed_short_reason": po_item.closed_short_reason,
+                # The correction, reported next to what it corrects rather than
+                # in place of it — a line back in receiving after a mistaken
+                # write-off still shows the write-off.
+                "was_reopened": po_item.was_reopened,
+                "reopened_reason": po_item.reopened_reason,
                 "is_kit_line": po_item.is_kit_line,
                 "scan_codes": line_scan_codes(po_item),
                 "serial_targets": [

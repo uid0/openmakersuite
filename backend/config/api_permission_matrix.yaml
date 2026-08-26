@@ -2743,6 +2743,9 @@ views:
       receiving:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+      reopen_short:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
       reorder_data:
         permission_classes:
         - IsAuthenticatedOrReadOnly

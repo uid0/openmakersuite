@@ -193,6 +193,41 @@ describe('closing a line short', () => {
     const [, body] = (api.purchaseOrderAPI.receiveItems as jest.Mock).mock.calls[0];
     expect(body.items[0].close_short).toBeUndefined();
   });
+
+  test('correcting the quantity back up drops the close-short the operator can no longer see', async () => {
+    // The offer only renders while the quantity is short. A flag ticked at 4 of
+    // 7 and then corrected to 7 would otherwise still be sent — input the
+    // operator can neither see nor untick, against a line with nothing left
+    // outstanding.
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeOrder() });
+    (api.purchaseOrderAPI.receiveItems as jest.Mock).mockResolvedValue({ data: makeOrder() });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^receive items$/i }));
+    const quantity = screen.getByLabelText('Receive quantity for Stocked Bolt');
+    fireEvent.change(quantity, { target: { value: '4' } });
+
+    await screen.findByTestId('receive-short-row-301');
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.change(screen.getByLabelText(/reason for closing Stocked Bolt short/i), {
+      target: { value: 'backorder cancelled' },
+    });
+
+    // The operator notices the miscount and corrects it: the offer goes away.
+    fireEvent.change(quantity, { target: { value: '7' } });
+    expect(screen.queryByTestId('receive-short-row-301')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm receipt/i }));
+
+    await waitFor(() => {
+      expect(api.purchaseOrderAPI.receiveItems).toHaveBeenCalled();
+    });
+    const [, body] = (api.purchaseOrderAPI.receiveItems as jest.Mock).mock.calls[0];
+    expect(body.items[0].quantity_received).toBe(7);
+    expect(body.items[0].close_short).toBeUndefined();
+    expect(body.items[0].close_short_reason).toBeUndefined();
+  });
 });
 
 describe('the mismatch stays visible on the order', () => {

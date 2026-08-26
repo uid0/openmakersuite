@@ -149,6 +149,27 @@ class ReorderRequest(models.Model):
         return None
 
 
+def outstanding_of(items) -> list:
+    """The lines receiving is still waiting on, out of ``items``.
+
+    THE derivation of "which lines does receiving still owe?", written once and
+    reached through :attr:`PurchaseOrder.outstanding_items` (and its service
+    alias ``reorder_queue.services.outstanding_lines``). Every site that has to
+    act on those lines — the order's settlement roll-up, ``mark-delivered``,
+    ``mark-received``, the receiving worksheet — comes through one of those two
+    names, so none of them can drift onto a predicate of its own.
+
+    Built on each line's :attr:`PurchaseOrderItem.is_settled`, so a line that
+    becomes settled by a route added later drops out of here without this
+    function being touched — and a voided line, or one closed short, is never
+    handed back as work still to do.
+
+    Takes an iterable rather than an order so the aggregate pass can hand it the
+    lines it has already materialised instead of fetching them twice.
+    """
+    return [item for item in items if not item.is_settled]
+
+
 class PurchaseOrder(models.Model):
     """
     Purchase order placed with a supplier.
@@ -203,6 +224,13 @@ class PurchaseOrder(models.Model):
             Status.PARTIALLY_RECEIVED,
         }
     )
+
+    #: Statuses in which receiving still owns the order: the receivable ones
+    #: plus RECEIVED, which receiving can still be corrected *out of*. Reopening
+    #: a line closed short in error is exactly that correction, and
+    #: ``refresh_receipt_status`` uses the same set to decide which orders it
+    #: may re-derive — a draft or cancelled order is never resurrected by one.
+    IN_RECEIVING_STATUSES = RECEIVABLE_STATUSES | {Status.RECEIVED}
 
     # Days-until-due for the "net N" terms. Every other term anchors the payment
     # to a date rather than to a delay — see :attr:`payment_schedule`.
@@ -379,10 +407,9 @@ class PurchaseOrder(models.Model):
         total_received_quantity = 0
         voided_estimated_total = Decimal("0.00")
         all_fully_received = True
-        all_settled = True
-        outstanding_count = 0
         variance_count = 0
-        for item in self.items.all():
+        items = list(self.items.all())
+        for item in items:
             # total_received_quantity counts every line, voided or not.
             if item.quantity_received is not None:
                 total_received_quantity += item.quantity_received
@@ -399,22 +426,33 @@ class PurchaseOrder(models.Model):
                 total_quantity += item.quantity_ordered
             if not item.is_fully_received:
                 all_fully_received = False
-            if item.is_settled:
-                if item.has_receipt_variance:
-                    variance_count += 1
-            else:
-                all_settled = False
-                outstanding_count += 1
+            if item.is_settled and item.has_receipt_variance:
+                variance_count += 1
+        # "Is receiving finished?" and "how many lines is it still waiting on?"
+        # are the same question as "which lines?", so all three come off the one
+        # derivation rather than being counted by a second predicate here. Two
+        # predicates answering it is how mark-delivered came to re-receive lines
+        # this roll-up already considered settled.
+        outstanding = outstanding_of(items)
         return {
             "total_items": active_count,
             "total_quantity": total_quantity,
             "total_received_quantity": total_received_quantity,
             "voided_estimated_total": voided_estimated_total,
             "is_fully_received": all_fully_received,
-            "is_settled": all_settled,
-            "outstanding_line_count": outstanding_count,
+            "is_settled": not outstanding,
+            "outstanding_line_count": len(outstanding),
             "variance_line_count": variance_count,
         }
+
+    @property
+    def outstanding_items(self) -> list["PurchaseOrderItem"]:
+        """This order's lines that receiving is still waiting on, in its own order.
+
+        :func:`outstanding_of` applied to this order's lines — see it for why
+        there is only one of these.
+        """
+        return outstanding_of(self.items.all())
 
     @property
     def total_items(self) -> int:
@@ -806,6 +844,33 @@ class PurchaseOrderItem(TypedTargetModel):
         help_text="Why the outstanding balance was written off (backorder cancelled, vendor short-shipped, ...)",
     )
 
+    # Reopened: a close-short taken back. A CORRECTION, never an undo — the
+    # ``closed_short_*`` stamps above are left exactly as they were, so the line
+    # reads as a mistake and its correction rather than as a clean slate. Which
+    # of the two is in force is decided by comparing the timestamps
+    # (:attr:`is_closed_short`), so there is no boolean here to disagree with
+    # them and every reader keeps the one derivation.
+    reopened_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "When a close-short on this line was taken back. Null means the line "
+            "has never been reopened."
+        ),
+    )
+    reopened_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reopened_purchase_order_items",
+        help_text="User who took the close-short back",
+    )
+    reopened_reason = models.TextField(
+        blank=True,
+        help_text="Why the close-short was taken back (closed the wrong line, the balance shipped after all, ...)",
+    )
+
     # Notes
     notes = models.TextField(blank=True)
 
@@ -930,8 +995,25 @@ class PurchaseOrderItem(TypedTargetModel):
 
     @property
     def is_closed_short(self) -> bool:
-        """Whether the outstanding balance has been written off as never arriving."""
-        return self.closed_short_at is not None
+        """Whether the outstanding balance is currently written off as never arriving.
+
+        Read off the two stamps and nothing else, which is what lets a reopen be
+        a correction rather than an erasure: reopening leaves
+        :attr:`closed_short_at` and its reason and actor in place and stamps
+        :attr:`reopened_at` beside them, and the later of the two is the one in
+        force. :attr:`receipt_state` and :attr:`is_settled` are both built on
+        this, so no reader has to know a reopened line is a special case.
+        """
+        if self.closed_short_at is None:
+            return False
+        if self.reopened_at is None:
+            return True
+        return self.closed_short_at > self.reopened_at
+
+    @property
+    def was_reopened(self) -> bool:
+        """Whether a close-short on this line was taken back and is not back in force."""
+        return self.reopened_at is not None and not self.is_closed_short
 
     @property
     def is_over_received(self) -> bool:
@@ -997,6 +1079,11 @@ class PurchaseOrderItem(TypedTargetModel):
         closed line, or closing one that has nothing outstanding, raises so a
         caller cannot quietly overwrite the recorded reason and actor of the
         first close. ``ValidationError`` so DRF renders it as a 400.
+
+        A line that was closed short and then reopened may be closed again —
+        the reopen put it back in receiving, so it can end short a second time.
+        Both stamps are re-read by :attr:`is_closed_short`, so the later one is
+        the one in force with no third field to keep in step.
         """
         if self.is_voided:
             raise ValidationError("A voided line has nothing outstanding to close short.")
@@ -1014,6 +1101,34 @@ class PurchaseOrderItem(TypedTargetModel):
                 "closed_short_at",
                 "closed_short_by",
                 "closed_short_reason",
+                "updated_at",
+            ]
+        )
+
+    def reopen_short(self, *, actor=None, reason: str = "", at=None) -> None:
+        """Take back a close-short: put this line's outstanding balance back on the order.
+
+        A CORRECTION, not an undo. The close-short is left on the line
+        untouched — ``closed_short_at``, ``closed_short_by`` and
+        ``closed_short_reason`` all keep their values — and the reopen is
+        stamped beside it to the same standard, actor and timestamp and reason,
+        so the record reads as a mistake and its correction rather than as
+        something that never happened.
+
+        Refuses a line that is not currently closed short, rather than stamping
+        a correction over nothing. ``ValidationError`` so DRF renders it as a
+        400.
+        """
+        if not self.is_closed_short:
+            raise ValidationError("This line is not closed short, so there is nothing to reopen.")
+        self.reopened_at = at or timezone.now()
+        self.reopened_by = actor if (actor is not None and actor.is_authenticated) else None
+        self.reopened_reason = reason
+        self.save(
+            update_fields=[
+                "reopened_at",
+                "reopened_by",
+                "reopened_reason",
                 "updated_at",
             ]
         )
@@ -1407,6 +1522,10 @@ class PurchaseOrderAuditEvent(models.Model):
         PO_LINE_REPRICE = "po_line_reprice", "Purchase order line item repriced"
         PO_MARK_DELIVERED = "po_mark_delivered", "Purchase order marked delivered"
         PO_RECEIVE_ITEMS = "po_receive_items", "Purchase order line items received"
+        PO_LINE_REOPEN_SHORT = (
+            "po_line_reopen_short",
+            "Purchase order line item reopened after being closed short",
+        )
         ATTACHMENT_ADD = "attachment_add", "Attachment added"
         ATTACHMENT_REMOVE = "attachment_remove", "Attachment removed"
 

@@ -178,6 +178,14 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
     closed_short_by_username = serializers.CharField(
         source="closed_short_by.username", read_only=True, allow_null=True
     )
+    # A close-short taken back. Reported ALONGSIDE the close-short it corrects,
+    # never instead of it: both sets of stamps stay on the line so the history
+    # reads as a mistake and its correction. ``is_closed_short`` above is
+    # derived from the two together, so a client never has to compare them.
+    was_reopened = serializers.BooleanField(read_only=True)
+    reopened_by_username = serializers.CharField(
+        source="reopened_by.username", read_only=True, allow_null=True
+    )
     # Which identities a receipt on this line may carry serials for, and how
     # many units of each the ordered quantity implies — the kit's COMPONENTS on
     # a kit line, never the kit. Rendered from the same function the receipt
@@ -234,6 +242,11 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
             "closed_short_by",
             "closed_short_by_username",
             "closed_short_reason",
+            "was_reopened",
+            "reopened_at",
+            "reopened_by",
+            "reopened_by_username",
+            "reopened_reason",
             "serial_targets",
             "serials_recorded",
             "serials_outstanding",
@@ -262,10 +275,14 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
             "voided_by",
             "unit_cost_ordered",
             # Owned by the close-short / mark-received actions, which is where
-            # the actor and the reason are stamped together.
+            # the actor and the reason are stamped together — and by
+            # reopen-short, which stamps its own correction beside them.
             "closed_short_at",
             "closed_short_by",
             "closed_short_reason",
+            "reopened_at",
+            "reopened_by",
+            "reopened_reason",
         ]
 
     def get_serial_targets(self, obj):
@@ -970,8 +987,13 @@ class ReceiveItemsSerializer(serializers.Serializer):
     receipt_notes = serializers.CharField(required=False, allow_blank=True, default="")
 
 
-class CloseShortLineSerializer(serializers.Serializer):
-    """One line whose outstanding balance is being written off as never arriving."""
+class LineSettlementSerializer(serializers.Serializer):
+    """One line named by a settlement action, with the operator's reason for it.
+
+    Shared by ``close-short`` and ``reopen-short`` because the two are the same
+    shape: name a line, say why. Recording the reason to the same standard on
+    both sides is what lets the pair read as a mistake and its correction.
+    """
 
     purchase_order_item = serializers.IntegerField()
     reason = serializers.CharField(required=False, allow_blank=True, default="")
@@ -980,7 +1002,17 @@ class CloseShortLineSerializer(serializers.Serializer):
 class CloseShortSerializer(serializers.Serializer):
     """Request body for writing off outstanding balances on named lines."""
 
-    items = CloseShortLineSerializer(many=True, allow_empty=False)
+    items = LineSettlementSerializer(many=True, allow_empty=False)
+
+
+class ReopenShortSerializer(serializers.Serializer):
+    """Request body for taking back the close-short on named lines.
+
+    ``reason`` is why the write-off is being corrected, and is stamped on the
+    line beside the close-short it corrects rather than replacing it.
+    """
+
+    items = LineSettlementSerializer(many=True, allow_empty=False)
 
 
 class MarkReceivedSerializer(serializers.Serializer):

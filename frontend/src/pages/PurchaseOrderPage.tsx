@@ -285,6 +285,20 @@ const withCurrentOption = (
     ? [{ value: currentValue, label: currentLabel }, ...available]
     : available;
 
+/**
+ * A per-line state map without `key`, or the same map when it never held one.
+ *
+ * Returning the original object on a miss keeps a no-op edit from re-rendering,
+ * and dropping rather than falsifying the entry means "the operator did not say
+ * this" is stored as absence, exactly as it was before they said it.
+ */
+const dropKey = <T,>(map: Record<string, T>, key: string): Record<string, T> => {
+  if (!(key in map)) return map;
+  const next = { ...map };
+  delete next[key];
+  return next;
+};
+
 /** The work-order + committee picker pair, used at order and line level. */
 const AssociationPickers: React.FC<{
   idPrefix: string;
@@ -932,6 +946,19 @@ const PurchaseOrderPage: React.FC = () => {
 
   const handleReceiveQuantityChange = (itemId: string, value: string) => {
     setReceiveQuantities((prev) => ({ ...prev, [itemId]: value }));
+
+    // The close-short offer only exists while the quantity is short, so the
+    // flag must not outlive it. Ticking "the rest is not coming" at 8 of 10 and
+    // then correcting the quantity to 10 hides the row; keeping the flag would
+    // send a close-short the operator can no longer see or untick — input they
+    // never confirmed, against a line with nothing left outstanding.
+    const item = order?.items.find((candidate) => candidate.id === itemId);
+    const parsed = Number.parseInt(value, 10);
+    const quantity = Number.isNaN(parsed) || parsed <= 0 ? 0 : parsed;
+    if (item !== undefined && quantity > 0 && quantity < item.quantity_pending) return;
+
+    setCloseShortLines((prev) => dropKey(prev, itemId));
+    setCloseShortReasons((prev) => dropKey(prev, itemId));
   };
 
   const handleSerialInputChange = (key: string, value: string) => {

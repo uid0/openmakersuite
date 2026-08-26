@@ -302,6 +302,53 @@ actor are a record, not a draft), is voided, or has nothing outstanding.
 Equivalent to setting `close_short` on the line in a `receive` call; use that
 form when the shortfall and the receipt are one operator action.
 
+A line that is closed short is refused by `receive` — the balance has been
+written off, so there is nothing to receive against. Correct a close-short made
+in error with `reopen-short/` below, then receive.
+
+---
+
+## `POST /api/reorders/purchase-orders/{id}/reopen-short/`
+
+Take back a close-short. This is the correction for one recorded in error, and
+the action `receive` points you at when it refuses a closed-short line.
+
+```json
+{ "items": [ { "purchase_order_item": 301, "reason": "closed the wrong line" } ] }
+```
+
+**A correction, not an undo.** The close-short stays on the line exactly as it
+was recorded — `closed_short_at`, `closed_short_by` and `closed_short_reason`
+keep their values — and the reopen is stamped beside it to the same standard:
+`reopened_at`, `reopened_by` / `reopened_by_username`, `reopened_reason`. A
+client reading the line afterwards sees both, and the history reads as a mistake
+and its correction rather than as a clean slate. `was_reopened` is `true`.
+
+`is_closed_short` is derived from the two stamps together, so `receipt_state`
+goes back to `not_received` or `partially_received` and `is_settled` back to
+`false` with no separate flag for a client to reconcile.
+
+After a reopen:
+
+* the line is outstanding again and `receive` accepts it;
+* the order's status is re-derived in the same transaction — one that had
+  reached `received` drops back to `partially_received`, because it is again
+  waiting on something;
+* the line may later be closed short again; the newer stamp is the one in force.
+
+Unlike every other receiving write, this is accepted on an order whose status is
+already `received` — a line closed short in error is usually noticed *after* the
+close settled the order. Allowed statuses are `sent`, `confirmed`,
+`partially_received` and `received`; a draft, cancelled or voided order is a
+`400`, because there is no receiving to correct.
+
+Refused with a `400` when the line is not currently closed short, rather than
+stamping a correction over nothing.
+
+The close-short and the reopen are two separate, separately attributable rows on
+the purchase order's audit trail (`po_receive_items` and
+`po_line_reopen_short`); the reopen's metadata names the close-short it corrects.
+
 ---
 
 ## `POST /api/reorders/purchase-orders/{id}/mark-received/`
@@ -383,6 +430,11 @@ never stored, so it cannot drift from them.
 | `over_received` | More arrived than was ordered | yes |
 | `closed_short` | Less arrived, and the balance was written off | yes |
 | `voided` | The line was struck off the order | yes |
+
+A `closed_short` line that is reopened leaves this table by the way it came in:
+it returns to `not_received` or `partially_received` and `is_settled` goes back
+to `false`, while `closed_short_at` and the reopen stamped beside it both stay
+on the record. See [`reopen-short/`](#post-apireorderspurchase-ordersidreopen-short).
 
 `is_settled` means "receiving is finished with this line" and is what decides
 whether it still blocks the order. It is **not** `is_fully_received`: a line

@@ -59,6 +59,7 @@ from .serializers import (
     PurchaseOrderCreateSerializer,
     PurchaseOrderSerializer,
     ReceiveItemsSerializer,
+    ReopenShortSerializer,
     ReorderRequestCreateSerializer,
     ReorderRequestSerializer,
     RepricePurchaseOrderLineSerializer,
@@ -1562,8 +1563,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        pending_items = [item for item in purchase_order.items.all() if not item.is_fully_received]
-        if not pending_items:
+        # The same "which lines does receiving still owe?" the receipt itself
+        # asks — asked once, in one place. A voided line and one closed short
+        # are settled, so neither keeps this action alive nor gets stocked by it.
+        if not services.outstanding_lines(purchase_order):
             return Response(
                 {"error": "All items in this purchase order are already fully received"},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -1655,8 +1658,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 return Response(
                     {
                         "error": (
-                            f"Line item {po_item_id} was closed short; reopen it before "
-                            "receiving more against it"
+                            f"Line item {po_item_id} was closed short; reopen it with "
+                            "POST .../reopen-short/ before receiving more against it"
                         )
                     },
                     status=status.HTTP_400_BAD_REQUEST,
@@ -1705,49 +1708,57 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         else:
             delivery_datetime = timezone.now()
 
+        # ONE transaction over the whole action — the receipt, the closures it
+        # settles, and the audit event. A rejected receipt writes nothing at
+        # all, which is what the API contract promises: before this, a
+        # ``close_short`` that raised after the receipt had committed returned
+        # 400 with the stock already credited, the delivery created, the order
+        # advanced, and no audit event to show for any of it. Nesting the
+        # services' own ``atomic`` blocks inside this one turns them into
+        # savepoints, so either everything lands or nothing does.
         try:
-            services.receive_delivery(
-                purchase_order,
-                resolved_lines,
-                received_by=request.user,
-                delivery_datetime=delivery_datetime,
-                tracking_number=data.get("tracking_number", ""),
-                carrier=data.get("carrier", ""),
-                receipt_notes=data.get("receipt_notes", ""),
-            )
-            # Written off in the same request as the receipt that revealed the
-            # shortfall, and in its own transaction with the status refresh, so
-            # "8 of 10 arrived and the rest is cancelled" is one operator action
-            # rather than two that can half-happen.
-            if closures:
-                services.close_lines_short(purchase_order, closures, actor=request.user)
+            with transaction.atomic():
+                services.receive_delivery(
+                    purchase_order,
+                    resolved_lines,
+                    received_by=request.user,
+                    delivery_datetime=delivery_datetime,
+                    tracking_number=data.get("tracking_number", ""),
+                    carrier=data.get("carrier", ""),
+                    receipt_notes=data.get("receipt_notes", ""),
+                )
+                # Written off in the same request as the receipt that revealed
+                # the shortfall, so "8 of 10 arrived and the rest is cancelled"
+                # is one operator action rather than two that can half-happen.
+                if closures:
+                    services.close_lines_short(purchase_order, closures, actor=request.user)
+
+                record_audit_event(
+                    action=PurchaseOrderAuditEvent.Action.PO_RECEIVE_ITEMS,
+                    actor=request.user,
+                    purchase_order=purchase_order,
+                    notes=data.get("receipt_notes", ""),
+                    metadata={
+                        "delivery_date": delivery_datetime.isoformat(),
+                        "tracking_number": data.get("tracking_number", ""),
+                        "carrier": data.get("carrier", ""),
+                        "fully_received": (purchase_order.status == PurchaseOrder.Status.RECEIVED),
+                        "received_items": [
+                            {
+                                "purchase_order_item": receipt.po_item.id,
+                                "quantity_received": receipt.quantity,
+                                # The mismatch the captain chases a vendor with,
+                                # on the audit trail as well as on the line.
+                                "quantity_variance": receipt.po_item.quantity_variance,
+                                "receipt_state": receipt.po_item.receipt_state,
+                                "serials": [capture.serial_number for capture in receipt.serials],
+                            }
+                            for receipt in resolved_lines
+                        ],
+                    },
+                )
         except DjangoValidationError as exc:
             return Response({"error": exc.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
-
-        record_audit_event(
-            action=PurchaseOrderAuditEvent.Action.PO_RECEIVE_ITEMS,
-            actor=request.user,
-            purchase_order=purchase_order,
-            notes=data.get("receipt_notes", ""),
-            metadata={
-                "delivery_date": delivery_datetime.isoformat(),
-                "tracking_number": data.get("tracking_number", ""),
-                "carrier": data.get("carrier", ""),
-                "fully_received": purchase_order.status == PurchaseOrder.Status.RECEIVED,
-                "received_items": [
-                    {
-                        "purchase_order_item": receipt.po_item.id,
-                        "quantity_received": receipt.quantity,
-                        # The mismatch the captain chases a vendor with, on the
-                        # audit trail as well as on the line.
-                        "quantity_variance": receipt.po_item.quantity_variance,
-                        "receipt_state": receipt.po_item.receipt_state,
-                        "serials": [capture.serial_number for capture in receipt.serials],
-                    }
-                    for receipt in resolved_lines
-                ],
-            },
-        )
 
         purchase_order.refresh_from_db()
         response_serializer = self.get_serializer(purchase_order)
@@ -1848,6 +1859,97 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         "reason": po_item.closed_short_reason,
                     }
                     for po_item in closed
+                ],
+                "fully_received": purchase_order.status == PurchaseOrder.Status.RECEIVED,
+            },
+        )
+
+        purchase_order.refresh_from_db()
+        return Response(self.get_serializer(purchase_order).data)
+
+    @action(detail=True, methods=["post"], url_path="reopen-short")
+    def reopen_short(self, request, pk=None):
+        """Take back a close-short on named lines — the correction for one made in error.
+
+        ``POST .../reopen-short/`` with
+        ``{"items": [{"purchase_order_item": 12, "reason": "closed the wrong line"}]}``.
+
+        A CORRECTION, not an undo. The close-short stays on the line exactly as
+        it was recorded — actor, timestamp and reason — and this reopen is
+        stamped beside it to the same standard, so the history reads as a
+        mistake and its correction and never as a clean slate. The two are
+        separate, separately attributable events on the audit trail.
+
+        The line becomes outstanding again and can be received against, and the
+        order's status is re-derived in the same transaction: one that had
+        already reached ``received`` drops back to ``partially_received``,
+        because it is once again waiting on something.
+
+        Allowed on an order that has finished receiving, unlike the other
+        receiving actions — a wrongly closed line is most often noticed *after*
+        the close settled the order. A draft, cancelled or voided order is
+        refused: there is no receiving to correct.
+
+        Refuses a line that is not currently closed short, rather than stamping
+        a correction over nothing.
+        """
+        purchase_order = self.get_object()
+
+        if purchase_order.status not in PurchaseOrder.IN_RECEIVING_STATUSES:
+            return Response(
+                {
+                    "error": (
+                        "Purchase order must be sent, confirmed, partially received, "
+                        "or received to reopen a line closed short"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = ReopenShortSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        po_items_by_id = {item.id: item for item in purchase_order.items.all()}
+        reopenings = []
+        for line in serializer.validated_data["items"]:
+            po_item = po_items_by_id.get(line["purchase_order_item"])
+            if po_item is None:
+                return Response(
+                    {
+                        "error": (
+                            f"Line item {line['purchase_order_item']} does not belong to "
+                            "this purchase order"
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            reopenings.append((po_item, line.get("reason", "")))
+
+        try:
+            reopened = services.reopen_lines_short(purchase_order, reopenings, actor=request.user)
+        except DjangoValidationError as exc:
+            return Response({"error": exc.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
+
+        record_audit_event(
+            action=PurchaseOrderAuditEvent.Action.PO_LINE_REOPEN_SHORT,
+            actor=request.user,
+            purchase_order=purchase_order,
+            notes="Reopened after close-short",
+            metadata={
+                "reopened_short": [
+                    {
+                        "purchase_order_item": po_item.id,
+                        "quantity_ordered": po_item.quantity_ordered,
+                        "quantity_received": po_item.quantity_received,
+                        "quantity_pending": po_item.quantity_pending,
+                        "reason": po_item.reopened_reason,
+                        # The close-short being corrected, carried on the
+                        # correction itself so the trail names what it undid
+                        # without a join back to the earlier event.
+                        "corrects_close_short_at": po_item.closed_short_at.isoformat(),
+                        "corrects_close_short_reason": po_item.closed_short_reason,
+                    }
+                    for po_item in reopened
                 ],
                 "fully_received": purchase_order.status == PurchaseOrder.Status.RECEIVED,
             },

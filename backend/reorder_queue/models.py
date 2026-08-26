@@ -15,6 +15,8 @@ from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import IntegrityError, models, transaction
+from django.db.models import Case, F, Q, Value, When
+from django.db.models.functions import Greatest
 from django.utils import timezone
 from django.utils.functional import cached_property
 
@@ -165,7 +167,10 @@ def outstanding_of(items) -> list:
     handed back as work still to do.
 
     Takes an iterable rather than an order so the aggregate pass can hand it the
-    lines it has already materialised instead of fetching them twice.
+    lines it has already materialised instead of fetching them twice. Code that
+    has a queryset instead of loaded lines asks
+    :meth:`PurchaseOrderItemQuerySet.outstanding` — the same question, one
+    derivation further down.
     """
     return [item for item in items if not item.is_settled]
 
@@ -662,6 +667,70 @@ _PO_ITEM_TARGETS = (
 )
 
 
+class PurchaseOrderItemQuerySet(models.QuerySet):
+    """The database's half of the settlement derivation.
+
+    :attr:`PurchaseOrderItem.is_settled` and friends answer for a line already
+    in memory. A query cannot call a Python property, so every ORM site used to
+    write its own predicate instead — which is how a metric came to count units
+    somebody had explicitly written off as never arriving among the units still
+    on their way, and how the admin changelist filed a closed-short line under
+    "Partially Received" while the column beside it said "Closed short".
+
+    This is that same derivation expressed in SQL, and it is not allowed to
+    drift from the Python one by hand: ``test_settlement_sites`` builds a line
+    for every combination of the settlement fields and asserts the two agree,
+    row for row. Change one without the other and that test says so.
+    """
+
+    #: Alias :meth:`with_receipt_state` annotates under. Named rather than
+    #: guessed at each call site so a filter and its annotation cannot disagree.
+    RECEIPT_STATE_ALIAS = "derived_receipt_state"
+
+    def with_receipt_state(self):
+        """Annotate each row with the SQL twin of :attr:`PurchaseOrderItem.receipt_state`.
+
+        Branch for branch in the same order as the property, because the order
+        is load-bearing: an over-received line is also ``received >= ordered``,
+        and a closed-short line that later filled up is received, not short.
+        """
+        states = self.model.ReceiptState
+        return self.annotate(
+            **{
+                self.RECEIPT_STATE_ALIAS: Case(
+                    When(is_voided=True, then=Value(states.VOIDED)),
+                    When(
+                        quantity_received__gt=F("quantity_ordered"),
+                        then=Value(states.OVER_RECEIVED),
+                    ),
+                    When(
+                        quantity_received__gte=F("quantity_ordered"),
+                        then=Value(states.RECEIVED),
+                    ),
+                    When(self.model.q_closed_short(), then=Value(states.CLOSED_SHORT)),
+                    When(quantity_received__gt=0, then=Value(states.PARTIALLY_RECEIVED)),
+                    default=Value(states.NOT_RECEIVED),
+                    output_field=models.CharField(),
+                )
+            }
+        )
+
+    def settled(self):
+        """Lines receiving is finished with — the queryset twin of ``is_settled``."""
+        return self.filter(self.model.q_settled())
+
+    def outstanding(self):
+        """Lines receiving is still waiting on — the queryset twin of ``outstanding_of``.
+
+        Deliberately a ``Q`` rather than a filter on :meth:`with_receipt_state`:
+        an annotation carried into ``.values(...).annotate(...)`` joins the
+        GROUP BY and silently splits the very per-item totals the inventory
+        metrics are grouping, so the aggregate sites need a predicate that adds
+        no column.
+        """
+        return self.exclude(self.model.q_settled())
+
+
 class PurchaseOrderItem(TypedTargetModel):
     """
     Line item within a purchase order.
@@ -691,10 +760,16 @@ class PurchaseOrderItem(TypedTargetModel):
         consumers of a line's receipt state means searching the whole codebase,
         not this app: ``inventory.services.work_order_context`` builds the work
         order page's "ordered for this job" panel from these, and the Django
-        admin renders them too. Four separate defects in this design's history
-        came from a rule that reached all-but-one site, and the fourth was the
-        first one across an app boundary — the sweep that missed it had derived
-        its consumers from ``reorder_queue`` alone.
+        admin renders them too. Six separate defects in this design's history
+        came from a rule that reached all-but-one site, and the ones that got
+        furthest were across an app boundary — the sweep that missed them had
+        derived its consumers from ``reorder_queue`` alone.
+
+        You do not have to do that search by hand any more, and should not:
+        :mod:`reorder_queue.settlement_sites` derives the whole set from
+        :attr:`is_settled` — this closure — and fails the build when a site
+        decides settlement for itself. Run it, or read
+        ``reorder_queue/tests/test_settlement_sites.py``.
 
         The distinction those readers keep getting wrong is worth stating once:
         :attr:`is_fully_received` answers "did the ordered quantity arrive?" and
@@ -730,6 +805,11 @@ class PurchaseOrderItem(TypedTargetModel):
     # No TARGET_MODE: this is at-most-one + freeform, enforced by the existing
     # ``purchase_order_item_must_have_item_or_asset`` CheckConstraint, not the
     # mixin's exactly-one clean().
+
+    #: Carries :class:`PurchaseOrderItemQuerySet` onto ``objects`` AND onto
+    #: ``purchase_order.items``, so an order's own lines can be asked the
+    #: settlement question the same way as the table can.
+    objects = PurchaseOrderItemQuerySet.as_manager()
 
     purchase_order = models.ForeignKey(
         PurchaseOrder, on_delete=models.CASCADE, related_name="items"
@@ -1085,7 +1165,10 @@ class PurchaseOrderItem(TypedTargetModel):
 
         The single derivation every reader shares (API, admin, the order's own
         roll-up), so a line described as "closed short" on one screen cannot be
-        "partially received" on another.
+        "partially received" on another. Code holding a QUERYSET rather than a
+        line asks the same question through
+        :meth:`PurchaseOrderItemQuerySet.with_receipt_state`, which is this
+        branch for branch and is held to it by test.
         """
         if self.is_voided:
             return self.ReceiptState.VOIDED
@@ -1120,6 +1203,54 @@ class PurchaseOrderItem(TypedTargetModel):
     def has_receipt_variance(self) -> bool:
         """Whether this line's settled record differs from what was ordered."""
         return self.receipt_state in self.VARIANCE_RECEIPT_STATES
+
+    # -- the same three answers, for code that has a query rather than a line --
+    #
+    # A queryset cannot call a property, so every ORM site used to write out its
+    # own version of these and each one got a different subset of the fields
+    # right. They live here, beside the properties they mirror, so the two are
+    # read and changed together; ``test_settlement_sites`` asserts they agree for
+    # every combination of the settlement fields rather than trusting that.
+
+    @classmethod
+    def q_closed_short(cls) -> Q:
+        """SQL twin of :attr:`is_closed_short`.
+
+        The later of the two stamps wins, and a line never reopened is still
+        closed — the ``reopened_at IS NULL`` arm is not optional, because SQL
+        comparisons against NULL are NULL rather than true.
+        """
+        return Q(closed_short_at__isnull=False) & (
+            Q(reopened_at__isnull=True) | Q(closed_short_at__gt=F("reopened_at"))
+        )
+
+    @classmethod
+    def q_settled(cls) -> Q:
+        """SQL twin of :attr:`is_settled` — receiving is finished with the line.
+
+        The same four endings, in one predicate: struck off, everything (or
+        more) arrived, or the balance was written off and not taken back.
+        """
+        return (
+            Q(is_voided=True)
+            | Q(quantity_received__gte=F("quantity_ordered"))
+            | cls.q_closed_short()
+        )
+
+    @classmethod
+    def outstanding_quantity_expression(cls):
+        """SQL twin of :attr:`quantity_pending`, floored at zero the same way.
+
+        Meaningful only about a line that is not settled — a closed-short line
+        keeps a non-zero value here, which is exactly the trap: pair it with
+        :meth:`q_settled` (or ``PurchaseOrderItem.objects.outstanding()``)
+        rather than summing it over everything.
+        """
+        return Greatest(
+            F("quantity_ordered") - F("quantity_received"),
+            Value(0),
+            output_field=models.IntegerField(),
+        )
 
     def close_short(self, *, actor=None, reason: str = "", at=None) -> None:
         """Write off this line's outstanding balance as never arriving.

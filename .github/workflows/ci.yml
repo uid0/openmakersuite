@@ -283,6 +283,19 @@ jobs:
           cd frontend
           npm run lint
 
+      - name: Check no site bypasses the settlement derivation
+        run: |
+          # The web UI can decide whether a purchase-order line is settled
+          # client-side just as easily as the backend can, and a frontend-only
+          # PR skips Backend Tests entirely — where this same check runs as
+          # reorder_queue/tests/test_settlement_sites.py. Running it here too is
+          # what stops the guard having a hole exactly the size of "only
+          # touched the frontend".
+          #
+          # Stdlib-only and Django-free on purpose, so it needs no backend
+          # environment: see backend/reorder_queue/settlement_sites.py.
+          python3 backend/reorder_queue/settlement_sites.py
+
   frontend-tests:
     name: Frontend Tests
     runs-on: ubuntu-latest

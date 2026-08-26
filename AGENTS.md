@@ -109,6 +109,29 @@ from "explicitly cleared" give it an `UNCHANGED` sentinel default rather than
 is stated in `ReorderRequestViewSet.mark_ordered`'s docstring and pinned by
 `reorder_queue/tests/test_po_confirm_preserves_expected_delivery_date.py`.
 
+### Purchase-order line settlement
+
+"Is receiving finished with this line?" is defined once, on
+`PurchaseOrderItem.is_settled`, and nowhere else. Seven defects have come from
+code answering it with a predicate of its own — the last one from another app
+entirely — so `backend/reorder_queue/settlement_sites.py` derives the whole set
+of sites from that property (it walks it with `ast` to the model fields, then
+sweeps `backend/` and `frontend/src`) and fails when one bypasses it. Run it for
+the report, `--sites` for every reader:
+
+```
+python3 backend/reorder_queue/settlement_sites.py
+```
+
+It runs as `reorder_queue/tests/test_settlement_sites.py` in Backend Tests and
+as a step in Frontend Lint, so a frontend-only PR is covered too. If it flags
+your change, route the site through the derivation rather than widening the
+guard: `PurchaseOrderItem.receipt_state` / `is_settled` in Python,
+`PurchaseOrderItem.q_settled()` / `objects.outstanding()` /
+`objects.with_receipt_state()` in the ORM, and `receipt_state` / `is_settled`
+off the API on the frontend. Anything that can settle a line must reach
+`services.refresh_receipt_status` before it returns.
+
 ### Django upgrade history
 
 The backend now runs **Django 6.0.7**. The notes below cover the earlier 4.2 -> 5.1

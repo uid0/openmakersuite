@@ -34,6 +34,7 @@ from .models import (
     PurchaseOrder,
     PurchaseOrderAttachment,
     PurchaseOrderItem,
+    PurchaseOrderItemQuerySet,
     ReorderRequest,
     WebHook,
 )
@@ -62,29 +63,31 @@ class DeliveryPerformanceFilter(admin.SimpleListFilter):
 
 
 class ReceiptStatusFilter(admin.SimpleListFilter):
-    """Custom filter for order item receipt status."""
+    """Filter the line changelist by a line's receipt state.
+
+    Both halves come off :class:`PurchaseOrderItem.ReceiptState` — the options
+    from its choices, the rows from the queryset's own twin of ``receipt_state``
+    — so this filter and the "Pending" column beside it always describe a line
+    the same way, and a state added to the enum turns up here on its own.
+
+    It used to spell three of the states out in SQL by hand and knew nothing of
+    the other three: a struck-off line was filed under "Pending Receipt" and a
+    line closed short under "Partially Received", each directly contradicting
+    what its own row said.
+    """
 
     title = "receipt status"
     parameter_name = "receipt_status"
 
     def lookups(self, request, model_admin):
-        return (
-            ("fully_received", "Fully Received"),
-            ("partially_received", "Partially Received"),
-            ("pending", "Pending Receipt"),
-        )
+        return PurchaseOrderItem.ReceiptState.choices
 
     def queryset(self, request, queryset):
-        from django.db.models import F
-
-        if self.value() == "fully_received":
-            return queryset.filter(quantity_received__gte=F("quantity_ordered"))
-        elif self.value() == "partially_received":
-            return queryset.filter(
-                quantity_received__gt=0, quantity_received__lt=F("quantity_ordered")
-            )
-        elif self.value() == "pending":
-            return queryset.filter(quantity_received=0)
+        value = self.value()
+        if not value:
+            return queryset
+        alias = PurchaseOrderItemQuerySet.RECEIPT_STATE_ALIAS
+        return queryset.with_receipt_state().filter(**{alias: value})
 
 
 @admin.register(ReorderRequest)

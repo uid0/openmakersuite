@@ -2520,6 +2520,21 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             # line's estimated_cost, so a quantity or price edit has to re-roll it.
             if quantity_changed or repriced_from is not None:
                 services.recalculate_estimated_total(purchase_order)
+            if quantity_changed:
+                # A quantity edit is a SETTLEMENT transition, not only a cost
+                # one: lowering a line to what has already arrived leaves it
+                # received in full, and if it was the last outstanding line the
+                # order has just finished receiving. Without this the order sat
+                # at ``partially_received`` with nothing outstanding, which both
+                # close-out actions refuse — a state reachable and not leavable.
+                # Same re-derivation ``void_line_item`` and the close-short
+                # actions use, so the four routes cannot disagree.
+                #
+                # Re-read rather than reusing ``purchase_order``: the viewset
+                # prefetches ``items``, so that instance's cached relation still
+                # holds the pre-edit quantities (the same trap
+                # ``recalculate_estimated_total`` documents).
+                services.refresh_receipt_status(PurchaseOrder.objects.get(pk=purchase_order.pk))
 
         # Only when the price actually moved. A price change that leaves no
         # trace is the very thing the add path's ``price_conflict`` refusal
@@ -2723,18 +2738,28 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             orders_received=Count("id", filter=Q(status=PurchaseOrder.Status.RECEIVED)),
         )
 
-        # Items metrics
-        item_metrics = PurchaseOrderItem.objects.aggregate(
-            total_items_ordered=Sum("quantity_ordered"),
-            total_items_received=Sum("quantity_received"),
-        )
+        # Items metrics. Two gross running totals — everything ever ordered,
+        # everything ever taken in — asked separately and deliberately NOT
+        # subtracted from one another. Their difference is not what is still on
+        # its way: a line struck off, or one whose balance was written off as
+        # never arriving, leaves a permanent gap between them, and reporting
+        # that gap as "pending receipt" claims goods are coming that nobody is
+        # waiting for.
+        total_items_ordered = PurchaseOrderItem.objects.aggregate(total=Sum("quantity_ordered"))[
+            "total"
+        ]
+        total_items_received = PurchaseOrderItem.objects.aggregate(total=Sum("quantity_received"))[
+            "total"
+        ]
+        # What receiving is actually still owed, off the line's own settlement
+        # derivation rather than off a subtraction.
+        items_pending = PurchaseOrderItem.objects.outstanding().aggregate(
+            total=Sum(PurchaseOrderItem.outstanding_quantity_expression())
+        )["total"]
 
         # Calculate pending values
         pending_value = (financial_metrics["total_value"] or 0) - (
             financial_metrics["received_value"] or 0
-        )
-        items_pending = (item_metrics["total_items_ordered"] or 0) - (
-            item_metrics["total_items_received"] or 0
         )
 
         # Lead time metrics
@@ -2760,9 +2785,9 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 "partially_received_orders": status_counts["partially_received"],
                 "completed_orders": status_counts["received"],
                 # Item metrics
-                "total_items_on_order": item_metrics["total_items_ordered"] or 0,
-                "total_items_received": item_metrics["total_items_received"] or 0,
-                "items_pending_receipt": items_pending,
+                "total_items_on_order": total_items_ordered or 0,
+                "total_items_received": total_items_received or 0,
+                "items_pending_receipt": items_pending or 0,
                 # Financial metrics
                 "total_order_value": financial_metrics["total_value"] or 0,
                 "received_order_value": financial_metrics["received_value"] or 0,
@@ -3004,7 +3029,14 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
                     "expected_delivery_date": order.expected_delivery_date,
                     "days_since_ordered": order.days_since_ordered,
                     "total_items": order.total_items,
-                    "items_pending": order.total_quantity - order.total_received_quantity,
+                    # What this order is still waiting on, off the lines
+                    # receiving has not finished with. It used to subtract the
+                    # order's received total from its ordered total, which
+                    # counts the two over different sets of lines — the received
+                    # side includes struck-off ones — and goes on reporting the
+                    # shortfall of a line written off as never arriving as if it
+                    # were still in transit.
+                    "items_pending": sum(line.quantity_pending for line in order.outstanding_items),
                     "estimated_total": order.estimated_total,
                 }
             )

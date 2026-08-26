@@ -516,7 +516,16 @@ def void_po(purchase_order, user, reason=""):
 
     The caller owns the permission/status guards and records the ``po_void``
     audit event.
+
+    Striking every line off settles them all, so this ends with the same status
+    re-derivation every other settlement transition uses. It returns without
+    moving anything today, because the order has just been put beyond receiving
+    — which is the point: the obligation is discharged here rather than being
+    left to hold only for as long as this function keeps setting ``VOIDED``
+    itself.
     """
+    from .receiving import refresh_receipt_status
+
     now = timezone.now()
 
     with transaction.atomic():
@@ -526,12 +535,14 @@ def void_po(purchase_order, user, reason=""):
         purchase_order.void_reason = reason
         purchase_order.save()
 
+        # Already-voided lines keep the reason and actor of their own voiding.
         purchase_order.items.filter(is_voided=False).update(
             is_voided=True,
             voided_at=now,
             voided_by=user,
             void_reason="PO voided",
         )
+        refresh_receipt_status(purchase_order)
 
 
 def void_line_item(line_item, user, reason):

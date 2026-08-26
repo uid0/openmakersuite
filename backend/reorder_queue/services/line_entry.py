@@ -867,6 +867,27 @@ def _apply_tag(existing, attr, supplied, noun, item_name):
         )
 
 
+def _refresh_order_receipt_status(purchase_order):
+    """Re-derive the order's status after a line's ordered quantity moved.
+
+    Growing a line changes what receiving is still owed, so it is a settlement
+    transition like receiving, voiding or closing short, and goes through the
+    same :func:`~reorder_queue.services.receiving.refresh_receipt_status` they
+    do. Today every caller has already been through ``assert_addable``, so the
+    order is a draft and the refresh returns without moving anything — but the
+    add services deliberately leave that guard to their caller (see
+    :func:`add_line_item`), so the obligation belongs here rather than in the
+    guard's shadow.
+
+    Re-reads the order: the viewset prefetches ``items``, and that instance's
+    cached relation still holds the pre-edit quantities — the same trap
+    :func:`recalculate_estimated_total` re-reads to avoid.
+    """
+    from .receiving import refresh_receipt_status
+
+    refresh_receipt_status(PurchaseOrder.objects.get(pk=purchase_order.pk))
+
+
 def _grow_existing_line(
     purchase_order,
     item_supplier,
@@ -901,6 +922,7 @@ def _grow_existing_line(
         existing.notes = f"{existing.notes}\n{notes}".strip() if existing.notes else notes
     existing.save()
     recalculate_estimated_total(purchase_order)
+    _refresh_order_receipt_status(purchase_order)
     # An override that replaced a DIFFERENT figure is a reprice, and the
     # caller has to be able to record it as one. Compared numerically, so
     # restating 5.00 against a stored 5.0000 is not a price change.
@@ -1108,6 +1130,7 @@ def _grow_existing_asset_line(
         existing.notes = f"{existing.notes}\n{notes}".strip() if existing.notes else notes
     existing.save()
     recalculate_estimated_total(purchase_order)
+    _refresh_order_receipt_status(purchase_order)
     # Never a reprice: a differing price was refused above, before any
     # mutation, so the price this line carries is the one it already had.
     existing.repriced_from = None

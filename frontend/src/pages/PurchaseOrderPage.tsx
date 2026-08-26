@@ -1188,7 +1188,10 @@ const PurchaseOrderPage: React.FC = () => {
   const handleReopenShort = async (item: PurchaseOrderItem) => {
     if (!order || saving) return;
     const { itemName } = getItemNameAndSku(item);
-    const outstanding = item.quantity_ordered - item.quantity_received;
+    // The server already sends this: `quantity_pending` is the same subtraction
+    // floored at zero, and re-doing it here is a second derivation of what
+    // receiving is still owed that can only ever drift from the first.
+    const outstanding = item.quantity_pending;
     const reason = await promptInput(
       'Reopen this line?',
       `${itemName} was closed short with ${outstanding} unit${outstanding === 1 ? '' : 's'} ` +

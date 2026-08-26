@@ -459,6 +459,14 @@ def build_purchase_lines_context(work_order: "WorkOrder") -> list[dict[str, Any]
     *ordering* view of the same fact, which is what tells a tech that the part
     they are waiting on is still in transit.
 
+    Carries the line's SETTLEMENT (``is_settled`` / ``receipt_state``) and not
+    only ``is_fully_received``, because what this panel is really asking is "is
+    receiving finished with this line?". Those differ: a line closed short is
+    finished with and did NOT get its ordered quantity, and rendering it off
+    ``is_fully_received`` alone told a tech that units written off as never
+    arriving were still in transit, with an expected date, for ever. See
+    ``PurchaseOrderItem.ReceiptState`` for the distinction.
+
     Reads ``purchase_order_items.all()`` unfiltered/unordered so the viewset's
     prefetch is used instead of a query per work order; the filter and sort
     happen in Python over that cache.
@@ -485,6 +493,10 @@ def build_purchase_lines_context(work_order: "WorkOrder") -> list[dict[str, Any]
             "quantity_received": line.quantity_received,
             "quantity_pending": line.quantity_pending,
             "is_fully_received": line.is_fully_received,
+            "is_settled": line.is_settled,
+            "receipt_state": line.receipt_state,
+            "receipt_state_label": line.receipt_state_label,
+            "quantity_variance": line.quantity_variance,
             "unit_cost": str(purchase_line_unit_cost(line)),
             "expected_delivery_date": (
                 line.purchase_order.expected_delivery_date.isoformat()

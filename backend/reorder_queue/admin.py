@@ -471,12 +471,19 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
 
     @admin.display(description="Pending")
     def quantity_pending_display(self, obj):
-        """Display quantity pending with color coding."""
-        pending = obj.quantity_pending
-        if pending == 0:
-            return mark_safe('<span style="color: green;">✓ Complete</span>')
-        else:
-            return format_html('<span style="color: orange;">{} pending</span>', pending)
+        """How much this line is still waiting on, colour-coded.
+
+        Reads the line's SETTLEMENT, not its raw pending quantity: a line closed
+        short or struck off keeps a non-zero ``quantity_pending`` while nothing
+        more is coming for it, and "N pending" in orange is then a claim about
+        goods in transit that nobody is waiting for. Settled lines report how
+        they ended instead.
+        """
+        if obj.is_settled:
+            if obj.is_fully_received:
+                return mark_safe('<span style="color: green;">✓ Complete</span>')
+            return format_html('<span style="color: gray;">{}</span>', obj.receipt_state_label)
+        return format_html('<span style="color: orange;">{} pending</span>', obj.quantity_pending)
 
     @admin.display(description="Est. Cost")
     def estimated_cost_display(self, obj):

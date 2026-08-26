@@ -556,8 +556,10 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     total_received_quantity = serializers.IntegerField(read_only=True)
     is_fully_received = serializers.BooleanField(read_only=True)
     # Receiving roll-up (oms-po-receiving), all derived from the lines.
-    # ``is_settled`` is "receiving is finished with this order" — which is what
-    # advances it to ``received`` — while ``is_fully_received`` stays the
+    # ``is_settled`` is "receiving is finished with this order" — necessary for
+    # it to reach ``received`` but not sufficient, since that status also
+    # requires something to have actually arrived — while ``is_fully_received``
+    # stays the
     # stricter "everything we ordered turned up". They differ exactly when a
     # line was closed short, and ``has_receipt_variance`` is what keeps that
     # difference visible after the order is closed.
@@ -974,8 +976,9 @@ class ReceiveItemsSerializer(serializers.Serializer):
 
     ``tracking_number`` is the carrier's tracking barcode for the parcel this
     receipt covers, stored exactly as scanned. It is recorded, never parsed:
-    together with the delivery's ``received_at`` it is what a transit-duration
-    calculation would later be built from.
+    together with the delivery's ``created_at`` — the accurate receipt
+    timestamp, as against the operator-stated ``delivery_date`` — it is what a
+    transit-duration calculation would later be built from.
     """
 
     items = ReceiveItemSerializer(many=True, allow_empty=False)

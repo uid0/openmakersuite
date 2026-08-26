@@ -2430,3 +2430,57 @@ class TestDeliveryCompletionReflectsTheWholeRequest:
 
         purchase_order.refresh_from_db()
         assert purchase_order.deliveries.get().is_complete is False
+
+
+@pytest.mark.django_db
+class TestAnEmptyOrderClaimsNothing:
+    """ "Did everything turn up?" is not vacuously yes.
+
+    ``is_fully_received`` is an ``all()`` over the ACTIVE lines, and an order
+    whose lines were every one struck off has none. Answering true there tells a
+    report — and any integration reading the field — that goods arrived when the
+    order took in nothing at all.
+    """
+
+    def test_an_order_with_every_line_voided_does_not_claim_the_goods_arrived(
+        self, client, supplier, operator
+    ):
+        purchase_order = make_po(supplier, operator)
+        first = add_line(purchase_order, make_item("Widget", supplier=supplier), 10)
+        second = add_line(purchase_order, make_item("Gasket", supplier=supplier), 4)
+
+        void_line(client, purchase_order, first)
+        void_line(client, purchase_order, second)
+
+        purchase_order.refresh_from_db()
+        assert purchase_order.total_received_quantity == 0
+        assert purchase_order.is_fully_received is False
+        # Settlement is a different question and stays vacuously true: receiving
+        # IS finished with every active line, of which there are none. The
+        # status gate built on it is what keeps that from reading `received`.
+        assert purchase_order.is_settled is True
+        assert purchase_order.status == PurchaseOrder.Status.SENT
+
+    def test_an_order_with_no_lines_at_all_does_not_claim_the_goods_arrived(
+        self, client, supplier, operator
+    ):
+        purchase_order = make_po(supplier, operator)
+
+        payload = worksheet(client, purchase_order).data
+
+        assert payload["is_fully_received"] is False
+        assert payload["is_settled"] is True
+        assert payload["outstanding_line_count"] == 0
+
+    def test_an_order_that_really_did_receive_everything_still_says_so(
+        self, client, supplier, operator
+    ):
+        """The emptiness check must not swallow the honest true."""
+        purchase_order = make_po(supplier, operator)
+        line = add_line(purchase_order, make_item("Widget", supplier=supplier), 6)
+
+        receive(client, purchase_order, [{"purchase_order_item": line.pk, "quantity_received": 6}])
+
+        purchase_order.refresh_from_db()
+        assert purchase_order.is_fully_received is True
+        assert purchase_order.status == PurchaseOrder.Status.RECEIVED

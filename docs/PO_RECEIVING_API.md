@@ -123,12 +123,29 @@ a UUID.
 
 They answer different questions and a client must not collapse them:
 
-| Situation | `can_receive` | `unavailable_reason` | `outstanding_line_count` |
-| --------- | ------------- | -------------------- | ------------------------ |
-| Order is in flight, work to do | `true` | `null` | `> 0` |
-| Order is a draft | `false` | "This order is still a draft…" | may be `> 0` |
-| Receiving has finished with it | `false` | "Receiving has finished with every line…" | `0` |
-| Cancelled / voided | `false` | "This order was cancelled…" | may be `> 0` |
+| Situation | `status` | `can_receive` | `unavailable_reason` | `outstanding_line_count` |
+| --------- | -------- | ------------- | -------------------- | ------------------------ |
+| Order is in flight, work to do | `sent` / `confirmed` / `partially_received` | `true` | `null` | `> 0` |
+| Order is in flight, every line settled, nothing ever arrived | `sent` / `confirmed` | `true` | `null` | `0` |
+| Order is a draft | `draft` | `false` | "This order is still a draft…" | may be `> 0` |
+| Receiving has finished with it | `received` | `false` | "Receiving has finished with every line…" | `0` |
+| Cancelled / voided | `cancelled` / `voided` | `false` | "This order was cancelled…" | may be `> 0` |
+
+The second row is the one worth reading twice, because `can_receive: true` with
+`outstanding_line_count: 0` looks contradictory and is not. It is the state an
+order lands in when every line was closed short or struck off without a single
+delivery: it never reached `received`, because that status means goods arrived
+(see [`received` means goods arrived](#received-means-goods-arrived)), so it is
+still a receivable status — but there is nothing left to receive against. A
+client showing the receive screen here will find no lines; say so, and point at
+voiding or cancelling the order. Both close-out actions return that same
+explanation if asked.
+
+Those five rows are every combination the server can produce. `can_receive` is
+exactly "`status` is one of the three in-flight ones", and `unavailable_reason`
+is non-null exactly when `can_receive` is `false`; `outstanding_line_count` is
+independent of both, which is why it needs its own column rather than being
+inferred from them.
 
 "You may not receive against this, and here is why" is a different fact from
 "there is nothing left to receive". An operator standing at the bench with a box

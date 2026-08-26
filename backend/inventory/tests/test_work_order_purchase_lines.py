@@ -203,3 +203,60 @@ def test_removing_a_bridged_material_line_does_not_disturb_the_order_list():
 
     lines = _serialize(wo)["purchase_order_lines"]
     assert [entry["id"] for entry in lines] == [str(line.id)]
+
+
+def test_a_line_closed_short_is_not_shown_as_still_on_its_way():
+    """The written-off balance is not a part the tech is waiting for.
+
+    Receiving is finished with a closed-short line — that is what settlement
+    means — and this panel is asking "is anything still coming?", not "did the
+    ordered quantity arrive?". Answering it with ``is_fully_received`` told a
+    tech that units nobody expects were still in transit, with an expected
+    delivery date, for ever.
+    """
+    _client, user = _staff_client()
+    wo = _corrective_wo()
+    po, line = _line_for(wo, user, qty=10, unit_cost=Decimal("2.00"))
+
+    services.receive_delivery(po, [(line, 8)], received_by=user, delivery_datetime=timezone.now())
+    services.close_lines_short(po, [(line, "backorder cancelled")], actor=user)
+
+    row = _serialize(wo)["purchase_order_lines"][0]
+
+    assert row["is_settled"] is True
+    assert row["receipt_state"] == PurchaseOrderItem.ReceiptState.CLOSED_SHORT
+    assert row["receipt_state_label"] == "Closed short"
+    # The shortfall stays readable — the panel reports it, it just does not
+    # present it as a delivery still to come.
+    assert row["is_fully_received"] is False
+    assert row["quantity_received"] == 8
+    assert row["quantity_variance"] == -2
+
+
+def test_a_line_still_genuinely_outstanding_is_reported_as_such():
+    """The gray badge must not swallow the case it exists to distinguish."""
+    _client, user = _staff_client()
+    wo = _corrective_wo()
+    po, line = _line_for(wo, user, qty=10, unit_cost=Decimal("2.00"))
+
+    services.receive_delivery(po, [(line, 8)], received_by=user, delivery_datetime=timezone.now())
+
+    row = _serialize(wo)["purchase_order_lines"][0]
+
+    assert row["is_settled"] is False
+    assert row["receipt_state"] == PurchaseOrderItem.ReceiptState.PARTIALLY_RECEIVED
+    assert row["quantity_pending"] == 2
+
+
+def test_a_fully_received_line_is_settled_too():
+    _client, user = _staff_client()
+    wo = _corrective_wo()
+    po, line = _line_for(wo, user, qty=4, unit_cost=Decimal("5.00"))
+
+    services.receive_delivery(po, [(line, 4)], received_by=user, delivery_datetime=timezone.now())
+
+    row = _serialize(wo)["purchase_order_lines"][0]
+
+    assert row["is_fully_received"] is True
+    assert row["is_settled"] is True
+    assert row["receipt_state"] == PurchaseOrderItem.ReceiptState.RECEIVED

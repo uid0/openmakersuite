@@ -439,7 +439,11 @@ class PurchaseOrder(models.Model):
             "total_quantity": total_quantity,
             "total_received_quantity": total_received_quantity,
             "voided_estimated_total": voided_estimated_total,
-            "is_fully_received": all_fully_received,
+            # ``all()`` over zero active lines is vacuously true, and "everything
+            # arrived" is not a true thing to say about an order whose lines were
+            # every one struck off — or about one that never had a line. The
+            # emptiness is checked before the claim is made.
+            "is_fully_received": active_count > 0 and all_fully_received,
             "is_settled": not outstanding,
             "outstanding_line_count": len(outstanding),
             "variance_line_count": variance_count,
@@ -541,6 +545,12 @@ class PurchaseOrder(models.Model):
     @property
     def is_fully_received(self) -> bool:
         """Whether every active line got at least the quantity that was ordered.
+
+        False for an order with no active lines at all: an order whose every
+        line was struck off, or that never carried one, cannot honestly claim
+        the goods turned up. :attr:`is_settled` stays vacuously true for such an
+        order — "receiving is finished with every active line" IS true of a set
+        with no members — and that is the one the status derivation consumes.
 
         The strict reading, and NOT what decides the order's status — a line
         closed short leaves this False for ever, which is the honest answer to
@@ -676,6 +686,22 @@ class PurchaseOrderItem(TypedTargetModel):
         The three "settled" states — RECEIVED, OVER_RECEIVED, CLOSED_SHORT —
         plus VOIDED are what :attr:`is_settled` is the ``in`` test against, so
         adding a state here cannot leave a hand-maintained list behind.
+
+        **Readers of this live outside ``reorder_queue``.** Deriving the
+        consumers of a line's receipt state means searching the whole codebase,
+        not this app: ``inventory.services.work_order_context`` builds the work
+        order page's "ordered for this job" panel from these, and the Django
+        admin renders them too. Four separate defects in this design's history
+        came from a rule that reached all-but-one site, and the fourth was the
+        first one across an app boundary — the sweep that missed it had derived
+        its consumers from ``reorder_queue`` alone.
+
+        The distinction those readers keep getting wrong is worth stating once:
+        :attr:`is_fully_received` answers "did the ordered quantity arrive?" and
+        :attr:`is_settled` answers "is receiving finished with this line?". A
+        line closed short answers no to the first and yes to the second, so a
+        screen that asks the first while meaning the second shows a balance as
+        still on its way for ever.
         """
 
         NOT_RECEIVED = "not_received", "Not received"

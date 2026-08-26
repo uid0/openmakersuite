@@ -1139,6 +1139,32 @@ class TestSerialGapIsVisible:
         assert gap["Probe"]["outstanding"] == 2
         assert services.serials_outstanding(line) == 2
 
+    def test_the_gap_counts_what_ARRIVED_not_what_was_ordered(self, client, supplier, operator):
+        """Order 5, receive 2, capture none: two units owe serials, not five.
+
+        Measuring against the ordered quantity would claim serials are missing
+        for three units that are not on the shelf yet — outstanding work that
+        nobody can do, on a figure that could never reach zero until the line
+        was fully received. The distinction is invisible whenever a line is
+        received in full, which is why it is asserted on a partial one.
+        """
+        purchase_order = make_po(supplier, operator)
+        meter = make_item("Meter", serialized=True, supplier=supplier)
+        line = add_line(purchase_order, meter, 5)
+
+        receive(client, purchase_order, [{"purchase_order_item": line.pk, "quantity_received": 2}])
+
+        line.refresh_from_db()
+        assert line.quantity_ordered == 5
+        assert line.quantity_received == 2
+        assert services.serials_outstanding(line) == 2
+        assert services.serial_gap(line)[0]["expected"] == 2
+
+        # The rest arrives later; the gap grows with the stock, not the order.
+        receive(client, purchase_order, [{"purchase_order_item": line.pk, "quantity_received": 3}])
+        line.refresh_from_db()
+        assert services.serials_outstanding(line) == 5
+
     def test_a_line_with_nothing_serialized_has_no_gap(self, client, supplier, operator):
         """Zero must mean "nothing owed", never "we did not look"."""
         purchase_order = make_po(supplier, operator)

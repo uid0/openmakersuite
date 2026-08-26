@@ -49,6 +49,34 @@ import {
 } from '../utils/purchaseOrderTerms';
 import { parseSerialNumbers } from '../utils/serializedComponents';
 
+/** One line of a receive request, as the API takes it. */
+interface ReceiveLine {
+  purchase_order_item: number;
+  quantity_received: number;
+  serials?: { serial_number: string; item?: string; lot?: string; expiration_date?: string }[];
+  close_short?: boolean;
+  close_short_reason?: string;
+}
+
+/** A line's position in the receiving workflow, mirroring the server's choices. */
+type ReceiptState =
+  | 'not_received'
+  | 'partially_received'
+  | 'received'
+  | 'over_received'
+  | 'closed_short'
+  | 'voided';
+
+/** An inventory identity a receipt may record serials against. */
+interface SerialTarget {
+  item: string;
+  item_name: string;
+  item_sku: string;
+  serial_tracking_mode?: SerializedTrackingMode;
+  /** Units of this identity the FULL ordered quantity implies. */
+  quantity: number;
+}
+
 interface PurchaseOrderItem {
   id: string;
   item_type: 'inventory_item' | 'asset' | 'freeform' | null;
@@ -81,6 +109,27 @@ interface PurchaseOrderItem {
   quantity_received: number;
   quantity_pending: number;
   is_fully_received: boolean;
+  // Receiving state (oms-po-receiving), all derived server-side so the badge
+  // here and the API's own answer cannot disagree. `quantity_variance` is
+  // signed — negative short, positive over — and is the figure
+  // `quantity_pending` deliberately floors away.
+  quantity_variance: number;
+  receipt_state: ReceiptState;
+  receipt_state_label: string;
+  is_settled: boolean;
+  has_receipt_variance: boolean;
+  is_over_received: boolean;
+  is_short_received: boolean;
+  is_closed_short: boolean;
+  closed_short_at: string | null;
+  closed_short_by_username: string | null;
+  closed_short_reason: string;
+  // Which identities a receipt on this line may carry serials for — the kit's
+  // COMPONENTS on a kit line, never the kit. Empty when nothing here is
+  // serialized. Never inferred from `item_details.is_serialized`: on a kit
+  // line that field describes the kit, which is never stocked.
+  serial_targets: SerialTarget[];
+  serials_recorded: number;
   unit_cost_ordered: string;
   unit_cost_actual: string | null;
   estimated_cost: string;
@@ -127,6 +176,17 @@ interface PurchaseOrder {
   owning_group_details: OwningGroupIdentity | null;
   status: string;
   status_label: string;
+  // Receiving roll-up (oms-po-receiving). `is_settled` is "receiving is
+  // finished with this order"; `is_fully_received` stays the stricter
+  // "everything we ordered turned up". They differ exactly when a line was
+  // closed short, and `has_receipt_variance` keeps that visible afterwards.
+  is_settled: boolean;
+  has_receipt_variance: boolean;
+  outstanding_line_count: number;
+  variance_line_count: number;
+  // Served by the API from its own RECEIVABLE_STATUSES, so the button and the
+  // endpoint cannot disagree about whether this order can be received against.
+  can_receive: boolean;
   // Header terms (op-bwo9), all editable here. `order_date` is a datetime that
   // carries a business *day* — the server derives `payment_schedule` from its
   // UTC date — so it is read and written as a day (see `utcYmd`).
@@ -301,9 +361,21 @@ const PurchaseOrderPage: React.FC = () => {
   const [receiveQuantities, setReceiveQuantities] = useState<Record<string, string>>({});
   // Per-serialized-line captured serial numbers (one per line / comma-separated),
   // keyed by purchase-order line id.
+  // Keyed by `serialKey(line, target)` rather than by line id: one kit line
+  // can credit several serialized identities, and a single box per line would
+  // make the operator's cartridge serials and meter serials indistinguishable.
   const [serialInputs, setSerialInputs] = useState<Record<string, string>>({});
+  const [serialLots, setSerialLots] = useState<Record<string, string>>({});
+  const [serialExpiries, setSerialExpiries] = useState<Record<string, string>>({});
   const [receiveDeliveryDate, setReceiveDeliveryDate] = useState<string>('');
   const [receiveNotes, setReceiveNotes] = useState<string>('');
+  // The carrier's tracking barcode for the parcel being unpacked. The receive
+  // endpoint has always accepted this; the form did not collect it, so it was
+  // only ever recorded by the separate mark-delivered path.
+  const [receiveTracking, setReceiveTracking] = useState<string>('');
+  const [receiveCarrier, setReceiveCarrier] = useState<string>('');
+  const [closeShortLines, setCloseShortLines] = useState<Record<string, boolean>>({});
+  const [closeShortReasons, setCloseShortReasons] = useState<Record<string, string>>({});
   const [editingMetadata, setEditingMetadata] = useState(false);
   const [metadataSupplierOrderNumber, setMetadataSupplierOrderNumber] = useState('');
   const [metadataSalesOrderNumber, setMetadataSalesOrderNumber] = useState('');
@@ -776,8 +848,9 @@ const PurchaseOrderPage: React.FC = () => {
   const canMarkDelivered = (po: PurchaseOrder) =>
     isAuthenticated && ['sent', 'confirmed', 'partially_received'].includes(po.status);
 
-  const canReceiveItems = (po: PurchaseOrder) =>
-    isAuthenticated && ['sent', 'confirmed', 'partially_received'].includes(po.status);
+  // Served by the API from its own RECEIVABLE_STATUSES. The local copy of that
+  // list this used to keep is how the button and the endpoint could disagree.
+  const canReceiveItems = (po: PurchaseOrder) => isAuthenticated && po.can_receive;
 
   /**
    * Why receiving is unavailable on this order, or null when it is available.
@@ -795,7 +868,13 @@ const PurchaseOrderPage: React.FC = () => {
       case 'draft':
         return 'This order is still a draft. Send it to the supplier before receiving against it.';
       case 'received':
-        return 'Every line on this order has already been received in full.';
+        // Deliberately not always "received in full": an order reaches
+        // `received` once receiving is FINISHED with every line, which
+        // includes lines closed short. Claiming everything arrived would be a
+        // documented untruth on exactly the orders most in need of chasing.
+        return po.has_receipt_variance
+          ? 'Receiving has finished with this order. Some lines did not match what was ordered — see the flags below.'
+          : 'Every line on this order has already been received in full.';
       case 'cancelled':
         return 'This order was cancelled, so nothing can be received against it.';
       case 'voided':
@@ -805,8 +884,12 @@ const PurchaseOrderPage: React.FC = () => {
     }
   };
 
+  // Lines receiving is not finished with. `is_settled` rather than
+  // `is_fully_received`: a line closed short is done with even though it never
+  // got its full quantity, and re-offering it would invite a receipt the API
+  // now refuses.
   const getReceivableItems = (po: PurchaseOrder) =>
-    po.items.filter((item) => !item.is_voided && !item.is_fully_received);
+    po.items.filter((item) => !item.is_voided && !item.is_settled);
 
   const handleOpenReceiveItems = () => {
     if (!order) return;
@@ -815,8 +898,15 @@ const PurchaseOrderPage: React.FC = () => {
       initialQuantities[item.id] = String(item.quantity_pending);
     });
     setReceiveQuantities(initialQuantities);
+    setSerialInputs({});
+    setSerialLots({});
+    setSerialExpiries({});
     setReceiveDeliveryDate(formatYmd(new Date()));
     setReceiveNotes('');
+    setReceiveTracking('');
+    setReceiveCarrier('');
+    setCloseShortLines({});
+    setCloseShortReasons({});
     setReceivingItems(true);
   };
 
@@ -824,21 +914,45 @@ const PurchaseOrderPage: React.FC = () => {
     setReceivingItems(false);
     setReceiveQuantities({});
     setSerialInputs({});
+    setSerialLots({});
+    setSerialExpiries({});
     setReceiveDeliveryDate('');
     setReceiveNotes('');
+    setReceiveTracking('');
+    setReceiveCarrier('');
+    setCloseShortLines({});
+    setCloseShortReasons({});
   };
 
   const handleReceiveQuantityChange = (itemId: string, value: string) => {
     setReceiveQuantities((prev) => ({ ...prev, [itemId]: value }));
   };
 
-  const handleSerialInputChange = (itemId: string, value: string) => {
-    setSerialInputs((prev) => ({ ...prev, [itemId]: value }));
+  const handleSerialInputChange = (key: string, value: string) => {
+    setSerialInputs((prev) => ({ ...prev, [key]: value }));
   };
 
-  // Serialized line + the qty being received on it, for the serial-capture UI.
-  const isSerializedLine = (item: PurchaseOrderItem): boolean =>
-    Boolean(item.item_details?.is_serialized && item.item_details?.id);
+  /** One serial box per (line, identity) pair — a kit line has several. */
+  const serialKey = (item: PurchaseOrderItem, target: SerialTarget) =>
+    `${item.id}:${target.item}`;
+
+  /**
+   * Units of `target` that receiving `quantity` on this line credits.
+   *
+   * `target.quantity` is what the FULL ordered quantity implies, so a partial
+   * receipt scales it down by the same bill-of-materials ratio the server
+   * applies. Guarded against a zero ordered quantity, which would otherwise
+   * ask for an impossible number of serials.
+   */
+  const expectedSerialCount = (
+    item: PurchaseOrderItem,
+    target: SerialTarget,
+    quantity: number,
+  ): number => {
+    const ordered = item.quantity_ordered;
+    if (!ordered || ordered <= 0) return target.quantity;
+    return Math.max(0, Math.round((target.quantity / ordered) * quantity));
+  };
 
   const receiveQtyFor = (item: PurchaseOrderItem): number => {
     const raw = receiveQuantities[item.id];
@@ -850,34 +964,77 @@ const PurchaseOrderPage: React.FC = () => {
   const handleSubmitReceiveItems = async () => {
     if (!order || saving) return;
 
-    const lines: { purchase_order_item: number; quantity_received: number }[] = [];
-    // Serialized lines: one SerializedComponent per captured serial, created
-    // against this PO line (provenance) once the receipt is recorded.
-    const serialPlan: { item: PurchaseOrderItem; serials: string[] }[] = [];
+    const lines: ReceiveLine[] = [];
+    // What the operator will be told BEFORE anything is sent, so a receipt
+    // that records fewer serials than units — or more than was ordered — is
+    // never a surprise discovered afterwards.
+    const advisories: string[] = [];
+
     for (const item of getReceivableItems(order)) {
       const raw = receiveQuantities[item.id];
       if (raw === undefined || raw.trim() === '') continue;
       const quantity = Number.parseInt(raw, 10);
       if (Number.isNaN(quantity) || quantity <= 0) continue;
+
+      const { itemName } = getItemNameAndSku(item);
+      const line: ReceiveLine = {
+        purchase_order_item: Number(item.id),
+        quantity_received: quantity,
+      };
+
+      // An over-receipt is RECORDED, not refused and never rounded down — the
+      // whole point is an honest record of what turned up. It is called out so
+      // the operator can catch a typo before it becomes a vendor query.
       if (quantity > item.quantity_pending) {
-        showError(
-          `Cannot receive ${quantity} of ${getItemNameAndSku(item).itemName}; ` +
-            `only ${item.quantity_pending} pending`,
+        advisories.push(
+          `${itemName}: receiving ${quantity} against ${item.quantity_pending} outstanding — ` +
+            'recorded as an over-receipt.',
         );
-        return;
       }
-      if (isSerializedLine(item)) {
-        const serials = parseSerialNumbers(serialInputs[item.id] ?? '');
-        if (serials.length !== quantity) {
-          showError(
-            `Enter ${quantity} unique serial number${quantity === 1 ? '' : 's'} for ` +
-              `${getItemNameAndSku(item).itemName} (got ${serials.length}).`,
-          );
-          return;
+
+      // Serials go against the identity the API says this line credits, which
+      // on a kit line is the COMPONENT, never the kit.
+      const targets = item.serial_targets ?? [];
+      if (targets.length > 0) {
+        const serials: ReceiveLine['serials'] = [];
+        for (const target of targets) {
+          const key = serialKey(item, target);
+          const entered = parseSerialNumbers(serialInputs[key] ?? '');
+          const expected = expectedSerialCount(item, target, quantity);
+          if (entered.length > expected) {
+            showError(
+              `Enter at most ${expected} serial number${expected === 1 ? '' : 's'} for ` +
+                `${target.item_name} (got ${entered.length}). Nothing has been received.`,
+            );
+            return;
+          }
+          if (entered.length > 0 && entered.length < expected) {
+            advisories.push(
+              `${target.item_name}: ${entered.length} of ${expected} serials captured — ` +
+                'the rest can be added from the item page.',
+            );
+          }
+          const lot = (serialLots[key] ?? '').trim();
+          const expiry = (serialExpiries[key] ?? '').trim();
+          for (const serial_number of entered) {
+            serials.push({
+              serial_number,
+              item: target.item,
+              ...(lot ? { lot } : {}),
+              ...(expiry ? { expiration_date: expiry } : {}),
+            });
+          }
         }
-        serialPlan.push({ item, serials });
+        if (serials.length > 0) line.serials = serials;
       }
-      lines.push({ purchase_order_item: Number(item.id), quantity_received: quantity });
+
+      if (closeShortLines[item.id]) {
+        line.close_short = true;
+        const reason = (closeShortReasons[item.id] ?? '').trim();
+        if (reason) line.close_short_reason = reason;
+      }
+
+      lines.push(line);
     }
 
     if (lines.length === 0) {
@@ -885,56 +1042,78 @@ const PurchaseOrderPage: React.FC = () => {
       return;
     }
 
+    // Never silently: anything unusual about this receipt is said out loud and
+    // confirmed before it is recorded. The receipt is driven from the confirm
+    // callback, so declining leaves the panel and the typed quantities exactly
+    // as they were.
+    if (advisories.length > 0) {
+      confirmAction(
+        'Record this receipt?',
+        `${advisories.join(' ')} Record the receipt as entered?`,
+        () => void submitReceipt(lines),
+        { labels: { confirm: 'Record receipt', cancel: 'Go back' } },
+      );
+      return;
+    }
+
+    await submitReceipt(lines);
+  };
+
+  /** Send the resolved lines and patch the page from the response. */
+  const submitReceipt = async (lines: ReceiveLine[]) => {
     try {
       setSaving(true);
+      // ONE call. Serials ride inside the receipt's own transaction, so a
+      // serial that cannot be saved rolls the whole receipt back instead of
+      // leaving stock credited and the operator's serials lost — which is what
+      // the previous loop of N follow-up calls could do.
       const response = await purchaseOrderAPI.receiveItems(orderId!, {
         items: lines,
         delivery_date: receiveDeliveryDate || undefined,
+        tracking_number: receiveTracking || undefined,
+        carrier: receiveCarrier || undefined,
         receipt_notes: receiveNotes || undefined,
       });
       if (response.data && typeof response.data === 'object' && response.data.id) {
         setOrder(response.data as PurchaseOrder);
       }
 
-      // Record the individual serialized units against their PO line.
-      let serialsCreated = 0;
-      let serialsFailed = 0;
-      for (const { item, serials } of serialPlan) {
-        const itemId = item.item_details?.id;
-        if (!itemId) continue;
-        const results = await Promise.allSettled(
-          serials.map((serial_number) =>
-            serializedComponentsAPI.create({
-              item: itemId,
-              serial_number,
-              provenance_purchase_order_item: Number(item.id),
-            }),
-          ),
-        );
-        for (const r of results) {
-          if (r.status === 'fulfilled') serialsCreated += 1;
-          else serialsFailed += 1;
-        }
-      }
-
+      const serialCount = lines.reduce((sum, line) => sum + (line.serials?.length ?? 0), 0);
       handleCancelReceiveItems();
-      if (serialsFailed > 0) {
-        showError(
-          `Items received, but ${serialsFailed} serialized unit` +
-            `${serialsFailed === 1 ? '' : 's'} could not be recorded ` +
-            '(duplicate serial or permission). Add them from the item page.',
-        );
-      } else if (serialsCreated > 0) {
-        showSuccess(
-          `Items received; recorded ${serialsCreated} serialized unit` +
-            `${serialsCreated === 1 ? '' : 's'}.`,
-        );
-      } else {
-        showSuccess('Items received');
-      }
+      showSuccess(
+        serialCount > 0
+          ? `Items received; recorded ${serialCount} serialized unit${serialCount === 1 ? '' : 's'}.`
+          : 'Items received',
+      );
     } catch (err: any) {
       showError(extractErrorMessage(err, 'Failed to receive items'));
       console.error('Error receiving items:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleMarkReceived = async () => {
+    if (!order || saving) return;
+    const outstanding = getReceivableItems(order);
+    const reason = await promptInput(
+      'Close out this order?',
+      `${outstanding.length} line${outstanding.length === 1 ? '' : 's'} will be recorded as ` +
+        'short — what did not arrive is written off, not marked received. Reason (optional):',
+    );
+    // `null` is Cancel; `''` is "confirmed, no reason typed". Different
+    // answers, and only one of them is a decision to close the order.
+    if (reason === null) return;
+
+    try {
+      setSaving(true);
+      const response = await purchaseOrderAPI.markReceived(orderId!, { reason });
+      if (response.data && typeof response.data === 'object' && response.data.id) {
+        setOrder(response.data as PurchaseOrder);
+      }
+      showSuccess('Purchase order closed out');
+    } catch (err: any) {
+      showError(extractErrorMessage(err, 'Failed to mark purchase order received'));
     } finally {
       setSaving(false);
     }
@@ -1367,6 +1546,23 @@ const PurchaseOrderPage: React.FC = () => {
         Mark as delivered
       </Button>,
     );
+    // Step 6 of the receiving flow, and deliberately NOT the same as "Mark as
+    // delivered". That one asserts everything outstanding arrived and stocks
+    // it; this one writes the shortfall off. Only offered when something is
+    // actually outstanding, so it can never be mistaken for a no-op.
+    if (order.outstanding_line_count > 0) {
+      heroActions.push(
+        <Button
+          key="mark-received"
+          variant="default"
+          onClick={handleMarkReceived}
+          disabled={saving}
+          data-testid="mark-received-button"
+        >
+          Close out order
+        </Button>,
+      );
+    }
   }
 
   return (
@@ -1380,6 +1576,31 @@ const PurchaseOrderPage: React.FC = () => {
       }}
     >
       <div className="purchase-order-page">
+        {/* The mismatch the captain chases a vendor with, stated at the top of
+            the order and NOT only inside the receive form — it has to stay
+            visible long after the receipt, which is the whole point of
+            recording it. */}
+        {order.has_receipt_variance && (
+          <Paper
+            withBorder
+            p="sm"
+            radius="md"
+            bg="orange.0"
+            c="orange.9"
+            mb="md"
+            data-testid="receipt-variance-warning"
+          >
+            <Text size="sm">
+              {order.variance_line_count}{' '}
+              {order.variance_line_count === 1 ? 'line' : 'lines'} did not match what was
+              ordered — see the flags in the Received column.
+              {order.outstanding_line_count > 0 &&
+                ` ${order.outstanding_line_count} ${
+                  order.outstanding_line_count === 1 ? 'line is' : 'lines are'
+                } still outstanding.`}
+            </Text>
+          </Paper>
+        )}
         {orderPad && orderPad.missing_sku.length > 0 && (
           <Paper
             withBorder
@@ -1547,6 +1768,27 @@ const PurchaseOrderPage: React.FC = () => {
                 onChange={(e) => setReceiveDeliveryDate(e.target.value)}
               />
             </label>
+            <label htmlFor="receive-tracking">
+              Tracking Barcode (optional)
+              <input
+                id="receive-tracking"
+                type="text"
+                value={receiveTracking}
+                onChange={(e) => setReceiveTracking(e.target.value)}
+                placeholder="Scan the carrier label"
+                autoComplete="off"
+              />
+            </label>
+            <label htmlFor="receive-carrier">
+              Carrier (optional)
+              <input
+                id="receive-carrier"
+                type="text"
+                value={receiveCarrier}
+                onChange={(e) => setReceiveCarrier(e.target.value)}
+                placeholder="e.g. UPS"
+              />
+            </label>
             <label htmlFor="receive-notes">
               Receipt Notes (optional)
               <input
@@ -1573,27 +1815,32 @@ const PurchaseOrderPage: React.FC = () => {
               <tbody>
                 {receivableItems.map((item) => {
                   const { itemName, itemSku } = getItemNameAndSku(item);
-                  const serialized = isSerializedLine(item);
+                  const targets = item.serial_targets ?? [];
                   const qty = receiveQtyFor(item);
-                  const serialCount = serialized
-                    ? parseSerialNumbers(serialInputs[item.id] ?? '').length
-                    : 0;
+                  // A short receipt the operator has NOT declared final is
+                  // ordinary — the rest may still be coming — so this is an
+                  // offer, never a block.
+                  const short = qty > 0 && qty < item.quantity_pending;
+                  const over = qty > item.quantity_pending;
                   return (
                     <React.Fragment key={item.id}>
                       <tr>
                         <td>
                           {itemName}
-                          {serialized && (
+                          {targets.length > 0 && (
                             <span className="receive-serial-tag"> · serialized</span>
                           )}
                         </td>
                         <td>{itemSku}</td>
                         <td>{item.quantity_pending}</td>
                         <td>
+                          {/* No `max`: more than was ordered is a real thing
+                              that happens, and the record has to be able to
+                              say so. The operator is told, then it is saved
+                              exactly as entered. */}
                           <input
                             type="number"
                             min="0"
-                            max={item.quantity_pending}
                             step="1"
                             className="receive-items-qty-input"
                             value={receiveQuantities[item.id] ?? ''}
@@ -1601,8 +1848,57 @@ const PurchaseOrderPage: React.FC = () => {
                             disabled={saving}
                             aria-label={`Receive quantity for ${itemName}`}
                           />
+                          {over && (
+                            <span
+                              className="receive-variance-note receive-variance-over"
+                              data-testid={`receive-over-note-${item.id}`}
+                            >
+                              +{qty - item.quantity_pending} over — recorded and flagged
+                            </span>
+                          )}
                         </td>
                       </tr>
+                      {short && (
+                        <tr
+                          className="receive-serial-row"
+                          data-testid={`receive-short-row-${item.id}`}
+                        >
+                          <td colSpan={4}>
+                            <label className="receive-close-short">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(closeShortLines[item.id])}
+                                onChange={(e) =>
+                                  setCloseShortLines((prev) => ({
+                                    ...prev,
+                                    [item.id]: e.target.checked,
+                                  }))
+                                }
+                                disabled={saving}
+                              />{' '}
+                              The remaining {item.quantity_pending - qty}{' '}
+                              {item.quantity_pending - qty === 1 ? 'unit is' : 'units are'} not
+                              coming — close this line short
+                            </label>
+                            {closeShortLines[item.id] && (
+                              <input
+                                type="text"
+                                className="receive-close-short-reason"
+                                value={closeShortReasons[item.id] ?? ''}
+                                onChange={(e) =>
+                                  setCloseShortReasons((prev) => ({
+                                    ...prev,
+                                    [item.id]: e.target.value,
+                                  }))
+                                }
+                                disabled={saving}
+                                placeholder="Reason (e.g. backorder cancelled)"
+                                aria-label={`Reason for closing ${itemName} short`}
+                              />
+                            )}
+                          </td>
+                        </tr>
+                      )}
                       {/* Live consequence row (op-8n0). Driven ENTIRELY by
                           local state and the line's own snapshot, so it updates
                           as the quantity is typed and the operator sees what
@@ -1623,25 +1919,87 @@ const PurchaseOrderPage: React.FC = () => {
                           </td>
                         </tr>
                       )}
-                      {serialized && qty > 0 && (
-                        <tr className="receive-serial-row">
-                          <td colSpan={4}>
-                            <label htmlFor={`serials-${item.id}`}>
-                              Serial numbers for {itemName} — one per line ({serialCount}/{qty})
-                            </label>
-                            <textarea
-                              id={`serials-${item.id}`}
-                              className="receive-serials-input"
-                              rows={Math.min(Math.max(qty, 2), 8)}
-                              value={serialInputs[item.id] ?? ''}
-                              onChange={(e) => handleSerialInputChange(item.id, e.target.value)}
-                              disabled={saving}
-                              placeholder={'SN-0001\nSN-0002'}
-                              aria-label={`Serial numbers for ${itemName}`}
-                            />
-                          </td>
-                        </tr>
-                      )}
+                      {/* One capture block per serialized IDENTITY this line
+                          credits — on a kit line that is each component, and
+                          never the kit. Driven by the server's
+                          `serial_targets` rather than the line's own
+                          `is_serialized`, because on a kit line that flag
+                          describes a SKU that never enters stock. */}
+                      {qty > 0 &&
+                        targets.map((target) => {
+                          const key = serialKey(item, target);
+                          const expected = expectedSerialCount(item, target, qty);
+                          const entered = parseSerialNumbers(serialInputs[key] ?? '').length;
+                          return (
+                            <tr
+                              className="receive-serial-row"
+                              key={key}
+                              data-testid={`receive-serials-${key}`}
+                            >
+                              <td colSpan={4}>
+                                <label htmlFor={`serials-${key}`}>
+                                  Serial numbers for {target.item_name} — one per line ({entered}/
+                                  {expected})
+                                  {item.is_kit_line && (
+                                    <span className="receive-serial-tag">
+                                      {' '}
+                                      · component of {itemName}
+                                    </span>
+                                  )}
+                                </label>
+                                <textarea
+                                  id={`serials-${key}`}
+                                  className="receive-serials-input"
+                                  rows={Math.min(Math.max(expected, 2), 8)}
+                                  value={serialInputs[key] ?? ''}
+                                  onChange={(e) => handleSerialInputChange(key, e.target.value)}
+                                  disabled={saving}
+                                  placeholder={'SN-0001\nSN-0002'}
+                                  aria-label={`Serial numbers for ${target.item_name}`}
+                                />
+                                {entered > 0 && entered < expected && (
+                                  <p className="receive-variance-note">
+                                    {entered} of {expected} captured — the rest can be added from
+                                    the item page.
+                                  </p>
+                                )}
+                                {/* Lot and expiry apply to every serial in
+                                    this box: one box is one batch off one
+                                    pallet, which is what a lot number means. */}
+                                <div className="receive-serial-meta">
+                                  <label htmlFor={`lot-${key}`}>
+                                    Lot (optional)
+                                    <input
+                                      id={`lot-${key}`}
+                                      type="text"
+                                      value={serialLots[key] ?? ''}
+                                      onChange={(e) =>
+                                        setSerialLots((prev) => ({ ...prev, [key]: e.target.value }))
+                                      }
+                                      disabled={saving}
+                                      placeholder="Batch / lot number"
+                                    />
+                                  </label>
+                                  <label htmlFor={`expiry-${key}`}>
+                                    Expiry (optional)
+                                    <input
+                                      id={`expiry-${key}`}
+                                      type="date"
+                                      value={serialExpiries[key] ?? ''}
+                                      onChange={(e) =>
+                                        setSerialExpiries((prev) => ({
+                                          ...prev,
+                                          [key]: e.target.value,
+                                        }))
+                                      }
+                                      disabled={saving}
+                                    />
+                                  </label>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                     </React.Fragment>
                   );
                 })}
@@ -2208,7 +2566,42 @@ const PurchaseOrderPage: React.FC = () => {
                   </td>
                   <td>{itemSku}</td>
                   <td>{item.quantity_ordered}</td>
-                  <td>{item.quantity_received}</td>
+                  <td>
+                    {item.quantity_received}
+                    {/* The mismatch, wherever the line is read. Rendered from
+                        the server's own derivation (`receipt_state`,
+                        `quantity_variance`) rather than recomputed here, so
+                        this badge and the API cannot disagree about whether a
+                        line came up short. */}
+                    {item.has_receipt_variance && (
+                      <span
+                        className={
+                          item.is_over_received
+                            ? 'receipt-flag receipt-flag-over'
+                            : 'receipt-flag receipt-flag-short'
+                        }
+                        data-testid={`line-variance-${item.id}`}
+                        title={
+                          item.closed_short_reason ||
+                          (item.is_over_received
+                            ? 'More arrived than was ordered'
+                            : 'Closed short — the balance was written off')
+                        }
+                      >
+                        {item.quantity_variance > 0
+                          ? `+${item.quantity_variance} over`
+                          : `${item.quantity_variance} short`}
+                      </span>
+                    )}
+                    {!item.is_settled && item.quantity_received > 0 && (
+                      <span
+                        className="receipt-flag receipt-flag-pending"
+                        data-testid={`line-outstanding-${item.id}`}
+                      >
+                        {item.quantity_pending} still due
+                      </span>
+                    )}
+                  </td>
                   <td>
                     {item.unit_cost_actual 
                       ? formatCurrency(item.unit_cost_actual) 

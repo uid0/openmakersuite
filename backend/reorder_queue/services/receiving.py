@@ -542,6 +542,17 @@ def refresh_receipt_status(purchase_order) -> str:
     voided order is left exactly where it is, because "every line is settled"
     is not a reason to resurrect an order nobody is receiving against.
 
+    Nor does it move an order nothing has arrived against
+    (:attr:`~reorder_queue.models.PurchaseOrder.has_received_anything`).
+    Settlement and delivery are different facts: a line can settle by being
+    written off or struck off, and an order made only of those has finished
+    receiving without ever having received anything. Advancing it would put
+    "Fully Received" on a screen over a received quantity of zero, so such an
+    order stays ``sent`` or ``confirmed`` and is closed out by voiding or
+    cancelling the ORDER instead. An order that has taken something in is
+    unaffected: its last outstanding line settling still finishes it off,
+    however that line settles.
+
     Returns the resulting status.
     """
     if purchase_order.status not in PurchaseOrder.IN_RECEIVING_STATUSES:
@@ -551,6 +562,10 @@ def refresh_receipt_status(purchase_order) -> str:
     # through it, and a stale read here is exactly how an order finishes
     # receiving and stays displayed as partially received.
     purchase_order.__dict__.pop("_line_item_totals", None)
+
+    if not purchase_order.has_received_anything:
+        return purchase_order.status
+
     purchase_order.status = (
         PurchaseOrder.Status.RECEIVED
         if purchase_order.is_settled
@@ -601,6 +616,30 @@ def reopen_lines_short(purchase_order, reopenings, *, actor):
             reopened.append(po_item)
         refresh_receipt_status(purchase_order)
     return reopened
+
+
+def close_out_refusal(purchase_order) -> str:
+    """Why an order with nothing outstanding cannot be closed out, for the operator.
+
+    Shared by ``mark-delivered`` and ``mark-received`` so the two cannot give
+    different accounts of the same order.
+
+    The second sentence is the one that matters. An order every line of which is
+    settled but which never took anything in cannot reach ``received`` — that
+    status means goods arrived — so refusing it without saying where to go next
+    would be a dead end. It names the action that does exist: voiding or
+    cancelling the order.
+    """
+    settled = (
+        "Every line on this order is already settled, so there is nothing left "
+        "to receive or close."
+    )
+    if purchase_order.has_received_anything:
+        return settled
+    return (
+        f"{settled} Nothing was received against it either, and an order only reads as "
+        "received once goods actually arrived — void or cancel the order instead."
+    )
 
 
 def receipt_refusal(po_item) -> Optional[str]:

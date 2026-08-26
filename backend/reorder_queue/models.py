@@ -522,6 +522,23 @@ class PurchaseOrder(models.Model):
         return self._line_item_totals["total_received_quantity"]
 
     @property
+    def has_received_anything(self) -> bool:
+        """Whether any quantity at all has physically arrived against this order.
+
+        The one test of "did receiving ever happen here?", derived from the
+        quantities the lines already carry rather than from a stored flag.
+        Counts every line, voided ones included: goods that arrived and were
+        then struck off still arrived.
+
+        This is what keeps ``received`` meaning what it says. Settlement alone
+        does not earn that status — a line can be settled by being written off
+        or struck off, neither of which is a delivery — so an order nothing came
+        in against stays where it is rather than reading "Fully Received" over a
+        received quantity of zero.
+        """
+        return self.total_received_quantity > 0
+
+    @property
     def is_fully_received(self) -> bool:
         """Whether every active line got at least the quantity that was ordered.
 

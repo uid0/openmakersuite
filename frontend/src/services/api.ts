@@ -2285,6 +2285,9 @@ export interface ReceivingWorksheetLine {
   is_voided: boolean;
   is_closed_short: boolean;
   closed_short_reason: string;
+  /** A close-short taken back. Reported alongside the one it corrects. */
+  was_reopened: boolean;
+  reopened_reason: string;
   is_kit_line: boolean;
   scan_codes: ReceivingScanCode[];
   serial_targets: ReceivingSerialTarget[];
@@ -2309,7 +2312,8 @@ export interface ReceivingWorksheetLine {
  * nothing outstanding", and an operator acts differently on each.
  */
 export interface ReceivingWorksheet {
-  purchase_order: string;
+  /** Integer: a purchase order's primary key, unlike an item's UUID. */
+  purchase_order: number;
   po_number: string | null;
   supplier: string;
   status: string;

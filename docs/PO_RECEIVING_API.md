@@ -69,9 +69,15 @@ The receiving worksheet. Read-only, derived from the order on every request —
 there is no stored worksheet to invalidate, and a receipt recorded by another
 client shows up on the next fetch.
 
+Two kinds of identifier appear below and they are not interchangeable. A
+purchase order and a purchase-order line are **integers**; an inventory item is
+a **UUID string**. `purchase_order`, `purchase_order_item` and `{id}` in the
+URLs are integers; `item` on a line, in `serial_targets` and in `serial_gap` is
+a UUID.
+
 ```json
 {
-  "purchase_order": "6f2c…",
+  "purchase_order": 412,
   "po_number": "PO-2026-0500",
   "supplier": "Grainger",
   "status": "partially_received",

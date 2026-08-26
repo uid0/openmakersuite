@@ -24,6 +24,7 @@ ScanTTY and the web share, not a service call the clients do not make.
 
 from __future__ import annotations
 
+import uuid
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -221,6 +222,32 @@ class TestReceivingWorksheet:
         # The item's own SKU is auto-assigned and is a legitimate code; what
         # must not appear is a blank standing in for the three absent barcodes.
         assert codes == [bare.sku]
+
+
+@pytest.mark.django_db
+class TestWorksheetIdentifierTypes:
+    """Two kinds of id ride in this payload and they are not interchangeable.
+
+    A purchase order and its lines are integer primary keys; an inventory item
+    is a UUID. They look alike in a JSON example and a client that types the
+    order id as a string builds against something the endpoint never sends.
+    """
+
+    def test_the_order_and_line_ids_are_integers_and_the_item_id_is_a_uuid(
+        self, client, supplier, operator
+    ):
+        purchase_order = make_po(supplier, operator)
+        item = make_item("Widget", supplier=supplier)
+        line = add_line(purchase_order, item, 4)
+
+        payload = worksheet(client, purchase_order).data
+        row = line_of(payload, line)
+
+        assert payload["purchase_order"] == purchase_order.pk
+        assert isinstance(payload["purchase_order"], int)
+        assert isinstance(row["purchase_order_item"], int)
+        assert row["item"] == str(item.pk)
+        assert uuid.UUID(row["item"])
 
 
 @pytest.mark.django_db
@@ -1566,10 +1593,15 @@ class TestDocumentedContract:
         assert written_item.current_stock == 0
         assert written_line.receipt_state == PurchaseOrderItem.ReceiptState.CLOSED_SHORT
 
-        # Both orders end `received`; only one of them is honest about arrival.
+        # Both orders are settled — receiving is finished with every line — but
+        # only the one goods arrived at reads `received`. Nothing came in
+        # against the other, so it stays `sent`: settlement is bookkeeping and
+        # `received` is a claim about the world.
         stocked.refresh_from_db()
         written_off.refresh_from_db()
-        assert stocked.status == written_off.status == PurchaseOrder.Status.RECEIVED
+        assert stocked.is_settled == written_off.is_settled is True
+        assert stocked.status == PurchaseOrder.Status.RECEIVED
+        assert written_off.status == PurchaseOrder.Status.SENT
         assert stocked.has_receipt_variance is False
         assert written_off.has_receipt_variance is True
 
@@ -1941,6 +1973,11 @@ def settlement_consistent(purchase_order):
     can go on to assert which of the two statuses it landed on.
     """
     fresh = PurchaseOrder.objects.get(pk=purchase_order.pk)
+    if not fresh.has_received_anything:
+        # Settlement alone never promotes an order nothing arrived against, so
+        # for those the invariant is that receiving left the status alone.
+        assert fresh.status in PurchaseOrder.RECEIVABLE_STATUSES
+        return fresh
     expected = (
         PurchaseOrder.Status.RECEIVED
         if fresh.is_settled
@@ -2185,3 +2222,151 @@ class TestLeadTimeIsLoggedOncePerLine:
         line.refresh_from_db()
         assert line.quantity_received == 6
         assert LeadTimeLog.objects.filter(item_supplier=line.item_supplier).count() == 1
+
+
+@pytest.mark.django_db
+class TestReceivedMeansGoodsArrived:
+    """``received`` is a claim about the world, not about bookkeeping.
+
+    A line can settle three ways that are not deliveries — written off, struck
+    off, or an order that had nothing on it — and settlement alone used to
+    advance the order. An order reading "Fully Received" over a received
+    quantity of zero is the screen stating a falsehood, so the promotion is
+    gated on something having actually arrived.
+    """
+
+    def test_voiding_the_only_line_of_an_untouched_order_does_not_read_received(
+        self, client, supplier, operator
+    ):
+        """Nothing arrived, so nothing was received — and the PO stays voidable.
+
+        Promoting it to ``received`` also locked the operator out of voiding the
+        order at all: ``void`` refuses a received PO and tells them to create a
+        return for goods that never came.
+        """
+        purchase_order = make_po(supplier, operator)
+        line = add_line(purchase_order, make_item("Widget", supplier=supplier), 5)
+
+        response = void_line(client, purchase_order, line)
+        assert response.status_code == status.HTTP_200_OK, response.data
+
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.Status.SENT
+        assert purchase_order.total_received_quantity == 0
+
+        # And the way out is still open.
+        voided = client.post(
+            reverse("purchaseorder-void", args=[purchase_order.pk]),
+            {"reason": "nothing ever shipped"},
+            format="json",
+        )
+        assert voided.status_code == status.HTTP_200_OK, voided.data
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.Status.VOIDED
+
+    def test_voiding_one_of_two_untouched_lines_does_not_read_partially_received(
+        self, client, supplier, operator
+    ):
+        purchase_order = make_po(supplier, operator)
+        add_line(purchase_order, make_item("Widget", supplier=supplier), 5)
+        struck = add_line(purchase_order, make_item("Gasket", supplier=supplier), 3)
+
+        void_line(client, purchase_order, struck)
+
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.Status.SENT
+
+    def test_closing_the_only_line_short_with_nothing_received_does_not_read_received(
+        self, client, supplier, operator
+    ):
+        """The second trigger, reachable with no void anywhere in it.
+
+        Close-short is allowed from ``sent`` and only needs an outstanding
+        balance, so an order nobody has received anything against can settle
+        every line this way.
+        """
+        purchase_order = make_po(supplier, operator)
+        line = add_line(purchase_order, make_item("Widget", supplier=supplier), 5)
+
+        response = client.post(
+            reverse("purchaseorder-close-short", args=[purchase_order.pk]),
+            {"items": [{"purchase_order_item": line.pk, "reason": "vendor never shipped"}]},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_200_OK, response.data
+
+        purchase_order.refresh_from_db()
+        line.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.Status.SENT
+        assert purchase_order.total_received_quantity == 0
+        # The write-off itself is still recorded — only the promotion is refused.
+        assert line.receipt_state == PurchaseOrderItem.ReceiptState.CLOSED_SHORT
+        assert purchase_order.is_settled is True
+
+    def test_mark_received_on_an_order_nothing_arrived_against_names_the_way_out(
+        self, client, supplier, operator
+    ):
+        """Refusing without a way forward would just be the next trap."""
+        purchase_order = make_po(supplier, operator)
+        line = add_line(purchase_order, make_item("Widget", supplier=supplier), 5)
+        client.post(
+            reverse("purchaseorder-close-short", args=[purchase_order.pk]),
+            {"items": [{"purchase_order_item": line.pk, "reason": "vendor never shipped"}]},
+            format="json",
+        )
+
+        response = client.post(
+            reverse("purchaseorder-mark-received", args=[purchase_order.pk]), {}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        error = response.data["error"]
+        assert "Nothing was received against it" in error
+        assert "void or cancel the order" in error
+
+        # And that action really is available on this order.
+        voided = client.post(
+            reverse("purchaseorder-void", args=[purchase_order.pk]),
+            {"reason": "vendor never shipped"},
+            format="json",
+        )
+        assert voided.status_code == status.HTTP_200_OK, voided.data
+
+    def test_an_order_that_took_something_in_still_closes_out(self, client, supplier, operator):
+        """The gate must not make a genuinely completed order unclosable.
+
+        Each of the three ways the last outstanding line can settle — received,
+        closed short, voided — still finishes an order that has taken delivery.
+        """
+        for settle in ("receive", "close_short", "void"):
+            purchase_order = make_po(supplier, operator)
+            landed = add_line(purchase_order, make_item(f"Widget {settle}", supplier=supplier), 4)
+            last = add_line(purchase_order, make_item(f"Gasket {settle}", supplier=supplier), 6)
+
+            receive(
+                client,
+                purchase_order,
+                [{"purchase_order_item": landed.pk, "quantity_received": 4}],
+            )
+            assert settlement_consistent(purchase_order).status == (
+                PurchaseOrder.Status.PARTIALLY_RECEIVED
+            )
+
+            if settle == "receive":
+                receive(
+                    client,
+                    purchase_order,
+                    [{"purchase_order_item": last.pk, "quantity_received": 6}],
+                )
+            elif settle == "close_short":
+                client.post(
+                    reverse("purchaseorder-close-short", args=[purchase_order.pk]),
+                    {"items": [{"purchase_order_item": last.pk, "reason": "not coming"}]},
+                    format="json",
+                )
+            else:
+                void_line(client, purchase_order, last)
+
+            assert (
+                settlement_consistent(purchase_order).status == PurchaseOrder.Status.RECEIVED
+            ), f"an order that received goods failed to close out via {settle}"

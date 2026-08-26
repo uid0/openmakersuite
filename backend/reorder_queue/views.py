@@ -1568,12 +1568,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         # are settled, so neither keeps this action alive nor gets stocked by it.
         if not services.outstanding_lines(purchase_order):
             return Response(
-                {
-                    "error": (
-                        "Every line on this order is already settled; there is nothing "
-                        "left to receive."
-                    )
-                },
+                {"error": services.close_out_refusal(purchase_order)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1610,17 +1605,38 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     def receive(self, request, pk=None):
         """Receive specific line items with explicit per-item quantities.
 
-        Where ``mark_delivered`` receives every pending quantity on the whole
-        PO, this records a partial receipt of exactly the quantities supplied
-        per line — the flow Scantty and the web UI use to receive a delivery
-        that contains only some of what was ordered. Shares the receipt side
-        effects (delivery, stock, status, lead-time logs) with
-        ``mark_delivered`` via :func:`_apply_po_receipt`.
+        Where ``mark_delivered`` receives every outstanding quantity on the
+        whole PO, this records a receipt of exactly the quantities supplied per
+        line — the flow ScanTTY and the web UI use for a delivery that contains
+        only some of what was ordered. Shares the receipt side effects
+        (delivery, stock, serials, status, lead-time logs) with
+        ``mark_delivered`` via :func:`services.receive_delivery`, and the whole
+        action is one transaction: a rejected receipt writes nothing at all.
 
-        A line may carry ``at_level: true`` to report its ``quantity_received``
-        as whole packs of the item's ``count_level`` — "three cases came in" —
-        converted to base units before the pending-quantity check and the stock
-        add (op-ev14). Without it the quantity is base units exactly as before.
+        Per line, beyond ``purchase_order_item`` and ``quantity_received``:
+
+        * ``at_level: true`` reports the quantity as whole packs of the item's
+          ``count_level`` — "three cases came in" — converted to base units
+          before the figure is recorded or anything is credited (op-ev14).
+          Without it the quantity is base units exactly as before. Invalid on a
+          line whose item is not counted in packs, and on asset/freeform lines.
+        * ``serials`` accessions the units that arrived, each naming the
+          identity it belongs to — on a kit line the COMPONENTS the receipt
+          credits, never the kit. Captured inside the receipt's transaction, so
+          a serial that cannot be saved rolls the receipt back rather than
+          leaving stock credited and the operator's serials lost. Fewer serials
+          than units is allowed; more is a 400.
+        * ``close_short`` (with an optional ``close_short_reason``) declares
+          that whatever is still outstanding *after* this receipt is not
+          coming, settling the line in the same request as the receipt that
+          revealed the shortfall.
+
+        **The quantity is recorded as sent, including more than was ordered.**
+        The pending-quantity guard that used to reject an over-receipt with a
+        400 is gone: what arrived is credited and the difference stays visible
+        on the line as ``quantity_variance`` and ``receipt_state``. A line that
+        is voided, or whose balance has been closed short, is still refused —
+        nothing more is coming for either.
         """
         from datetime import datetime
 
@@ -1994,12 +2010,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         outstanding = services.outstanding_lines(purchase_order)
         if not outstanding:
             return Response(
-                {
-                    "error": (
-                        "Every line on this order is already settled; there is nothing "
-                        "left to close."
-                    )
-                },
+                {"error": services.close_out_refusal(purchase_order)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

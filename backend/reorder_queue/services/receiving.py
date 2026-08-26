@@ -391,6 +391,13 @@ def receive_delivery(
             po_item, quantity = receipt.po_item, receipt.quantity
             resolve_serial_targets(po_item, quantity, receipt.serials)
 
+            # Read BEFORE the quantity moves: the lead-time log records when a
+            # line *became* fully received, which is a transition and not a
+            # state. An over-receipt against a line that was already full is a
+            # second delivery of a line that landed once, and logging it again
+            # would count one delivery twice in supplier performance.
+            was_fully_received = po_item.is_fully_received
+
             delivery_item = DeliveryItem.objects.create(
                 delivery=delivery,
                 purchase_order_item=po_item,
@@ -455,7 +462,8 @@ def receive_delivery(
                 post_work_order_material(po_item)
 
             if po_item.is_fully_received:
-                create_lead_time_log(po_item, delivery.delivery_date)
+                if not was_fully_received:
+                    create_lead_time_log(po_item, delivery.delivery_date)
                 # The whole line landed, so whatever reorder request asked for
                 # it is satisfied — close it in the same transaction as the
                 # receipt. A partial receipt leaves it open.
@@ -469,16 +477,7 @@ def receive_delivery(
                 else:
                     close_linked_reorder_request(po_item, delivery.delivery_date)
 
-        # ``is_settled``, not ``is_fully_received``: a line whose shortfall has
-        # been written off is finished with even though it never got its full
-        # ordered quantity, and an order made only of such lines must be able
-        # to reach ``received``. The shortfall itself stays on the record via
-        # ``has_receipt_variance``.
-        if purchase_order.is_settled:
-            purchase_order.status = PurchaseOrder.Status.RECEIVED
-        else:
-            purchase_order.status = PurchaseOrder.Status.PARTIALLY_RECEIVED
-        purchase_order.save()
+        refresh_receipt_status(purchase_order)
 
         delivery.is_complete = purchase_order.is_settled
         delivery.save(update_fields=["is_complete"])
@@ -524,11 +523,24 @@ def mark_delivered_receipt(
 def refresh_receipt_status(purchase_order) -> str:
     """Re-derive and persist the order's status from its lines' settlement.
 
-    Called after anything that can change whether receiving is finished with a
-    line but is not itself a receipt — closing a line short, principally. Only
-    ever moves an order that is *in* receiving: a draft, cancelled or voided
-    order is left exactly where it is, because "every line is settled" is not a
-    reason to resurrect an order nobody is receiving against.
+    THE sole writer of ``PurchaseOrder.status`` for receiving, and the single
+    answer to "what status does this order's settlement imply?". Every
+    operation that can change whether a line is settled calls this as part of
+    itself rather than leaving it as a step the caller has to remember:
+    :func:`receive_delivery`, :func:`close_lines_short`,
+    :func:`reopen_lines_short` and
+    :func:`~reorder_queue.services.purchase_orders.void_line_item`. The inline
+    barcode receive path (``OrderReceiptViewSet.scan_barcode``), which mutates
+    the line itself, calls it directly for the same reason.
+
+    That routing is the point. While the answer was computed in each path
+    separately, one of them derived it from ``is_fully_received`` — which a
+    closed-short line never satisfies — and left orders stranded at
+    ``partially_received`` with every close-out action refusing them.
+
+    Only ever moves an order that is *in* receiving: a draft, cancelled or
+    voided order is left exactly where it is, because "every line is settled"
+    is not a reason to resurrect an order nobody is receiving against.
 
     Returns the resulting status.
     """
@@ -589,6 +601,29 @@ def reopen_lines_short(purchase_order, reopenings, *, actor):
             reopened.append(po_item)
         refresh_receipt_status(purchase_order)
     return reopened
+
+
+def receipt_refusal(po_item) -> Optional[str]:
+    """Why nothing more may be received against this line, or ``None``.
+
+    The single answer to "may this line still take a receipt?", shared by the
+    ``receive`` action and the inline barcode path so the two cannot disagree
+    about it. Returns the tail of an operator-facing sentence beginning with
+    the line's identifier.
+
+    Only the two endings that mean *nothing more is coming* refuse. A line
+    already received in full does NOT: more than was ordered is a real thing
+    that happens, and recording it is the whole point of accepting an
+    over-receipt rather than rounding it away.
+    """
+    if po_item.is_voided:
+        return "is voided and cannot be received"
+    if po_item.is_closed_short:
+        return (
+            "was closed short; reopen it with POST .../reopen-short/ before "
+            "receiving more against it"
+        )
+    return None
 
 
 def outstanding_lines(purchase_order):

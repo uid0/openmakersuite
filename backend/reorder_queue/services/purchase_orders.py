@@ -535,21 +535,33 @@ def void_po(purchase_order, user, reason=""):
 
 
 def void_line_item(line_item, user, reason):
-    """Void a single purchase-order line item.
+    """Void a single purchase-order line item, then re-derive the order's status.
 
     Marks the linked ``item_supplier`` discontinued/inactive when present. The
     caller owns the not-found / already-voided / already-received guards and
     records the ``po_line_void`` audit event.
+
+    Striking a line off settles it — nothing is coming for it any more — so this
+    is a settlement transition like closing a line short, and it re-derives the
+    order's status through the same
+    :func:`~reorder_queue.services.receiving.refresh_receipt_status` in the same
+    transaction. Voiding the last outstanding line therefore finishes the order
+    off instead of leaving it reading ``partially_received`` while its own
+    payload says receiving has nothing left to wait for.
     """
-    line_item.is_voided = True
-    line_item.voided_at = timezone.now()
-    line_item.voided_by = user
-    line_item.void_reason = reason
+    from .receiving import refresh_receipt_status
 
-    # If this is an item_supplier relationship, mark it as discontinued
-    if line_item.item_supplier:
-        line_item.item_supplier.is_discontinued = True
-        line_item.item_supplier.is_active = False
-        line_item.item_supplier.save()
+    with transaction.atomic():
+        line_item.is_voided = True
+        line_item.voided_at = timezone.now()
+        line_item.voided_by = user
+        line_item.void_reason = reason
 
-    line_item.save()
+        # If this is an item_supplier relationship, mark it as discontinued
+        if line_item.item_supplier:
+            line_item.item_supplier.is_discontinued = True
+            line_item.item_supplier.is_active = False
+            line_item.item_supplier.save()
+
+        line_item.save()
+        refresh_receipt_status(line_item.purchase_order)

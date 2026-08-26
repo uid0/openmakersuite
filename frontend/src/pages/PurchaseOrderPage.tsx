@@ -952,10 +952,21 @@ const PurchaseOrderPage: React.FC = () => {
     // then correcting the quantity to 10 hides the row; keeping the flag would
     // send a close-short the operator can no longer see or untick — input they
     // never confirmed, against a line with nothing left outstanding.
+    //
+    // Only a COMPLETED edit clears it. An empty box, a zero, or anything that
+    // does not parse is a quantity mid-edit — every backspace-and-retype passes
+    // through one — and dropping the typed reason there would discard what the
+    // operator entered while they were still entering it. Nothing invisible can
+    // be submitted from those states either: `handleSubmitReceiveItems` skips a
+    // line with no usable quantity before it ever reads the flag.
     const item = order?.items.find((candidate) => candidate.id === itemId);
     const parsed = Number.parseInt(value, 10);
-    const quantity = Number.isNaN(parsed) || parsed <= 0 ? 0 : parsed;
-    if (item !== undefined && quantity > 0 && quantity < item.quantity_pending) return;
+    const noLongerShort =
+      item !== undefined &&
+      !Number.isNaN(parsed) &&
+      parsed > 0 &&
+      parsed >= item.quantity_pending;
+    if (!noLongerShort) return;
 
     setCloseShortLines((prev) => dropKey(prev, itemId));
     setCloseShortReasons((prev) => dropKey(prev, itemId));
@@ -1147,6 +1158,36 @@ const PurchaseOrderPage: React.FC = () => {
       showSuccess('Purchase order closed out');
     } catch (err: any) {
       showError(extractErrorMessage(err, 'Failed to mark purchase order received'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReopenShort = async (item: PurchaseOrderItem) => {
+    if (!order || saving) return;
+    const { itemName } = getItemNameAndSku(item);
+    const outstanding = item.quantity_ordered - item.quantity_received;
+    const reason = await promptInput(
+      'Reopen this line?',
+      `${itemName} was closed short with ${outstanding} unit${outstanding === 1 ? '' : 's'} ` +
+        'written off. Reopening puts them back on the order; the close-short stays on the ' +
+        'record beside this correction. Reason (optional):',
+    );
+    // `null` is Cancel; `''` is "confirmed, no reason typed". Different
+    // answers, and only one of them is a decision to reopen the line.
+    if (reason === null) return;
+
+    try {
+      setSaving(true);
+      const response = await purchaseOrderAPI.reopenShort(orderId!, {
+        items: [{ purchase_order_item: Number(item.id), reason }],
+      });
+      if (response.data && typeof response.data === 'object' && response.data.id) {
+        setOrder(response.data as PurchaseOrder);
+      }
+      showSuccess('Line reopened — it is outstanding again');
+    } catch (err: any) {
+      showError(extractErrorMessage(err, 'Failed to reopen line'));
     } finally {
       setSaving(false);
     }
@@ -2892,6 +2933,23 @@ const PurchaseOrderPage: React.FC = () => {
                                   style={{ marginLeft: '0.5rem' }}
                                 >
                                   Void Item
+                                </button>
+                              )}
+                              {/* Correcting a close-short made in error. Only
+                                  offered on a line that IS closed short: the
+                                  receive panel skips settled lines, so without
+                                  this the mistake is uncorrectable from the
+                                  browser. Labelled "Reopen", never "Undo" —
+                                  the close-short stays on the record. */}
+                              {item.is_closed_short && (
+                                <button
+                                  onClick={() => void handleReopenShort(item)}
+                                  disabled={saving}
+                                  className="btn-reopen-short"
+                                  style={{ marginLeft: '0.5rem' }}
+                                  data-testid={`reopen-short-${item.id}`}
+                                >
+                                  Reopen
                                 </button>
                               )}
                             </>

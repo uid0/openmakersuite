@@ -1568,7 +1568,12 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         # are settled, so neither keeps this action alive nor gets stocked by it.
         if not services.outstanding_lines(purchase_order):
             return Response(
-                {"error": "All items in this purchase order are already fully received"},
+                {
+                    "error": (
+                        "Every line on this order is already settled; there is nothing "
+                        "left to receive."
+                    )
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1649,19 +1654,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     {"error": f"Line item {po_item_id} does not belong to this purchase order"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            if po_item.is_voided:
+            refusal = services.receipt_refusal(po_item)
+            if refusal is not None:
                 return Response(
-                    {"error": f"Line item {po_item_id} is voided and cannot be received"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            if po_item.is_closed_short:
-                return Response(
-                    {
-                        "error": (
-                            f"Line item {po_item_id} was closed short; reopen it with "
-                            "POST .../reopen-short/ before receiving more against it"
-                        )
-                    },
+                    {"error": f"Line item {po_item_id} {refusal}"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -2788,13 +2784,21 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
 
         NOTE (#883): this is a SEPARATE receive path from
         :func:`services.receive_delivery` (used by ``receive``/``mark-delivered``)
-        and is intentionally left inline. Its behaviour diverges in ways that do
-        not parameterize cleanly: it upserts one delivery per day
+        and its side effects are still written inline. Its behaviour diverges in
+        ways that do not parameterize cleanly: it upserts one delivery per day
         (``get_or_create`` on ``delivery_date``) instead of always creating a new
         delivery, it records scan-specific ``DeliveryItem`` fields
         (``scanned_upc``/``scanned_at``/``scanned_by``/damage/expiry), it never
-        sets ``delivery.is_complete``, and it records NO audit event. Kept as-is
-        to preserve exact behaviour; flagged here as a future de-duplication.
+        sets ``delivery.is_complete``, and it records NO audit event. Those four
+        divergences are still the case; the rest is flagged as a future
+        de-duplication.
+
+        What it does NOT decide for itself is settlement. Which lines may still
+        take a receipt (:func:`services.receipt_refusal`) and what the order's
+        status should be afterwards (:func:`services.refresh_receipt_status`)
+        are answered by the same two functions the shared path uses, because a
+        second opinion on either produced orders that could never be closed out
+        and receipts that quietly erased a written-off shortfall.
         """
         serializer = BarcodeReceiptSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -2845,6 +2849,17 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
             )
 
         po_item = matching_items[0]
+
+        # The same answer the ``receive`` action gets to "may this line still
+        # take a receipt?": a struck-off line, or one whose balance has been
+        # written off, is finished with. Crediting stock against either would
+        # erase the record that says nothing more is coming.
+        refusal = services.receipt_refusal(po_item)
+        if refusal is not None:
+            return Response(
+                {"error": f"Line item {po_item.id} {refusal}", "po_item_id": po_item.id},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Kit lines are refused here rather than mis-received (op-8n0). This
         # endpoint DUPLICATES the stock mutation inline instead of routing
@@ -2910,12 +2925,7 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
             item.current_stock += quantity_received
             item.save()
 
-            # Update purchase order status
-            if purchase_order.is_fully_received:
-                purchase_order.status = PurchaseOrder.Status.RECEIVED
-            else:
-                purchase_order.status = PurchaseOrder.Status.PARTIALLY_RECEIVED
-            purchase_order.save()
+            services.refresh_receipt_status(purchase_order)
 
             # Create lead time log if order is complete
             if po_item.is_fully_received:

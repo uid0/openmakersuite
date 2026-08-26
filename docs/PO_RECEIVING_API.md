@@ -480,6 +480,6 @@ data.
 | Endpoint | Use |
 | -------- | --- |
 | `POST .../mark-delivered/` | Everything outstanding arrived — receive and stock it all in one delivery. |
-| `POST /api/reorders/receipts/scan_barcode/` | A separate, older inline receive path keyed on UPC. Refuses kit lines and writes no audit event. Prefer `receive` with a `scan_codes` match. |
+| `POST /api/reorders/receipts/scan_barcode/` | A separate, older inline receive path keyed on UPC. Refuses kit lines, voided lines and lines closed short, refuses more than the outstanding quantity (unlike `receive`, it does not accept an over-receipt), and writes no audit event. It settles the order through the same derivation as `receive`, so it leaves `status` agreeing with the lines. Prefer `receive` with a `scan_codes` match. |
 | `POST /api/inventory/serialized-components/scan_receive/` | Accession a serial with no purchase order behind it. |
 | `GET .../item-lookup/?q=` | Resolve an identifier against the *supplier catalogue* when **adding** a line. Not for receiving — use the worksheet's `scan_codes`. |

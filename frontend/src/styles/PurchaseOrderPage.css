@@ -652,6 +652,29 @@
   background-color: #fecaca;
 }
 
+/* Reopening a line closed short is a correction, not a destructive act, so it
+   reads as an ordinary secondary action rather than borrowing the void red. */
+.btn-reopen-short {
+  padding: 0.5rem 1rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.375rem;
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-reopen-short:hover:not(:disabled) {
+  background-color: #dbeafe;
+}
+
+.btn-reopen-short:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .voided-status {
   display: flex;
   flex-direction: column;

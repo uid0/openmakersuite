@@ -194,6 +194,51 @@ describe('closing a line short', () => {
     expect(body.items[0].close_short).toBeUndefined();
   });
 
+  test('editing the quantity through an empty box keeps the flag and the typed reason', async () => {
+    // Every backspace-and-retype passes through an empty value. Treating that
+    // transient state as "no longer short" would throw away the reason the
+    // operator had already typed, mid-edit, with no warning.
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeOrder() });
+    (api.purchaseOrderAPI.receiveItems as jest.Mock).mockResolvedValue({ data: makeOrder() });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^receive items$/i }));
+    const quantity = screen.getByLabelText('Receive quantity for Stocked Bolt');
+    fireEvent.change(quantity, { target: { value: '4' } });
+
+    await screen.findByTestId('receive-short-row-301');
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.change(screen.getByLabelText(/reason for closing Stocked Bolt short/i), {
+      target: { value: 'vendor cancelled the backorder' },
+    });
+
+    // Correcting 4 to 5: the box is empty for one keystroke, then zero-ish
+    // values on the way back up. None of those is a decision.
+    fireEvent.change(quantity, { target: { value: '' } });
+    fireEvent.change(quantity, { target: { value: '0' } });
+    fireEvent.change(quantity, { target: { value: '5' } });
+
+    const row = await screen.findByTestId('receive-short-row-301');
+    expect(row).toBeInTheDocument();
+    expect(screen.getByRole('checkbox')).toBeChecked();
+    expect(screen.getByLabelText(/reason for closing Stocked Bolt short/i)).toHaveValue(
+      'vendor cancelled the backorder',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm receipt/i }));
+
+    await waitFor(() => {
+      expect(api.purchaseOrderAPI.receiveItems).toHaveBeenCalled();
+    });
+    const [, body] = (api.purchaseOrderAPI.receiveItems as jest.Mock).mock.calls[0];
+    expect(body.items[0]).toMatchObject({
+      quantity_received: 5,
+      close_short: true,
+      close_short_reason: 'vendor cancelled the backorder',
+    });
+  });
+
   test('correcting the quantity back up drops the close-short the operator can no longer see', async () => {
     // The offer only renders while the quantity is short. A flag ticked at 4 of
     // 7 and then corrected to 7 would otherwise still be sent — input the
@@ -543,5 +588,109 @@ describe('an uncaptured serial is never silent', () => {
     await screen.findByRole('button', { name: /^receive items$/i });
     expect(screen.queryByTestId('serials-outstanding-warning')).not.toBeInTheDocument();
     expect(screen.queryByTestId('line-serials-outstanding-301')).not.toBeInTheDocument();
+  });
+});
+
+
+describe('correcting a close-short from the purchase-order page', () => {
+  /** The same order with its one line already written off at 3 of 10. */
+  const closedShortOrder = () =>
+    makeOrder({
+      status: 'received',
+      status_label: 'Fully Received',
+      can_receive: false,
+      is_settled: true,
+      has_receipt_variance: true,
+      outstanding_line_count: 0,
+      variance_line_count: 1,
+      items: [
+        {
+          ...makeOrder().items[0],
+          quantity_pending: 7,
+          receipt_state: 'closed_short',
+          receipt_state_label: 'Closed short',
+          is_settled: true,
+          has_receipt_variance: true,
+          is_short_received: true,
+          is_closed_short: true,
+          closed_short_at: '2026-08-20T10:00:00Z',
+          closed_short_by_username: 'clerk',
+          closed_short_reason: 'backorder cancelled',
+        },
+      ],
+    });
+
+  test('the reopen control is offered only on a line that is closed short', async () => {
+    // Without it the mistake is uncorrectable from the browser: the receive
+    // panel skips settled lines, so a closed-short line is never offered there.
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: closedShortOrder() });
+
+    renderPage();
+
+    expect(await screen.findByTestId('reopen-short-301')).toHaveTextContent(/reopen/i);
+  });
+
+  test('an ordinary outstanding line offers no reopen control', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeOrder() });
+
+    renderPage();
+
+    await screen.findByRole('button', { name: /^receive items$/i });
+    expect(screen.queryByTestId('reopen-short-301')).not.toBeInTheDocument();
+  });
+
+  test('cancelling the reason prompt reopens nothing', async () => {
+    // `null` is Cancel and `''` is "confirmed, nothing typed" — different
+    // answers, and only one of them is a decision.
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: closedShortOrder() });
+    (promptInput as jest.Mock).mockResolvedValue(null);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('reopen-short-301'));
+
+    await waitFor(() => {
+      expect(promptInput).toHaveBeenCalled();
+    });
+    expect(api.purchaseOrderAPI.reopenShort).not.toHaveBeenCalled();
+  });
+
+  test('confirming sends the line and the reason, and the line becomes receivable again', async () => {
+    // The trap being removed: after the correction the line is outstanding, so
+    // the receive panel offers it.
+    const reopened = makeOrder({
+      status: 'partially_received',
+      status_label: 'Partially Received',
+      can_receive: true,
+      is_settled: false,
+      outstanding_line_count: 1,
+      items: [
+        {
+          ...makeOrder().items[0],
+          is_closed_short: false,
+          closed_short_at: '2026-08-20T10:00:00Z',
+          closed_short_by_username: 'clerk',
+          closed_short_reason: 'backorder cancelled',
+        },
+      ],
+    });
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: closedShortOrder() });
+    (promptInput as jest.Mock).mockResolvedValue('closed the wrong line');
+    (api.purchaseOrderAPI.reopenShort as jest.Mock).mockResolvedValue({ data: reopened });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('reopen-short-301'));
+
+    await waitFor(() => {
+      expect(api.purchaseOrderAPI.reopenShort).toHaveBeenCalled();
+    });
+    const [, body] = (api.purchaseOrderAPI.reopenShort as jest.Mock).mock.calls[0];
+    expect(body).toEqual({
+      items: [{ purchase_order_item: 301, reason: 'closed the wrong line' }],
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: /^receive items$/i }));
+    expect(await screen.findByLabelText('Receive quantity for Stocked Bolt')).toBeInTheDocument();
   });
 });

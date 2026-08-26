@@ -24,7 +24,7 @@ ScanTTY and the web share, not a service call the clients do not make.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -39,7 +39,12 @@ from inventory.models import ItemSupplier, KitComponent, SerializedComponent
 from inventory.services.kits import build_kit_snapshot
 from inventory.tests.factories import InventoryItemFactory, SupplierFactory
 from reorder_queue import services
-from reorder_queue.models import PurchaseOrder, PurchaseOrderAuditEvent, PurchaseOrderItem
+from reorder_queue.models import (
+    LeadTimeLog,
+    PurchaseOrder,
+    PurchaseOrderAuditEvent,
+    PurchaseOrderItem,
+)
 
 
 @pytest.fixture
@@ -1900,3 +1905,283 @@ class TestRejectedReceiptWritesNothing:
         received = events.first().metadata["received_items"][0]
         assert received["purchase_order_item"] == line.pk
         assert received["quantity_received"] == 8
+
+
+def scan_barcode(client, purchase_order, upc, quantity):
+    """The older inline UPC receive path, driven as a real request."""
+    return client.post(
+        "/api/reorders/receipts/scan_barcode/",
+        {
+            "purchase_order_id": purchase_order.id,
+            "scanned_upc": upc,
+            "quantity_received": quantity,
+        },
+        format="json",
+    )
+
+
+def void_line(client, purchase_order, po_item, reason="ordered by mistake"):
+    return client.post(
+        reverse("purchaseorder-void-item", args=[purchase_order.pk, po_item.pk]),
+        {"reason": reason},
+        format="json",
+    )
+
+
+def settlement_consistent(purchase_order):
+    """Re-read the order and assert its stored status says what its lines say.
+
+    The invariant every settlement-changing path has to leave behind. An order
+    whose lines are all settled but whose status still reads
+    ``partially_received`` is unreceivable: both close-out actions refuse it for
+    having nothing outstanding, and nothing else moves it.
+
+    Read back through a fresh instance so what is checked is what was persisted,
+    not what the request happened to leave in memory. Returns it, so a caller
+    can go on to assert which of the two statuses it landed on.
+    """
+    fresh = PurchaseOrder.objects.get(pk=purchase_order.pk)
+    expected = (
+        PurchaseOrder.Status.RECEIVED
+        if fresh.is_settled
+        else PurchaseOrder.Status.PARTIALLY_RECEIVED
+    )
+    assert fresh.status == expected, (
+        f"status {fresh.status!r} but is_settled={fresh.is_settled} "
+        f"with {fresh.outstanding_line_count} outstanding line(s)"
+    )
+    return fresh
+
+
+@pytest.mark.django_db
+class TestSettlementDecidesStatusOnEveryPath:
+    """One answer to "what status does this order's settlement imply?".
+
+    Five paths can change whether a line is settled — receiving, closing short,
+    reopening, voiding a line, and the older inline barcode scan. Each of them
+    has to leave the stored status agreeing with the lines, or the order is
+    stranded: every close-out action refuses an order with nothing outstanding,
+    so a status that disagrees cannot be corrected through the API at all.
+    """
+
+    def test_receiving_the_last_outstanding_line_finishes_the_order(
+        self, client, supplier, operator
+    ):
+        purchase_order = make_po(supplier, operator)
+        first = add_line(purchase_order, make_item("Widget", supplier=supplier), 4)
+        second = add_line(purchase_order, make_item("Gasket", supplier=supplier), 6)
+
+        receive(client, purchase_order, [{"purchase_order_item": first.pk, "quantity_received": 4}])
+        assert settlement_consistent(purchase_order).status == (
+            PurchaseOrder.Status.PARTIALLY_RECEIVED
+        )
+
+        receive(
+            client, purchase_order, [{"purchase_order_item": second.pk, "quantity_received": 6}]
+        )
+        assert settlement_consistent(purchase_order).status == PurchaseOrder.Status.RECEIVED
+
+    def test_closing_and_reopening_move_the_status_both_ways(self, client, supplier, operator):
+        purchase_order = make_po(supplier, operator)
+        line = add_line(purchase_order, make_item("Widget", supplier=supplier), 10)
+        receive(client, purchase_order, [{"purchase_order_item": line.pk, "quantity_received": 8}])
+        assert settlement_consistent(purchase_order).status == (
+            PurchaseOrder.Status.PARTIALLY_RECEIVED
+        )
+
+        client.post(
+            reverse("purchaseorder-close-short", args=[purchase_order.pk]),
+            {"items": [{"purchase_order_item": line.pk, "reason": "backorder cancelled"}]},
+            format="json",
+        )
+        assert settlement_consistent(purchase_order).status == PurchaseOrder.Status.RECEIVED
+
+        client.post(
+            reverse("purchaseorder-reopen-short", args=[purchase_order.pk]),
+            {"items": [{"purchase_order_item": line.pk, "reason": "closed the wrong line"}]},
+            format="json",
+        )
+        assert settlement_consistent(purchase_order).status == (
+            PurchaseOrder.Status.PARTIALLY_RECEIVED
+        )
+
+    def test_voiding_the_last_outstanding_line_finishes_the_order(self, client, supplier, operator):
+        """Striking a line off settles it, so nothing is waiting on it any more.
+
+        Voided after the other line had already landed, the order used to keep
+        reading ``partially_received`` while its own payload said receiving was
+        finished — and both close-out actions then refused it for having
+        nothing outstanding, so no API call could move it.
+        """
+        purchase_order = make_po(supplier, operator)
+        landed = add_line(purchase_order, make_item("Widget", supplier=supplier), 10)
+        struck = add_line(purchase_order, make_item("Gasket", supplier=supplier), 5)
+
+        receive(
+            client, purchase_order, [{"purchase_order_item": landed.pk, "quantity_received": 10}]
+        )
+        assert settlement_consistent(purchase_order).status == (
+            PurchaseOrder.Status.PARTIALLY_RECEIVED
+        )
+
+        response = void_line(client, purchase_order, struck)
+        assert response.status_code == status.HTTP_200_OK, response.data
+
+        closed_out = settlement_consistent(purchase_order)
+        assert closed_out.status == PurchaseOrder.Status.RECEIVED
+        assert closed_out.outstanding_line_count == 0
+
+    def test_scanning_the_last_outstanding_line_finishes_a_short_closed_order(
+        self, client, supplier, operator
+    ):
+        """The barcode path reads settlement the same way the others do.
+
+        With one line closed short at 8 of 10, "did everything we ordered turn
+        up?" is false for ever. Deciding the status from that question left the
+        order at ``partially_received`` with nothing outstanding and no way out.
+        """
+        purchase_order = make_po(supplier, operator)
+        short_item = make_item("Widget", stock=0, supplier=supplier)
+        short_line = add_line(purchase_order, short_item, 10)
+        scanned_item = make_item(
+            "Gasket", stock=0, supplier=supplier, sku_barcodes={"package_upc": "0123456789012"}
+        )
+        scanned_line = add_line(purchase_order, scanned_item, 5)
+
+        receive(
+            client, purchase_order, [{"purchase_order_item": short_line.pk, "quantity_received": 8}]
+        )
+        client.post(
+            reverse("purchaseorder-close-short", args=[purchase_order.pk]),
+            {"items": [{"purchase_order_item": short_line.pk, "reason": "backorder cancelled"}]},
+            format="json",
+        )
+
+        response = scan_barcode(client, purchase_order, "0123456789012", 5)
+        assert response.status_code == status.HTTP_200_OK, response.data
+
+        scanned_line.refresh_from_db()
+        scanned_item.refresh_from_db()
+        assert scanned_line.quantity_received == 5
+        assert scanned_item.current_stock == 5
+
+        closed_out = settlement_consistent(purchase_order)
+        assert closed_out.status == PurchaseOrder.Status.RECEIVED
+        # The shortfall survives the order closing out — that is the point of it.
+        assert closed_out.has_receipt_variance is True
+        assert response.data["order_status"] == PurchaseOrder.Status.RECEIVED
+
+    def test_scanning_a_closed_short_line_is_refused(self, client, supplier, operator):
+        """The written-off balance is not a receiving opportunity.
+
+        Crediting it would walk the line back to ``received`` and erase the
+        shortfall the close-short record exists to preserve.
+        """
+        purchase_order = make_po(supplier, operator)
+        item = make_item(
+            "Widget", stock=0, supplier=supplier, sku_barcodes={"package_upc": "0123456789012"}
+        )
+        line = add_line(purchase_order, item, 10)
+        add_line(purchase_order, make_item("Gasket", supplier=supplier), 5)
+
+        receive(client, purchase_order, [{"purchase_order_item": line.pk, "quantity_received": 8}])
+        client.post(
+            reverse("purchaseorder-close-short", args=[purchase_order.pk]),
+            {"items": [{"purchase_order_item": line.pk, "reason": "backorder cancelled"}]},
+            format="json",
+        )
+
+        response = scan_barcode(client, purchase_order, "0123456789012", 2)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "reopen-short" in response.data["error"]
+        line.refresh_from_db()
+        item.refresh_from_db()
+        assert line.quantity_received == 8
+        assert item.current_stock == 8
+        assert line.receipt_state == PurchaseOrderItem.ReceiptState.CLOSED_SHORT
+
+    def test_scanning_a_voided_line_is_refused(self, client, supplier, operator):
+        purchase_order = make_po(supplier, operator)
+        item = make_item(
+            "Widget", stock=0, supplier=supplier, sku_barcodes={"package_upc": "0123456789012"}
+        )
+        line = add_line(purchase_order, item, 4)
+        add_line(purchase_order, make_item("Gasket", supplier=supplier), 5)
+        void_line(client, purchase_order, line)
+
+        response = scan_barcode(client, purchase_order, "0123456789012", 4)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "voided" in response.data["error"]
+        line.refresh_from_db()
+        item.refresh_from_db()
+        assert line.quantity_received == 0
+        assert item.current_stock == 0
+
+
+@pytest.mark.django_db
+class TestLeadTimeIsLoggedOncePerLine:
+    """A line becomes fully received once, so it is logged once.
+
+    Supplier performance counts LeadTimeLog rows and averages their lead times.
+    Now that an over-receipt is accepted rather than refused, a second box
+    against a line that already landed would otherwise be counted as a second
+    delivery of the same line.
+    """
+
+    def _sent_po(self, supplier, operator):
+        purchase_order = make_po(supplier, operator)
+        purchase_order.sent_at = timezone.now() - timedelta(days=5)
+        purchase_order.save(update_fields=["sent_at"])
+        return purchase_order
+
+    def test_a_line_that_lands_in_full_is_logged_once(self, client, supplier, operator):
+        purchase_order = self._sent_po(supplier, operator)
+        line = add_line(purchase_order, make_item("Widget", supplier=supplier), 5)
+
+        receive(client, purchase_order, [{"purchase_order_item": line.pk, "quantity_received": 5}])
+
+        assert LeadTimeLog.objects.filter(item_supplier=line.item_supplier).count() == 1
+
+    def test_an_over_receipt_after_the_line_landed_logs_nothing_more(
+        self, client, supplier, operator
+    ):
+        purchase_order = self._sent_po(supplier, operator)
+        line = add_line(purchase_order, make_item("Widget", supplier=supplier), 5)
+        add_line(purchase_order, make_item("Gasket", supplier=supplier), 3)
+
+        receive(client, purchase_order, [{"purchase_order_item": line.pk, "quantity_received": 5}])
+        assert LeadTimeLog.objects.filter(item_supplier=line.item_supplier).count() == 1
+
+        # A second box turns up for a line that already landed. It is recorded
+        # as the over-receipt it is — and it is not a second delivery.
+        response = receive(
+            client, purchase_order, [{"purchase_order_item": line.pk, "quantity_received": 1}]
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        line.refresh_from_db()
+        assert line.quantity_received == 6
+        assert line.receipt_state == PurchaseOrderItem.ReceiptState.OVER_RECEIVED
+        assert LeadTimeLog.objects.filter(item_supplier=line.item_supplier).count() == 1
+
+    def test_one_request_that_over_receives_a_line_twice_logs_once(
+        self, client, supplier, operator
+    ):
+        """Two entries for one line in a single receipt sum past the order."""
+        purchase_order = self._sent_po(supplier, operator)
+        line = add_line(purchase_order, make_item("Widget", supplier=supplier), 5)
+
+        receive(
+            client,
+            purchase_order,
+            [
+                {"purchase_order_item": line.pk, "quantity_received": 5},
+                {"purchase_order_item": line.pk, "quantity_received": 1},
+            ],
+        )
+
+        line.refresh_from_db()
+        assert line.quantity_received == 6
+        assert LeadTimeLog.objects.filter(item_supplier=line.item_supplier).count() == 1

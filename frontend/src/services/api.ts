@@ -2411,6 +2411,13 @@ export const purchaseOrderAPI = {
     orderId: string,
     data: { items: { purchase_order_item: number; reason?: string }[] },
   ) => api.post<any>(`/reorders/purchase-orders/${orderId}/close-short/`, data),
+  // Take a close-short back. A CORRECTION, not an undo: the close-short stays
+  // on the line and this is stamped beside it with its own actor, time and
+  // reason. The line becomes outstanding again, so the receive panel offers it.
+  reopenShort: (
+    orderId: string,
+    data: { items: { purchase_order_item: number; reason?: string }[] },
+  ) => api.post<any>(`/reorders/purchase-orders/${orderId}/reopen-short/`, data),
   // Finish the order off: closes every still-outstanding line short and
   // advances the order to `received`. Distinct from `markDelivered`, which
   // asserts the opposite — that everything outstanding DID arrive.

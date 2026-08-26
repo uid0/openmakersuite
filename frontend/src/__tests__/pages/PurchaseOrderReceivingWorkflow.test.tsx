@@ -18,7 +18,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 import PurchaseOrderPage from '../../pages/PurchaseOrderPage';
 import * as api from '../../services/api';
-import { promptInput } from '../../utils/dialogs';
+import { promptInput, showSuccess } from '../../utils/dialogs';
 
 vi.mock('../../services/api');
 
@@ -57,6 +57,7 @@ const makeOrder = (overrides: Record<string, unknown> = {}) => ({
   has_receipt_variance: false,
   outstanding_line_count: 1,
   variance_line_count: 0,
+  total_received_quantity: 3,
   serials_outstanding: 0,
   order_date: '2026-04-01T00:00:00Z',
   expected_delivery_date: '2026-05-15',
@@ -389,6 +390,88 @@ describe('closing the order out', () => {
       expect.any(String),
       expect.stringMatching(/written off, not marked received/i),
     );
+  });
+
+  test('an order nothing arrived against is not announced as closed out', async () => {
+    // The server writes the lines off but leaves the order where it was —
+    // `received` is a claim goods turned up. Saying "closed out" over a hero
+    // still reading "Sent" would be the page contradicting itself, and would
+    // leave the operator with no idea what to do next.
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeOrder() });
+    (api.purchaseOrderAPI.markReceived as jest.Mock).mockResolvedValue({
+      data: makeOrder({
+        status: 'sent',
+        status_label: 'Sent to Supplier',
+        is_settled: true,
+        outstanding_line_count: 0,
+        total_received_quantity: 0,
+      }),
+    });
+    (promptInput as jest.Mock).mockResolvedValue('vendor never shipped');
+
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('mark-received-button'));
+
+    await waitFor(() => {
+      expect(showSuccess).toHaveBeenCalled();
+    });
+    const [message] = (showSuccess as jest.Mock).mock.calls.at(-1);
+    expect(message).not.toMatch(/closed out/i);
+    expect(message).toMatch(/nothing was received against this order/i);
+    // Names an exit that exists on this page for this operator (staff here).
+    expect(message).toMatch(/void po/i);
+  });
+
+  test('a member who cannot void the order is told who can', async () => {
+    // `canVoidOrder` requires staff, so pointing a member at a control they
+    // cannot see would be the same dead end in a different costume.
+    localStorage.setItem('is_staff', 'false');
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeOrder() });
+    (api.purchaseOrderAPI.markReceived as jest.Mock).mockResolvedValue({
+      data: makeOrder({
+        status: 'sent',
+        status_label: 'Sent to Supplier',
+        is_settled: true,
+        outstanding_line_count: 0,
+        total_received_quantity: 0,
+      }),
+    });
+    (promptInput as jest.Mock).mockResolvedValue('');
+
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('mark-received-button'));
+
+    await waitFor(() => {
+      expect(showSuccess).toHaveBeenCalled();
+    });
+    const [message] = (showSuccess as jest.Mock).mock.calls.at(-1);
+    expect(message).not.toMatch(/closed out/i);
+    expect(message).toMatch(/ask a staff member/i);
+  });
+
+  test('an order that really did close out still says so', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeOrder() });
+    (api.purchaseOrderAPI.markReceived as jest.Mock).mockResolvedValue({
+      data: makeOrder({
+        status: 'received',
+        status_label: 'Fully Received',
+        can_receive: false,
+        is_settled: true,
+        outstanding_line_count: 0,
+        total_received_quantity: 3,
+      }),
+    });
+    (promptInput as jest.Mock).mockResolvedValue('vendor closed the order');
+
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('mark-received-button'));
+
+    await waitFor(() => {
+      expect(showSuccess).toHaveBeenCalledWith('Purchase order closed out');
+    });
   });
 
   test('cancelling the prompt closes nothing', async () => {

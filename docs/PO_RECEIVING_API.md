@@ -21,7 +21,9 @@ below requires an authenticated user.
 5. **Capture serials**, with optional lot and expiry, on lines that have
    `serial_targets`.
 6. **Finish the order off.** It advances to `received` on its own once every
-   line is settled; `POST .../mark-received/` closes out whatever is left.
+   line is settled *and something has actually been received against it*;
+   `POST .../mark-received/` closes out whatever is left. See
+   [`received` means goods arrived](#received-means-goods-arrived).
 
 Steps 3–5 are all part of one `POST .../receive/` call.
 
@@ -300,7 +302,9 @@ a short receipt *ends*.
 
 The line becomes `closed_short` and `is_settled`, while `quantity_received`
 stays at what actually arrived and `quantity_variance` stays negative. The
-order advances to `received` if this settles the last outstanding line.
+order advances to `received` if this settles the last outstanding line and
+something was received against the order — see
+[`received` means goods arrived](#received-means-goods-arrived).
 
 Refused with a `400` when the line is already closed short (the first reason and
 actor are a record, not a draft), is voided, or has nothing outstanding.
@@ -360,7 +364,9 @@ the purchase order's audit trail (`po_receive_items` and
 ## `POST /api/reorders/purchase-orders/{id}/mark-received/`
 
 Finish the order off. Closes **every still-outstanding line** short, recording
-the optional `reason` against each, and advances the order to `received`.
+the optional `reason` against each. The order advances to `received` if
+something was received against it — see
+[`received` means goods arrived](#received-means-goods-arrived).
 
 ```json
 { "reason": "vendor closed the order" }
@@ -376,7 +382,40 @@ invents a shortfall on a line that landed.
 > and a tidy one.
 
 Refused with a `400` when the order has nothing outstanding, rather than
-silently doing nothing.
+silently doing nothing. When nothing was received against it either, that
+refusal says so and names the way out:
+
+> Every line on this order is already settled, so there is nothing left to
+> receive or close. Nothing was received against it either, and an order only
+> reads as received once goods actually arrived — void or cancel the order
+> instead.
+
+`mark-delivered` refuses a settled order with the same message.
+
+---
+
+## `received` means goods arrived
+
+An order reaches `received` only when **both** are true:
+
+1. every active line `is_settled` — received in full, over-received, closed
+   short, or voided; and
+2. something was actually received against the order (`total_received_quantity`
+   is greater than zero).
+
+Settlement alone is not enough, because two of the four ways a line settles are
+not deliveries: closing it short writes the balance off, and voiding it strikes
+the line from the order. An order every line of which settled that way has
+finished receiving without anything ever arriving, and reporting it `received`
+would put "Fully Received" on a screen over a received quantity of zero.
+
+Such an order stays `sent` or `confirmed`. It is not stuck: the lines are
+settled and on the record, and the way to finish with the order is to void or
+cancel the **order** (`POST .../void/`), not to mark it received. Both
+`mark-received` and `mark-delivered` say exactly that when refusing it.
+
+A client should not infer the status from settlement. Read `status` off the
+response — every action here returns the full order.
 
 ---
 
@@ -452,7 +491,7 @@ At order level:
 | Field | Meaning |
 | ----- | ------- |
 | `is_fully_received` | Every active line got at least its ordered quantity. Stays `false` for ever once a line is closed short — the honest answer to "did everything turn up?" |
-| `is_settled` | Receiving is finished with every active line. **This** is what advances the order to `received`. |
+| `is_settled` | Receiving is finished with every active line. Necessary for the order to reach `received`, but not sufficient — see [`received` means goods arrived](#received-means-goods-arrived). |
 | `has_receipt_variance` | Some line arrived short or over. Survives the order closing — that is the point. |
 | `outstanding_line_count` | Active lines still being waited on. |
 | `variance_line_count` | Settled lines that did not match the order. |

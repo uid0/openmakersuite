@@ -1730,7 +1730,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         # savepoints, so either everything lands or nothing does.
         try:
             with transaction.atomic():
-                services.receive_delivery(
+                delivery = services.receive_delivery(
                     purchase_order,
                     resolved_lines,
                     received_by=request.user,
@@ -1744,6 +1744,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 # is one operator action rather than two that can half-happen.
                 if closures:
                     services.close_lines_short(purchase_order, closures, actor=request.user)
+                    services.refresh_delivery_completion(delivery, purchase_order)
 
                 record_audit_event(
                     action=PurchaseOrderAuditEvent.Action.PO_RECEIVE_ITEMS,
@@ -1816,8 +1817,14 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         Refuses a line that is already closed short, one that is voided, and one
         that has nothing outstanding — in each case rather than overwriting the
-        reason and actor already recorded. Advances the order to ``received``
-        when this settles the last outstanding line.
+        reason and actor already recorded.
+
+        Advances the order to ``received`` when this settles the last
+        outstanding line AND something has actually been received against the
+        order. Writing every line off without a single delivery does not make an
+        order ``received`` — that status is a claim that goods arrived — so such
+        an order stays ``sent`` or ``confirmed`` and is closed out by voiding or
+        cancelling the ORDER instead.
         """
         purchase_order = self.get_object()
 
@@ -1977,9 +1984,15 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         ``POST .../mark-received/`` with an optional ``{"reason": "..."}``.
 
         Closes every line still outstanding short, recording ``reason`` against
-        each, and advances the order to ``received``. The bulk form of
-        ``close-short``, for the ordinary case where the operator has finished
-        unpacking and whatever has not turned up is not going to.
+        each. The bulk form of ``close-short``, for the ordinary case where the
+        operator has finished unpacking and whatever has not turned up is not
+        going to.
+
+        The order advances to ``received`` only if something was actually
+        received against it. Written off with nothing ever delivered, it stays
+        ``sent`` or ``confirmed`` and the way to finish with it is to void or
+        cancel the ORDER; the refusal this action returns once every line is
+        settled says so.
 
         Distinct from ``mark-delivered``, which asserts the opposite — that
         every outstanding quantity *did* arrive and should be received and

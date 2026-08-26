@@ -2370,3 +2370,63 @@ class TestReceivedMeansGoodsArrived:
             assert (
                 settlement_consistent(purchase_order).status == PurchaseOrder.Status.RECEIVED
             ), f"an order that received goods failed to close out via {settle}"
+
+
+@pytest.mark.django_db
+class TestDeliveryCompletionReflectsTheWholeRequest:
+    """ "Did this delivery finish the order off?" is answered after the request.
+
+    A receipt can settle the last outstanding line by CLOSING IT SHORT rather
+    than by filling it, and that closure is applied after the receipt itself.
+    Answering before it left the order ``received`` and its delivery flagged
+    incomplete — two records of the same event disagreeing.
+    """
+
+    def test_a_receipt_whose_close_short_settles_the_order_is_flagged_complete(
+        self, client, supplier, operator
+    ):
+        purchase_order = make_po(supplier, operator)
+        line = add_line(purchase_order, make_item("Widget", supplier=supplier), 10)
+
+        response = receive(
+            client,
+            purchase_order,
+            [
+                {
+                    "purchase_order_item": line.pk,
+                    "quantity_received": 8,
+                    "close_short": True,
+                    "close_short_reason": "backorder cancelled",
+                }
+            ],
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        purchase_order.refresh_from_db()
+        delivery = purchase_order.deliveries.get()
+
+        assert purchase_order.status == PurchaseOrder.Status.RECEIVED
+        assert delivery.is_complete is True
+
+    def test_a_receipt_that_leaves_work_outstanding_is_not_flagged_complete(
+        self, client, supplier, operator
+    ):
+        purchase_order = make_po(supplier, operator)
+        line = add_line(purchase_order, make_item("Widget", supplier=supplier), 10)
+        add_line(purchase_order, make_item("Gasket", supplier=supplier), 5)
+
+        receive(
+            client,
+            purchase_order,
+            [
+                {
+                    "purchase_order_item": line.pk,
+                    "quantity_received": 8,
+                    "close_short": True,
+                    "close_short_reason": "backorder cancelled",
+                }
+            ],
+        )
+
+        purchase_order.refresh_from_db()
+        assert purchase_order.deliveries.get().is_complete is False

@@ -366,7 +366,10 @@ def receive_delivery(
     per-item ``receive`` action so receipt side effects stay consistent (DRY).
     The delivery is flagged ``is_complete`` when this receipt leaves receiving
     finished with the whole PO — for ``mark_delivered`` that is always the case,
-    matching its previous behaviour.
+    matching its previous behaviour. A caller that settles further lines in the
+    same request (``receive`` applies its ``close_short`` closures after this
+    returns) re-derives the flag through :func:`refresh_delivery_completion`
+    once everything has been applied.
 
     **Quantities are recorded as given, including more than was ordered.** An
     over-receipt credits the stock that physically arrived and leaves the
@@ -478,9 +481,7 @@ def receive_delivery(
                     close_linked_reorder_request(po_item, delivery.delivery_date)
 
         refresh_receipt_status(purchase_order)
-
-        delivery.is_complete = purchase_order.is_settled
-        delivery.save(update_fields=["is_complete"])
+        refresh_delivery_completion(delivery, purchase_order)
 
     return delivery
 
@@ -518,6 +519,25 @@ def mark_delivered_receipt(
         carrier=carrier,
         receipt_notes=receipt_notes,
     )
+
+
+def refresh_delivery_completion(delivery, purchase_order) -> bool:
+    """Re-derive whether this delivery left receiving finished with the order.
+
+    THE one answer to "was this the delivery that finished the order off?", so
+    a caller that does more work after the receipt re-asks it here rather than
+    computing its own. ``receive`` closes lines short after
+    :func:`receive_delivery` returns, and a receipt whose closure settles the
+    last outstanding line is exactly a delivery that finished the order — the
+    flag has to be written after that, not before it.
+
+    Takes the order the caller has been mutating rather than reading
+    ``delivery.purchase_order``, which would be a second instance with its own
+    stale aggregate cache.
+    """
+    delivery.is_complete = purchase_order.is_settled
+    delivery.save(update_fields=["is_complete"])
+    return delivery.is_complete
 
 
 def refresh_receipt_status(purchase_order) -> str:

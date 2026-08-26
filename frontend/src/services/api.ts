@@ -2422,9 +2422,10 @@ export const purchaseOrderAPI = {
     orderId: string,
     data: { items: { purchase_order_item: number; reason?: string }[] },
   ) => api.post<any>(`/reorders/purchase-orders/${orderId}/reopen-short/`, data),
-  // Finish the order off: closes every still-outstanding line short and
-  // advances the order to `received`. Distinct from `markDelivered`, which
-  // asserts the opposite — that everything outstanding DID arrive.
+  // Finish the order off: closes every still-outstanding line short. The order
+  // reaches `received` only if something was actually received against it, so
+  // read the returned order's `status` rather than assuming. Distinct from
+  // `markDelivered`, which asserts the opposite — that everything DID arrive.
   markReceived: (orderId: string, data?: { reason?: string }) =>
     api.post<any>(`/reorders/purchase-orders/${orderId}/mark-received/`, data ?? {}),
   updateOrder: (orderId: string, data: PurchaseOrderUpdate) =>

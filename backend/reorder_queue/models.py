@@ -555,9 +555,15 @@ class PurchaseOrder(models.Model):
 
         True once each line has either been received in full, over-received, or
         had its outstanding balance closed short. This — not
-        :attr:`is_fully_received` — is what advances the order to ``received``,
+        :attr:`is_fully_received` — is what lets the order reach ``received``,
         so an order short-shipped by a vendor can be closed out and still carry
         the record of the shortfall.
+
+        Settlement is necessary but not sufficient: the order also has to have
+        taken something in (:attr:`has_received_anything`), because
+        ``received`` is a claim that goods arrived. An order every line of which
+        was written off or struck off without a delivery is settled and stays
+        where it is.
         """
         return self._line_item_totals["is_settled"]
 

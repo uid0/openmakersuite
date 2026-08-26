@@ -188,6 +188,9 @@ interface PurchaseOrder {
   is_settled: boolean;
   has_receipt_variance: boolean;
   outstanding_line_count: number;
+  // Units taken in across every line. Zero means nothing ever arrived, which
+  // is why an order can be fully settled and still not read `received`.
+  total_received_quantity: number;
   variance_line_count: number;
   serials_outstanding: number;
   // Served by the API from its own RECEIVABLE_STATUSES, so the button and the
@@ -1143,7 +1146,8 @@ const PurchaseOrderPage: React.FC = () => {
     const reason = await promptInput(
       'Close out this order?',
       `${outstanding.length} line${outstanding.length === 1 ? '' : 's'} will be recorded as ` +
-        'short — what did not arrive is written off, not marked received. Reason (optional):',
+        'short — what did not arrive is written off, not marked received. The order reads ' +
+        'as received only if something actually arrived against it. Reason (optional):',
     );
     // `null` is Cancel; `''` is "confirmed, no reason typed". Different
     // answers, and only one of them is a decision to close the order.
@@ -1152,10 +1156,28 @@ const PurchaseOrderPage: React.FC = () => {
     try {
       setSaving(true);
       const response = await purchaseOrderAPI.markReceived(orderId!, { reason });
-      if (response.data && typeof response.data === 'object' && response.data.id) {
-        setOrder(response.data as PurchaseOrder);
+      const settled =
+        response.data && typeof response.data === 'object' && response.data.id
+          ? (response.data as PurchaseOrder)
+          : null;
+      if (settled) setOrder(settled);
+
+      // Report what the server actually did, not what the request asked for.
+      // Writing every line off does not make an order received when nothing
+      // ever arrived — that status is a claim goods turned up — so the order
+      // stays where it was, and saying "closed out" over a hero still reading
+      // "Sent" would be the screen contradicting itself.
+      if (settled && settled.status !== 'received') {
+        showSuccess(
+          'Outstanding lines written off. Nothing was received against this order, so it is ' +
+            `still ${settled.status_label.toLowerCase()} — ` +
+            (isStaff
+              ? 'use Void PO to finish with it.'
+              : 'ask a staff member to void or cancel the order to finish with it.'),
+        );
+      } else {
+        showSuccess('Purchase order closed out');
       }
-      showSuccess('Purchase order closed out');
     } catch (err: any) {
       showError(extractErrorMessage(err, 'Failed to mark purchase order received'));
     } finally {
@@ -1892,7 +1914,10 @@ const PurchaseOrderPage: React.FC = () => {
             </label>
           </div>
           {receivableItems.length === 0 ? (
-            <p className="no-data">All line items have already been received.</p>
+            <p className="no-data">
+              Receiving has finished with every line on this order — each was received,
+              written off, or struck off.
+            </p>
           ) : (
             <table className="items-table receive-items-table">
               <thead>

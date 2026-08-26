@@ -112,7 +112,7 @@ is stated in `ReorderRequestViewSet.mark_ordered`'s docstring and pinned by
 ### Purchase-order line settlement
 
 "Is receiving finished with this line?" is defined once, on
-`PurchaseOrderItem.is_settled`, and nowhere else. Seven defects have come from
+`PurchaseOrderItem.is_settled`, and nowhere else. Six defects had come from
 code answering it with a predicate of its own — the last one from another app
 entirely — so `backend/reorder_queue/settlement_sites.py` derives the whole set
 of sites from that property (it walks it with `ast` to the model fields, then
@@ -136,7 +136,16 @@ That includes the Django admin, which writes through a `ModelForm` and so names
 no field for the scanner to see. A `ModelAdmin`/inline on `PurchaseOrderItem`
 that leaves any settlement column writable owes the refresh from one of its save
 hooks (`save_model`/`save_formset`/`save_related`); making those columns
-`readonly_fields` satisfies the rule instead.
+`readonly_fields` satisfies the rule instead. One that can DELETE lines owes it
+from `delete_model`/`delete_queryset` — a delete writes no settlement field at
+all and still changes what the order is owed — and denying delete permission
+satisfies that one. Re-derive only when something actually moved: `save_related`
+runs `save_formset` on every save, and an unconditional refresh overwrites the
+`status` an operator just picked on the same form.
+
+Do not read a clean run as "there is nothing left". The scan prints the write
+shapes it can and cannot see on every run; that list is the honest boundary and
+it has grown twice already.
 
 ### Django upgrade history
 

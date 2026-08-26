@@ -177,6 +177,29 @@ class TestDerivationIsHonoured:
         assert "No site bypasses the derivation." in printed
         assert "Scanned:" in printed
 
+    def test_the_report_names_the_write_shapes_it_cannot_see(self, capsys):
+        """A clean run must not read as "there is nothing left".
+
+        The write arm has been blind to a write SHAPE three times over, so the
+        report carries its own edges: what it can see and what it cannot, every
+        run, beside the clean verdict. The module's docstring says the limits
+        are stated in the report — this is that claim being honoured rather
+        than asserted.
+        """
+        assert settlement_sites.main([]) == 0
+        printed = capsys.readouterr().out
+
+        assert "Write shapes this scan CAN see:" in printed
+        assert "Write shapes it CANNOT see" in printed
+        for shape in settlement_sites.WRITE_SHAPES_SEEN:
+            assert shape in printed
+        for shape in settlement_sites.WRITE_SHAPES_UNSEEN:
+            assert shape in printed
+        assert settlement_sites.WRITE_SHAPES_UNSEEN, (
+            "the scan claims to name its own holes but lists none — that is a "
+            "claim of completeness this arm has already been wrong about twice"
+        )
+
     def test_the_command_line_form_can_list_the_whole_derived_set(self, capsys):
         """``--sites`` is how the derived set was read off for the PR."""
         assert settlement_sites.main(["--sites"]) == 0
@@ -674,15 +697,8 @@ class TestAdminEditsReDeriveTheOrder:
         assert purchase_order.status == PurchaseOrder.Status.PARTIALLY_RECEIVED
         assert [item.pk for item in purchase_order.outstanding_items] == [second.pk]
 
-    def test_lowering_a_line_on_the_order_inline_finishes_the_order(
-        self, admin_client, client, supplier, operator
-    ):
-        """The inline writes the same columns, so it owes the same refresh.
-
-        The order admin prefetches ``items``, so this also pins that the refresh
-        re-reads rather than trusting the cached relation's pre-edit quantities.
-        """
-        purchase_order, line = self._order_with_one_short_line(client, supplier, operator)
+    def _order_form_data(self, purchase_order, line, operator, **overrides):
+        """The order's change form, its line inline included, shaped for a POST."""
         model_admin = admin.site._registry[PurchaseOrder]
         request = RequestFactory().get("/")
         request.user = operator
@@ -711,10 +727,24 @@ class TestAdminEditsReDeriveTheOrder:
             data[f"{prefix}-0-{name}"] = self._form_value(line, name)
         data[f"{prefix}-0-id"] = str(line.pk)
         data[f"{prefix}-0-purchase_order"] = str(purchase_order.pk)
-        data[f"{prefix}-0-quantity_ordered"] = "6"
+        data.update(overrides)
+        return data
+
+    def test_lowering_a_line_on_the_order_inline_finishes_the_order(
+        self, admin_client, client, supplier, operator
+    ):
+        """The inline writes the same columns, so it owes the same refresh.
+
+        The order admin prefetches ``items``, so this also pins that the refresh
+        re-reads rather than trusting the cached relation's pre-edit quantities.
+        """
+        purchase_order, line = self._order_with_one_short_line(client, supplier, operator)
 
         response = admin_client.post(
-            f"/admin/reorder_queue/purchaseorder/{purchase_order.pk}/change/", data
+            f"/admin/reorder_queue/purchaseorder/{purchase_order.pk}/change/",
+            self._order_form_data(
+                purchase_order, line, operator, **{"items-0-quantity_ordered": "6"}
+            ),
         )
 
         assert response.status_code == 302, getattr(response, "context_data", None)
@@ -724,16 +754,122 @@ class TestAdminEditsReDeriveTheOrder:
         assert purchase_order.outstanding_line_count == 0
         assert purchase_order.status == PurchaseOrder.Status.RECEIVED
 
+    def test_an_order_save_that_moved_no_line_keeps_the_status_the_operator_chose(
+        self, admin_client, client, supplier, operator
+    ):
+        """The operator's own status choice survives a save that touched no line.
+
+        ``save_related`` runs ``save_formset`` for every inline on every save of
+        this form, so a refresh that did not ask whether a line had actually
+        moved would re-derive the status straight back over the one the operator
+        had just picked — a received order set back to "Confirmed" for a
+        re-shipment would silently reappear as "Received". ``status`` is
+        editable here on purpose and staying editable is the point.
+        """
+        purchase_order = make_po(supplier, operator)
+        item = make_item("Pulley", supplier)
+        line = add_line(purchase_order, item, 10)
+        client.post(
+            reverse("purchaseorder-receive", args=[purchase_order.pk]),
+            {"items": [{"purchase_order_item": str(line.pk), "quantity_received": 10}]},
+            format="json",
+        )
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.Status.RECEIVED
+
+        response = admin_client.post(
+            f"/admin/reorder_queue/purchaseorder/{purchase_order.pk}/change/",
+            self._order_form_data(
+                purchase_order,
+                line,
+                operator,
+                status=PurchaseOrder.Status.CONFIRMED,
+                notes="Re-shipment agreed with the supplier",
+            ),
+        )
+
+        assert response.status_code == 302, getattr(response, "context_data", None)
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.Status.CONFIRMED
+        assert purchase_order.notes == "Re-shipment agreed with the supplier"
+
+    def test_deleting_the_last_outstanding_line_finishes_the_order(
+        self, admin_client, client, supplier, operator
+    ):
+        """A delete writes no settlement field and still settles the order.
+
+        Driven through the admin's own delete-confirmation POST, the door an
+        operator actually uses.
+        """
+        purchase_order, settled = self._order_with_one_short_line(client, supplier, operator)
+        admin_client.post(
+            f"/admin/reorder_queue/purchaseorderitem/{settled.pk}/change/",
+            self._line_form_data(settled, operator, quantity_ordered=6),
+        )
+        outstanding = add_line(purchase_order, make_item("Idler", supplier), 5)
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.Status.PARTIALLY_RECEIVED
+
+        response = admin_client.post(
+            f"/admin/reorder_queue/purchaseorderitem/{outstanding.pk}/delete/", {"post": "yes"}
+        )
+
+        assert response.status_code == 302, getattr(response, "context_data", None)
+        purchase_order.refresh_from_db()
+        assert purchase_order.outstanding_line_count == 0
+        assert purchase_order.status == PurchaseOrder.Status.RECEIVED
+
+    def test_the_bulk_delete_action_re_derives_every_order_it_touched(
+        self, admin_client, client, supplier, operator
+    ):
+        """ "Delete selected" never reaches ``delete_model``, so it needs its own.
+
+        Two orders in one selection, so this also pins that each affected order
+        is re-derived rather than only the first.
+        """
+        orders = []
+        doomed = []
+        for name in ("Cam", "Lever"):
+            purchase_order, settled = self._order_with_one_short_line(client, supplier, operator)
+            admin_client.post(
+                f"/admin/reorder_queue/purchaseorderitem/{settled.pk}/change/",
+                self._line_form_data(settled, operator, quantity_ordered=6),
+            )
+            doomed.append(add_line(purchase_order, make_item(name, supplier), 4))
+            purchase_order.refresh_from_db()
+            assert purchase_order.status == PurchaseOrder.Status.PARTIALLY_RECEIVED
+            orders.append(purchase_order)
+
+        response = admin_client.post(
+            "/admin/reorder_queue/purchaseorderitem/",
+            {
+                "action": "delete_selected",
+                "_selected_action": [str(line.pk) for line in doomed],
+                "post": "yes",
+            },
+        )
+
+        assert response.status_code == 302, getattr(response, "context_data", None)
+        for purchase_order in orders:
+            purchase_order.refresh_from_db()
+            assert purchase_order.outstanding_line_count == 0
+            assert purchase_order.status == PurchaseOrder.Status.RECEIVED
+
 
 class TestTheGuardSeesAdminWriters:
     """The arm that found the admin, exercised on modules built to trip it.
 
     A ``ModelAdmin`` is invisible to the ordinary write arm — it names no
     settlement field and calls nothing the arm recognises — so the obligation is
-    derived from the CLASS: which model it edits, and which of that model's
-    settlement columns it leaves writable. These feed the scanner admin modules
-    of each shape and assert what it says about them, which is the same
-    judgement it passes on the real tree.
+    derived from the CLASS: which model it edits, which of that model's
+    settlement columns it leaves writable, and whether it can delete rows at
+    all. These feed the scanner admin modules of each shape and assert what it
+    says about them, which is the same judgement it passes on the real tree.
+
+    Deletion is its own shape and gets its own cases: it writes no settlement
+    field, so no widening of the field-write rule could reach it, and an admin
+    can be perfectly closed for saves while still stranding an order by removing
+    its last outstanding line.
     """
 
     def _findings(self, sweep, source):
@@ -743,29 +879,37 @@ class TestTheGuardSeesAdminWriters:
             sweep.anchor, scanner.functions, scanner.admin_obligations
         )
 
+    @staticmethod
+    def _no_deletes():
+        return """
+    def has_delete_permission(self, request, obj=None):
+        return False
+"""
+
     def test_an_admin_that_can_settle_a_line_and_never_refreshes_is_flagged(self, sweep):
         findings = self._findings(
             sweep,
-            """
+            f"""
 @admin.register(PurchaseOrderItem)
 class LineAdmin(admin.ModelAdmin):
     readonly_fields = ["created_at"]
-
+{self._no_deletes()}
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
 """,
         )
         assert [f.arm for f in findings] == ["write"]
         assert "LineAdmin" in findings[0].detail
+        assert "editable" in findings[0].detail
 
     def test_the_same_admin_is_clean_once_its_save_hook_re_derives_the_order(self, sweep):
         findings = self._findings(
             sweep,
-            """
+            f"""
 @admin.register(PurchaseOrderItem)
 class LineAdmin(admin.ModelAdmin):
     readonly_fields = ["created_at"]
-
+{self._no_deletes()}
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
         refresh_receipt_status(PurchaseOrder.objects.get(pk=obj.purchase_order_id))
@@ -774,7 +918,21 @@ class LineAdmin(admin.ModelAdmin):
         assert findings == []
 
     def test_an_admin_that_makes_every_settlement_column_readonly_is_not_a_writer(self, sweep):
-        """Refusing the edit is a legitimate way to satisfy the rule."""
+        """Refusing the edit is a legitimate way to satisfy the save rule."""
+        readonly = ", ".join(f'"{name}"' for name in sorted(sweep.anchor.all_fields))
+        findings = self._findings(
+            sweep,
+            f"""
+@admin.register(PurchaseOrderItem)
+class LineAdmin(admin.ModelAdmin):
+    readonly_fields = [{readonly}]
+{self._no_deletes()}
+""",
+        )
+        assert findings == []
+
+    def test_an_admin_that_can_delete_lines_and_never_refreshes_is_flagged(self, sweep):
+        """Closed for saves, open for deletes — still a way to strand an order."""
         readonly = ", ".join(f'"{name}"' for name in sorted(sweep.anchor.all_fields))
         findings = self._findings(
             sweep,
@@ -784,10 +942,79 @@ class LineAdmin(admin.ModelAdmin):
     readonly_fields = [{readonly}]
 """,
         )
+        assert [f.arm for f in findings] == ["write"]
+        assert "delete" in findings[0].detail
+        for hook in settlement_sites.ADMIN_DELETE_HOOKS:
+            assert hook in findings[0].detail
+
+    def test_closing_only_the_row_delete_door_leaves_the_bulk_one_open(self, sweep):
+        """Django dispatches to exactly one delete hook and never falls through.
+
+        "Delete selected" reaches ``delete_queryset`` and nothing else, so an
+        admin that re-derives in ``delete_model`` alone is still stranding
+        orders through the door operators use for several lines at once. Any
+        one hook satisfying the obligation would have called this clean.
+        """
+        readonly = ", ".join(f'"{name}"' for name in sorted(sweep.anchor.all_fields))
+        findings = self._findings(
+            sweep,
+            f"""
+@admin.register(PurchaseOrderItem)
+class LineAdmin(admin.ModelAdmin):
+    readonly_fields = [{readonly}]
+
+    def delete_model(self, request, obj):
+        super().delete_model(request, obj)
+        refresh_receipt_status(PurchaseOrder.objects.get(pk=obj.purchase_order_id))
+""",
+        )
+        assert [f.arm for f in findings] == ["write"]
+        assert "delete_queryset" in findings[0].detail
+        assert "delete_model does not" not in findings[0].detail
+
+    def test_the_same_admin_is_clean_once_both_delete_doors_re_derive_the_order(self, sweep):
+        readonly = ", ".join(f'"{name}"' for name in sorted(sweep.anchor.all_fields))
+        findings = self._findings(
+            sweep,
+            f"""
+@admin.register(PurchaseOrderItem)
+class LineAdmin(admin.ModelAdmin):
+    readonly_fields = [{readonly}]
+
+    def delete_model(self, request, obj):
+        super().delete_model(request, obj)
+        refresh_receipt_status(PurchaseOrder.objects.get(pk=obj.purchase_order_id))
+
+    def delete_queryset(self, request, queryset):
+        super().delete_queryset(request, queryset)
+        for order in PurchaseOrder.objects.filter(pk__in=[1]):
+            refresh_receipt_status(order)
+""",
+        )
+        assert findings == []
+
+    def test_an_admin_that_denies_deletion_owes_nothing_for_it(self, sweep):
+        """Taking the action away is as good an answer as re-deriving after it."""
+        readonly = ", ".join(f'"{name}"' for name in sorted(sweep.anchor.all_fields))
+        findings = self._findings(
+            sweep,
+            f"""
+@admin.register(PurchaseOrderItem)
+class LineAdmin(admin.ModelAdmin):
+    readonly_fields = [{readonly}]
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+""",
+        )
         assert findings == []
 
     def test_an_inline_puts_the_obligation_on_the_order_admin_that_hosts_it(self, sweep):
-        """An inline has no save hook of its own — its parent's formset writes it."""
+        """An inline has no hook of its own — its parent's formset writes it.
+
+        Its DELETIONS land there too: ``formset.save()`` performs them, so the
+        parent's save hooks are where an inline's removals must be answered for.
+        """
         findings = self._findings(
             sweep,
             """
@@ -806,6 +1033,7 @@ class OrderAdmin(admin.ModelAdmin):
         assert [f.arm for f in findings] == ["write"]
         assert "OrderAdmin" in findings[0].detail
         assert "LineInline" in findings[0].detail
+        assert "delete" in findings[0].detail
 
     def test_an_admin_of_another_model_entirely_is_left_alone(self, sweep):
         findings = self._findings(
@@ -815,6 +1043,61 @@ class OrderAdmin(admin.ModelAdmin):
 class DeliveryItemAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
+
+    def delete_model(self, request, obj):
+        super().delete_model(request, obj)
+""",
+        )
+        assert findings == []
+
+
+class TestTheScannerSeesAnUpdateItCannotResolve:
+    """An ``update()`` it cannot trace back to a model is treated as a line.
+
+    The resolution is syntactic and cannot follow a variable, so
+    ``qs.update(quantity_ordered=..., quantity_received=...)`` on a queryset
+    held in a local names no model for the scanner to recognise. The two ways of
+    being wrong are not symmetric: a false positive costs one explicit receiver,
+    a false negative is the whole defect class. An identifier that names some
+    other model still buys the call its way out.
+    """
+
+    def _findings(self, sweep, source):
+        scanner = settlement_sites._PyScanner(sweep.anchor, "someapp/service.py", source)
+        scanner.run()
+        return scanner.findings + settlement_sites._write_arm(
+            sweep.anchor, scanner.functions, scanner.admin_obligations
+        )
+
+    def test_an_update_on_an_opaque_local_queryset_is_a_settlement_write(self, sweep):
+        findings = self._findings(
+            sweep,
+            """
+def settle_them(qs):
+    qs.update(quantity_ordered=5, quantity_received=5)
+""",
+        )
+        assert [f.arm for f in findings] == ["write"]
+        assert "settle_them" in findings[0].detail
+
+    def test_it_is_clean_once_that_writer_re_derives_the_order(self, sweep):
+        findings = self._findings(
+            sweep,
+            """
+def settle_them(qs, purchase_order):
+    qs.update(quantity_ordered=5, quantity_received=5)
+    refresh_receipt_status(purchase_order)
+""",
+        )
+        assert findings == []
+
+    def test_an_update_on_another_model_is_not_a_settlement_write(self, sweep):
+        """The same column name on ``DeliveryItem`` is a different question."""
+        findings = self._findings(
+            sweep,
+            """
+def record_receipt(delivery):
+    DeliveryItem.objects.filter(delivery=delivery).update(quantity_received=5)
 """,
         )
         assert findings == []

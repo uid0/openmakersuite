@@ -45,18 +45,20 @@ write arm is a name match, but in the safe direction: it *requires* a call to
 ``refresh_receipt_status``, so writing ``my_own_refresh()`` instead does not
 satisfy it.
 
-One kind of writer neither half can see at all: a Django ``ModelAdmin`` writes
-through a ``ModelForm``, so it names no settlement field and makes no
-``create()``/``update()`` call, while an operator on its change form settles
-lines exactly as the API does. That is derived from the admin CLASS instead —
-which model it edits, and which of that model's settlement columns it leaves out
-of ``readonly_fields`` — and owes the refresh from one of its save hooks. Making
-those columns readonly satisfies the rule too: such a class is not a writer.
+The write arm has now been blind to a write SHAPE three separate times. First it
+knew only attribute assignment and ``create``/``update`` keywords. Then a Django
+``ModelAdmin`` turned out to write through a ``ModelForm``, naming no settlement
+field at all — derived from the admin CLASS instead: which model it edits, and
+which of that model's settlement columns it leaves out of ``readonly_fields``.
+Then a DELETE turned out to change the answer while writing no field whatsoever,
+which no extension of a field-write rule could ever have caught.
 
-What this does NOT cover is stated in the module's own report and in
-:mod:`reorder_queue.tests.test_settlement_sites`: raw SQL, values_list into
-local variables that are then compared, and — on the frontend — anything the
-line-based scanner cannot see. Those are holes, not absences of sites.
+So this file does not claim to see every write, and must not be read as if it
+did. :data:`WRITE_SHAPES_SEEN` and :data:`WRITE_SHAPES_UNSEEN` enumerate both
+halves, and :func:`main` PRINTS them on every run beside the derived definition
+and the trees it could read, so the edges travel with the report rather than
+living in a docstring nobody opens. A derivation that implies a completeness it
+does not have is worse than one that names its edges.
 
 Run it directly for a report::
 
@@ -112,8 +114,59 @@ WRITE_CALLS = frozenset({"create", "update", "get_or_create", "update_or_create"
 #: derives the obligation from the class instead.
 ADMIN_BASES = frozenset({"ModelAdmin", "InlineModelAdmin", "TabularInline", "StackedInline"})
 
-#: The hooks a ``ModelAdmin`` may discharge a settlement obligation from.
-ADMIN_SAVE_HOOKS = ("save_model", "save_formset", "save_related")
+#: The hook a ``ModelAdmin``'s own change form writes its object through.
+ADMIN_SAVE_HOOK = "save_model"
+
+#: The hook an inline's rows are both written and DELETED through, on the parent.
+ADMIN_FORMSET_HOOK = "save_formset"
+
+#: Runs around the hooks above within one request, so a refresh here discharges
+#: their door as surely as putting it in the door itself would.
+ADMIN_SAVE_ALTERNATES = ("save_related",)
+
+#: The hooks a ``ModelAdmin`` may discharge a settlement SAVE obligation from.
+ADMIN_SAVE_HOOKS = (ADMIN_SAVE_HOOK, ADMIN_FORMSET_HOOK) + ADMIN_SAVE_ALTERNATES
+
+#: BOTH doors Django dispatches a delete to — a row delete reaches
+#: ``delete_model`` and the "Delete selected" action reaches ``delete_queryset``,
+#: and neither falls through to the other. Overriding one and leaving the other
+#: at Django's default leaves that door open, so every one of these must reach
+#: the refresh rather than any one of them.
+#:
+#: Separate from the save hooks because a delete is a different shape: it writes
+#: no settlement field at all, so no extension of the field-write rule reaches
+#: it, yet removing the last outstanding line changes the order's answer exactly
+#: as editing that line would.
+ADMIN_DELETE_HOOKS = ("delete_model", "delete_queryset")
+
+#: The write shapes this scan can actually see. Stated so the arm is never read
+#: as exhaustive — it has been surprised three times, and each surprise shipped.
+WRITE_SHAPES_SEEN = (
+    "assignment to a settlement field on a line (obj.quantity_received = ...)",
+    "create()/update()/get_or_create()/update_or_create()/bulk_create() with a "
+    "settlement field as a keyword",
+    "a call to one of the model's own mutating methods (close_short, reopen_short)",
+    "an update() whose keywords name settlement fields, even on a receiver this "
+    "scan cannot resolve — a false positive there costs one explicit receiver",
+    "a Django admin whose form leaves a settlement column editable (the ModelForm "
+    "save names no field, so this is derived from the admin class)",
+    "a Django admin that can delete lines (a delete writes no settlement field)",
+)
+
+#: What it cannot see. These are holes, not absences of sites — "found nothing"
+#: and "could not tell" are different facts and this list is which is which.
+WRITE_SHAPES_UNSEEN = (
+    "raw SQL, and anything reaching the database outside the ORM",
+    "bulk_update(), and queryset writers not named above",
+    "a cascading delete from a parent row rather than from the line itself",
+    "a write through a serializer, form or signal outside the Django admin",
+    "settlement fields pulled into locals by values_list() and compared later",
+    "arithmetic on order-level aggregate PROPERTIES rather than on the line fields "
+    "— which is how the pending_orders site hid, found by reading not by this",
+    "on the frontend, anything a line-based regex cannot see: there is no "
+    "TypeScript parser in the standard library, so that arm is weaker than the "
+    "AST-based Python one and must not be read as its equal",
+)
 
 _SKIP_DIR_PARTS = ("__pycache__", "node_modules", ".venv", "staticfiles", "media")
 
@@ -436,16 +489,29 @@ class _PyScanner:
         write and must not be asked to refresh anything. Resolved off the
         receiver — ``PurchaseOrderItem.objects`` or the order's own related
         manager, whose name comes from the model's own FK declaration.
+
+        A receiver naming NO model at all — ``qs.update(...)`` on a queryset
+        held in a local, a helper's return value — is treated as lines. The
+        resolution is syntactic and cannot follow a variable, and the two ways
+        of being wrong are not symmetric: a false positive costs whoever wrote
+        it one explicit receiver, while a false negative is the entire defect
+        class this file exists to end. Only an identifier that names something
+        else buys the call its way out.
         """
         receiver = call.func.value if isinstance(call.func, ast.Attribute) else None
         if receiver is None:
             return False
+        named: set[str] = set()
         for sub in ast.walk(receiver):
-            if isinstance(sub, ast.Name) and sub.id == "PurchaseOrderItem":
-                return True
-            if isinstance(sub, ast.Attribute) and sub.attr == self.a.related_name:
-                return True
-        return False
+            if isinstance(sub, ast.Name):
+                if sub.id == self.a.model_name:
+                    return True
+                named.add(sub.id)
+            elif isinstance(sub, ast.Attribute):
+                if sub.attr == self.a.related_name:
+                    return True
+                named.add(sub.attr)
+        return not any(name[:1].isupper() for name in named)
 
     def _flag(self, node: ast.AST, detail: str) -> None:
         line = getattr(node, "lineno", 0)
@@ -682,8 +748,32 @@ class _PyScanner:
             candidate &= declared
         return candidate - self._class_strings(cls, "readonly_fields", "exclude")
 
+    def _denies_delete(self, cls: ast.ClassDef) -> bool:
+        """Whether this admin class has taken deletion away.
+
+        ``can_delete = False`` on an inline, or a ``has_delete_permission`` that
+        can only ever return False. Refusing the delete is a legitimate way to
+        satisfy the delete obligation, exactly as making the columns readonly
+        satisfies the save one — the rule is about what an operator can do, not
+        about which methods happen to be defined.
+        """
+        for value in self._class_assignments(cls, "can_delete"):
+            if isinstance(value, ast.Constant) and value.value is False:
+                return True
+        for stmt in cls.body:
+            if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if stmt.name != "has_delete_permission":
+                continue
+            returned = [sub.value for sub in ast.walk(stmt) if isinstance(sub, ast.Return)]
+            if returned and all(
+                isinstance(value, ast.Constant) and value.value is False for value in returned
+            ):
+                return True
+        return False
+
     def _scan_admin(self) -> None:
-        """A Django admin that leaves settlement columns editable owes the refresh.
+        """A Django admin that can move a line's settlement owes the refresh.
 
         The admin was invisible to the write arm above because a ``ModelAdmin``
         never writes the way that arm looks for: ``super().save_model()`` hands
@@ -693,6 +783,13 @@ class _PyScanner:
         settles the line — so the obligation is derived from the CLASS instead:
         which model it edits, and which of that model's settlement fields it
         leaves writable.
+
+        DELETION is a second and different shape. It writes no settlement field
+        whatsoever, so it is not reachable by widening any rule about writes;
+        what makes it a settlement transition is that the order is left owed
+        less than it was. It gets its own obligation, discharged from the delete
+        hooks — except on an inline, whose rows are deleted by the parent's
+        formset save and are therefore owed from the parent's SAVE hooks.
         """
         classes = {
             node.name: node for node in ast.walk(self.tree) if isinstance(node, ast.ClassDef)
@@ -704,56 +801,93 @@ class _PyScanner:
             return
         registered = self._registrations(classes)
 
-        editors: dict[str, set[str]] = {}
-        for name, cls in classes.items():
+        def hosts_of(inline: str) -> list[str]:
+            return [
+                host
+                for host, cls in sorted(classes.items())
+                if kinds.get(host) is not None and inline in self._class_references(cls, "inlines")
+            ]
+
+        # (admin class, the doors that must ALL be closed) -> why it owes them.
+        owed: dict[tuple[str, tuple[str, ...]], list[str]] = {}
+
+        def owe(admin_class: str, doors: tuple[str, ...], why: str) -> None:
+            reasons = owed.setdefault((admin_class, doors), [])
+            if why not in reasons:
+                reasons.append(why)
+
+        for name in sorted(classes):
+            cls = classes[name]
             if kinds.get(name) is None:
                 continue
             targets = self._class_references(cls, "model") | registered.get(name, set())
             if self.a.model_name not in targets:
                 continue
+            inline = kinds[name] == "inline"
+            # An inline has no hook of its own: both its edits and its deletions
+            # are performed by whichever ModelAdmin hosts it, in ``save_formset``.
+            carriers = hosts_of(name) if inline else [name]
+
+            # An inline's rows are both written and deleted by the parent's
+            # formset save, so both of its obligations land on that one door.
+            save_door = (ADMIN_FORMSET_HOOK,) if inline else (ADMIN_SAVE_HOOK,)
+
             editable = self._editable_settlement_fields(cls)
             if editable:
-                editors[name] = editable
-
-        owed: dict[str, str] = {}
-        for name, editable in sorted(editors.items()):
-            columns = ", ".join(sorted(editable))
-            if kinds[name] == "inline":
-                # An inline has no save hook of its own: its rows are written by
-                # whichever ModelAdmin hosts it, through ``save_formset``.
-                hosts = [
-                    host
-                    for host, cls in sorted(classes.items())
-                    if kinds.get(host) is not None
-                    and name in self._class_references(cls, "inlines")
-                ]
-                for host in hosts:
-                    owed.setdefault(
-                        host,
-                        f"the {name} inline it hosts leaves {columns} editable on "
-                        f"{self.a.model_name}",
+                columns = ", ".join(sorted(editable))
+                for carrier in carriers or [name]:
+                    owe(
+                        carrier,
+                        save_door,
+                        (
+                            f"the {name} inline it hosts leaves {columns} editable"
+                            if carrier != name
+                            else f"it leaves {columns} editable"
+                        )
+                        + f" on {self.a.model_name}",
                     )
-                if not hosts:
-                    owed.setdefault(name, f"it leaves {columns} editable on {self.a.model_name}")
-            else:
-                owed.setdefault(name, f"it leaves {columns} editable on {self.a.model_name}")
 
-        for name in sorted(owed):
-            cls = classes[name]
-            defined = {
-                stmt.name
-                for stmt in cls.body
-                if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
-            }
+            if not self._denies_delete(cls):
+                struck = (
+                    "a deleted line changes what the order is still owed, and writes no "
+                    "settlement field while doing it"
+                )
+                if inline:
+                    for carrier in carriers or [name]:
+                        owe(
+                            carrier,
+                            save_door,
+                            (
+                                f"the {name} inline it hosts can delete {self.a.model_name} "
+                                f"rows through this formset — {struck}"
+                            ),
+                        )
+                else:
+                    owe(
+                        name,
+                        ADMIN_DELETE_HOOKS,
+                        f"it can delete {self.a.model_name} rows — {struck}",
+                    )
+
+        for (name, doors), reasons in sorted(owed.items()):
             self.admin_obligations.append(
                 {
                     "path": self.rel,
-                    "line": cls.lineno,
+                    "line": classes[name].lineno,
                     "admin": name,
-                    "why": owed[name],
-                    "hooks": [
-                        f"{self.rel}:{name}.{hook}" for hook in ADMIN_SAVE_HOOKS if hook in defined
-                    ],
+                    "why": "; ".join(reasons),
+                    "doors": doors,
+                    # Every door has to be closed, not just one of them: Django
+                    # dispatches to exactly one per action and never falls
+                    # through, so a door left at its default is a door open.
+                    "door_quals": {door: f"{self.rel}:{name}.{door}" for door in doors},
+                    # ``save_related`` wraps the save doors within one request,
+                    # so a refresh there closes them. Nothing wraps a delete.
+                    "alternate_quals": (
+                        [f"{self.rel}:{name}.{hook}" for hook in ADMIN_SAVE_ALTERNATES]
+                        if doors != ADMIN_DELETE_HOOKS
+                        else []
+                    ),
                 }
             )
 
@@ -1025,7 +1159,12 @@ def _write_arm(
         )
 
     for obligation in admin_obligations or []:
-        if any(hook in reaches_refresh for hook in obligation["hooks"]):
+        if any(qual in reaches_refresh for qual in obligation["alternate_quals"]):
+            continue
+        open_doors = [
+            door for door, qual in obligation["door_quals"].items() if qual not in reaches_refresh
+        ]
+        if not open_doors:
             continue
         findings.append(
             Finding(
@@ -1033,11 +1172,13 @@ def _write_arm(
                 obligation["line"],
                 "write",
                 f"{obligation['admin']} can change whether a line is settled — "
-                f"{obligation['why']} — and none of its save hooks "
-                f"({', '.join(ADMIN_SAVE_HOOKS)}) calls {REFRESH}(), so an admin edit "
-                f"that settles the last outstanding line leaves the order with a status "
-                f"claiming something its own lines no longer say. Making those columns "
-                f"readonly here would satisfy this too",
+                f"{obligation['why']} — and {', '.join(open_doors)} "
+                f"{'does' if len(open_doors) == 1 else 'do'} not reach {REFRESH}(), so an "
+                f"admin action that settles the last outstanding line leaves the order "
+                f"with a status claiming something its own lines no longer say. Django "
+                f"dispatches to one hook per action and never falls through, so a hook "
+                f"left at its default is a door open. Refusing the action here — readonly "
+                f"columns, or no delete permission — satisfies this too",
                 "",
             )
         )
@@ -1064,6 +1205,17 @@ def main(argv: list[str] | None = None) -> int:
     print("Scanned: " + ", ".join(report.scanned))
     for missing in report.unscanned:
         print(f"NOT scanned: {missing}")
+    print()
+
+    # The edges travel with the report. This arm has been blind to a write
+    # SHAPE three times over; a clean run means "none of the shapes below the
+    # first heading bypassed the derivation", never "there is nothing left".
+    print("Write shapes this scan CAN see:")
+    for shape in WRITE_SHAPES_SEEN:
+        print(f"  + {shape}")
+    print("Write shapes it CANNOT see — holes, not absences of sites:")
+    for shape in WRITE_SHAPES_UNSEEN:
+        print(f"  - {shape}")
     print()
 
     if "--sites" in argv:

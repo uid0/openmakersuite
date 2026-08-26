@@ -361,7 +361,12 @@ class TestQuantityEditSettlesTheOrder:
     def test_settling_one_line_does_not_finish_an_order_still_owed_another(
         self, client, supplier, operator
     ):
-        """Re-deriving is not the same as advancing: the other line still counts."""
+        """Re-deriving is not the same as advancing: the other line still counts.
+
+        Corroborating, not discriminating: dropping the refresh leaves the order
+        at ``partially_received`` too, so this passes either way. What it pins is
+        the opposite error — a refresh that advances an order still owed a line.
+        """
         purchase_order, line = self._order_with_one_short_line(client, supplier, operator)
         second = add_line(purchase_order, make_item("Bracket", supplier), 3)
 
@@ -421,60 +426,95 @@ class TestWrittenOffUnitsAreNotInTransit:
 
     Asserted through ``compute_item_metrics`` — the payload the item screen and
     the ScanTTY TUI both read — and closed through the real close-short action.
+
+    Every case here puts TWO lines on the order, and that is the point rather
+    than incidental setup. QIT only looks at orders in ``partially_received``,
+    so closing an order's ONLY line short settles the order, moves it to
+    ``received``, and drops the line out of the metric through the status
+    filter — with the old predicate and the new one alike. A one-line fixture
+    therefore proves nothing about the predicate: the order status does all the
+    work. A second, genuinely outstanding line holds the order in
+    ``partially_received`` so the closed-short line is judged on its own terms.
     """
+
+    def _order_with_a_short_line_and_an_outstanding_one(self, client, supplier, operator):
+        """One order, ``partially_received``, whose two lines settle differently.
+
+        ``short`` has taken 4 of 10 and is about to be written off; ``other``
+        is untouched and keeps the order in receiving so the metric keeps
+        looking at it.
+        """
+        purchase_order = make_po(supplier, operator)
+        written_off = make_item("Bearing", supplier, stock=0, reorder_quantity=5)
+        still_coming = make_item("Collar", supplier, stock=0, reorder_quantity=5)
+        short = add_line(purchase_order, written_off, 10)
+        other = add_line(purchase_order, still_coming, 5)
+        receive = client.post(
+            reverse("purchaseorder-receive", args=[purchase_order.pk]),
+            {"items": [{"purchase_order_item": str(short.pk), "quantity_received": 4}]},
+            format="json",
+        )
+        assert receive.status_code == status.HTTP_200_OK, receive.data
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.Status.PARTIALLY_RECEIVED
+        assert compute_item_metrics(written_off)["quantity_in_transit"] == 6
+        assert compute_item_metrics(still_coming)["quantity_in_transit"] == 5
+        return purchase_order, short, other, written_off, still_coming
 
     def test_closing_a_line_short_takes_its_balance_out_of_in_transit(
         self, client, supplier, operator
     ):
-        purchase_order = make_po(supplier, operator)
-        item = make_item("Bearing", supplier, stock=0, reorder_quantity=5)
-        line = add_line(purchase_order, item, 10)
-        client.post(
-            reverse("purchaseorder-receive", args=[purchase_order.pk]),
-            {"items": [{"purchase_order_item": str(line.pk), "quantity_received": 4}]},
-            format="json",
+        purchase_order, short, _other, written_off, still_coming = (
+            self._order_with_a_short_line_and_an_outstanding_one(client, supplier, operator)
         )
-        assert compute_item_metrics(item)["quantity_in_transit"] == 6
 
         response = client.post(
             reverse("purchaseorder-close-short", args=[purchase_order.pk]),
-            {"items": [{"purchase_order_item": line.pk, "reason": "backorder cancelled"}]},
+            {"items": [{"purchase_order_item": short.pk, "reason": "backorder cancelled"}]},
             format="json",
         )
         assert response.status_code == status.HTTP_200_OK, response.data
 
-        item.refresh_from_db()
-        assert compute_item_metrics(item)["quantity_in_transit"] == 0
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.Status.PARTIALLY_RECEIVED, (
+            "the other line must keep the order in receiving, or the status filter "
+            "removes the closed-short line before the predicate ever judges it"
+        )
+        assert compute_item_metrics(written_off)["quantity_in_transit"] == 0
+        assert compute_item_metrics(still_coming)["quantity_in_transit"] == 5
 
     def test_reopening_the_line_puts_the_balance_back_in_transit(self, client, supplier, operator):
         """A close-short taken back is a correction, and the metric follows it."""
-        purchase_order = make_po(supplier, operator)
-        item = make_item("Bushing", supplier, stock=0, reorder_quantity=5)
-        line = add_line(purchase_order, item, 10)
-        client.post(
-            reverse("purchaseorder-receive", args=[purchase_order.pk]),
-            {"items": [{"purchase_order_item": str(line.pk), "quantity_received": 4}]},
-            format="json",
+        purchase_order, short, _other, written_off, still_coming = (
+            self._order_with_a_short_line_and_an_outstanding_one(client, supplier, operator)
         )
         client.post(
             reverse("purchaseorder-close-short", args=[purchase_order.pk]),
-            {"items": [{"purchase_order_item": line.pk, "reason": "short-shipped"}]},
+            {"items": [{"purchase_order_item": short.pk, "reason": "short-shipped"}]},
             format="json",
         )
-        assert compute_item_metrics(item)["quantity_in_transit"] == 0
+        assert compute_item_metrics(written_off)["quantity_in_transit"] == 0
 
         response = client.post(
             reverse("purchaseorder-reopen-short", args=[purchase_order.pk]),
-            {"items": [{"purchase_order_item": line.pk, "reason": "shipped after all"}]},
+            {"items": [{"purchase_order_item": short.pk, "reason": "shipped after all"}]},
             format="json",
         )
         assert response.status_code == status.HTTP_200_OK, response.data
 
-        item.refresh_from_db()
-        assert compute_item_metrics(item)["quantity_in_transit"] == 6
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.Status.PARTIALLY_RECEIVED
+        assert compute_item_metrics(written_off)["quantity_in_transit"] == 6
+        assert compute_item_metrics(still_coming)["quantity_in_transit"] == 5
 
     def test_a_voided_line_was_already_excluded_and_still_is(self, client, supplier, operator):
-        """The behaviour that was already right stays right."""
+        """The behaviour that was already right stays right.
+
+        Corroborating, not discriminating: the old predicate carried
+        ``is_voided=False`` of its own, so this passes either way. It is here to
+        pin that routing through ``outstanding()`` did not lose the exclusion
+        the old spelling already had.
+        """
         purchase_order = make_po(supplier, operator)
         item = make_item("Seal", supplier)
         line = add_line(purchase_order, item, 10)
@@ -591,7 +631,48 @@ class TestPendingCountsOnlyWhatIsStillComing:
         assert after.data["total_items_on_order"] == before.data["total_items_on_order"]
         assert after.data["total_items_received"] == before.data["total_items_received"]
 
+    def _pending_row(self, client, purchase_order):
+        rows = client.get(reverse("orderdelivery-pending-orders")).data
+        return next(row for row in rows if str(row["id"]) == str(purchase_order.pk))
+
+    def test_pending_orders_stops_counting_a_written_off_balance(self, client, supplier, operator):
+        """The closed-short case, which is the one the old subtraction got wrong.
+
+        ``total_quantity - total_received_quantity`` counted its two sides over
+        different sets of lines: the ordered side already dropped struck-off
+        lines while the received side kept them. A line CLOSED SHORT is in both
+        sets, so its written-off balance survived the subtraction and went on
+        being reported as goods still on their way.
+        """
+        purchase_order = make_po(supplier, operator)
+        kept = add_line(purchase_order, make_item("Kept", supplier), 5)
+        written_off = add_line(purchase_order, make_item("WroteOff", supplier), 7)
+        receive = client.post(
+            reverse("purchaseorder-receive", args=[purchase_order.pk]),
+            {"items": [{"purchase_order_item": str(kept.pk), "quantity_received": 1}]},
+            format="json",
+        )
+        assert receive.status_code == status.HTTP_200_OK, receive.data
+        assert self._pending_row(client, purchase_order)["items_pending"] == 4 + 7
+
+        response = client.post(
+            reverse("purchaseorder-close-short", args=[purchase_order.pk]),
+            {"items": [{"purchase_order_item": written_off.pk, "reason": "never shipped"}]},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_200_OK, response.data
+
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.Status.PARTIALLY_RECEIVED
+        assert self._pending_row(client, purchase_order)["items_pending"] == 4
+
     def test_pending_orders_stops_counting_a_struck_off_line(self, client, supplier, operator):
+        """The voided case.
+
+        Corroborating, not discriminating: the old subtraction already dropped a
+        voided line from its ordered side, so both spellings agree here. It
+        stays to pin that the new expression did not lose that.
+        """
         purchase_order = make_po(supplier, operator)
         kept = add_line(purchase_order, make_item("Kept", supplier), 5)
         struck = add_line(purchase_order, make_item("Struck", supplier), 7)
@@ -600,15 +681,10 @@ class TestPendingCountsOnlyWhatIsStillComing:
             {"items": [{"purchase_order_item": str(kept.pk), "quantity_received": 1}]},
             format="json",
         )
-
-        rows = client.get(reverse("orderdelivery-pending-orders")).data
-        row = next(r for r in rows if str(r["id"]) == str(purchase_order.pk))
-        assert row["items_pending"] == 4 + 7
+        assert self._pending_row(client, purchase_order)["items_pending"] == 4 + 7
 
         services.void_line_item(struck, operator, "discontinued")
-        rows = client.get(reverse("orderdelivery-pending-orders")).data
-        row = next(r for r in rows if str(r["id"]) == str(purchase_order.pk))
-        assert row["items_pending"] == 4
+        assert self._pending_row(client, purchase_order)["items_pending"] == 4
 
 
 @pytest.mark.django_db
@@ -644,7 +720,12 @@ class TestAdminEditsReDeriveTheOrder:
         )
         assert receive.status_code == status.HTTP_200_OK, receive.data
         purchase_order.refresh_from_db()
+        # The receipt wrote ``quantity_received`` in the database. This instance
+        # still says 0, and every form below is built from it — posting that 0
+        # back would un-receive the line and quietly test nothing.
+        line.refresh_from_db()
         assert purchase_order.status == PurchaseOrder.Status.PARTIALLY_RECEIVED
+        assert line.quantity_received == 6
         return purchase_order, line
 
     @staticmethod
@@ -665,6 +746,35 @@ class TestAdminEditsReDeriveTheOrder:
         data.update(overrides)
         return data
 
+    def _order_settled_but_for_one_line(self, admin_client, client, supplier, operator, spare_name):
+        """An order whose only remaining outstanding line is the one to delete.
+
+        The spare line is added BEFORE anything settles, because a raw
+        ``objects.create`` re-derives nothing — adding it afterwards would leave
+        the order sitting at ``received`` over an outstanding line and prove
+        only that this setup was wrong.
+        """
+        purchase_order = make_po(supplier, operator)
+        line = add_line(purchase_order, make_item(f"Gasket {spare_name}", supplier), 10)
+        spare = add_line(purchase_order, make_item(spare_name, supplier), 5)
+        receive = client.post(
+            reverse("purchaseorder-receive", args=[purchase_order.pk]),
+            {"items": [{"purchase_order_item": str(line.pk), "quantity_received": 6}]},
+            format="json",
+        )
+        assert receive.status_code == status.HTTP_200_OK, receive.data
+        line.refresh_from_db()
+
+        response = admin_client.post(
+            f"/admin/reorder_queue/purchaseorderitem/{line.pk}/change/",
+            self._line_form_data(line, operator, quantity_ordered=6),
+        )
+        assert response.status_code == 302, getattr(response, "context_data", None)
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.Status.PARTIALLY_RECEIVED
+        assert [item.pk for item in purchase_order.outstanding_items] == [spare.pk]
+        return purchase_order, line, spare
+
     def test_lowering_a_line_on_its_change_form_finishes_the_order(
         self, admin_client, client, supplier, operator
     ):
@@ -683,7 +793,12 @@ class TestAdminEditsReDeriveTheOrder:
     def test_settling_one_line_in_the_admin_leaves_an_order_still_owed_another(
         self, admin_client, client, supplier, operator
     ):
-        """Re-deriving is not advancing: the other line still counts."""
+        """Re-deriving is not advancing: the other line still counts.
+
+        Corroborating, not discriminating, for the same reason as its sibling in
+        :class:`TestQuantityEditSettlesTheOrder`: it pins over-advancing, which
+        removing the refresh does not cause.
+        """
         purchase_order, line = self._order_with_one_short_line(client, supplier, operator)
         second = add_line(purchase_order, make_item("Shim", supplier), 3)
 
@@ -775,6 +890,7 @@ class TestAdminEditsReDeriveTheOrder:
             format="json",
         )
         purchase_order.refresh_from_db()
+        line.refresh_from_db()
         assert purchase_order.status == PurchaseOrder.Status.RECEIVED
 
         response = admin_client.post(
@@ -801,14 +917,9 @@ class TestAdminEditsReDeriveTheOrder:
         Driven through the admin's own delete-confirmation POST, the door an
         operator actually uses.
         """
-        purchase_order, settled = self._order_with_one_short_line(client, supplier, operator)
-        admin_client.post(
-            f"/admin/reorder_queue/purchaseorderitem/{settled.pk}/change/",
-            self._line_form_data(settled, operator, quantity_ordered=6),
+        purchase_order, settled, outstanding = self._order_settled_but_for_one_line(
+            admin_client, client, supplier, operator, "Idler"
         )
-        outstanding = add_line(purchase_order, make_item("Idler", supplier), 5)
-        purchase_order.refresh_from_db()
-        assert purchase_order.status == PurchaseOrder.Status.PARTIALLY_RECEIVED
 
         response = admin_client.post(
             f"/admin/reorder_queue/purchaseorderitem/{outstanding.pk}/delete/", {"post": "yes"}
@@ -830,15 +941,11 @@ class TestAdminEditsReDeriveTheOrder:
         orders = []
         doomed = []
         for name in ("Cam", "Lever"):
-            purchase_order, settled = self._order_with_one_short_line(client, supplier, operator)
-            admin_client.post(
-                f"/admin/reorder_queue/purchaseorderitem/{settled.pk}/change/",
-                self._line_form_data(settled, operator, quantity_ordered=6),
+            purchase_order, _settled, outstanding = self._order_settled_but_for_one_line(
+                admin_client, client, supplier, operator, name
             )
-            doomed.append(add_line(purchase_order, make_item(name, supplier), 4))
-            purchase_order.refresh_from_db()
-            assert purchase_order.status == PurchaseOrder.Status.PARTIALLY_RECEIVED
             orders.append(purchase_order)
+            doomed.append(outstanding)
 
         response = admin_client.post(
             "/admin/reorder_queue/purchaseorderitem/",
@@ -913,6 +1020,44 @@ class LineAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
         refresh_receipt_status(PurchaseOrder.objects.get(pk=obj.purchase_order_id))
+""",
+        )
+        assert findings == []
+
+    def test_a_model_admin_must_answer_in_its_own_save_hook_not_a_formset_one(self, sweep):
+        """Each door is answered where Django actually goes through it.
+
+        A ``ModelAdmin`` registered on the settlement model writes its object in
+        ``save_model``; ``save_formset`` on the same class runs for its inlines,
+        never for the object itself, so discharging there leaves the change form
+        writing settlement columns with nothing re-deriving behind it.
+        """
+        findings = self._findings(
+            sweep,
+            f"""
+@admin.register(PurchaseOrderItem)
+class LineAdmin(admin.ModelAdmin):
+    readonly_fields = ["created_at"]
+{self._no_deletes()}
+    def save_formset(self, request, form, formset, change):
+        super().save_formset(request, form, formset, change)
+        refresh_receipt_status(PurchaseOrder.objects.get(pk=1))
+""",
+        )
+        assert [f.arm for f in findings] == ["write"]
+        assert settlement_sites.ADMIN_SAVE_HOOK in findings[0].detail
+
+    def test_save_related_discharges_the_save_door_it_wraps(self, sweep):
+        findings = self._findings(
+            sweep,
+            f"""
+@admin.register(PurchaseOrderItem)
+class LineAdmin(admin.ModelAdmin):
+    readonly_fields = ["created_at"]
+{self._no_deletes()}
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        refresh_receipt_status(PurchaseOrder.objects.get(pk=1))
 """,
         )
         assert findings == []

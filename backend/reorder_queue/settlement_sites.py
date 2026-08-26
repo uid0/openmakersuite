@@ -121,11 +121,12 @@ ADMIN_SAVE_HOOK = "save_model"
 ADMIN_FORMSET_HOOK = "save_formset"
 
 #: Runs around the hooks above within one request, so a refresh here discharges
-#: their door as surely as putting it in the door itself would.
+#: their door as surely as putting it in the door itself would. Deliberately not
+#: a third interchangeable save hook: a ``ModelAdmin``'s own change form goes
+#: through :data:`ADMIN_SAVE_HOOK` and an inline's rows through its parent's
+#: :data:`ADMIN_FORMSET_HOOK`, and answering for one door in the other's hook
+#: leaves the first one open.
 ADMIN_SAVE_ALTERNATES = ("save_related",)
-
-#: The hooks a ``ModelAdmin`` may discharge a settlement SAVE obligation from.
-ADMIN_SAVE_HOOKS = (ADMIN_SAVE_HOOK, ADMIN_FORMSET_HOOK) + ADMIN_SAVE_ALTERNATES
 
 #: BOTH doors Django dispatches a delete to — a row delete reaches
 #: ``delete_model`` and the "Delete selected" action reaches ``delete_queryset``,

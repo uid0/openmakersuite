@@ -134,12 +134,19 @@ off the API on the frontend. Anything that can settle a line must reach
 
 That includes the Django admin, which writes through a `ModelForm` and so names
 no field for the scanner to see. A `ModelAdmin`/inline on `PurchaseOrderItem`
-that leaves any settlement column writable owes the refresh from one of its save
-hooks (`save_model`/`save_formset`/`save_related`); making those columns
-`readonly_fields` satisfies the rule instead. One that can DELETE lines owes it
-from `delete_model`/`delete_queryset` — a delete writes no settlement field at
-all and still changes what the order is owed — and denying delete permission
-satisfies that one. Re-derive only when something actually moved: `save_related`
+that leaves any settlement column writable owes the refresh from the hook that
+door actually goes through, not from whichever one is handy:
+
+- its own change form → `save_model` (`save_related` wraps it and counts too);
+- a hosted inline → the PARENT admin's `save_formset`, which is where an
+  inline's rows are both written and deleted;
+- deletion → `delete_model` **and** `delete_queryset`, both of them. Django
+  dispatches a row delete to the first and "Delete selected" to the second and
+  never falls through, so overriding one leaves the other's door open.
+
+Refusing the action satisfies the rule just as well: `readonly_fields` for the
+save side, denying delete permission (or `can_delete = False` on an inline) for
+the delete side. Re-derive only when something actually moved — `save_related`
 runs `save_formset` on every save, and an unconditional refresh overwrites the
 `status` an operator just picked on the same form.
 

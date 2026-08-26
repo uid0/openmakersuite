@@ -50,7 +50,9 @@ from .receiving import (
     outstanding_lines,
     receive_delivery,
     refresh_receipt_status,
+    serial_gap,
     serialized_receipt_targets,
+    serials_outstanding,
 )
 
 __all__ = [
@@ -93,5 +95,7 @@ __all__ = [
     "outstanding_lines",
     "receive_delivery",
     "refresh_receipt_status",
+    "serial_gap",
     "serialized_receipt_targets",
+    "serials_outstanding",
 ]

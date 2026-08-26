@@ -167,14 +167,17 @@ how many units of each the **full ordered quantity** implies.
   kit itself never appears.
 * Nothing serialized, or an asset/freeform line → `[]`.
 
-> **Kit lines return `[]` today.** `KitComponent` currently refuses to put a
-> serialized item in a kit at all, so no kit has a serialized component and no
-> kit line has a serial target. The component-targeting rule above is
-> nonetheless enforced by the receipt — naming a kit is refused whether or not
-> that prohibition is in place — because it is a rule about what receiving may
-> *write*, not about how kits may be configured. Whether to relax the
-> configuration rule is an open product question; a client should read
-> `serial_targets` and will simply find it empty until it is answered.
+`serial_tracking_mode` reflects the item **as it is today**, not as it was when
+the order was placed: the kit snapshot freezes what a receipt *credits* (which
+components, how many), but whether the system tracks a component serially is a
+live property, so a component that became serialized after the order is still
+offered.
+
+> Serialized items were once forbidden as kit components entirely. That rule was
+> lifted — receiving can record a serial against the right component, so
+> refusing the configuration guarded against nothing. What guards the identity
+> rule now is the receipt itself (naming a kit is refused) plus
+> [`serials_outstanding`](#serials_outstanding).
 
 For a partial receipt, scale: `round(target.quantity / quantity_ordered ×
 quantity_received)`. This is the same function the receipt validates against, so
@@ -251,7 +254,7 @@ Each entry:
 | Field | Required | Notes |
 | ----- | -------- | ----- |
 | `serial_number` | yes | Trimmed; must not be blank. |
-| `item` | when the line credits >1 serialized identity | Which identity the serial belongs to. Optional when there is exactly one, which is every case today. Naming a kit is always refused. |
+| `item` | when the line credits >1 serialized identity | Which identity the serial belongs to. Optional when there is exactly one. Naming a kit is always refused. |
 | `lot` | no | Batch number, recorded verbatim. Does not affect stock. |
 | `expiration_date` | no | ISO date. Recorded and displayed only — an expired unit still counts as on-hand and raises no alert. |
 
@@ -261,14 +264,14 @@ was ordered against), created **inside the receipt's transaction**.
 
 **Fewer serials than units is allowed.** Goods that physically arrived must be
 recordable even when not every label has been scanned yet; the gap shows up as
-`serials_recorded` against `serial_targets[].quantity`.
+[`serials_outstanding`](#serials_outstanding).
 
 **More serials than units is a `400`**, never a truncation. So is:
 
 | Condition | Message contains |
 | --------- | ---------------- |
 | `item` names the kit on a kit line | `never itself stocked` |
-| `item` omitted on a line crediting several serialized identities | `which one it belongs to` (and names them) — unreachable while kits cannot hold serialized components |
+| `item` omitted on a line crediting several serialized identities | `which one it belongs to` (and names them) |
 | `item` names something this line does not credit | `does not credit a serialized unit` |
 | More serials than the receipt credits | `only credits N unit(s)` |
 | Same serial twice in one request | `appears twice` |
@@ -321,6 +324,49 @@ invents a shortfall on a line that landed.
 
 Refused with a `400` when the order has nothing outstanding, rather than
 silently doing nothing.
+
+---
+
+## `serials_outstanding`
+
+Units of a serialized identity that a receipt has already put into stock, for
+which no serial number has been recorded.
+
+Present on every purchase-order line, on the order (summed), and on each
+worksheet line — where `serial_gap` breaks it down per identity:
+
+```json
+"serial_gap": [
+  { "item": "c9a2…", "item_name": "Meter", "expected": 3, "recorded": 2, "outstanding": 1 }
+],
+"serials_outstanding": 1
+```
+
+`expected` is derived from the quantity **received**, not ordered, so this is
+real outstanding work rather than a restatement of the order. `0` always means
+nothing is owed — a line with nothing serialized reports `0` and an empty
+`serial_gap`, which is not the same as a line that owes serials nobody looked
+for.
+
+This figure exists because **every** receive path can put a serialized unit into
+stock without a serial:
+
+| Path | Can leave a gap? |
+| ---- | ---------------- |
+| `receive` with full serials | no |
+| `receive` with partial or no serials | yes — deliberately allowed |
+| `mark-delivered` | yes — it captures no serials at all |
+| `receipts/scan_barcode/` | yes, on non-kit lines |
+
+Serialized items used to be banned from kits on the grounds that receiving a kit
+would "credit stock without recording serial numbers". That was true, but never
+unique to kits — `mark-delivered` has always done exactly that to an ordinary
+serialized line. Reporting the gap covers every path, does not block a receipt
+for goods that physically arrived, and leaves work that can be finished later;
+the prohibition covered one path, blocked a legitimate configuration, and pushed
+the operator somewhere the system could not see.
+
+A client should surface a non-zero value. It is not an error.
 
 ---
 

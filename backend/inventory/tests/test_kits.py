@@ -201,20 +201,52 @@ class TestKitDefinition:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert not KitComponent.objects.filter(kit=eufy_kit, component=other).exists()
 
-    def test_ac10_serialized_components_fail_loud(self, staff_client, eufy_kit):
+    def test_ac10_serialized_components_are_now_accepted(self, staff_client, eufy_kit):
+        """AC-10 REVERSED (oms-po-receiving).
+
+        A serialized component used to be refused here and at the model,
+        because receiving the kit would have credited its stock and recorded no
+        serial numbers. Receiving can now capture a serial against the
+        component — and refuses one aimed at the kit — so the refusal guarded
+        against nothing while blocking a real configuration: a kit whose parts
+        happen to be serial-tracked.
+
+        The gap that rule was really about is reported instead, as a line's
+        ``serials_outstanding``. See
+        ``reorder_queue/tests/test_po_receiving_workflow.py``.
+        """
         serialized = InventoryItemFactory(name="Serialized Board", is_serialized=True, image=None)
         response = staff_client.patch(
             reverse("kit-detail", args=[eufy_kit.pk]),
             {"components": [{"component": serialized.pk, "quantity": 1}]},
             format="json",
         )
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert not KitComponent.objects.filter(kit=eufy_kit, component=serialized).exists()
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert KitComponent.objects.filter(kit=eufy_kit, component=serialized).exists()
 
-    def test_ac10_serialized_component_rejected_at_the_model_too(self, eufy_kit):
+    def test_ac10_serialized_component_accepted_at_the_model_too(self, eufy_kit):
         serialized = InventoryItemFactory(name="Serialized Board", is_serialized=True, image=None)
-        with pytest.raises(ValidationError):
-            KitComponent(kit=eufy_kit, component=serialized, quantity=1).save()
+
+        KitComponent(kit=eufy_kit, component=serialized, quantity=1).save()
+
+        assert eufy_kit.kit_components.filter(component=serialized).exists()
+
+    def test_ac10_the_kit_itself_is_still_never_serialized(self, staff_client, eufy_kit):
+        """The rule that did NOT move.
+
+        "A kit may contain serialized parts" and "a kit is itself serialized"
+        are different claims. The second remains false: a kit never enters
+        stock, so a serial against it names a unit nothing can draw down.
+        """
+        response = staff_client.patch(
+            reverse("kit-detail", args=[eufy_kit.pk]),
+            {"is_serialized": True},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "is_serialized" in field_errors(response)
+        eufy_kit.refresh_from_db()
+        assert eufy_kit.is_serialized is False
 
     def test_ac11_duplicate_components_are_rejected(self, staff_client, eufy_kit, ink_components):
         cyan = ink_components[0]

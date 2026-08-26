@@ -130,6 +130,11 @@ interface PurchaseOrderItem {
   // line that field describes the kit, which is never stocked.
   serial_targets: SerialTarget[];
   serials_recorded: number;
+  // Units of a serialized identity already on the shelf with no serial
+  // recorded. Non-zero means real outstanding work — this is what replaced
+  // the old ban on serialized kit components, and it covers every receive
+  // path including `mark-delivered`, which records no serials at all.
+  serials_outstanding: number;
   unit_cost_ordered: string;
   unit_cost_actual: string | null;
   estimated_cost: string;
@@ -184,6 +189,7 @@ interface PurchaseOrder {
   has_receipt_variance: boolean;
   outstanding_line_count: number;
   variance_line_count: number;
+  serials_outstanding: number;
   // Served by the API from its own RECEIVABLE_STATUSES, so the button and the
   // endpoint cannot disagree about whether this order can be received against.
   can_receive: boolean;
@@ -1601,6 +1607,23 @@ const PurchaseOrderPage: React.FC = () => {
             </Text>
           </Paper>
         )}
+        {order.serials_outstanding > 0 && (
+          <Paper
+            withBorder
+            p="sm"
+            radius="md"
+            bg="yellow.0"
+            c="yellow.9"
+            mb="md"
+            data-testid="serials-outstanding-warning"
+          >
+            <Text size="sm">
+              {order.serials_outstanding} received{' '}
+              {order.serials_outstanding === 1 ? 'unit is' : 'units are'} in stock with no serial
+              number recorded. Serial numbers can be added from the item page.
+            </Text>
+          </Paper>
+        )}
         {orderPad && orderPad.missing_sku.length > 0 && (
           <Paper
             withBorder
@@ -2599,6 +2622,15 @@ const PurchaseOrderPage: React.FC = () => {
                         data-testid={`line-outstanding-${item.id}`}
                       >
                         {item.quantity_pending} still due
+                      </span>
+                    )}
+                    {item.serials_outstanding > 0 && (
+                      <span
+                        className="receipt-flag receipt-flag-serials"
+                        data-testid={`line-serials-outstanding-${item.id}`}
+                        title="These units are in stock but no serial number was recorded for them"
+                      >
+                        {item.serials_outstanding} without serials
                       </span>
                     )}
                   </td>

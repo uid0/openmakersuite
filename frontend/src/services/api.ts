@@ -2253,6 +2253,8 @@ export interface ReceivingSerialTarget {
   serial_tracking_mode?: string;
   /** Units of this identity the FULL ordered quantity implies. */
   quantity: number;
+  /** Units of this identity already accessioned against the line. */
+  recorded: number;
 }
 
 /** An identifier a scanner could read off a line's goods. */
@@ -2287,6 +2289,16 @@ export interface ReceivingWorksheetLine {
   scan_codes: ReceivingScanCode[];
   serial_targets: ReceivingSerialTarget[];
   serials_recorded: number;
+  /** Per-identity breakdown of units credited with no serial yet. */
+  serial_gap: {
+    item: string;
+    item_name: string;
+    expected: number;
+    recorded: number;
+    outstanding: number;
+  }[];
+  /** Units on this line in stock with no serial recorded. */
+  serials_outstanding: number;
 }
 
 /**
@@ -2309,6 +2321,8 @@ export interface ReceivingWorksheet {
   has_receipt_variance: boolean;
   outstanding_line_count: number;
   variance_line_count: number;
+  /** Order-level roll-up of units in stock with no serial recorded. */
+  serials_outstanding: number;
   lines: ReceivingWorksheetLine[];
 }
 

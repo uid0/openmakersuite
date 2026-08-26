@@ -57,6 +57,7 @@ const makeOrder = (overrides: Record<string, unknown> = {}) => ({
   has_receipt_variance: false,
   outstanding_line_count: 1,
   variance_line_count: 0,
+  serials_outstanding: 0,
   order_date: '2026-04-01T00:00:00Z',
   expected_delivery_date: '2026-05-15',
   supplier_order_number: '',
@@ -90,6 +91,7 @@ const makeOrder = (overrides: Record<string, unknown> = {}) => ({
       closed_short_reason: '',
       serial_targets: [],
       serials_recorded: 0,
+      serials_outstanding: 0,
       unit_cost_ordered: '1.00',
       unit_cost_actual: null,
       estimated_cost: '10.00',
@@ -449,5 +451,62 @@ describe('kit lines and serial identity', () => {
     });
 
     expect(await screen.findByTestId('receive-serials-402:comp-2')).toHaveTextContent('(0/3)');
+  });
+});
+
+
+describe('an uncaptured serial is never silent', () => {
+  test('units in stock with no serial are flagged on the line and the order', async () => {
+    // This is what replaced the old ban on serialized kit components. The ban
+    // refused the configuration; this reports the gap, and it covers every
+    // receive path rather than just the kit one.
+    const withGap = makeOrder({
+      serials_outstanding: 3,
+      items: [
+        {
+          ...makeOrder().items[0],
+          quantity_received: 3,
+          serials_outstanding: 3,
+          serial_targets: [
+            { item: 'inv-1', item_name: 'Meter', item_sku: 'M-1', quantity: 3, recorded: 0 },
+          ],
+        },
+      ],
+    });
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: withGap });
+
+    renderPage();
+
+    expect(await screen.findByTestId('serials-outstanding-warning')).toHaveTextContent(
+      /3 received units are in stock with no serial number recorded/i,
+    );
+    expect(screen.getByTestId('line-serials-outstanding-301')).toHaveTextContent(
+      /3 without serials/i,
+    );
+  });
+
+  test('a line with every serial captured carries no flag', async () => {
+    // Zero must read as "nothing owed", not as "we did not look".
+    const complete = makeOrder({
+      serials_outstanding: 0,
+      items: [
+        {
+          ...makeOrder().items[0],
+          quantity_received: 3,
+          serials_outstanding: 0,
+          serials_recorded: 3,
+          serial_targets: [
+            { item: 'inv-1', item_name: 'Meter', item_sku: 'M-1', quantity: 3, recorded: 3 },
+          ],
+        },
+      ],
+    });
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: complete });
+
+    renderPage();
+
+    await screen.findByRole('button', { name: /^receive items$/i });
+    expect(screen.queryByTestId('serials-outstanding-warning')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('line-serials-outstanding-301')).not.toBeInTheDocument();
   });
 });

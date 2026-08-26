@@ -38,6 +38,7 @@ from rest_framework.test import APIClient
 from inventory.models import ItemSupplier, KitComponent, SerializedComponent
 from inventory.services.kits import build_kit_snapshot
 from inventory.tests.factories import InventoryItemFactory, SupplierFactory
+from reorder_queue import services
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
 
 
@@ -753,33 +754,29 @@ class TestSerialCapture:
 
 @pytest.mark.django_db
 class TestKitSerialIdentity:
-    """The kit rule: a serial never lands on the kit's own identity.
+    """The kit rule: serials land on the COMPONENTS, never on the kit.
 
-    A kit is bought as one SKU and received as stock on its COMPONENTS — the
-    kit's own stock stays at zero for ever. A serial written against the kit
-    would therefore name a unit that never enters stock and can never be drawn
-    down. That is the documented data-corruption path, and it is defended at
-    two independent layers:
+    A kit is bought as one SKU and stocked as its parts — its own stock stays
+    at zero for ever — so a serial written against the kit names a unit that
+    can never be drawn down. That is the documented data-corruption path.
 
-    * ``KitComponent.clean`` refuses to put a serialized item in a kit at all,
-      so the situation cannot normally arise; and
-    * receiving refuses to record a serial against a kit identity even when
-      asked to directly, which is the layer these tests exercise.
-
-    Both matter. The first is a rule about how kits may be *configured* and can
-    be relaxed by a future decision; the second is a rule about what receiving
-    may *write*, and must hold regardless.
+    Serialized items were once banned from kits outright to prevent it. That
+    ban was lifted (oms-po-receiving) once receiving could record a serial
+    against the right component; what defends the rule now is this refusal, at
+    the point of the write, plus the ``serials_outstanding`` gap that keeps an
+    uncaptured serial visible instead of silently lost.
     """
 
     @pytest.fixture
     def kit_setup(self, supplier, operator, db):
+        """A kit with one serialized component and one plain one."""
+        meter = make_item("Meter", serialized=True, supplier=supplier)
         cable = make_item("Cable", serialized=False, supplier=supplier)
-        washer = make_item("Washer", serialized=False, supplier=supplier)
         kit = InventoryItemFactory(
             name="Meter Kit", is_kit=True, current_stock=0, minimum_stock=0, image=None
         )
-        KitComponent.objects.create(kit=kit, component=cable, quantity=1)
-        KitComponent.objects.create(kit=kit, component=washer, quantity=2)
+        KitComponent.objects.create(kit=kit, component=meter, quantity=1)
+        KitComponent.objects.create(kit=kit, component=cable, quantity=2)
         ItemSupplier.objects.create(
             item=kit,
             supplier=supplier,
@@ -790,51 +787,126 @@ class TestKitSerialIdentity:
         )
         purchase_order = make_po(supplier, operator)
         line = add_line(purchase_order, kit, 2)
-        return purchase_order, line, kit, cable, washer
+        return purchase_order, line, kit, meter, cable
 
-    def test_a_serialized_item_cannot_be_put_in_a_kit_at_all(self, supplier, db):
-        """The first layer, stated here so its removal is a visible change.
+    def test_a_serialized_item_may_now_be_a_kit_component(self, supplier, db):
+        """The lifted rule, asserted at the model.
 
-        This is what currently makes "a kit line with serials" unreachable
-        through the UI. It is asserted rather than assumed, so if the rule is
-        ever relaxed this test fails and whoever relaxes it has to look at the
-        receiving-side guards below.
+        It used to raise "Serialized items cannot be kit components". Receiving
+        can record those serials now, so refusing the configuration guarded
+        against nothing and blocked a real one.
         """
         meter = make_item("Meter", serialized=True, supplier=supplier)
         kit = InventoryItemFactory(
             name="Serialized Kit", is_kit=True, current_stock=0, minimum_stock=0, image=None
         )
 
+        row = KitComponent.objects.create(kit=kit, component=meter, quantity=1)
+
+        assert row.pk is not None
+        assert kit.kit_components.get().component == meter
+        # The rule that did NOT move: the kit itself is still never serialized.
+        kit.is_serialized = True
         with pytest.raises(DjangoValidationError) as excinfo:
-            KitComponent.objects.create(kit=kit, component=meter, quantity=1)
+            kit.full_clean()
+        assert "kit cannot be serialized" in str(excinfo.value)
 
-        assert "Serialized items cannot be kit components" in str(excinfo.value)
-
-    def test_a_kit_line_offers_no_serial_target_of_its_own(self, client, kit_setup):
-        """The worksheet never invites a serial against the kit.
-
-        Not merely "the kit is absent from a longer list" — the whole list is
-        empty, because none of this kit's components is serialized. A client
-        reading this is told, correctly, that there is nothing here to
-        serialize.
-        """
-        purchase_order, line, kit, cable, washer = kit_setup
+    def test_a_kit_line_offers_its_serialized_components_never_the_kit(self, client, kit_setup):
+        purchase_order, line, kit, meter, cable = kit_setup
 
         row = line_of(worksheet(client, purchase_order).data, line)
         offered = {target["item"] for target in row["serial_targets"]}
 
-        assert offered == set()
+        assert offered == {str(meter.pk)}
+        # Never the kit — that is the corruption path.
         assert str(kit.pk) not in offered
-        assert row["is_kit_line"] is True
+        # Nor the component that is not serialized.
+        assert str(cable.pk) not in offered
+        # Two kits ordered, one meter each.
+        assert row["serial_targets"][0]["quantity"] == 2
+
+    def test_serials_on_a_kit_line_land_on_the_component(self, client, kit_setup):
+        purchase_order, line, kit, meter, cable = kit_setup
+
+        response = receive(
+            client,
+            purchase_order,
+            [
+                {
+                    "purchase_order_item": line.pk,
+                    "quantity_received": 2,
+                    "serials": [
+                        {"item": str(meter.pk), "serial_number": "M-1", "lot": "L9"},
+                        {"item": str(meter.pk), "serial_number": "M-2"},
+                    ],
+                }
+            ],
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        units = SerializedComponent.objects.filter(item=meter)
+        assert set(units.values_list("serial_number", flat=True)) == {"M-1", "M-2"}
+        # Nothing whatsoever attached to the kit's identity.
+        assert SerializedComponent.objects.filter(item=kit).count() == 0
+        kit.refresh_from_db()
+        assert kit.current_stock == 0
+        # The components were still credited exactly as before.
+        meter.refresh_from_db()
+        cable.refresh_from_db()
+        assert meter.current_stock == 2
+        assert cable.current_stock == 4
+        # Provenance points at the kit LINE, but the unit is a component's.
+        first = units.get(serial_number="M-1")
+        assert first.provenance_purchase_order_item == line
+        assert first.item == meter
+        assert first.lot == "L9"
+        # Every credited unit has a serial, so nothing is outstanding.
+        line.refresh_from_db()
+        assert services.serials_outstanding(line) == 0
+
+    def test_the_component_serial_target_uses_the_live_serialized_flag(
+        self, client, supplier, operator, db
+    ):
+        """Serialization is a property of the item TODAY, not of the box.
+
+        The kit snapshot freezes what a receipt *credits* — quantities and
+        component identities as ordered — because that is what physically
+        arrives. Whether the system tracks a component serially is a different
+        question: serials can only be recorded for an item it tracks serially
+        now, so an item that became serialized after the order must still be
+        offered.
+        """
+        part = make_item("Part", serialized=False, supplier=supplier)
+        kit = InventoryItemFactory(
+            name="Late Kit", is_kit=True, current_stock=0, minimum_stock=0, image=None
+        )
+        KitComponent.objects.create(kit=kit, component=part, quantity=1)
+        ItemSupplier.objects.create(
+            item=kit,
+            supplier=supplier,
+            supplier_sku="KIT-L",
+            unit_cost=Decimal("5.00"),
+            quantity_per_package=1,
+            is_primary=True,
+        )
+        purchase_order = make_po(supplier, operator)
+        line = add_line(purchase_order, kit, 1)
+        # Ordered while the part was NOT serialized; it becomes so afterwards.
+        assert line_of(worksheet(client, purchase_order).data, line)["serial_targets"] == []
+
+        part.is_serialized = True
+        part.save(update_fields=["is_serialized"])
+
+        row = line_of(worksheet(client, purchase_order).data, line)
+        assert [target["item"] for target in row["serial_targets"]] == [str(part.pk)]
 
     def test_naming_the_kit_itself_is_refused_and_says_why(self, client, kit_setup):
         """The corruption path, refused loudly rather than redirected quietly.
 
         Silently re-pointing the serial at a component would be a guess about
-        which one, on a kit that has several. The refusal names the kit and
-        explains that its components are what get stocked.
+        which one, on a kit that has several.
         """
-        purchase_order, line, kit, cable, washer = kit_setup
+        purchase_order, line, kit, meter, cable = kit_setup
 
         response = receive(
             client,
@@ -858,45 +930,244 @@ class TestKitSerialIdentity:
         assert line.quantity_received == 0
         assert cable.current_stock == 0
 
-    def test_receiving_a_kit_never_mints_a_unit_against_the_kit(self, client, kit_setup):
-        """The ordinary path: components credited, kit identity untouched."""
-        purchase_order, line, kit, cable, washer = kit_setup
+    def test_an_unlabelled_serial_on_a_multi_component_kit_is_refused(
+        self, client, supplier, operator, db
+    ):
+        """With two serialized components there is no "the obvious one".
+
+        Picking either would be inventing which physical part the operator was
+        holding. Reachable only now that a kit may hold serialized components.
+        """
+        meter = make_item("Meter", serialized=True, supplier=supplier)
+        probe = make_item("Probe", serialized=True, supplier=supplier)
+        kit = InventoryItemFactory(
+            name="Twin Kit", is_kit=True, current_stock=0, minimum_stock=0, image=None
+        )
+        KitComponent.objects.create(kit=kit, component=meter, quantity=1)
+        KitComponent.objects.create(kit=kit, component=probe, quantity=1)
+        ItemSupplier.objects.create(
+            item=kit,
+            supplier=supplier,
+            supplier_sku="KIT-2",
+            unit_cost=Decimal("50.00"),
+            quantity_per_package=1,
+            is_primary=True,
+        )
+        purchase_order = make_po(supplier, operator)
+        line = add_line(purchase_order, kit, 1)
 
         response = receive(
             client,
             purchase_order,
-            [{"purchase_order_item": line.pk, "quantity_received": 2}],
+            [
+                {
+                    "purchase_order_item": line.pk,
+                    "quantity_received": 1,
+                    "serials": [{"serial_number": "X-1"}],
+                }
+            ],
         )
 
-        assert response.status_code == status.HTTP_200_OK, response.data
-        assert SerializedComponent.objects.filter(item=kit).count() == 0
-        kit.refresh_from_db()
-        cable.refresh_from_db()
-        washer.refresh_from_db()
-        assert kit.current_stock == 0
-        assert cable.current_stock == 2
-        assert washer.current_stock == 4
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "which one it belongs to" in response.data["error"]
+        # Both candidates named, so the operator can fix it without guessing.
+        assert "Meter" in response.data["error"]
+        assert "Probe" in response.data["error"]
+        assert SerializedComponent.objects.count() == 0
+
+    def test_a_serial_for_the_wrong_component_of_the_right_kit_is_refused(self, client, kit_setup):
+        """The cable is in the box, but it is not serialized.
+
+        Accepting this would mint a serialized unit for an item nothing tracks
+        serially — a different way to reach the same unusable row.
+        """
+        purchase_order, line, kit, meter, cable = kit_setup
+
+        response = receive(
+            client,
+            purchase_order,
+            [
+                {
+                    "purchase_order_item": line.pk,
+                    "quantity_received": 1,
+                    "serials": [{"item": str(cable.pk), "serial_number": "C-1"}],
+                }
+            ],
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "does not credit a serialized unit" in response.data["error"]
+        assert SerializedComponent.objects.filter(item=cable).count() == 0
 
     def test_the_kit_rule_holds_on_an_over_receipt_too(self, client, kit_setup):
-        """Three kits against an order for two: three kits' components, no kit unit."""
-        purchase_order, line, kit, cable, washer = kit_setup
+        """Three kits against an order for two: three meters, still no kit unit."""
+        purchase_order, line, kit, meter, cable = kit_setup
 
         response = receive(
             client,
             purchase_order,
-            [{"purchase_order_item": line.pk, "quantity_received": 3}],
+            [
+                {
+                    "purchase_order_item": line.pk,
+                    "quantity_received": 3,
+                    "serials": [
+                        {"item": str(meter.pk), "serial_number": "M-1"},
+                        {"item": str(meter.pk), "serial_number": "M-2"},
+                        {"item": str(meter.pk), "serial_number": "M-3"},
+                    ],
+                }
+            ],
         )
 
         assert response.status_code == status.HTTP_200_OK, response.data
+        assert SerializedComponent.objects.filter(item=meter).count() == 3
         assert SerializedComponent.objects.filter(item=kit).count() == 0
         kit.refresh_from_db()
+        meter.refresh_from_db()
         cable.refresh_from_db()
-        washer.refresh_from_db()
         assert kit.current_stock == 0
-        assert cable.current_stock == 3
-        assert washer.current_stock == 6
+        assert meter.current_stock == 3
+        assert cable.current_stock == 6
         line.refresh_from_db()
         assert line.is_over_received
+
+
+@pytest.mark.django_db
+class TestSerialGapIsVisible:
+    """What replaced the prohibition: an uncaptured serial is never silent.
+
+    The old rule refused serialized kit components because "receiving the kit
+    would credit stock without recording serial numbers". That gap was never
+    unique to kits — ``mark-delivered`` has always credited an ordinary
+    serialized line's stock and minted nothing — so the fix is to report it
+    everywhere rather than to forbid one configuration.
+    """
+
+    def test_mark_delivered_on_a_serialized_line_reports_the_gap(self, client, supplier, operator):
+        """The path that credits stock and records no serials at all.
+
+        This is the exact hazard the prohibition named, on the ordinary line
+        where it has always been reachable. It stays permitted — the goods did
+        arrive — but it is now counted.
+        """
+        purchase_order = make_po(supplier, operator)
+        meter = make_item("Meter", serialized=True, supplier=supplier)
+        line = add_line(purchase_order, meter, 3)
+
+        response = client.post(
+            reverse("purchaseorder-mark-delivered", args=[purchase_order.pk]),
+            {"delivery_date": date(2026, 8, 1).isoformat()},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        line.refresh_from_db()
+        meter.refresh_from_db()
+        # Stock credited, no serials — and the gap says exactly that.
+        assert meter.current_stock == 3
+        assert SerializedComponent.objects.filter(item=meter).count() == 0
+        assert services.serials_outstanding(line) == 3
+        assert response.data["serials_outstanding"] == 3
+
+    def test_the_gap_closes_as_serials_are_captured(self, client, supplier, operator):
+        purchase_order = make_po(supplier, operator)
+        meter = make_item("Meter", serialized=True, supplier=supplier)
+        line = add_line(purchase_order, meter, 3)
+
+        receive(
+            client,
+            purchase_order,
+            [
+                {
+                    "purchase_order_item": line.pk,
+                    "quantity_received": 3,
+                    "serials": [{"serial_number": "S-1"}, {"serial_number": "S-2"}],
+                }
+            ],
+        )
+
+        line.refresh_from_db()
+        assert services.serials_outstanding(line) == 1
+        row = line_of(worksheet(client, purchase_order).data, line)
+        assert row["serials_outstanding"] == 1
+        assert row["serial_gap"] == [
+            {
+                "item": str(meter.pk),
+                "item_name": "Meter",
+                "expected": 3,
+                "recorded": 2,
+                "outstanding": 1,
+            }
+        ]
+
+    def test_the_gap_is_measured_per_component_on_a_kit_line(self, client, supplier, operator, db):
+        """A single total could not say WHICH component is missing serials."""
+        meter = make_item("Meter", serialized=True, supplier=supplier)
+        probe = make_item("Probe", serialized=True, supplier=supplier)
+        kit = InventoryItemFactory(
+            name="Twin Kit", is_kit=True, current_stock=0, minimum_stock=0, image=None
+        )
+        KitComponent.objects.create(kit=kit, component=meter, quantity=1)
+        KitComponent.objects.create(kit=kit, component=probe, quantity=2)
+        ItemSupplier.objects.create(
+            item=kit,
+            supplier=supplier,
+            supplier_sku="KIT-3",
+            unit_cost=Decimal("50.00"),
+            quantity_per_package=1,
+            is_primary=True,
+        )
+        purchase_order = make_po(supplier, operator)
+        line = add_line(purchase_order, kit, 1)
+
+        # One kit: 1 meter, 2 probes. Only the meter gets a serial.
+        receive(
+            client,
+            purchase_order,
+            [
+                {
+                    "purchase_order_item": line.pk,
+                    "quantity_received": 1,
+                    "serials": [{"item": str(meter.pk), "serial_number": "M-1"}],
+                }
+            ],
+        )
+
+        line.refresh_from_db()
+        gap = {row["item_name"]: row for row in services.serial_gap(line)}
+        assert gap["Meter"]["outstanding"] == 0
+        assert gap["Probe"]["outstanding"] == 2
+        assert services.serials_outstanding(line) == 2
+
+    def test_a_line_with_nothing_serialized_has_no_gap(self, client, supplier, operator):
+        """Zero must mean "nothing owed", never "we did not look"."""
+        purchase_order = make_po(supplier, operator)
+        widget = make_item("Widget", serialized=False, supplier=supplier)
+        line = add_line(purchase_order, widget, 5)
+        receive(client, purchase_order, [{"purchase_order_item": line.pk, "quantity_received": 5}])
+
+        line.refresh_from_db()
+        assert services.serial_gap(line) == []
+        assert services.serials_outstanding(line) == 0
+
+    def test_the_order_rolls_the_gap_up(self, client, supplier, operator):
+        purchase_order = make_po(supplier, operator)
+        meter = make_item("Meter", serialized=True, supplier=supplier)
+        probe = make_item("Probe", serialized=True, supplier=supplier)
+        meter_line = add_line(purchase_order, meter, 2)
+        probe_line = add_line(purchase_order, probe, 3)
+
+        receive(
+            client,
+            purchase_order,
+            [
+                {"purchase_order_item": meter_line.pk, "quantity_received": 2},
+                {"purchase_order_item": probe_line.pk, "quantity_received": 3},
+            ],
+        )
+
+        payload = worksheet(client, purchase_order).data
+        assert payload["serials_outstanding"] == 5
 
 
 @pytest.mark.django_db
@@ -1124,7 +1395,84 @@ class TestDocumentedContract:
             "scan_codes",
             "serial_targets",
             "serials_recorded",
+            "serial_gap",
+            "serials_outstanding",
         }
+
+    def test_the_documented_serial_gap_shape_is_the_real_one(self, client, supplier, operator):
+        """The keys the doc's ``serial_gap`` example shows, exactly."""
+        purchase_order = make_po(supplier, operator)
+        meter = make_item("Meter", serialized=True, supplier=supplier)
+        line = add_line(purchase_order, meter, 3)
+        receive(
+            client,
+            purchase_order,
+            [
+                {
+                    "purchase_order_item": line.pk,
+                    "quantity_received": 3,
+                    "serials": [{"serial_number": "S-1"}, {"serial_number": "S-2"}],
+                }
+            ],
+        )
+
+        row = line_of(worksheet(client, purchase_order).data, line)
+
+        assert set(row["serial_gap"][0]) == {
+            "item",
+            "item_name",
+            "expected",
+            "recorded",
+            "outstanding",
+        }
+        # The doc says `expected` comes from what was RECEIVED, not ordered.
+        assert row["serial_gap"][0]["expected"] == 3
+        assert row["serials_outstanding"] == 1
+
+    def test_every_path_the_doc_says_can_leave_a_gap_actually_can(self, client, supplier, operator):
+        """The doc's path table, asserted rather than asserted-about.
+
+        A table claiming ``mark-delivered`` leaves a gap would be worse than no
+        table if the path had since started capturing serials — a client would
+        surface a warning that never fires.
+        """
+        # `receive` with no serials.
+        first = make_po(supplier, operator)
+        meter_a = make_item("MeterA", serialized=True, supplier=supplier)
+        line_a = add_line(first, meter_a, 2)
+        receive(client, first, [{"purchase_order_item": line_a.pk, "quantity_received": 2}])
+        line_a.refresh_from_db()
+        assert services.serials_outstanding(line_a) == 2
+
+        # `mark-delivered`, which captures no serials at all.
+        second = make_po(supplier, operator)
+        meter_b = make_item("MeterB", serialized=True, supplier=supplier)
+        line_b = add_line(second, meter_b, 2)
+        client.post(
+            reverse("purchaseorder-mark-delivered", args=[second.pk]),
+            {"delivery_date": date(2026, 8, 1).isoformat()},
+            format="json",
+        )
+        line_b.refresh_from_db()
+        assert services.serials_outstanding(line_b) == 2
+
+        # `receive` with full serials leaves none.
+        third = make_po(supplier, operator)
+        meter_c = make_item("MeterC", serialized=True, supplier=supplier)
+        line_c = add_line(third, meter_c, 2)
+        receive(
+            client,
+            third,
+            [
+                {
+                    "purchase_order_item": line_c.pk,
+                    "quantity_received": 2,
+                    "serials": [{"serial_number": "C-1"}, {"serial_number": "C-2"}],
+                }
+            ],
+        )
+        line_c.refresh_from_db()
+        assert services.serials_outstanding(line_c) == 0
 
     def test_every_documented_scan_code_kind_is_one_the_api_emits(self, client, supplier, operator):
         purchase_order = make_po(supplier, operator)

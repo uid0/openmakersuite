@@ -93,6 +93,65 @@ def serialized_receipt_targets(po_item, quantity: int) -> list[tuple["InventoryI
     return [(item, quantity)] if item.is_serialized else []
 
 
+def serials_recorded_by_item(po_item) -> dict:
+    """``{item_pk: units}`` already accessioned against this line.
+
+    Grouped by identity rather than totalled, because a kit line can credit
+    several serialized components and a single total could not say which of
+    them is still missing serials.
+    """
+    from django.db.models import Count
+
+    rows = po_item.serialized_components.values("item").annotate(n=Count("id"))
+    return {row["item"]: row["n"] for row in rows}
+
+
+def serial_gap(po_item) -> list[dict]:
+    """Units credited to a serialized identity that still have no serial on file.
+
+    ``[{"item", "item_name", "expected", "recorded", "outstanding"}, ...]``,
+    one row per serialized identity this line touches, computed from the
+    quantity actually RECEIVED (not ordered) so it reflects what is physically
+    on the shelf.
+
+    This is what replaced the old ban on serialized kit components (op-8n0).
+    That rule refused the configuration outright because "receiving the kit
+    would credit stock without recording serial numbers" — but the same gap has
+    always existed for an ordinary serialized line received through
+    ``mark-delivered``, which credits aggregate stock and mints nothing. The
+    hazard was never specific to kits; it was that the gap was SILENT.
+
+    Reporting it is strictly better than the prohibition was: it covers every
+    receive path rather than one, it does not block a receipt for goods that
+    physically arrived, and an outstanding count can be worked off later,
+    whereas a refused kit simply pushed the operator somewhere the system could
+    not see.
+    """
+    recorded = serials_recorded_by_item(po_item)
+    gap = []
+    for item, expected in serialized_receipt_targets(po_item, po_item.quantity_received):
+        have = recorded.get(item.pk, 0)
+        gap.append(
+            {
+                "item": str(item.pk),
+                "item_name": item.name,
+                "expected": expected,
+                "recorded": have,
+                "outstanding": max(0, expected - have),
+            }
+        )
+    return gap
+
+
+def serials_outstanding(po_item) -> int:
+    """Total units on this line credited to a serialized identity with no serial.
+
+    ``0`` when nothing here is serialized, and ``0`` once every credited unit
+    has one — so a non-zero value always means real work is outstanding.
+    """
+    return sum(row["outstanding"] for row in serial_gap(po_item))
+
+
 def resolve_serial_targets(po_item, quantity: int, serials: Iterable[SerialCapture]) -> None:
     """Validate a line's serial captures against what the receipt actually credits.
 
@@ -594,6 +653,7 @@ def build_receiving_worksheet(purchase_order) -> dict:
     lines = []
     for po_item in purchase_order.items.all():
         quantity_ordered = po_item.quantity_ordered or 0
+        recorded_by_item = serials_recorded_by_item(po_item)
         lines.append(
             {
                 "purchase_order_item": po_item.id,
@@ -619,10 +679,16 @@ def build_receiving_worksheet(purchase_order) -> dict:
                         "item_sku": item.sku,
                         "serial_tracking_mode": item.serial_tracking_mode,
                         "quantity": units,
+                        "recorded": recorded_by_item.get(item.pk, 0),
                     }
                     for item, units in serialized_receipt_targets(po_item, quantity_ordered)
                 ],
-                "serials_recorded": po_item.serialized_components.count(),
+                "serials_recorded": sum(recorded_by_item.values()),
+                # Units already on the shelf whose serials nobody has captured.
+                # Derived from what was RECEIVED, so it is real outstanding work
+                # and not a restatement of the order.
+                "serial_gap": serial_gap(po_item),
+                "serials_outstanding": serials_outstanding(po_item),
             }
         )
 
@@ -639,5 +705,8 @@ def build_receiving_worksheet(purchase_order) -> dict:
         "has_receipt_variance": purchase_order.has_receipt_variance,
         "outstanding_line_count": purchase_order.outstanding_line_count,
         "variance_line_count": purchase_order.variance_line_count,
+        # Order-level roll-up of the same gap, so a client can flag "stock is on
+        # the shelf with no serials against it" without walking the lines.
+        "serials_outstanding": sum(line["serials_outstanding"] for line in lines),
         "lines": lines,
     }

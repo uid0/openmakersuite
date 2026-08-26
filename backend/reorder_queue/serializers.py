@@ -185,6 +185,12 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
     # would then refuse.
     serial_targets = serializers.SerializerMethodField()
     serials_recorded = serializers.SerializerMethodField()
+    # Units of a serialized identity this line has already put on the shelf
+    # that still carry no serial number. What replaced the old ban on
+    # serialized kit components: the gap is reported rather than the
+    # configuration refused, and it covers every receive path — including
+    # ``mark-delivered``, which credits stock and records no serials at all.
+    serials_outstanding = serializers.SerializerMethodField()
     # Kit lines (op-8n0). ``is_kit_line`` is derived from the item this line
     # already points at, and ``kit_components`` previews what receiving the
     # ordered quantity will credit.
@@ -230,6 +236,7 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
             "closed_short_reason",
             "serial_targets",
             "serials_recorded",
+            "serials_outstanding",
             "is_kit_line",
             "kit_components",
             "expected_shipment_date",
@@ -293,9 +300,21 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
 
         Counted from the units' own provenance link rather than tracked in a
         column, so it cannot drift from the units that actually exist. A client
-        compares it with ``serial_targets`` to see what is still uncaptured.
+        compares it with ``serial_targets`` to see what is still uncaptured, or
+        reads ``serials_outstanding`` for that subtraction already done.
         """
         return obj.serialized_components.count()
+
+    def get_serials_outstanding(self, obj):
+        """Units credited to a serialized identity on this line with no serial yet.
+
+        Zero when nothing on the line is serialized, and zero once every
+        received unit has one — so a non-zero value always means real
+        outstanding work, on a kit line and an ordinary line alike.
+        """
+        from .services import serials_outstanding
+
+        return serials_outstanding(obj)
 
     def get_kit_components(self, obj):
         """What receiving this line's ordered quantity will credit (op-8n0).
@@ -530,6 +549,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     outstanding_line_count = serializers.IntegerField(read_only=True)
     variance_line_count = serializers.IntegerField(read_only=True)
     can_receive = serializers.SerializerMethodField()
+    serials_outstanding = serializers.SerializerMethodField()
     days_since_ordered = serializers.IntegerField(read_only=True)
     estimated_total = serializers.DecimalField(
         max_digits=12,
@@ -590,12 +610,24 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "outstanding_line_count",
             "variance_line_count",
             "can_receive",
+            "serials_outstanding",
             "days_since_ordered",
             "payment_schedule",
         ]
         # ``order_date`` is deliberately absent (op-bwo9): a PO entered after the
         # fact is backdated to when it was actually placed, so PATCH must reach it.
         read_only_fields = ["po_number", "updated_at"]
+
+    def get_serials_outstanding(self, obj):
+        """Units on this order sitting in stock with no serial recorded.
+
+        Summed across the lines. Non-zero means somebody received goods —
+        through any path, ``mark-delivered`` included — without capturing the
+        serials, and the units are still identifiable only in aggregate.
+        """
+        from .services import serials_outstanding
+
+        return sum(serials_outstanding(item) for item in obj.items.all())
 
     def get_can_receive(self, obj):
         """Whether this order's status allows receiving against it.

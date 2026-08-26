@@ -35,7 +35,7 @@ import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from inventory.models import InventoryItem, ItemSupplier, KitComponent, SerializedComponent
+from inventory.models import ItemSupplier, KitComponent, SerializedComponent
 from inventory.services.kits import build_kit_snapshot
 from inventory.tests.factories import InventoryItemFactory, SupplierFactory
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
@@ -124,9 +124,7 @@ def line_of(payload, po_item):
 class TestReceivingWorksheet:
     """What a client reads before it can show a receive screen."""
 
-    def test_worksheet_reports_each_line_and_what_is_outstanding(
-        self, client, supplier, operator
-    ):
+    def test_worksheet_reports_each_line_and_what_is_outstanding(self, client, supplier, operator):
         purchase_order = make_po(supplier, operator)
         widget = make_item("Widget", stock=0, supplier=supplier)
         gasket = make_item("Gasket", stock=0, supplier=supplier)
@@ -157,7 +155,7 @@ class TestReceivingWorksheet:
     def test_worksheet_distinguishes_unreceivable_from_nothing_outstanding(
         self, client, supplier, operator
     ):
-        """"You may not receive this" and "there is nothing left" are different facts.
+        """ "You may not receive this" and "there is nothing left" are different facts.
 
         An operator holding a box acts differently on each: one means go and
         send the order, the other means the box is a surprise. Collapsing them
@@ -195,9 +193,7 @@ class TestReceivingWorksheet:
         assert codes["GRA-RELAY-1"] == "supplier_sku"
         assert item.sku in codes
 
-    def test_an_unbarcoded_line_offers_no_empty_code_to_match_on(
-        self, client, supplier, operator
-    ):
+    def test_an_unbarcoded_line_offers_no_empty_code_to_match_on(self, client, supplier, operator):
         """A line with no barcodes contributes nothing, not an empty string.
 
         An empty code in the list is worse than no code: a scanner emitting a
@@ -251,9 +247,7 @@ class TestQuantityMismatch:
         assert response.data["has_receipt_variance"] is True
         assert response.data["variance_line_count"] == 1
 
-    def test_short_receipt_leaves_the_line_outstanding_not_short(
-        self, client, supplier, operator
-    ):
+    def test_short_receipt_leaves_the_line_outstanding_not_short(self, client, supplier, operator):
         """8 of 10 is not yet "short" — the other 2 may still be coming.
 
         A line only becomes short when somebody says the rest is not arriving.
@@ -312,7 +306,7 @@ class TestQuantityMismatch:
         assert purchase_order.is_fully_received is False
 
     def test_receiving_and_closing_short_in_one_request(self, client, supplier, operator):
-        """"8 arrived and the other 2 are cancelled" is one operator action."""
+        """ "8 arrived and the other 2 are cancelled" is one operator action."""
         purchase_order = make_po(supplier, operator)
         item = make_item("Widget", stock=0, supplier=supplier)
         line = add_line(purchase_order, item, 10)
@@ -383,9 +377,7 @@ class TestQuantityMismatch:
         line.refresh_from_db()
         assert line.is_closed_short is False
 
-    def test_receiving_against_a_closed_short_line_is_refused(
-        self, client, supplier, operator
-    ):
+    def test_receiving_against_a_closed_short_line_is_refused(self, client, supplier, operator):
         """The line was declared finished; more stock arriving needs a human."""
         purchase_order = make_po(supplier, operator)
         item = make_item("Widget", stock=0, supplier=supplier)
@@ -446,9 +438,7 @@ class TestPartialReceiptAcrossTime:
         assert purchase_order.deliveries.count() == 2
         assert worksheet(client, purchase_order).data["outstanding_line_count"] == 0
 
-    def test_mark_received_closes_every_outstanding_line_at_once(
-        self, client, supplier, operator
-    ):
+    def test_mark_received_closes_every_outstanding_line_at_once(self, client, supplier, operator):
         purchase_order = make_po(supplier, operator)
         done = add_line(purchase_order, make_item("Widget", supplier=supplier), 5)
         partial = add_line(purchase_order, make_item("Gasket", supplier=supplier), 4)
@@ -501,9 +491,7 @@ class TestPartialReceiptAcrossTime:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "must be sent, confirmed, or partially received" in response.data["error"]
 
-    def test_mark_received_on_an_order_with_no_lines_is_refused(
-        self, client, supplier, operator
-    ):
+    def test_mark_received_on_an_order_with_no_lines_is_refused(self, client, supplier, operator):
         """A sent order with nothing on it has nothing to close.
 
         The one way an order can sit in a receivable status with no
@@ -521,9 +509,7 @@ class TestPartialReceiptAcrossTime:
         purchase_order.refresh_from_db()
         assert purchase_order.status == PurchaseOrder.Status.SENT
 
-    def test_a_voided_line_does_not_block_the_order_finishing(
-        self, client, supplier, operator
-    ):
+    def test_a_voided_line_does_not_block_the_order_finishing(self, client, supplier, operator):
         """A struck-off line is settled: nothing is coming, and nothing should.
 
         It used to be counted as "not fully received", which left every order
@@ -549,9 +535,7 @@ class TestPartialReceiptAcrossTime:
 class TestTrackingBarcode:
     """The scanned parcel label, stored verbatim beside an accurate timestamp."""
 
-    def test_tracking_barcode_is_recorded_exactly_as_scanned(
-        self, client, supplier, operator
-    ):
+    def test_tracking_barcode_is_recorded_exactly_as_scanned(self, client, supplier, operator):
         purchase_order = make_po(supplier, operator)
         line = add_line(purchase_order, make_item("Widget", supplier=supplier), 2)
         scanned = "1Z999AA10123456784"
@@ -568,9 +552,7 @@ class TestTrackingBarcode:
         assert delivery.tracking_number == scanned
         assert delivery.carrier == "UPS"
 
-    def test_the_receipt_keeps_an_accurate_wall_clock_timestamp(
-        self, client, supplier, operator
-    ):
+    def test_the_receipt_keeps_an_accurate_wall_clock_timestamp(self, client, supplier, operator):
         """Transit duration is deferred, but the inputs for it are not.
 
         ``delivery_date`` is the date the OPERATOR states, and is coerced to
@@ -677,9 +659,7 @@ class TestSerialCapture:
         assert row["serials_recorded"] == 2
         assert row["serial_targets"][0]["quantity"] == 5
 
-    def test_more_serials_than_units_is_refused_never_truncated(
-        self, client, supplier, operator
-    ):
+    def test_more_serials_than_units_is_refused_never_truncated(self, client, supplier, operator):
         """Three labels for two units means the operator has made a mistake.
 
         Recording two and dropping the third would discard something they
@@ -713,9 +693,7 @@ class TestSerialCapture:
         assert line.quantity_received == 0
         assert purchase_order.deliveries.count() == 0
 
-    def test_a_duplicate_serial_rolls_the_whole_receipt_back(
-        self, client, supplier, operator
-    ):
+    def test_a_duplicate_serial_rolls_the_whole_receipt_back(self, client, supplier, operator):
         purchase_order = make_po(supplier, operator)
         item = make_item("Meter", serialized=True, supplier=supplier)
         line = add_line(purchase_order, item, 3)
@@ -1003,3 +981,215 @@ class TestEndToEnd:
             "1Z999AA10123456784",
             "1Z999AA10123456785",
         }
+
+
+@pytest.mark.django_db
+class TestDocumentedContract:
+    """The claims ``docs/PO_RECEIVING_API.md`` makes, asserted against the code.
+
+    A documented claim the code does not honour is a defect in its own right,
+    and an API doc that a second client is expected to build against is exactly
+    where that costs the most. The error substrings a client is told to match on
+    are pinned here so the doc and the messages cannot drift apart silently.
+    """
+
+    def test_the_documented_error_substrings_are_the_real_ones(self, client, supplier, operator):
+        purchase_order = make_po(supplier, operator)
+        plain = make_item("Widget", supplier=supplier)
+        meter = make_item("Meter", serialized=True, supplier=supplier)
+        plain_line = add_line(purchase_order, plain, 5)
+        meter_line = add_line(purchase_order, meter, 2)
+        other = make_item("Elsewhere", serialized=True, supplier=supplier)
+
+        cases = [
+            (
+                "nothing on this line is serialized",
+                [
+                    {
+                        "purchase_order_item": plain_line.pk,
+                        "quantity_received": 1,
+                        "serials": [{"serial_number": "S-1"}],
+                    }
+                ],
+            ),
+            (
+                "does not credit a serialized unit",
+                [
+                    {
+                        "purchase_order_item": meter_line.pk,
+                        "quantity_received": 1,
+                        "serials": [{"item": str(other.pk), "serial_number": "S-1"}],
+                    }
+                ],
+            ),
+            (
+                "only credits 1 unit",
+                [
+                    {
+                        "purchase_order_item": meter_line.pk,
+                        "quantity_received": 1,
+                        "serials": [
+                            {"serial_number": "S-1"},
+                            {"serial_number": "S-2"},
+                        ],
+                    }
+                ],
+            ),
+            (
+                "appears twice",
+                [
+                    {
+                        "purchase_order_item": meter_line.pk,
+                        "quantity_received": 2,
+                        "serials": [
+                            {"serial_number": "S-1"},
+                            {"serial_number": "S-1"},
+                        ],
+                    }
+                ],
+            ),
+        ]
+
+        for substring, items in cases:
+            response = receive(client, purchase_order, items)
+            assert response.status_code == status.HTTP_400_BAD_REQUEST, substring
+            assert substring in response.data["error"], (
+                f"docs/PO_RECEIVING_API.md tells clients to match on "
+                f"{substring!r}, but the API said {response.data['error']!r}"
+            )
+
+    def test_an_already_recorded_serial_says_so(self, client, supplier, operator):
+        purchase_order = make_po(supplier, operator)
+        meter = make_item("Meter", serialized=True, supplier=supplier)
+        line = add_line(purchase_order, meter, 3)
+        SerializedComponent.objects.create(item=meter, serial_number="DUP-1")
+
+        response = receive(
+            client,
+            purchase_order,
+            [
+                {
+                    "purchase_order_item": line.pk,
+                    "quantity_received": 1,
+                    "serials": [{"serial_number": "DUP-1"}],
+                }
+            ],
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "already recorded" in response.data["error"]
+
+    def test_the_worksheet_returns_every_field_the_doc_shows(self, client, supplier, operator):
+        """The documented payload shape, field by field.
+
+        A doc that lists a key the response does not carry sends a second client
+        looking for a bug in its own code.
+        """
+        purchase_order = make_po(supplier, operator)
+        add_line(purchase_order, make_item("Widget", supplier=supplier), 5)
+
+        payload = worksheet(client, purchase_order).data
+
+        assert set(payload) >= {
+            "purchase_order",
+            "po_number",
+            "supplier",
+            "status",
+            "status_label",
+            "can_receive",
+            "unavailable_reason",
+            "is_settled",
+            "is_fully_received",
+            "has_receipt_variance",
+            "outstanding_line_count",
+            "variance_line_count",
+            "lines",
+        }
+        assert set(payload["lines"][0]) >= {
+            "purchase_order_item",
+            "label",
+            "item",
+            "item_type",
+            "quantity_ordered",
+            "quantity_received",
+            "quantity_pending",
+            "quantity_variance",
+            "receipt_state",
+            "receipt_state_label",
+            "is_settled",
+            "is_voided",
+            "is_closed_short",
+            "closed_short_reason",
+            "is_kit_line",
+            "scan_codes",
+            "serial_targets",
+            "serials_recorded",
+        }
+
+    def test_every_documented_scan_code_kind_is_one_the_api_emits(self, client, supplier, operator):
+        purchase_order = make_po(supplier, operator)
+        item = make_item(
+            "Relay",
+            supplier=supplier,
+            sku_barcodes={
+                "package_upc": "0123456789012",
+                "unit_upc": "9876543210987",
+                "supplier_sku": "GRA-1",
+            },
+        )
+        line = add_line(purchase_order, item, 1)
+
+        row = line_of(worksheet(client, purchase_order).data, line)
+        kinds = {entry["kind"] for entry in row["scan_codes"]}
+
+        # The four the doc's table names, and nothing the doc does not.
+        assert kinds == {"item_sku", "package_upc", "unit_upc", "supplier_sku"}
+
+    def test_mark_delivered_and_mark_received_are_genuinely_different(
+        self, client, supplier, operator
+    ):
+        """The doc says one stocks the shortfall and the other writes it off.
+
+        If they behaved alike, the warning telling operators never to substitute
+        one for the other would be advice about nothing.
+        """
+        stocked = make_po(supplier, operator)
+        stocked_item = make_item("Widget", stock=0, supplier=supplier)
+        stocked_line = add_line(stocked, stocked_item, 10)
+
+        written_off = make_po(supplier, operator)
+        written_item = make_item("Gasket", stock=0, supplier=supplier)
+        written_line = add_line(written_off, written_item, 10)
+
+        client.post(
+            reverse("purchaseorder-mark-delivered", args=[stocked.pk]),
+            {"delivery_date": date(2026, 8, 1).isoformat()},
+            format="json",
+        )
+        client.post(
+            reverse("purchaseorder-mark-received", args=[written_off.pk]),
+            {"reason": "not coming"},
+            format="json",
+        )
+
+        stocked_line.refresh_from_db()
+        stocked_item.refresh_from_db()
+        written_line.refresh_from_db()
+        written_item.refresh_from_db()
+
+        # mark-delivered: the outstanding quantity is received and STOCKED.
+        assert stocked_line.quantity_received == 10
+        assert stocked_item.current_stock == 10
+        assert stocked_line.receipt_state == PurchaseOrderItem.ReceiptState.RECEIVED
+
+        # mark-received: nothing stocked, the shortfall written off.
+        assert written_line.quantity_received == 0
+        assert written_item.current_stock == 0
+        assert written_line.receipt_state == PurchaseOrderItem.ReceiptState.CLOSED_SHORT
+
+        # Both orders end `received`; only one of them is honest about arrival.
+        stocked.refresh_from_db()
+        written_off.refresh_from_db()
+        assert stocked.status == written_off.status == PurchaseOrder.Status.RECEIVED
+        assert stocked.has_receipt_variance is False
+        assert written_off.has_receipt_variance is True

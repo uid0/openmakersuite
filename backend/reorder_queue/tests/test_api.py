@@ -1592,9 +1592,7 @@ class TestPurchaseOrderReceive:
             }
         ]
 
-    def test_receive_over_pending_records_what_arrived_and_flags_it(
-        self, authenticated_client
-    ):
+    def test_receive_over_pending_records_what_arrived_and_flags_it(self, authenticated_client):
         """More than was ordered is RECORDED, not rejected and not rounded down.
 
         The captain wants a record they can chase a vendor with: six arrived
@@ -1631,9 +1629,7 @@ class TestPurchaseOrderReceive:
         assert response.data["has_receipt_variance"] is True
         assert response.data["variance_line_count"] == 1
 
-    def test_receive_duplicate_line_sums_into_one_recorded_quantity(
-        self, authenticated_client
-    ):
+    def test_receive_duplicate_line_sums_into_one_recorded_quantity(self, authenticated_client):
         """The same line twice in one request adds up rather than being refused.
 
         Two boxes of the same part in one delivery is an ordinary thing to

@@ -637,9 +637,7 @@ class PurchaseOrderItem(TypedTargetModel):
 
     #: The settled states that do NOT match what was ordered — a variance the
     #: operator can chase the vendor with.
-    VARIANCE_RECEIPT_STATES = frozenset(
-        {ReceiptState.OVER_RECEIVED, ReceiptState.CLOSED_SHORT}
-    )
+    VARIANCE_RECEIPT_STATES = frozenset({ReceiptState.OVER_RECEIVED, ReceiptState.CLOSED_SHORT})
 
     TARGET_FIELDS = _PO_ITEM_TARGETS
     # No TARGET_MODE: this is at-most-one + freeform, enforced by the existing

@@ -18,7 +18,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 import PurchaseOrderPage from '../../pages/PurchaseOrderPage';
 import * as api from '../../services/api';
-import { confirmAction, promptInput, showError } from '../../utils/dialogs';
+import { promptInput } from '../../utils/dialogs';
 
 vi.mock('../../services/api');
 

@@ -47,6 +47,7 @@ The rest of this file applies to both agents.
   matching the existing constraints in `inventory/` and `reorder_queue/`.
 - Use `python manage.py startapp` to create new apps within your project
 - Keep models in `models.py` and register them in `admin.py` for admin interface
+- **A new DRF `@action` needs two files updated, or CI fails**: `config/tests/test_permission_matrix.py` pins every endpoint's `permission_classes`. After adding or changing one, run `python manage.py check_permission_matrix --write` to refresh `backend/config/api_permission_matrix.yaml` and add the endpoint to `docs/API_PERMISSION_MATRIX.md`.
 - Use Django's ORM instead of raw SQL queries
 - Avoid N+1 queries with `select_related` and `prefetch_related`:
 

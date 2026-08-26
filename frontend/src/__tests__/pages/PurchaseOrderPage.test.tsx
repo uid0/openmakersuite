@@ -13,7 +13,7 @@ import SessionExpiredBanner, {
 } from '../../components/SessionExpiredBanner';
 import PurchaseOrderPage from '../../pages/PurchaseOrderPage';
 import * as api from '../../services/api';
-import { showError, showSuccess } from '../../utils/dialogs';
+import { confirmAction, showError, showSuccess } from '../../utils/dialogs';
 
 vi.mock('../../services/api');
 
@@ -37,12 +37,20 @@ const renderPage = () =>
     </MantineProvider>
   );
 
+// `can_receive` is served by the API from its own RECEIVABLE_STATUSES rather
+// than re-derived in the client, so fixtures have to carry it like any other
+// server-computed field.
 const baseOrder = {
   id: 'po-1',
   po_number: 'PO-2026-0001',
   supplier_details: 'Acme Supplies',
   status: 'sent',
   status_label: 'Sent',
+  can_receive: true,
+  is_settled: false,
+  has_receipt_variance: false,
+  outstanding_line_count: 0,
+  variance_line_count: 0,
   order_date: '2026-04-01T00:00:00Z',
   expected_delivery_date: '2026-05-15',
   supplier_order_number: 'SUP-9',
@@ -532,6 +540,11 @@ describe('PurchaseOrderPage receive items (oms-s0hj4)', () => {
     supplier_details: 'Acme Supplies',
     status: 'partially_received',
     status_label: 'Partially Received',
+    can_receive: true,
+    is_settled: false,
+    has_receipt_variance: false,
+    outstanding_line_count: 1,
+    variance_line_count: 0,
     order_date: '2026-04-01T00:00:00Z',
     expected_delivery_date: '2026-05-15',
     supplier_order_number: '',
@@ -572,6 +585,7 @@ describe('PurchaseOrderPage receive items (oms-s0hj4)', () => {
         quantity_received: 5,
         quantity_pending: 0,
         is_fully_received: true,
+        is_settled: true,
         unit_cost_ordered: '2.00',
         unit_cost_actual: null,
         estimated_cost: '10.00',
@@ -788,24 +802,64 @@ describe('PurchaseOrderPage receive items (oms-s0hj4)', () => {
     expect(api.purchaseOrderAPI.receiveItems).not.toHaveBeenCalled();
   });
 
-  test('rejects an over-receive that exceeds the pending quantity', async () => {
+  test('records an over-receive after saying so, rather than refusing it', async () => {
+    // What the captain asked for: the record says what actually turned up, and
+    // the difference is flagged. Refusing the receipt would lose real stock and
+    // hide a vendor's mistake; rounding it down silently would be worse.
     (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeReceiveOrder() });
+    (api.purchaseOrderAPI.receiveItems as jest.Mock).mockResolvedValue({
+      data: makeReceiveOrder(),
+    });
 
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /^receive items$/i }));
 
-    // Bolt only has 7 pending; ask for more.
+    // Bolt only has 7 outstanding; 9 turned up.
     fireEvent.change(screen.getByLabelText('Receive quantity for Stocked Bolt'), {
-      target: { value: '99' },
+      target: { value: '9' },
     });
+
+    // The over-receipt is announced inline, before anything is sent.
+    expect(await screen.findByTestId('receive-over-note-101')).toHaveTextContent(/\+2 over/i);
 
     fireEvent.click(screen.getByRole('button', { name: /confirm receipt/i }));
 
     await waitFor(() => {
-      expect(showError).toHaveBeenCalledWith(expect.stringMatching(/only 7 pending/i));
+      expect(api.purchaseOrderAPI.receiveItems).toHaveBeenCalled();
+    });
+    // Confirmed out loud first — never silently.
+    expect(confirmAction).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringMatching(/over-receipt/i),
+      expect.any(Function),
+      expect.anything(),
+    );
+    const [, body] = (api.purchaseOrderAPI.receiveItems as jest.Mock).mock.calls[0];
+    const bolt = body.items.find((line: any) => line.purchase_order_item === 101);
+    // Sent as entered — not clamped to the 7 that were outstanding.
+    expect(bolt.quantity_received).toBe(9);
+  });
+
+  test('an over-receipt the operator declines is not sent at all', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeReceiveOrder() });
+    // The operator backs out of the confirm rather than accepting it.
+    (confirmAction as jest.Mock).mockImplementationOnce(() => {});
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^receive items$/i }));
+    fireEvent.change(screen.getByLabelText('Receive quantity for Stocked Bolt'), {
+      target: { value: '99' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /confirm receipt/i }));
+
+    await waitFor(() => {
+      expect(confirmAction).toHaveBeenCalled();
     });
     expect(api.purchaseOrderAPI.receiveItems).not.toHaveBeenCalled();
+    // The typed quantity survives so the operator can correct it.
+    expect(screen.getByLabelText('Receive quantity for Stocked Bolt')).toHaveValue(99);
   });
 
   test('surfaces a permission error and keeps the panel when receiving is forbidden (403) (#457 R3)', async () => {
@@ -901,6 +955,11 @@ describe('PurchaseOrderPage receive-with-serial (op-y45)', () => {
     supplier_details: 'Acme Supplies',
     status: 'sent',
     status_label: 'Sent',
+    can_receive: true,
+    is_settled: false,
+    has_receipt_variance: false,
+    outstanding_line_count: 1,
+    variance_line_count: 0,
     order_date: '2026-04-01T00:00:00Z',
     expected_delivery_date: '2026-05-15',
     supplier_order_number: '',
@@ -927,6 +986,23 @@ describe('PurchaseOrderPage receive-with-serial (op-y45)', () => {
         quantity_received: 0,
         quantity_pending: 2,
         is_fully_received: false,
+        is_settled: false,
+        has_receipt_variance: false,
+        quantity_variance: -2,
+        receipt_state: 'not_received',
+        // The identities a receipt on this line may serialize, served by the
+        // API. Read INSTEAD of `item_details.is_serialized`, which on a kit
+        // line describes a SKU that is never stocked.
+        serial_targets: [
+          {
+            item: 'inv-1',
+            item_name: 'Serial Blade',
+            item_sku: 'SB-1',
+            serial_tracking_mode: 'consumable',
+            quantity: 2,
+          },
+        ],
+        serials_recorded: 0,
         unit_cost_ordered: '5.00',
         unit_cost_actual: null,
         estimated_cost: '10.00',
@@ -940,55 +1016,72 @@ describe('PurchaseOrderPage receive-with-serial (op-y45)', () => {
     ],
   });
 
-  test('captures serials and creates one SerializedComponent per unit against the PO line', async () => {
+  test('sends serials inside the receipt itself, one call, with lot and expiry', async () => {
+    // Serials used to be created by N separate follow-up calls AFTER the
+    // receipt had already committed, so a failure there left stock credited
+    // and the operator's serials lost. They now ride inside the receipt's own
+    // transaction.
     (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeSerialOrder() });
     (api.purchaseOrderAPI.receiveItems as jest.Mock).mockResolvedValue({
       data: { ...makeSerialOrder(), status: 'received', status_label: 'Received' },
     });
-    (api.serializedComponentsAPI.create as jest.Mock).mockResolvedValue({ data: { id: 'u' } });
 
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /^receive items$/i }));
 
-    // The serial-capture textarea appears for the serialized line at its default qty.
     fireEvent.change(screen.getByLabelText('Serial numbers for Serial Blade'), {
       target: { value: 'SN-1\nSN-2' },
+    });
+    fireEvent.change(screen.getByLabelText(/^Lot \(optional\)$/i), {
+      target: { value: 'LOT-42' },
+    });
+    fireEvent.change(screen.getByLabelText(/^Expiry \(optional\)$/i), {
+      target: { value: '2027-01-31' },
     });
 
     fireEvent.click(screen.getByRole('button', { name: /confirm receipt/i }));
 
     await waitFor(() => {
-      expect(api.purchaseOrderAPI.receiveItems).toHaveBeenCalledWith('po-1', {
-        items: [{ purchase_order_item: 201, quantity_received: 2 }],
-        delivery_date: expect.any(String),
-        receipt_notes: undefined,
-      });
+      expect(api.purchaseOrderAPI.receiveItems).toHaveBeenCalled();
     });
-
-    await waitFor(() => {
-      expect(api.serializedComponentsAPI.create).toHaveBeenCalledTimes(2);
-    });
-    expect(api.serializedComponentsAPI.create).toHaveBeenCalledWith({
-      item: 'inv-1',
-      serial_number: 'SN-1',
-      provenance_purchase_order_item: 201,
-    });
-    expect(api.serializedComponentsAPI.create).toHaveBeenCalledWith({
-      item: 'inv-1',
-      serial_number: 'SN-2',
-      provenance_purchase_order_item: 201,
-    });
+    const [, body] = (api.purchaseOrderAPI.receiveItems as jest.Mock).mock.calls[0];
+    expect(body.items).toEqual([
+      {
+        purchase_order_item: 201,
+        quantity_received: 2,
+        serials: [
+          {
+            serial_number: 'SN-1',
+            item: 'inv-1',
+            lot: 'LOT-42',
+            expiration_date: '2027-01-31',
+          },
+          {
+            serial_number: 'SN-2',
+            item: 'inv-1',
+            lot: 'LOT-42',
+            expiration_date: '2027-01-31',
+          },
+        ],
+      },
+    ]);
+    // No separate follow-up writes — that path is gone.
+    expect(api.serializedComponentsAPI.create).not.toHaveBeenCalled();
   });
 
-  test('blocks receipt when the serial count does not match the received quantity', async () => {
+  test('accepts fewer serials than units and says the rest are outstanding', async () => {
+    // Refusing the receipt because only one of two labels has been scanned
+    // would leave the operator holding stock they cannot enter. The gap is
+    // named instead, then confirmed.
     (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeSerialOrder() });
+    (api.purchaseOrderAPI.receiveItems as jest.Mock).mockResolvedValue({
+      data: makeSerialOrder(),
+    });
 
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /^receive items$/i }));
-
-    // Only one serial for a qty of 2.
     fireEvent.change(screen.getByLabelText('Serial numbers for Serial Blade'), {
       target: { value: 'SN-1' },
     });
@@ -996,12 +1089,38 @@ describe('PurchaseOrderPage receive-with-serial (op-y45)', () => {
     fireEvent.click(screen.getByRole('button', { name: /confirm receipt/i }));
 
     await waitFor(() => {
+      expect(api.purchaseOrderAPI.receiveItems).toHaveBeenCalled();
+    });
+    expect(confirmAction).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringMatching(/1 of 2 serials captured/i),
+      expect.any(Function),
+      expect.anything(),
+    );
+    const [, body] = (api.purchaseOrderAPI.receiveItems as jest.Mock).mock.calls[0];
+    expect(body.items[0].serials).toHaveLength(1);
+  });
+
+  test('refuses more serials than the receipt credits, dropping none of them', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeSerialOrder() });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^receive items$/i }));
+    // Three labels for a quantity of two.
+    fireEvent.change(screen.getByLabelText('Serial numbers for Serial Blade'), {
+      target: { value: 'SN-1\nSN-2\nSN-3' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm receipt/i }));
+
+    await waitFor(() => {
       expect(showError).toHaveBeenCalledWith(
-        expect.stringContaining('Enter 2 unique serial numbers for Serial Blade'),
+        expect.stringContaining('Enter at most 2 serial numbers for Serial Blade'),
       );
     });
+    // Nothing sent, so nothing to silently truncate.
     expect(api.purchaseOrderAPI.receiveItems).not.toHaveBeenCalled();
-    expect(api.serializedComponentsAPI.create).not.toHaveBeenCalled();
   });
 });
 
@@ -1017,6 +1136,8 @@ describe('PurchaseOrderPage send-to-supplier + confirm (op-alh)', () => {
     ...baseOrder,
     status,
     status_label,
+    // Mirrors what the API computes for this status.
+    can_receive: ['sent', 'confirmed', 'partially_received'].includes(status),
     items: [],
     attachments: [],
   });

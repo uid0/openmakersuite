@@ -1581,12 +1581,27 @@ class TestPurchaseOrderReceive:
         ).first()
         assert event is not None
         assert event.actor == user
+        po_item.refresh_from_db()
         assert event.metadata["received_items"] == [
-            {"purchase_order_item": po_item.id, "quantity_received": 1}
+            {
+                "purchase_order_item": po_item.id,
+                "quantity_received": 1,
+                "quantity_variance": po_item.quantity_variance,
+                "receipt_state": po_item.receipt_state,
+                "serials": [],
+            }
         ]
 
-    def test_receive_over_pending_returns_400(self, authenticated_client):
-        """Receiving more than pending is rejected with no side effects."""
+    def test_receive_over_pending_records_what_arrived_and_flags_it(
+        self, authenticated_client
+    ):
+        """More than was ordered is RECORDED, not rejected and not rounded down.
+
+        The captain wants a record they can chase a vendor with: six arrived
+        against an order for five, so the line says six and carries a +1
+        variance. Rounding the figure to five would lose a real unit of stock
+        and hide the vendor's mistake.
+        """
         client, user = authenticated_client
         purchase_order, (po_item,) = self._create_po(
             user, lines=[{"quantity_ordered": 5, "current_stock": 10}]
@@ -1598,17 +1613,33 @@ class TestPurchaseOrderReceive:
             format="json",
         )
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "exceeds pending" in response.data["error"]
+        assert response.status_code == status.HTTP_200_OK, response.data
         purchase_order.refresh_from_db()
         po_item.refresh_from_db()
         po_item.item.refresh_from_db()
-        assert po_item.quantity_received == 0
-        assert po_item.item.current_stock == 10
-        assert purchase_order.deliveries.count() == 0
 
-    def test_receive_duplicate_line_cannot_over_receive(self, authenticated_client):
-        """The same line referenced twice cannot collectively exceed pending."""
+        assert po_item.quantity_received == 6
+        assert po_item.quantity_variance == 1
+        assert po_item.receipt_state == PurchaseOrderItem.ReceiptState.OVER_RECEIVED
+        assert po_item.is_over_received
+        # The stock that physically arrived, all six of it.
+        assert po_item.item.current_stock == 16
+        assert purchase_order.deliveries.count() == 1
+        # And the flag is visible on the order itself.
+        assert purchase_order.has_receipt_variance
+        assert purchase_order.status == PurchaseOrder.Status.RECEIVED
+        assert response.data["has_receipt_variance"] is True
+        assert response.data["variance_line_count"] == 1
+
+    def test_receive_duplicate_line_sums_into_one_recorded_quantity(
+        self, authenticated_client
+    ):
+        """The same line twice in one request adds up rather than being refused.
+
+        Two boxes of the same part in one delivery is an ordinary thing to
+        scan. The total is what lands on the line — and if it overshoots the
+        order, that overshoot is recorded like any other.
+        """
         client, user = authenticated_client
         purchase_order, (po_item,) = self._create_po(
             user, lines=[{"quantity_ordered": 5, "current_stock": 0}]
@@ -1625,11 +1656,15 @@ class TestPurchaseOrderReceive:
             format="json",
         )
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "exceeds pending" in response.data["error"]
+        assert response.status_code == status.HTTP_200_OK, response.data
         po_item.refresh_from_db()
-        assert po_item.quantity_received == 0
-        assert purchase_order.deliveries.count() == 0
+        po_item.item.refresh_from_db()
+        assert po_item.quantity_received == 6
+        assert po_item.quantity_variance == 1
+        assert po_item.item.current_stock == 6
+        # One delivery, two lines on it — the record of two boxes.
+        assert purchase_order.deliveries.count() == 1
+        assert purchase_order.deliveries.first().items.count() == 2
 
     def test_receive_item_from_other_po_returns_400(self, authenticated_client):
         """A line belonging to another PO is rejected."""

@@ -50,7 +50,9 @@ from .models import (
 from .serializers import (
     AddPurchaseOrderLineSerializer,
     BarcodeReceiptSerializer,
+    CloseShortSerializer,
     MarkDeliveredSerializer,
+    MarkReceivedSerializer,
     OrderDeliverySerializer,
     OrderMetricsSerializer,
     PurchaseOrderAttachmentSerializer,
@@ -107,6 +109,90 @@ AMAZON_CART_BASE = "https://www.amazon.com/gp/aws/cart/add.html"
 # Keep each cart URL comfortably under common ~2000-char URL limits; longer POs
 # are chunked across multiple URLs.
 AMAZON_URL_MAX_LEN = 2000
+
+
+def _resolve_receive_serials(po_item, serial_payloads):
+    """Turn a line's ``serials`` payload into :class:`services.SerialCapture` records.
+
+    Resolves the ``item`` each serial names — and, where the payload omits it,
+    supplies the only identity it could mean. That default is deliberately
+    narrow: it applies ONLY when the line credits exactly one serialized
+    identity. A kit line crediting several serialized components has no "only
+    identity", so an unlabelled serial there is refused with the choices named
+    rather than being attached to whichever component sorted first.
+
+    Naming the kit itself is refused by
+    :func:`~reorder_queue.services.receiving.resolve_serial_targets`, which sees
+    the resolved captures; nothing here can smuggle one past it, because an id
+    that is not among the receipt's serialized targets never resolves.
+
+    Raises ``django.core.exceptions.ValidationError``; the caller renders it as
+    a 400 naming the line.
+    """
+    if not serial_payloads:
+        return []
+
+    from inventory.models import InventoryItem
+
+    # What the ORDERED quantity implies, which is the widest set a serial on
+    # this line could legitimately name. The receipt then re-checks the
+    # captures against THIS receipt's quantity, so a serial for a real
+    # component still fails if more were sent than this delivery credits.
+    targets = {
+        item.pk: item
+        for item, _ in services.serialized_receipt_targets(po_item, po_item.quantity_ordered or 0)
+    }
+
+    # Naming the kit is answered with the kit's own explanation FIRST, before
+    # the generic "nothing here is serialized" below. A kit whose components
+    # happen not to be serialized would otherwise send the operator looking for
+    # a serial setting, when the actual mistake is that they aimed the serial
+    # at a SKU that never enters stock.
+    line_item = po_item.item
+    if line_item is not None and line_item.is_kit:
+        for payload in serial_payloads:
+            if payload.get("item") == line_item.pk:
+                raise DjangoValidationError(
+                    f"the kit '{line_item.name}' is never itself stocked — record serials "
+                    "against the components the receipt credits, not against the kit"
+                )
+
+    if not targets:
+        raise DjangoValidationError(
+            "nothing on this line is serialized, so it cannot carry serial numbers"
+        )
+
+    sole_target = next(iter(targets.values())) if len(targets) == 1 else None
+
+    captures = []
+    for payload in serial_payloads:
+        item_id = payload.get("item")
+        if item_id is None:
+            if sole_target is None:
+                names = ", ".join(sorted(item.name for item in targets.values()))
+                raise DjangoValidationError(
+                    "this line credits several serialized items, so each serial must say "
+                    f"which one it belongs to (one of: {names})"
+                )
+            item = sole_target
+        else:
+            item = targets.get(item_id)
+            if item is None:
+                # Named something real but not something this line credits —
+                # the kit's own id lands here too, and the service's error
+                # spells out why that one in particular is wrong.
+                item = InventoryItem.objects.filter(pk=item_id).first()
+                if item is None:
+                    raise DjangoValidationError(f"no inventory item with id {item_id}")
+        captures.append(
+            services.SerialCapture(
+                item=item,
+                serial_number=payload["serial_number"],
+                lot=payload.get("lot", "") or "",
+                expiration_date=payload.get("expiration_date"),
+            )
+        )
+    return captures
 
 
 def is_valid_asin(supplier_sku):
@@ -1461,11 +1547,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         purchase_order = self.get_object()
 
-        if purchase_order.status not in [
-            PurchaseOrder.Status.SENT,
-            PurchaseOrder.Status.CONFIRMED,
-            PurchaseOrder.Status.PARTIALLY_RECEIVED,
-        ]:
+        if purchase_order.status not in PurchaseOrder.RECEIVABLE_STATUSES:
             return Response(
                 {
                     "error": (
@@ -1536,11 +1618,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         purchase_order = self.get_object()
 
-        if purchase_order.status not in [
-            PurchaseOrder.Status.SENT,
-            PurchaseOrder.Status.CONFIRMED,
-            PurchaseOrder.Status.PARTIALLY_RECEIVED,
-        ]:
+        if purchase_order.status not in PurchaseOrder.RECEIVABLE_STATUSES:
             return Response(
                 {
                     "error": (
@@ -1556,8 +1634,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         data = serializer.validated_data
 
         po_items_by_id = {item.id: item for item in purchase_order.items.all()}
-        remaining_by_item = {}
         resolved_lines = []
+        closures = []
         for line in data["items"]:
             po_item_id = line["purchase_order_item"]
             quantity = line["quantity_received"]
@@ -1573,9 +1651,19 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     {"error": f"Line item {po_item_id} is voided and cannot be received"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            if po_item.is_closed_short:
+                return Response(
+                    {
+                        "error": (
+                            f"Line item {po_item_id} was closed short; reopen it before "
+                            "receiving more against it"
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-            # "N packs arrived" → base units, before the pending check below
-            # compares it against the base-unit order (op-ev14).
+            # "N packs arrived" → base units, before anything compares it
+            # against the base-unit order (op-ev14).
             if line.get("at_level"):
                 if po_item.item is None:
                     return Response(
@@ -1595,22 +1683,19 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         status=status.HTTP_400_BAD_REQUEST,
                     )
 
-            # Track remaining allowance per line so repeated references to the
-            # same line in one request can't collectively over-receive.
-            if po_item_id not in remaining_by_item:
-                remaining_by_item[po_item_id] = po_item.quantity_pending
-            if quantity > remaining_by_item[po_item_id]:
+            try:
+                serials = _resolve_receive_serials(po_item, line.get("serials") or [])
+            except DjangoValidationError as exc:
                 return Response(
-                    {
-                        "error": (
-                            f"Quantity {quantity} exceeds pending "
-                            f"{remaining_by_item[po_item_id]} for line item {po_item_id}"
-                        )
-                    },
+                    {"error": f"Line item {po_item_id}: {exc.messages[0]}"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            remaining_by_item[po_item_id] -= quantity
-            resolved_lines.append((po_item, quantity))
+
+            resolved_lines.append(
+                services.LineReceipt(po_item=po_item, quantity=quantity, serials=serials)
+            )
+            if line.get("close_short"):
+                closures.append((po_item, line.get("close_short_reason", "")))
 
         delivery_date = data.get("delivery_date")
         if delivery_date is not None:
@@ -1620,15 +1705,24 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         else:
             delivery_datetime = timezone.now()
 
-        services.receive_delivery(
-            purchase_order,
-            resolved_lines,
-            received_by=request.user,
-            delivery_datetime=delivery_datetime,
-            tracking_number=data.get("tracking_number", ""),
-            carrier=data.get("carrier", ""),
-            receipt_notes=data.get("receipt_notes", ""),
-        )
+        try:
+            services.receive_delivery(
+                purchase_order,
+                resolved_lines,
+                received_by=request.user,
+                delivery_datetime=delivery_datetime,
+                tracking_number=data.get("tracking_number", ""),
+                carrier=data.get("carrier", ""),
+                receipt_notes=data.get("receipt_notes", ""),
+            )
+            # Written off in the same request as the receipt that revealed the
+            # shortfall, and in its own transaction with the status refresh, so
+            # "8 of 10 arrived and the rest is cancelled" is one operator action
+            # rather than two that can half-happen.
+            if closures:
+                services.close_lines_short(purchase_order, closures, actor=request.user)
+        except DjangoValidationError as exc:
+            return Response({"error": exc.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
 
         record_audit_event(
             action=PurchaseOrderAuditEvent.Action.PO_RECEIVE_ITEMS,
@@ -1641,14 +1735,202 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 "carrier": data.get("carrier", ""),
                 "fully_received": purchase_order.status == PurchaseOrder.Status.RECEIVED,
                 "received_items": [
-                    {"purchase_order_item": po_item.id, "quantity_received": quantity}
-                    for po_item, quantity in resolved_lines
+                    {
+                        "purchase_order_item": receipt.po_item.id,
+                        "quantity_received": receipt.quantity,
+                        # The mismatch the captain chases a vendor with, on the
+                        # audit trail as well as on the line.
+                        "quantity_variance": receipt.po_item.quantity_variance,
+                        "receipt_state": receipt.po_item.receipt_state,
+                        "serials": [capture.serial_number for capture in receipt.serials],
+                    }
+                    for receipt in resolved_lines
                 ],
             },
         )
 
+        purchase_order.refresh_from_db()
         response_serializer = self.get_serializer(purchase_order)
         return Response(response_serializer.data)
+
+    @action(detail=True, methods=["get"], url_path="receiving")
+    def receiving(self, request, pk=None):
+        """Everything a client needs to drive a receipt against this order.
+
+        ``GET .../receiving/`` — the receiving worksheet. It answers, in one
+        round trip, the questions a receive screen (web or ScanTTY) has to ask
+        before it can show anything:
+
+        * may this order be received against at all, and if not, why not;
+        * which lines are still outstanding, and which are already settled —
+          received in full, over-received, or closed short;
+        * for each line, what identifiers a scanner will see on the box
+          (``scan_codes``: the item's own SKU and barcodes plus the vendor's),
+          so a scanned code can be matched to a line;
+        * for each line, which identities may carry serial numbers and how many
+          units of each — the kit's COMPONENTS on a kit line, never the kit.
+
+        Read-only and side-effect-free. Deliberately a *derived view over the
+        order*, not a stored worksheet: there is nothing to get out of date, and
+        a receipt recorded by another client is reflected the next time this is
+        fetched.
+        """
+        purchase_order = self.get_object()
+        return Response(services.build_receiving_worksheet(purchase_order))
+
+    @action(detail=True, methods=["post"], url_path="close-short")
+    def close_short(self, request, pk=None):
+        """Write off the outstanding balance on named lines as never arriving.
+
+        ``POST .../close-short/`` with
+        ``{"items": [{"purchase_order_item": 12, "reason": "backorder cancelled"}]}``.
+
+        This is how a short receipt *ends*. Receiving 8 of 10 leaves the line
+        partially received and still expecting 2; closing it short says the 2
+        are not coming, which settles the line without ever pretending 10
+        arrived. The shortfall stays on the line for good as
+        ``quantity_variance`` and ``receipt_state=closed_short``.
+
+        Refuses a line that is already closed short, one that is voided, and one
+        that has nothing outstanding — in each case rather than overwriting the
+        reason and actor already recorded. Advances the order to ``received``
+        when this settles the last outstanding line.
+        """
+        purchase_order = self.get_object()
+
+        if purchase_order.status not in PurchaseOrder.RECEIVABLE_STATUSES:
+            return Response(
+                {
+                    "error": (
+                        "Purchase order must be sent, confirmed, or partially "
+                        "received to close lines short"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = CloseShortSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        po_items_by_id = {item.id: item for item in purchase_order.items.all()}
+        closures = []
+        for line in serializer.validated_data["items"]:
+            po_item = po_items_by_id.get(line["purchase_order_item"])
+            if po_item is None:
+                return Response(
+                    {
+                        "error": (
+                            f"Line item {line['purchase_order_item']} does not belong to "
+                            "this purchase order"
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            closures.append((po_item, line.get("reason", "")))
+
+        try:
+            closed = services.close_lines_short(purchase_order, closures, actor=request.user)
+        except DjangoValidationError as exc:
+            return Response({"error": exc.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
+
+        record_audit_event(
+            action=PurchaseOrderAuditEvent.Action.PO_RECEIVE_ITEMS,
+            actor=request.user,
+            purchase_order=purchase_order,
+            notes="Closed short",
+            metadata={
+                "closed_short": [
+                    {
+                        "purchase_order_item": po_item.id,
+                        "quantity_ordered": po_item.quantity_ordered,
+                        "quantity_received": po_item.quantity_received,
+                        "quantity_variance": po_item.quantity_variance,
+                        "reason": po_item.closed_short_reason,
+                    }
+                    for po_item in closed
+                ],
+                "fully_received": purchase_order.status == PurchaseOrder.Status.RECEIVED,
+            },
+        )
+
+        purchase_order.refresh_from_db()
+        return Response(self.get_serializer(purchase_order).data)
+
+    @action(detail=True, methods=["post"], url_path="mark-received")
+    def mark_received(self, request, pk=None):
+        """Finish the order off — step 6 of the receiving flow.
+
+        ``POST .../mark-received/`` with an optional ``{"reason": "..."}``.
+
+        Closes every line still outstanding short, recording ``reason`` against
+        each, and advances the order to ``received``. The bulk form of
+        ``close-short``, for the ordinary case where the operator has finished
+        unpacking and whatever has not turned up is not going to.
+
+        Distinct from ``mark-delivered``, which asserts the opposite — that
+        every outstanding quantity *did* arrive and should be received and
+        stocked. This one stocks nothing; it writes the shortfall off. Choosing
+        between them is the difference between an honest record and a tidy one,
+        so neither is a default for the other.
+
+        Refuses an order that has nothing outstanding, rather than silently
+        doing nothing.
+        """
+        purchase_order = self.get_object()
+
+        if purchase_order.status not in PurchaseOrder.RECEIVABLE_STATUSES:
+            return Response(
+                {
+                    "error": (
+                        "Purchase order must be sent, confirmed, or partially "
+                        "received to be marked received"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = MarkReceivedSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reason = serializer.validated_data.get("reason", "")
+
+        outstanding = services.outstanding_lines(purchase_order)
+        if not outstanding:
+            return Response(
+                {
+                    "error": (
+                        "Every line on this order is already settled; there is nothing "
+                        "left to close."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            closed = services.close_lines_short(
+                purchase_order, [(po_item, reason) for po_item in outstanding], actor=request.user
+            )
+        except DjangoValidationError as exc:
+            return Response({"error": exc.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
+
+        record_audit_event(
+            action=PurchaseOrderAuditEvent.Action.PO_RECEIVE_ITEMS,
+            actor=request.user,
+            purchase_order=purchase_order,
+            notes=reason,
+            metadata={
+                "marked_received": True,
+                "closed_short": [
+                    {
+                        "purchase_order_item": po_item.id,
+                        "quantity_variance": po_item.quantity_variance,
+                    }
+                    for po_item in closed
+                ],
+            },
+        )
+
+        purchase_order.refresh_from_db()
+        return Response(self.get_serializer(purchase_order).data)
 
     @action(detail=True, methods=["get"], url_path="item-lookup")
     def item_lookup(self, request, pk=None):

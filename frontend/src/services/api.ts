@@ -2226,6 +2226,92 @@ export interface AddPurchaseOrderLineError {
   candidates?: PurchaseOrderLineCandidate[];
 }
 
+/** One serial-numbered unit captured during a receipt. */
+export interface ReceiveSerial {
+  serial_number: string;
+  /**
+   * Which inventory identity this serial belongs to.
+   *
+   * Optional on an ordinary line (there is only one it could be) and REQUIRED
+   * on a kit line, where the receipt credits several components and guessing
+   * between them would invent the operator's intent. Naming the KIT itself is
+   * refused: a kit is never stocked, so a serial against it names a unit that
+   * can never be drawn down.
+   */
+  item?: string;
+  /** Optional batch/lot number, recorded verbatim. */
+  lot?: string;
+  /** Optional expiry, ISO date. Recorded and displayed only. */
+  expiration_date?: string;
+}
+
+/** An inventory identity a receipt may record serials against. */
+export interface ReceivingSerialTarget {
+  item: string;
+  item_name: string;
+  item_sku: string;
+  serial_tracking_mode?: string;
+  /** Units of this identity the FULL ordered quantity implies. */
+  quantity: number;
+}
+
+/** An identifier a scanner could read off a line's goods. */
+export interface ReceivingScanCode {
+  code: string;
+  kind: 'item_sku' | 'package_upc' | 'unit_upc' | 'supplier_sku';
+}
+
+export interface ReceivingWorksheetLine {
+  purchase_order_item: number;
+  label: string;
+  item: string | null;
+  item_type: string | null;
+  quantity_ordered: number;
+  quantity_received: number;
+  quantity_pending: number;
+  /** Signed: negative short, positive over. Never floored. */
+  quantity_variance: number;
+  receipt_state:
+    | 'not_received'
+    | 'partially_received'
+    | 'received'
+    | 'over_received'
+    | 'closed_short'
+    | 'voided';
+  receipt_state_label: string;
+  is_settled: boolean;
+  is_voided: boolean;
+  is_closed_short: boolean;
+  closed_short_reason: string;
+  is_kit_line: boolean;
+  scan_codes: ReceivingScanCode[];
+  serial_targets: ReceivingSerialTarget[];
+  serials_recorded: number;
+}
+
+/**
+ * The receive screen's whole payload, derived server-side on every read.
+ *
+ * `can_receive` and `unavailable_reason` are a deliberate pair: "you may not
+ * receive against this, and here is why" is a different fact from "there is
+ * nothing outstanding", and an operator acts differently on each.
+ */
+export interface ReceivingWorksheet {
+  purchase_order: string;
+  po_number: string | null;
+  supplier: string;
+  status: string;
+  status_label: string;
+  can_receive: boolean;
+  unavailable_reason: string | null;
+  is_settled: boolean;
+  is_fully_received: boolean;
+  has_receipt_variance: boolean;
+  outstanding_line_count: number;
+  variance_line_count: number;
+  lines: ReceivingWorksheetLine[];
+}
+
 export const purchaseOrderAPI = {
   /**
    * Resolve a typed or scanned identifier against this order's supplier
@@ -2279,13 +2365,43 @@ export const purchaseOrderAPI = {
   receiveItems: (
     orderId: string,
     data: {
-      items: { purchase_order_item: number; quantity_received: number }[];
+      items: {
+        purchase_order_item: number;
+        quantity_received: number;
+        at_level?: boolean;
+        // Serialized units arriving with this quantity. `item` names which
+        // inventory identity each belongs to and is REQUIRED on a kit line,
+        // where the receipt credits several components — see the API's
+        // `serial_targets`. Recorded inside the receipt's own transaction, so
+        // a serial that cannot be saved rolls the receipt back rather than
+        // leaving stock credited with the serials lost.
+        serials?: ReceiveSerial[];
+        // "Whatever is still outstanding after this is not coming." Settles
+        // the line without ever claiming the missing units arrived.
+        close_short?: boolean;
+        close_short_reason?: string;
+      }[];
       delivery_date?: string;
+      // The carrier's tracking barcode for this parcel, stored as scanned.
       tracking_number?: string;
       carrier?: string;
       receipt_notes?: string;
     },
   ) => api.post<any>(`/reorders/purchase-orders/${orderId}/receive/`, data),
+  // The receive screen's whole payload, derived server-side: which lines are
+  // outstanding, what a scanner will read off each box, and which identities
+  // may carry serials. Both clients (web + ScanTTY) drive the same endpoint.
+  receivingWorksheet: (orderId: string) =>
+    api.get<ReceivingWorksheet>(`/reorders/purchase-orders/${orderId}/receiving/`),
+  closeShort: (
+    orderId: string,
+    data: { items: { purchase_order_item: number; reason?: string }[] },
+  ) => api.post<any>(`/reorders/purchase-orders/${orderId}/close-short/`, data),
+  // Finish the order off: closes every still-outstanding line short and
+  // advances the order to `received`. Distinct from `markDelivered`, which
+  // asserts the opposite — that everything outstanding DID arrive.
+  markReceived: (orderId: string, data?: { reason?: string }) =>
+    api.post<any>(`/reorders/purchase-orders/${orderId}/mark-received/`, data ?? {}),
   updateOrder: (orderId: string, data: PurchaseOrderUpdate) =>
     api.patch<any>(`/reorders/purchase-orders/${orderId}/`, data),
   uploadAttachment: (orderId: string, file: File, description?: string) => {

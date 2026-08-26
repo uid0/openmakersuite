@@ -12,6 +12,7 @@ from typing import Optional
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
@@ -190,6 +191,19 @@ class PurchaseOrder(models.Model):
         COLLECT = "collect", "Collect"
         THIRD_PARTY = "third_party", "Third Party"
 
+    #: Statuses an order can be received against — the order is in flight with
+    #: the supplier and not struck off. The ONE definition: the ``receive``,
+    #: ``mark-delivered``, ``close-short`` and ``mark-received`` actions all
+    #: gate on this, the receiving worksheet reports it, and the web UI reads it
+    #: off the API rather than keeping a fourth copy of the same list.
+    RECEIVABLE_STATUSES = frozenset(
+        {
+            Status.SENT,
+            Status.CONFIRMED,
+            Status.PARTIALLY_RECEIVED,
+        }
+    )
+
     # Days-until-due for the "net N" terms. Every other term anchors the payment
     # to a date rather than to a delay — see :attr:`payment_schedule`.
     NET_PAYMENT_DAYS = {
@@ -365,25 +379,41 @@ class PurchaseOrder(models.Model):
         total_received_quantity = 0
         voided_estimated_total = Decimal("0.00")
         all_fully_received = True
+        all_settled = True
+        outstanding_count = 0
+        variance_count = 0
         for item in self.items.all():
             # total_received_quantity counts every line, voided or not.
             if item.quantity_received is not None:
                 total_received_quantity += item.quantity_received
-            # is_fully_received is all() over every line, voided or not.
-            if not item.is_fully_received:
-                all_fully_received = False
             if item.is_voided:
                 voided_estimated_total += item.estimated_cost
+                # A voided line is settled: it was struck off the order, so
+                # nothing is coming and nothing should block the order
+                # finishing. It used to be counted in ``is_fully_received``,
+                # which left every order carrying a voided line stuck at
+                # ``partially_received`` for ever.
+                continue
+            active_count += 1
+            if item.quantity_ordered is not None:
+                total_quantity += item.quantity_ordered
+            if not item.is_fully_received:
+                all_fully_received = False
+            if item.is_settled:
+                if item.has_receipt_variance:
+                    variance_count += 1
             else:
-                active_count += 1
-                if item.quantity_ordered is not None:
-                    total_quantity += item.quantity_ordered
+                all_settled = False
+                outstanding_count += 1
         return {
             "total_items": active_count,
             "total_quantity": total_quantity,
             "total_received_quantity": total_received_quantity,
             "voided_estimated_total": voided_estimated_total,
             "is_fully_received": all_fully_received,
+            "is_settled": all_settled,
+            "outstanding_line_count": outstanding_count,
+            "variance_line_count": variance_count,
         }
 
     @property
@@ -455,8 +485,46 @@ class PurchaseOrder(models.Model):
 
     @property
     def is_fully_received(self) -> bool:
-        """Check if all ordered items have been fully received."""
+        """Whether every active line got at least the quantity that was ordered.
+
+        The strict reading, and NOT what decides the order's status — a line
+        closed short leaves this False for ever, which is the honest answer to
+        "did everything we ordered turn up?". :attr:`is_settled` is the
+        question "is receiving finished with this order?".
+        """
         return self._line_item_totals["is_fully_received"]
+
+    @property
+    def is_settled(self) -> bool:
+        """Whether receiving is finished with every active line on this order.
+
+        True once each line has either been received in full, over-received, or
+        had its outstanding balance closed short. This — not
+        :attr:`is_fully_received` — is what advances the order to ``received``,
+        so an order short-shipped by a vendor can be closed out and still carry
+        the record of the shortfall.
+        """
+        return self._line_item_totals["is_settled"]
+
+    @property
+    def outstanding_line_count(self) -> int:
+        """How many active lines receiving is still waiting on."""
+        return self._line_item_totals["outstanding_line_count"]
+
+    @property
+    def variance_line_count(self) -> int:
+        """How many settled lines did not match what was ordered (short or over)."""
+        return self._line_item_totals["variance_line_count"]
+
+    @property
+    def has_receipt_variance(self) -> bool:
+        """Whether any line on this order arrived short or over.
+
+        The order-level flag the captain chases a vendor with: it stays true
+        after the order is closed, because the point of recording a mismatch is
+        that it is still visible later.
+        """
+        return self.variance_line_count > 0
 
     @property
     def days_since_ordered(self) -> int:
@@ -535,6 +603,43 @@ class PurchaseOrderItem(TypedTargetModel):
     - An asset (via asset)
     - A freeform item (via description, when neither item_supplier nor asset is set)
     """
+
+    class ReceiptState(models.TextChoices):
+        """What receiving still owes this line, and how the record differs from the order.
+
+        DERIVED, never stored (:attr:`receipt_state`). A stored copy would be a
+        second source of truth for something ``quantity_ordered``,
+        ``quantity_received`` and ``closed_short_at`` already answer between
+        them, and the two would drift the first time a quantity was edited.
+
+        The three "settled" states — RECEIVED, OVER_RECEIVED, CLOSED_SHORT —
+        plus VOIDED are what :attr:`is_settled` is the ``in`` test against, so
+        adding a state here cannot leave a hand-maintained list behind.
+        """
+
+        NOT_RECEIVED = "not_received", "Not received"
+        PARTIALLY_RECEIVED = "partially_received", "Partially received"
+        RECEIVED = "received", "Received in full"
+        OVER_RECEIVED = "over_received", "Over-received"
+        CLOSED_SHORT = "closed_short", "Closed short"
+        VOIDED = "voided", "Voided"
+
+    #: The states in which receiving is finished with a line — it is no longer
+    #: outstanding and no longer blocks the order reaching RECEIVED.
+    SETTLED_RECEIPT_STATES = frozenset(
+        {
+            ReceiptState.RECEIVED,
+            ReceiptState.OVER_RECEIVED,
+            ReceiptState.CLOSED_SHORT,
+            ReceiptState.VOIDED,
+        }
+    )
+
+    #: The settled states that do NOT match what was ordered — a variance the
+    #: operator can chase the vendor with.
+    VARIANCE_RECEIPT_STATES = frozenset(
+        {ReceiptState.OVER_RECEIVED, ReceiptState.CLOSED_SHORT}
+    )
 
     TARGET_FIELDS = _PO_ITEM_TARGETS
     # No TARGET_MODE: this is at-most-one + freeform, enforced by the existing
@@ -677,6 +782,32 @@ class PurchaseOrderItem(TypedTargetModel):
     )
     void_reason = models.TextField(blank=True, help_text="Reason for voiding this line item")
 
+    # Closed short: the operator has declared that the outstanding balance on
+    # this line is never arriving, so receiving is finished with it even though
+    # less than the ordered quantity came in. Deliberately NOT a boolean beside
+    # a timestamp — ``closed_short_at`` alone answers "is it closed short?"
+    # (:attr:`is_closed_short`), so there is no pair of fields to disagree.
+    closed_short_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "When the outstanding balance on this line was written off as never "
+            "arriving. Null means the line is still expecting the rest."
+        ),
+    )
+    closed_short_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="closed_short_purchase_order_items",
+        help_text="User who declared the outstanding balance would not arrive",
+    )
+    closed_short_reason = models.TextField(
+        blank=True,
+        help_text="Why the outstanding balance was written off (backorder cancelled, vendor short-shipped, ...)",
+    )
+
     # Notes
     notes = models.TextField(blank=True)
 
@@ -775,10 +906,119 @@ class PurchaseOrderItem(TypedTargetModel):
 
     @property
     def quantity_pending(self) -> int:
-        """Calculate quantity still pending delivery."""
+        """Calculate quantity still pending delivery.
+
+        Floored at zero: an over-received line has nothing left to expect, and
+        a negative "pending" would read as an order for goods. The signed
+        difference an over-receipt creates lives in :attr:`quantity_variance`,
+        which is what the flag on the order is rendered from.
+        """
         if self.quantity_ordered is None:
             return 0
         return max(0, self.quantity_ordered - self.quantity_received)
+
+    @property
+    def quantity_variance(self) -> int:
+        """Signed difference between what arrived and what was ordered.
+
+        Negative = short, positive = over, zero = exactly as ordered. The
+        honest figure: unlike :attr:`quantity_pending` it is never floored, so
+        an over-receipt stays visible as the ``+2`` it actually was rather than
+        being rounded away to "nothing pending".
+        """
+        if self.quantity_ordered is None:
+            return 0
+        return self.quantity_received - self.quantity_ordered
+
+    @property
+    def is_closed_short(self) -> bool:
+        """Whether the outstanding balance has been written off as never arriving."""
+        return self.closed_short_at is not None
+
+    @property
+    def is_over_received(self) -> bool:
+        """Whether more arrived than was ordered."""
+        return self.quantity_variance > 0
+
+    @property
+    def is_short_received(self) -> bool:
+        """Whether the line was closed with less than the ordered quantity in hand.
+
+        A line that is merely partially received is NOT short: the rest is
+        still expected. It becomes short only once somebody says it is not
+        coming.
+        """
+        return self.is_closed_short and self.quantity_variance < 0
+
+    @property
+    def receipt_state(self) -> str:
+        """This line's position in the receiving workflow — see :class:`ReceiptState`.
+
+        The single derivation every reader shares (API, admin, the order's own
+        roll-up), so a line described as "closed short" on one screen cannot be
+        "partially received" on another.
+        """
+        if self.is_voided:
+            return self.ReceiptState.VOIDED
+        if self.is_over_received:
+            return self.ReceiptState.OVER_RECEIVED
+        if self.quantity_ordered is not None and self.quantity_received >= self.quantity_ordered:
+            return self.ReceiptState.RECEIVED
+        if self.is_closed_short:
+            return self.ReceiptState.CLOSED_SHORT
+        if self.quantity_received > 0:
+            return self.ReceiptState.PARTIALLY_RECEIVED
+        return self.ReceiptState.NOT_RECEIVED
+
+    @property
+    def receipt_state_label(self) -> str:
+        """Human label for :attr:`receipt_state`, from the choices themselves."""
+        return self.ReceiptState(self.receipt_state).label
+
+    @property
+    def is_settled(self) -> bool:
+        """Whether receiving is finished with this line.
+
+        Settled covers four different endings — received in full, over-received,
+        closed short, and voided — and is what decides whether the line still
+        blocks the order reaching ``received``. It is emphatically NOT the same
+        question as :attr:`is_fully_received`: a line closed two units short is
+        settled and not fully received, and both facts stay on the record.
+        """
+        return self.receipt_state in self.SETTLED_RECEIPT_STATES
+
+    @property
+    def has_receipt_variance(self) -> bool:
+        """Whether this line's settled record differs from what was ordered."""
+        return self.receipt_state in self.VARIANCE_RECEIPT_STATES
+
+    def close_short(self, *, actor=None, reason: str = "", at=None) -> None:
+        """Write off this line's outstanding balance as never arriving.
+
+        Idempotent-by-refusal rather than idempotent: re-closing an already
+        closed line, or closing one that has nothing outstanding, raises so a
+        caller cannot quietly overwrite the recorded reason and actor of the
+        first close. ``ValidationError`` so DRF renders it as a 400.
+        """
+        if self.is_voided:
+            raise ValidationError("A voided line has nothing outstanding to close short.")
+        if self.is_closed_short:
+            raise ValidationError("This line has already been closed short.")
+        if self.quantity_pending == 0:
+            raise ValidationError(
+                "This line has nothing outstanding — it is already received in full."
+            )
+        self.closed_short_at = at or timezone.now()
+        self.closed_short_by = actor if (actor is not None and actor.is_authenticated) else None
+        self.closed_short_reason = reason
+        self.save(
+            update_fields=[
+                "closed_short_at",
+                "closed_short_by",
+                "closed_short_reason",
+                "updated_at",
+            ]
+        )
 
 
 class PurchaseOrderAttachment(models.Model):

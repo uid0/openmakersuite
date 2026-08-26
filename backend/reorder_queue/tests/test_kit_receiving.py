@@ -210,21 +210,34 @@ class TestKitReceiving:
         kit.refresh_from_db()
         assert kit.current_stock == 0
 
-    def test_ac28_over_receipt_is_rejected_before_stock_changes(
+    def test_ac28_over_receipt_credits_the_kits_that_actually_arrived(
         self, client, kit, supplier, components, receiver
     ):
+        """Five kits against an order for two credits five kits' components.
+
+        Over-receipt is recorded rather than refused (oms-po-receiving), and
+        the kit rule does not bend for it: the extra kits explode into extra
+        COMPONENT stock, and the kit's own stock stays at zero. Crediting the
+        kit — or crediting only the two that were ordered — would both leave
+        the shelf disagreeing with the room.
+        """
         purchase_order = make_po(supplier, receiver)
         line = add_kit_line(purchase_order, kit, quantity=2)
         assert receive(client, purchase_order, line, 1).status_code == status.HTTP_200_OK
 
-        response = receive(client, purchase_order, line, 5)
+        assert receive(client, purchase_order, line, 5).status_code == status.HTTP_200_OK
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
         for component in components:
             component.refresh_from_db()
-            assert component.current_stock == 1
+            # One kit then five: six kits' worth of every component.
+            assert component.current_stock == 6
         kit.refresh_from_db()
         assert kit.current_stock == 0
+
+        line.refresh_from_db()
+        assert line.quantity_received == 6
+        assert line.quantity_variance == 4
+        assert line.is_over_received
 
     def test_ac29_empty_breakdown_does_not_break_receiving(
         self, client, kit, supplier, components, caplog, receiver

@@ -160,6 +160,31 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
     actual_cost = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     quantity_pending = serializers.IntegerField(read_only=True)
     is_fully_received = serializers.BooleanField(read_only=True)
+    # Receiving state (oms-po-receiving). All DERIVED from the quantities and
+    # the close-short stamp, so no client has to re-implement "is this line
+    # short?" and none of them can reach a different answer.
+    #
+    # ``quantity_variance`` is the signed difference between what arrived and
+    # what was ordered — negative short, positive over — and is the honest
+    # figure ``quantity_pending`` deliberately floors away.
+    quantity_variance = serializers.IntegerField(read_only=True)
+    receipt_state = serializers.CharField(read_only=True)
+    receipt_state_label = serializers.CharField(read_only=True)
+    is_settled = serializers.BooleanField(read_only=True)
+    has_receipt_variance = serializers.BooleanField(read_only=True)
+    is_over_received = serializers.BooleanField(read_only=True)
+    is_short_received = serializers.BooleanField(read_only=True)
+    is_closed_short = serializers.BooleanField(read_only=True)
+    closed_short_by_username = serializers.CharField(
+        source="closed_short_by.username", read_only=True, allow_null=True
+    )
+    # Which identities a receipt on this line may carry serials for, and how
+    # many units of each the ordered quantity implies — the kit's COMPONENTS on
+    # a kit line, never the kit. Rendered from the same function the receipt
+    # validates against, so a client is never asked for a serial the receipt
+    # would then refuse.
+    serial_targets = serializers.SerializerMethodField()
+    serials_recorded = serializers.SerializerMethodField()
     # Kit lines (op-8n0). ``is_kit_line`` is derived from the item this line
     # already points at, and ``kit_components`` previews what receiving the
     # ordered quantity will credit.
@@ -190,7 +215,21 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
             "estimated_cost",
             "actual_cost",
             "quantity_pending",
+            "quantity_variance",
             "is_fully_received",
+            "receipt_state",
+            "receipt_state_label",
+            "is_settled",
+            "has_receipt_variance",
+            "is_over_received",
+            "is_short_received",
+            "is_closed_short",
+            "closed_short_at",
+            "closed_short_by",
+            "closed_short_by_username",
+            "closed_short_reason",
+            "serial_targets",
+            "serials_recorded",
             "is_kit_line",
             "kit_components",
             "expected_shipment_date",
@@ -215,7 +254,48 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
             "voided_at",
             "voided_by",
             "unit_cost_ordered",
+            # Owned by the close-short / mark-received actions, which is where
+            # the actor and the reason are stamped together.
+            "closed_short_at",
+            "closed_short_by",
+            "closed_short_reason",
         ]
+
+    def get_serial_targets(self, obj):
+        """Identities a receipt on this line may record serials against.
+
+        ``[]`` for a line with nothing serialized about it. For a KIT line this
+        is the kit's serialized COMPONENTS — never the kit — because receiving
+        a kit credits its components, and a serial written against the kit
+        would name a unit that never enters stock.
+
+        ``quantity`` is what the FULL ordered quantity implies; a partial
+        receipt carries proportionally fewer. Rendered from
+        :func:`reorder_queue.services.receiving.serialized_receipt_targets`,
+        the same function the receipt validates the operator's serials against,
+        so this can never offer an identity the receipt would then refuse.
+        """
+        from .services import serialized_receipt_targets
+
+        return [
+            {
+                "item": str(item.pk),
+                "item_name": item.name,
+                "item_sku": item.sku,
+                "serial_tracking_mode": item.serial_tracking_mode,
+                "quantity": units,
+            }
+            for item, units in serialized_receipt_targets(obj, obj.quantity_ordered or 0)
+        ]
+
+    def get_serials_recorded(self, obj):
+        """How many serialized units have been accessioned against this line so far.
+
+        Counted from the units' own provenance link rather than tracked in a
+        column, so it cannot drift from the units that actually exist. A client
+        compares it with ``serial_targets`` to see what is still uncaptured.
+        """
+        return obj.serialized_components.count()
 
     def get_kit_components(self, obj):
         """What receiving this line's ordered quantity will credit (op-8n0).
@@ -439,6 +519,17 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     total_quantity = serializers.IntegerField(read_only=True)
     total_received_quantity = serializers.IntegerField(read_only=True)
     is_fully_received = serializers.BooleanField(read_only=True)
+    # Receiving roll-up (oms-po-receiving), all derived from the lines.
+    # ``is_settled`` is "receiving is finished with this order" — which is what
+    # advances it to ``received`` — while ``is_fully_received`` stays the
+    # stricter "everything we ordered turned up". They differ exactly when a
+    # line was closed short, and ``has_receipt_variance`` is what keeps that
+    # difference visible after the order is closed.
+    is_settled = serializers.BooleanField(read_only=True)
+    has_receipt_variance = serializers.BooleanField(read_only=True)
+    outstanding_line_count = serializers.IntegerField(read_only=True)
+    variance_line_count = serializers.IntegerField(read_only=True)
+    can_receive = serializers.SerializerMethodField()
     days_since_ordered = serializers.IntegerField(read_only=True)
     estimated_total = serializers.DecimalField(
         max_digits=12,
@@ -494,12 +585,27 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "total_quantity",
             "total_received_quantity",
             "is_fully_received",
+            "is_settled",
+            "has_receipt_variance",
+            "outstanding_line_count",
+            "variance_line_count",
+            "can_receive",
             "days_since_ordered",
             "payment_schedule",
         ]
         # ``order_date`` is deliberately absent (op-bwo9): a PO entered after the
         # fact is backdated to when it was actually placed, so PATCH must reach it.
         read_only_fields = ["po_number", "updated_at"]
+
+    def get_can_receive(self, obj):
+        """Whether this order's status allows receiving against it.
+
+        Served from ``PurchaseOrder.RECEIVABLE_STATUSES`` so a client never has
+        to keep its own copy of which statuses those are — the copy the web UI
+        used to keep is how the receive button and the endpoint could disagree
+        about whether an order was receivable.
+        """
+        return obj.status in PurchaseOrder.RECEIVABLE_STATUSES
 
     def validate(self, attrs):
         """Re-attaching an agreement must respect the order's supplier."""
@@ -755,20 +861,58 @@ class MarkDeliveredSerializer(serializers.Serializer):
     receipt_notes = serializers.CharField(required=False, allow_blank=True, default="")
 
 
+class ReceiveSerialSerializer(serializers.Serializer):
+    """One serial-numbered unit captured during a receipt.
+
+    ``item`` names which inventory identity the serial belongs to. It is
+    OPTIONAL on an ordinary line (there is only one identity it could be) and
+    REQUIRED on a kit line, where the receipt credits several components and
+    guessing between them would be inventing the operator's intent. Naming the
+    kit itself is refused — see
+    :func:`reorder_queue.services.receiving.resolve_serial_targets`.
+
+    ``lot`` and ``expiration_date`` are optional provenance recorded verbatim
+    against the unit; neither affects stock or triggers any alert.
+    """
+
+    serial_number = serializers.CharField(max_length=200)
+    item = serializers.UUIDField(required=False, allow_null=True)
+    lot = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
+    expiration_date = serializers.DateField(required=False, allow_null=True)
+
+    def validate_serial_number(self, value):
+        """A serial is the barcode as scanned, minus the whitespace a scanner adds."""
+        cleaned = value.strip()
+        if not cleaned:
+            raise serializers.ValidationError("A serial number cannot be blank.")
+        return cleaned
+
+
 class ReceiveItemSerializer(serializers.Serializer):
     """A single line in a per-item purchase order receive request.
 
-    ``quantity_received`` is BASE units — it is checked against the line's
-    base-unit pending quantity — unless ``at_level`` is set, in which case it is
-    a count of whole packs of the item's ``count_level`` ("three cases came in")
-    and is converted before any of that (op-ev14). ``at_level`` on a line whose
-    item is not counted in packs, or on an asset/freeform line, is an error
-    rather than a silent base-unit reading.
+    ``quantity_received`` is BASE units unless ``at_level`` is set, in which
+    case it is a count of whole packs of the item's ``count_level`` ("three
+    cases came in") and is converted before anything else (op-ev14).
+    ``at_level`` on a line whose item is not counted in packs, or on an
+    asset/freeform line, is an error rather than a silent base-unit reading.
+
+    **More than the outstanding quantity is accepted.** An over-receipt is
+    recorded as the figure that actually arrived and flagged on the line; it is
+    never rounded down to what was ordered.
+
+    ``serials`` carries the units of a serialized item (or, on a kit line, of
+    its serialized components) that came in with this quantity. ``close_short``
+    declares that whatever is still outstanding after this receipt is never
+    arriving, which settles the line so the order can finish.
     """
 
     purchase_order_item = serializers.IntegerField()
     quantity_received = serializers.IntegerField(min_value=1)
     at_level = serializers.BooleanField(required=False, default=False)
+    serials = ReceiveSerialSerializer(many=True, required=False, default=list)
+    close_short = serializers.BooleanField(required=False, default=False)
+    close_short_reason = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class ReceiveItemsSerializer(serializers.Serializer):
@@ -778,6 +922,11 @@ class ReceiveItemsSerializer(serializers.Serializer):
     quantity on the whole PO), this drives a partial receipt from an explicit
     list of ``{purchase_order_item, quantity_received}`` lines. ``delivery_date``
     is optional and defaults to now when omitted.
+
+    ``tracking_number`` is the carrier's tracking barcode for the parcel this
+    receipt covers, stored exactly as scanned. It is recorded, never parsed:
+    together with the delivery's ``received_at`` it is what a transit-duration
+    calculation would later be built from.
     """
 
     items = ReceiveItemSerializer(many=True, allow_empty=False)
@@ -787,6 +936,30 @@ class ReceiveItemsSerializer(serializers.Serializer):
     )
     carrier = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
     receipt_notes = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class CloseShortLineSerializer(serializers.Serializer):
+    """One line whose outstanding balance is being written off as never arriving."""
+
+    purchase_order_item = serializers.IntegerField()
+    reason = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class CloseShortSerializer(serializers.Serializer):
+    """Request body for writing off outstanding balances on named lines."""
+
+    items = CloseShortLineSerializer(many=True, allow_empty=False)
+
+
+class MarkReceivedSerializer(serializers.Serializer):
+    """Request body for finishing an order off (step 6 of the receiving flow).
+
+    ``reason`` is recorded against every line that still had an outstanding
+    balance when the order was closed, so a shortfall written off in bulk is as
+    traceable as one written off line by line.
+    """
+
+    reason = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 def ordered_unit_cost_field(**kwargs):

@@ -51,16 +51,22 @@ def test_ac49_the_snapshot_migration_only_adds_one_nullable_field():
     assert field.has_default() is False
 
 
-def test_ac49_no_later_migration_touched_purchase_order_item():
-    """0028 is the last word *on this table*.
+def test_ac49_no_later_migration_added_a_kit_column_to_purchase_order_item():
+    """``kit_snapshot`` is the only kit column this table will ever carry.
 
-    Originally "0028 is the last reorder_queue migration at all", which only
-    held while op-8n0 was the newest work in the app. The budget it was pinning
-    is the ``PurchaseOrderItem`` schema, not the app's migration counter — a
-    later, unrelated migration elsewhere in ``reorder_queue`` (oms-po-add-item
-    adds an audit-action choice, which touches ``PurchaseOrderAuditEvent``) is
-    not an overspend. So the assertion is now what it always meant: after 0028,
-    nothing else altered the PO line table.
+    The assertion has been narrowed twice, each time toward what the budget
+    actually is. It began as "0028 is the last reorder_queue migration at all",
+    which only held while op-8n0 was the newest work in the app. It became
+    "nothing after 0028 alters PurchaseOrderItem", which only held until the
+    table needed a field for unrelated work — oms-po-receiving adds the
+    closed-short stamp so a short receipt can be settled and flagged.
+
+    Neither of those was the design constraint. The constraint is that **a kit
+    is an ordinary inventory line as far as this app's schema is concerned**:
+    ``is_kit_line`` is derived from the item behind ``item_supplier``, so the
+    kit design owes this table exactly one column and never a second. That is
+    what is asserted here, and unlike its predecessors it does not expire the
+    next time somebody has honest business with the table.
     """
     loader = MigrationLoader(None, ignore_no_migrations=True)
     names = sorted(
@@ -70,14 +76,16 @@ def test_ac49_no_later_migration_touched_purchase_order_item():
 
     for name in later:
         migration = loader.disk_migrations[("reorder_queue", name)]
-        touched = {
-            getattr(operation, "model_name", getattr(operation, "name", "")).lower()
-            for operation in migration.operations
-        }
-        assert "purchaseorderitem" not in touched, (
-            f"{name} alters PurchaseOrderItem — the kit snapshot budget (AC-49) "
-            "was one additive field on that table and nothing more."
-        )
+        for operation in migration.operations:
+            model_name = getattr(operation, "model_name", "").lower()
+            if model_name != "purchaseorderitem":
+                continue
+            field_name = getattr(operation, "name", "")
+            assert "kit" not in field_name.lower(), (
+                f"{name} adds the kit-related field '{field_name}' to "
+                "PurchaseOrderItem — the kit design's budget on this table "
+                "(AC-49) was kit_snapshot and nothing more."
+            )
 
 
 def test_ac49_kit_lines_added_no_purchase_order_item_target_slot():

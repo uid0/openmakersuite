@@ -81,6 +81,10 @@ const buildPurchaseLine = (
   quantity_received: 0,
   quantity_pending: 4,
   is_fully_received: false,
+  is_settled: false,
+  receipt_state: 'not_received',
+  receipt_state_label: 'Not received',
+  quantity_variance: -4,
   unit_cost: '11.25',
   expected_delivery_date: '2026-02-10',
   expected_shipment_date: null,
@@ -493,6 +497,10 @@ describe('WorkOrderPage — ordered for this work order (op-bu80)', () => {
               quantity_received: 2,
               quantity_pending: 0,
               is_fully_received: true,
+              is_settled: true,
+              receipt_state: 'received',
+              receipt_state_label: 'Received in full',
+              quantity_variance: 0,
               po_status: 'received',
             }),
           ],
@@ -513,6 +521,55 @@ describe('WorkOrderPage — ordered for this work order (op-bu80)', () => {
       'href',
       '/purchasing/orders/po-1',
     );
+  });
+
+  it('does not present a line closed short as still on its way', async () => {
+    // Receiving is finished with it — the missing units were written off, not
+    // dispatched. A yellow "2 on order" badge with an expected date would tell
+    // the tech to keep waiting for a part nobody is sending.
+    mockWorkOrderAPI.getWorkOrder.mockResolvedValue(
+      okResponse(
+        buildWorkOrder({
+          purchase_order_lines: [
+            buildPurchaseLine({
+              quantity_received: 2,
+              quantity_pending: 2,
+              is_fully_received: false,
+              is_settled: true,
+              receipt_state: 'closed_short',
+              receipt_state_label: 'Closed short',
+              quantity_variance: -2,
+              expected_delivery_date: '2026-02-10',
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderPage();
+
+    const card = (await screen.findByText('Ordered for this work order')).closest(
+      '.mantine-Card-root',
+    ) as HTMLElement;
+    expect(within(card).queryByText('2 on order')).not.toBeInTheDocument();
+    expect(within(card).queryByText(/^Expected /)).not.toBeInTheDocument();
+    expect(within(card).getByText('closed short')).toBeInTheDocument();
+    // What did arrive is still on the record.
+    expect(within(card).getByText(/2\/4 received/)).toBeInTheDocument();
+  });
+
+  it('still shows an expected date for a line that really is outstanding', async () => {
+    mockWorkOrderAPI.getWorkOrder.mockResolvedValue(
+      okResponse(buildWorkOrder({ purchase_order_lines: [buildPurchaseLine()] })),
+    );
+
+    renderPage();
+
+    const card = (await screen.findByText('Ordered for this work order')).closest(
+      '.mantine-Card-root',
+    ) as HTMLElement;
+    expect(within(card).getByText('4 on order')).toBeInTheDocument();
+    expect(within(card).getByText(/^Expected /)).toBeInTheDocument();
   });
 
   it('leaves the section out when nothing was ordered for the job', async () => {

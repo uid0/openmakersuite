@@ -20,9 +20,10 @@ no second code path in which they could disagree.
 
 Neither knows anything about idempotency. Both are driven by *this receipt's*
 quantity, never by ``po_item.quantity_received`` — that is what makes partial
-receipts additive, and it means over-receipt has to be rejected upstream (the
-pending-quantity guard in ``reorder_queue.views``) rather than half-detected
-here.
+receipts additive, and it means the quantity is taken as given. Receiving more
+kits than were ordered credits the components of every kit that turned up:
+an over-receipt is recorded and flagged upstream (oms-po-receiving), not
+refused, so there is nothing for these functions to detect or clamp.
 """
 
 from __future__ import annotations

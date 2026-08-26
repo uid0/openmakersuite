@@ -123,6 +123,14 @@ Behavior:
   the same receipt.
 - On failure the receive panel stays open with the entered quantities
   intact so the operator can correct and retry.
+- `mark-received` (close the order out) and `reopen-short` (take back a
+  close-short recorded in error) both patch the order from their response
+  the same way, so the status hero, the per-line receipt states and the
+  outstanding count settle without a follow-up GET. Neither reports more
+  than the server did: `mark-received` says the order stayed where it was
+  when nothing had been received against it, rather than claiming it is
+  received. Endpoint semantics are owned by
+  [`PO_RECEIVING_API.md`](PO_RECEIVING_API.md).
 - The add-a-line entry (draft orders only) patches the order from the
   `items/` response, which carries the full refreshed purchase order, so
   the new or grown line appears without a follow-up GET and the page does
@@ -176,7 +184,7 @@ Each row lists the file, the mutation, and the loader being called.
 | Status | File | Mutation | Currently calls |
 | --- | --- | --- | --- |
 | ✅ migrated | `pages/AdminDashboard.tsx` | reorder approve / mark ordered / mark received / cancel / update tracking | (now patches row from response) |
-| ✅ migrated | `pages/PurchaseOrderPage.tsx` | `mark-delivered` / `receive` (per-line-item) / add-a-line (`items/`) | (now patches order from response) |
+| ✅ migrated | `pages/PurchaseOrderPage.tsx` | `mark-delivered` / `receive` (per-line-item) / `mark-received` / `reopen-short` / add-a-line (`items/`) | (now patches order from response) |
 | ✅ migrated | `pages/LocationProblemDetailPage.tsx` | resolve / promote-standard / promote-third-party | (now patches problem from response) |
 | refresh-y | `pages/WorkOrderPage.tsx` | work-order status transition + save | `loadWorkOrder()` |
 | refresh-y | `pages/ChecklistCompletionPage.tsx` | submit checklist item | `loadData()` |

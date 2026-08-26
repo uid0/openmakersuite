@@ -22,6 +22,14 @@ vi.mock('../../utils/dialogs', () => ({
 }));
 
 const order = (overrides: Record<string, unknown> = {}) => ({
+  // Server-computed; mirrored here from the same status list the API uses.
+  can_receive: ['sent', 'confirmed', 'partially_received'].includes(
+    String((overrides as { status?: string }).status ?? 'draft'),
+  ),
+  is_settled: false,
+  has_receipt_variance: false,
+  outstanding_line_count: 0,
+  variance_line_count: 0,
   id: 'po-1',
   po_number: 'PO-2026-0042',
   supplier_details: 'Acme Fasteners',

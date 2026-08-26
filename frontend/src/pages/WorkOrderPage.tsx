@@ -2457,14 +2457,22 @@ const WorkOrderPage: React.FC = () => {
                   <Box style={{ flex: 1, minWidth: 0 }}>
                     <Group gap="xs">
                       <Text fw={600} size="sm">{line.name}</Text>
+                      {/* Yellow means "still coming". A line closed short or
+                          struck off is settled: nothing more is on its way, so
+                          it reports how it ended rather than a quantity due
+                          that will never arrive. */}
                       <Badge
                         size="xs"
                         variant="light"
-                        color={line.is_fully_received ? 'green' : 'yellow'}
+                        color={
+                          line.is_fully_received ? 'green' : line.is_settled ? 'gray' : 'yellow'
+                        }
                       >
                         {line.is_fully_received
                           ? 'received'
-                          : `${line.quantity_pending} on order`}
+                          : line.is_settled
+                            ? line.receipt_state_label.toLowerCase()
+                            : `${line.quantity_pending} on order`}
                       </Badge>
                     </Group>
                     <Text size="xs" c="dimmed">
@@ -2478,7 +2486,7 @@ const WorkOrderPage: React.FC = () => {
                       {line.supplier_name ? ` · ${line.supplier_name}` : ''}
                       {` · ${line.quantity_received}/${line.quantity_ordered} received`}
                     </Text>
-                    {!line.is_fully_received && line.expected_delivery_date && (
+                    {!line.is_settled && line.expected_delivery_date && (
                       <Text size="xs" c="dimmed">
                         Expected {formatDateOnly(line.expected_delivery_date)}
                       </Text>

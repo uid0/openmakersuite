@@ -357,8 +357,15 @@ class TestReceiveAtCountLevel:
         assert po_item.is_fully_received
         assert purchase_order.status == PurchaseOrder.Status.RECEIVED
 
-    def test_over_receiving_is_caught_on_the_converted_quantity(self, authenticated_client):
-        """4 cases against a 36-bottle order is over-receipt, not 4 <= 36."""
+    def test_over_receiving_is_measured_on_the_converted_quantity(self, authenticated_client):
+        """4 cases against a 36-bottle order is 48 bottles, +12 — not 4.
+
+        The pack conversion still happens before anything judges the figure
+        (op-ev14); what changed is the verdict. An over-receipt is now recorded
+        rather than refused, so the thing to prove is that the recorded
+        quantity and the flagged variance are both in BASE units. A conversion
+        applied after the variance was computed would report +12 as -32.
+        """
         client, user = authenticated_client
         item = _pack_item(case_size=12, current_stock=0)
         purchase_order, po_item = _sent_po_with_line(
@@ -371,10 +378,13 @@ class TestReceiveAtCountLevel:
             {"purchase_order_item": po_item.id, "quantity_received": 4, "at_level": True},
         )
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "exceeds pending" in response.data["error"]
+        assert response.status_code == status.HTTP_200_OK, response.data
+        po_item.refresh_from_db()
         item.refresh_from_db()
-        assert item.current_stock == 0
+        assert po_item.quantity_received == 48
+        assert po_item.quantity_variance == 12
+        assert po_item.is_over_received
+        assert item.current_stock == 48
 
     def test_at_level_on_an_each_item_is_rejected(self, authenticated_client):
         client, user = authenticated_client

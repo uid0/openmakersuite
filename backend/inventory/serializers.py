@@ -1066,7 +1066,7 @@ class KitSerializer(InventoryItemSerializer):
         """Enforce the kit rules the database and ``clean()`` cannot reach.
 
         The DB constraints cover self-reference and positive quantities, and
-        ``KitComponent.clean()`` covers nested kits and serialized components,
+        ``KitComponent.clean()`` covers nested kits,
         but both surface as a 500-shaped ``IntegrityError`` or a non-field
         error. Checking here turns each into a field-addressed 400 the kit form
         can render beside the offending row.
@@ -1132,15 +1132,6 @@ class KitSerializer(InventoryItemSerializer):
             if component.is_kit:
                 raise serializers.ValidationError(
                     {"components": f"'{component.name}' is a kit — kits cannot contain kits."}
-                )
-            if component.is_serialized:
-                raise serializers.ValidationError(
-                    {
-                        "components": (
-                            f"'{component.name}' is serialized and cannot be a kit component — "
-                            "receiving the kit would credit stock without recording serials."
-                        )
-                    }
                 )
         return attrs
 

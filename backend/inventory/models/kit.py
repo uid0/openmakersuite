@@ -93,12 +93,32 @@ class KitComponent(models.Model):
         return f"{self.kit.name} contains {self.quantity} x {self.component.name}"
 
     def clean(self) -> None:
-        """Reject self-reference, nested kits, a non-kit parent, and serialized parts.
+        """Reject self-reference, nested kits, and a non-kit parent.
 
         The two DB constraints above cover self-reference and quantity; the rest
         cannot be expressed as a ``CheckConstraint`` because they read a column
         on the *other* table. Raising here gives the API a field-addressed 400
         instead of an IntegrityError 500.
+
+        **A serialized component used to be refused here** (op-8n0), on the
+        grounds that "receiving the kit would credit stock without recording
+        serial numbers". That was true when it was written: nothing in the
+        receive path could record a serial against a kit's component, so the
+        serials of every unit in a kit were unrecoverable.
+
+        Receiving can now capture them — ``reorder_queue.services.receiving``
+        offers each serialized COMPONENT as a serial target and refuses a serial
+        aimed at the kit — so the refusal no longer describes a real hazard, and
+        it was removed rather than left standing as a guard against something
+        that cannot happen (oms-po-receiving).
+
+        What replaced it is not another prohibition but *visibility*: a line
+        reports ``serials_outstanding``, the units it credited to a serialized
+        identity that still have no serial recorded. That covers every receive
+        path rather than only the kit one — the same gap has always existed for
+        an ordinary serialized line received through ``mark-delivered`` — so
+        nothing silently drops serial tracking any more, which is the harm the
+        prohibition actually named.
         """
         super().clean()
 
@@ -116,26 +136,14 @@ class KitComponent(models.Model):
                 raise ValidationError(
                     {"component": "A kit cannot contain another kit."},
                 )
-            # Fail loud rather than silently dropping serial tracking: a receipt
-            # that credits aggregate stock but mints no SerializedComponent rows
-            # is worse than a refusal, because the serials are unrecoverable.
-            if component.is_serialized:
-                raise ValidationError(
-                    {
-                        "component": (
-                            "Serialized items cannot be kit components — receiving the "
-                            "kit would credit stock without recording serial numbers."
-                        )
-                    },
-                )
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Validate before writing.
 
         ``KitComponent`` is only ever written through the kit serializer or the
-        admin, both low-volume, so paying ``full_clean`` here keeps the nested-kit
-        and serialized-component rules from being bypassed by a direct
-        ``objects.create`` in a script or a data migration.
+        admin, both low-volume, so paying ``full_clean`` here keeps the
+        nested-kit rule from being bypassed by a direct ``objects.create`` in a
+        script or a data migration.
 
         Uniqueness and the two ``CheckConstraint``s are left to the database —
         validating them here would cost a query per row to re-derive what the

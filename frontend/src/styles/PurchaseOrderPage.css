@@ -516,6 +516,92 @@
   resize: vertical;
 }
 
+/* Receiving mismatch + serial capture (oms-po-receiving) ------------------ */
+
+/* The flags that keep a short or over receipt visible on the order long after
+   the receipt itself. Colour-coded, but never colour-ONLY: each carries its
+   own "+2 over" / "-2 short" text and a title attribute. */
+.receipt-flag {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.0625rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.receipt-flag-short {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.receipt-flag-over {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.receipt-flag-serials {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+.receipt-flag-pending {
+  background: #e0f2fe;
+  color: #075985;
+}
+
+/* Said inline as the quantity is typed, so an over-receipt or a partial
+   serial capture is known BEFORE the confirm, not discovered after. */
+.receive-variance-note {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.6875rem;
+  color: #475569;
+}
+
+.receive-variance-over {
+  color: #9a3412;
+  font-weight: 600;
+}
+
+.receive-close-short {
+  display: block;
+  font-size: 0.8125rem;
+  color: #334155;
+}
+
+.receive-close-short-reason {
+  width: 100%;
+  margin-top: 0.375rem;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+}
+
+/* Lot and expiry sit beside each other under their serial box; they apply to
+   every serial in that box. */
+.receive-serial-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.receive-serial-meta label {
+  margin-bottom: 0;
+}
+
+.receive-serial-meta input {
+  padding: 0.375rem 0.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+}
+
 .void-item-form textarea {
   padding: 0.5rem;
   border: 1px solid #cbd5e1;
@@ -564,6 +650,29 @@
 
 .btn-void-item:hover {
   background-color: #fecaca;
+}
+
+/* Reopening a line closed short is a correction, not a destructive act, so it
+   reads as an ordinary secondary action rather than borrowing the void red. */
+.btn-reopen-short {
+  padding: 0.5rem 1rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.375rem;
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-reopen-short:hover:not(:disabled) {
+  background-color: #dbeafe;
+}
+
+.btn-reopen-short:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .voided-status {

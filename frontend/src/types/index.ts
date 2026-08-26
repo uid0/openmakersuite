@@ -1051,6 +1051,18 @@ export interface WorkOrderPurchaseLine {
   quantity_received: number;
   quantity_pending: number;
   is_fully_received: boolean;
+  /**
+   * Whether receiving is FINISHED with this line — received in full,
+   * over-received, or written off short. Not the same question as
+   * `is_fully_received`, which asks whether the ordered quantity arrived: a
+   * line closed short is settled and not fully received, and only `is_settled`
+   * answers "is anything still on its way?".
+   */
+  is_settled: boolean;
+  receipt_state: string;
+  receipt_state_label: string;
+  /** Signed: negative short, positive over. Never floored. */
+  quantity_variance: number;
   unit_cost: string;
   expected_delivery_date: string | null;
   expected_shipment_date: string | null;

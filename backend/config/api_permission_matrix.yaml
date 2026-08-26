@@ -2698,6 +2698,9 @@ views:
       add_item:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+      close_short:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
       confirm_order:
         permission_classes:
         - IsAuthenticatedOrReadOnly
@@ -2728,10 +2731,19 @@ views:
       mark_delivered:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+      mark_received:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
       partial_update:
         permission_classes:
         - IsAuthenticatedOrReadOnly
       receive:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      receiving:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      reopen_short:
         permission_classes:
         - IsAuthenticatedOrReadOnly
       reorder_data:

@@ -23,7 +23,6 @@
 """
 
 from django.contrib import admin
-from django.db import transaction
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
@@ -39,7 +38,7 @@ from .models import (
     ReorderRequest,
     WebHook,
 )
-from .services.receiving import refresh_receipt_status
+from .settlement_signals import settlement_batch
 
 
 class DeliveryPerformanceFilter(admin.SimpleListFilter):
@@ -260,30 +259,25 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
     inlines = [PurchaseOrderItemInline]
 
     def save_formset(self, request, form, formset, change):
-        """Save the line-item inline, recording a price change and re-deriving status.
+        """Save the line-item inline, recording any price change as one.
 
         The inline edits ``unit_cost_ordered`` on existing lines just as the
         line-item change form does, so it owes the same trace. Inline saves go
         through here rather than ``save_model``, so closing one without the
         other would leave the price-trace invariant with a hole beside it.
 
-        It edits the SETTLEMENT columns too — ``quantity_ordered``,
-        ``quantity_received``, ``is_voided`` are all editable here, and a row
-        can be deleted outright — so it owes the same status re-derivation
-        every other settlement write goes through. Without it, lowering a line
-        to what has already arrived leaves the order at ``partially_received``
-        with nothing outstanding and both close-out actions refusing it. The
-        refresh shares the save's transaction, and re-reads the order because
-        ``get_queryset`` prefetches ``items`` and that cached relation still
-        holds the pre-edit quantities.
+        It edits the settlement columns too, and used to owe the status
+        re-derivation from here as well. It no longer does, and no admin hook
+        does: that obligation moved onto the line's own save/delete signals
+        (:mod:`reorder_queue.settlement_signals`), which is what finally stopped
+        each new admin door — inline, row delete, bulk delete, reparent —
+        needing its own entry in a hand-maintained list of method names.
 
-        Only when the formset actually moved a row. ``save_related`` runs this
-        for every inline on every save of the change form, so re-deriving
-        unconditionally would overwrite the ``status`` an operator had just
-        chosen on the same form — a staff member setting a received order back
-        to "Confirmed" for a re-shipment would watch their choice reappear as
-        "Received" with no error and no way to make it stick. A save that
-        touched no line leaves the operator's status alone.
+        A welcome consequence: ``save_related`` runs this for every inline on
+        every save whether or not a row moved, and the old refresh here was
+        gated by hand so it would not overwrite the ``status`` an operator had
+        just chosen on the same form. The signal derives that gate instead —
+        an unchanged inline row is never saved, so nothing re-derives.
         """
         previous_unit_costs = {}
         if formset.model is PurchaseOrderItem:
@@ -293,11 +287,8 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
                 ).values_list("pk", "unit_cost_ordered")
             )
 
-        with transaction.atomic():
+        with settlement_batch():
             super().save_formset(request, form, formset, change)
-            lines_moved = formset.new_objects or formset.changed_objects or formset.deleted_objects
-            if formset.model is PurchaseOrderItem and form.instance.pk and lines_moved:
-                refresh_receipt_status(PurchaseOrder.objects.get(pk=form.instance.pk))
 
         if not previous_unit_costs:
             return
@@ -458,7 +449,7 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
     ]
 
     def save_model(self, request, obj, form, change):
-        """Save the line, record a price change, and re-derive the order's status.
+        """Save the line, and record a price change as a price change.
 
         ``unit_cost_ordered`` stays editable here on purpose — admin exists for
         the exceptional correction the API's draft-only reprice cannot serve.
@@ -466,17 +457,12 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
         becomes impossible, so it emits the same event every other route that
         rewrites that field emits.
 
-        The settlement columns are editable here for the same reason, and carry
-        the same obligation ``update_item`` carries: lowering ``quantity_ordered``
-        to what has already arrived settles the line, and an order whose last
-        outstanding line has just settled must not be left claiming it is still
-        waiting. The refresh shares the save's transaction and re-reads the
-        order rather than trusting a possibly-prefetched ``items`` relation.
-
-        Gated on the form having changed something, for the same reason
-        :meth:`PurchaseOrderAdmin.save_formset` is: re-deriving an order's
-        status is a write, and a save that wrote nothing has no business
-        performing one.
+        The settlement columns stay editable for the same reason, and this hook
+        no longer answers for them. ``purchase_order`` is editable here too, so
+        this form can MOVE a line to another order — a settlement transition
+        for the order it left as much as for the one it joined, and one no
+        amount of refreshing ``obj.purchase_order_id`` after the save could
+        have seen. :mod:`reorder_queue.settlement_signals` re-derives both.
         """
         previous_unit_cost = None
         if change and obj.pk:
@@ -486,10 +472,8 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
                 .first()
             )
 
-        with transaction.atomic():
+        with settlement_batch():
             super().save_model(request, obj, form, change)
-            if form.has_changed():
-                refresh_receipt_status(PurchaseOrder.objects.get(pk=obj.purchase_order_id))
 
         if previous_unit_cost is not None and previous_unit_cost != obj.unit_cost_ordered:
             record_line_reprice(
@@ -497,34 +481,6 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
                 previous_unit_cost=previous_unit_cost,
                 actor=request.user,
             )
-
-    def delete_model(self, request, obj):
-        """Delete the line, then re-derive the order it was on.
-
-        A delete writes no settlement field, which is exactly why it slipped
-        past a rule built around writes — and it changes the answer as surely
-        as an edit does. Removing the last outstanding line leaves the order at
-        ``partially_received`` with nothing owed and both close-out actions
-        refusing it, the same stranding ``update_item`` produced.
-        """
-        purchase_order_id = obj.purchase_order_id
-        with transaction.atomic():
-            super().delete_model(request, obj)
-            refresh_receipt_status(PurchaseOrder.objects.get(pk=purchase_order_id))
-
-    def delete_queryset(self, request, queryset):
-        """The bulk action's half of :meth:`delete_model`.
-
-        Django's "Delete selected" never touches ``delete_model``, so closing
-        one without the other would leave the hole open on the door operators
-        actually use for several lines at once. Every order the selection
-        touched is re-derived once, off a fresh read taken after the delete.
-        """
-        order_ids = set(queryset.values_list("purchase_order_id", flat=True))
-        with transaction.atomic():
-            super().delete_queryset(request, queryset)
-            for purchase_order in PurchaseOrder.objects.filter(pk__in=order_ids):
-                refresh_receipt_status(purchase_order)
 
     @admin.display(description="Item")
     def item_name(self, obj):

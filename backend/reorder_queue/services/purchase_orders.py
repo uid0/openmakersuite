@@ -523,6 +523,14 @@ def void_po(purchase_order, user, reason=""):
     — which is the point: the obligation is discharged here rather than being
     left to hold only for as long as this function keeps setting ``VOIDED``
     itself.
+
+    THE WORKED EXAMPLE of what :mod:`reorder_queue.settlement_signals` does not
+    reach. Lines are struck off with one ``update()``, and a queryset write
+    fires no per-object save signal, so nothing re-derives on its own here and
+    the call below is not optional. The order is re-read for the same reason:
+    ``update()`` leaves a prefetched ``items`` relation holding rows that still
+    say ``is_voided=False``, and ``refresh_receipt_status`` drops its own
+    aggregate cache but cannot drop the caller's prefetch.
     """
     from .receiving import refresh_receipt_status
 
@@ -542,7 +550,7 @@ def void_po(purchase_order, user, reason=""):
             voided_by=user,
             void_reason="PO voided",
         )
-        refresh_receipt_status(purchase_order)
+        refresh_receipt_status(PurchaseOrder.objects.get(pk=purchase_order.pk))
 
 
 def void_line_item(line_item, user, reason):

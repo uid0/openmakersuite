@@ -15,12 +15,7 @@ from django.utils import timezone
 import pytest
 from rest_framework import status
 
-from inventory.models import (
-    MaintenanceItem,
-    MaintenanceMaterial,
-    WorkOrder,
-    WorkOrderMaterialUsage,
-)
+from inventory.models import MaintenanceItem, MaintenanceMaterial, WorkOrder, WorkOrderMaterialUsage
 from inventory.services.work_order_material_usage import apply_material_usage
 from inventory.tests.factories import AssetFactory, InventoryItemFactory
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
@@ -84,6 +79,26 @@ def _po_line(
         quantity_received=quantity_received,
         unit_cost_ordered=unit_cost_ordered,
         is_voided=is_voided,
+    )
+
+
+def _keep_in_receiving(purchase_order, *, created_by=None):
+    """Give ``purchase_order`` an outstanding line for some OTHER item.
+
+    A purchase order re-derives its own status whenever one of its lines is
+    written, so an order made only of settled lines will not sit in
+    ``partially_received`` waiting to be measured. This is what a real
+    part-received order has and a hand-built one forgets: something still owed.
+    The line is for a different item, so it contributes to no figure being
+    asserted about the item under test.
+    """
+    other = InventoryItemFactory(image=None, current_stock=0, reorder_quantity=1)
+    return PurchaseOrderItem.objects.create(
+        purchase_order=purchase_order,
+        item_supplier=other.primary_item_supplier,
+        quantity_ordered=1,
+        quantity_received=0,
+        unit_cost_ordered=_DEFAULT_PO_UNIT_COST,
     )
 
 
@@ -234,18 +249,24 @@ class TestQuantityInTransit:
         _po_line(
             item,
             po_status=PurchaseOrder.Status.PARTIALLY_RECEIVED,
-            quantity_ordered=10,
+            quantity_ordered=8 + 2,
             quantity_received=4,
             created_by=user,
         )
         # A fully-received line on a partial PO contributes nothing in transit.
-        _po_line(
+        # It needs a line of its own holding that order in receiving: a line's
+        # save re-derives its order now (``reorder_queue.settlement_signals``),
+        # so an order whose only line is fully received settles itself and stops
+        # being a partially-received order to measure. The companion line is for
+        # a DIFFERENT item, so it changes neither figure asserted below.
+        fully_received = _po_line(
             item,
             po_status=PurchaseOrder.Status.PARTIALLY_RECEIVED,
             quantity_ordered=8,
             quantity_received=8,
             created_by=user,
         )
+        _keep_in_receiving(fully_received.purchase_order, created_by=user)
         # A plain sent line is on order but not yet in transit.
         _po_line(item, po_status=PurchaseOrder.Status.SENT, quantity_ordered=5, created_by=user)
 

@@ -12,9 +12,9 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Iterable, NamedTuple, Optional, Sequence
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
 
 from ..models import DeliveryItem, LeadTimeLog, OrderDelivery, PurchaseOrder, ReorderRequest
+from ..settlement_signals import settlement_batch
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from inventory.models import InventoryItem
@@ -380,7 +380,7 @@ def receive_delivery(
     """
     receipts = [as_line_receipt(entry) for entry in line_quantities]
 
-    with transaction.atomic():
+    with settlement_batch():
         delivery = OrderDelivery.objects.create(
             purchase_order=purchase_order,
             delivery_date=delivery_datetime,
@@ -606,7 +606,7 @@ def close_lines_short(purchase_order, closures, *, actor):
     Returns the lines that were closed.
     """
     closed = []
-    with transaction.atomic():
+    with settlement_batch():
         for po_item, reason in closures:
             po_item.close_short(actor=actor, reason=reason)
             closed.append(po_item)
@@ -630,7 +630,7 @@ def reopen_lines_short(purchase_order, reopenings, *, actor):
     Returns the lines that were reopened.
     """
     reopened = []
-    with transaction.atomic():
+    with settlement_batch():
         for po_item, reason in reopenings:
             po_item.reopen_short(actor=actor, reason=reason)
             reopened.append(po_item)

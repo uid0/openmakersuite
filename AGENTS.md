@@ -132,23 +132,28 @@ guard: `PurchaseOrderItem.receipt_state` / `is_settled` in Python,
 off the API on the frontend. Anything that can settle a line must reach
 `services.refresh_receipt_status` before it returns.
 
-That includes the Django admin, which writes through a `ModelForm` and so names
-no field for the scanner to see. A `ModelAdmin`/inline on `PurchaseOrderItem`
-that leaves any settlement column writable owes the refresh from the hook that
-door actually goes through, not from whichever one is handy:
+**Where the refresh actually lives.** Saving or deleting a LINE re-derives its
+order on its own — `reorder_queue/settlement_signals.py` hangs off
+`PurchaseOrderItem`'s `post_save` / `post_delete`, and `pre_save` captures the
+order a line is LEAVING so a reparent re-derives both ends. Nothing in the admin
+knows about settlement any more. It used to: the change form, then the inline
+formset, then row delete, then bulk delete, then reparenting, each closed by
+adding another method name to a list, which is the mistake this section exists
+to stop.
 
-- its own change form → `save_model` (`save_related` wraps it and counts too);
-- a hosted inline → the PARENT admin's `save_formset`, which is where an
-  inline's rows are both written and deleted;
-- deletion → `delete_model` **and** `delete_queryset`, both of them. Django
-  dispatches a row delete to the first and "Delete selected" to the second and
-  never falls through, so overriding one leaves the other's door open.
+**What the signal does NOT cover, and why the guard still has a job:**
+querysets fire no per-object save signal. `PurchaseOrderItem.objects.filter(...)
+.update(...)` and `bulk_update` write settlement columns with nothing hearing
+about it, so those paths must call `services.refresh_receipt_status` themselves
+— `services.purchase_orders.void_po` is the live example. Deletes are the
+exception: `queryset.delete()` does fan out `post_delete` per row, so bulk
+deletion is covered.
 
-Refusing the action satisfies the rule just as well: `readonly_fields` for the
-save side, denying delete permission (or `can_delete = False` on an inline) for
-the delete side. Re-derive only when something actually moved — `save_related`
-runs `save_formset` on every save, and an unconditional refresh overwrites the
-`status` an operator just picked on the same form.
+Two properties the routing holds, both pinned by tests rather than asserted:
+receiving a twenty-line order re-derives the order ONCE (`settlement_batch()`
+coalesces inside the transaction, never on `transaction.on_commit` — endpoints
+serialize `purchase_order.status` into the response and ScanTTY reads it), and a
+refresh cannot re-enter its own signal.
 
 Do not read a clean run as "there is nothing left". The scan prints the write
 shapes it can and cannot see on every run; that list is the honest boundary and

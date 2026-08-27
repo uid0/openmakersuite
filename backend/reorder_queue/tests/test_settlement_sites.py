@@ -203,12 +203,20 @@ class TestDerivationIsHonoured:
             "claim of completeness this arm has already been wrong about twice"
         )
 
-    def test_the_command_line_form_can_list_the_whole_derived_set(self, capsys):
+    def test_the_command_line_form_can_list_the_whole_derived_set(self, capsys, sweep):
         """``--sites`` is how the derived set was read off for the PR."""
+        # Named the way the sweep names it, not the way this checkout happens to
+        # be laid out: paths are relative to the root the scan anchors on, and
+        # the docker-compose job mounts backend/ alone at /app, so a literal
+        # "backend/" prefix is a property of a developer checkout rather than of
+        # the report.
+        model_sites = [path for path, *_ in sweep.sites if path.endswith("reorder_queue/models.py")]
+        assert model_sites, "the sweep listed no settlement site in the model that defines it"
+
         assert settlement_sites.main(["--sites"]) == 0
         printed = capsys.readouterr().out
         assert "sites naming a settlement field" in printed
-        assert "backend/reorder_queue/models.py" in printed
+        assert model_sites[0] in printed
 
 
 class TestOrmAndPythonAgree:

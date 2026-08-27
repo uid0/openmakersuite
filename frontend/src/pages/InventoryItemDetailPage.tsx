@@ -1009,13 +1009,25 @@ const InventoryItemDetailPage: React.FC = () => {
                       </Table.Thead>
                       <Table.Tbody>
                         {supplierLinks.map((link) => {
-                          // Nothing can be ordered against a discontinued or
-                          // inactive link, so its lead time must not sit beside
-                          // an orderable one looking equally actionable.
+                          // A discontinued or inactive link is dimmed exactly
+                          // where it carries an ACTIONABLE FIGURE — the name
+                          // you would contact and the lead time you would plan
+                          // around — and never where it carries an IDENTIFIER.
+                          // A lead time is a promise about a future delivery
+                          // and a link you cannot buy from makes none, so its
+                          // "3 days" must not read as the better option beside
+                          // an orderable "14 days". A SKU or UPC stays true
+                          // whether or not you can order today and is exactly
+                          // what someone needs to look up what was bought last
+                          // year, so dimming it would cost legibility for no
+                          // safety gain. The treatment stops there.
                           const unorderable = link.is_discontinued || !link.is_active;
                           return (
                             <Table.Tr key={link.id} data-testid={`item-supplier-${link.id}`}>
-                              <Table.Td>
+                              <Table.Td
+                                data-testid={`supplier-name-${link.id}`}
+                                data-emphasis={unorderable ? 'dimmed' : 'full'}
+                              >
                                 <Group gap="xs" wrap="wrap">
                                   <Text size="sm" fw={500} c={unorderable ? 'dimmed' : undefined}>
                                     {link.supplier_name}
@@ -1037,17 +1049,22 @@ const InventoryItemDetailPage: React.FC = () => {
                                   )}
                                 </Group>
                               </Table.Td>
-                              <Table.Td data-testid={`supplier-sku-${link.id}`}>
+                              <Table.Td data-testid={`supplier-sku-${link.id}`} data-emphasis="full">
                                 {recordedValue(link.supplier_sku)}
                               </Table.Td>
-                              <Table.Td data-testid={`supplier-package-upc-${link.id}`}>
+                              <Table.Td data-testid={`supplier-package-upc-${link.id}`} data-emphasis="full">
                                 {recordedValue(link.package_upc)}
                               </Table.Td>
-                              <Table.Td data-testid={`supplier-unit-upc-${link.id}`}>
+                              <Table.Td data-testid={`supplier-unit-upc-${link.id}`} data-emphasis="full">
                                 {recordedValue(link.unit_upc)}
                               </Table.Td>
-                              <Table.Td data-testid={`supplier-lead-time-${link.id}`}>
-                                {leadTimeValue(link.average_lead_time)}
+                              <Table.Td
+                                data-testid={`supplier-lead-time-${link.id}`}
+                                data-emphasis={unorderable ? 'dimmed' : 'full'}
+                              >
+                                <Text span size="sm" c={unorderable ? 'dimmed' : undefined}>
+                                  {leadTimeValue(link.average_lead_time)}
+                                </Text>
                               </Table.Td>
                             </Table.Tr>
                           );

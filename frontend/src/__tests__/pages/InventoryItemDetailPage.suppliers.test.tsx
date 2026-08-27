@@ -253,6 +253,42 @@ describe('InventoryItemDetailPage — suppliers card', () => {
     expect(within(supplierRow(1)).queryByText('Inactive')).not.toBeInTheDocument();
   });
 
+  it('dims an unorderable link where it states a lead time, not where it states an identifier', async () => {
+    renderWith([
+      supplierLink({ id: 1, supplier_name: 'Acme Supplies', average_lead_time: 14, is_primary: true }),
+      supplierLink({
+        id: 2,
+        supplier_name: 'Beta Parts',
+        supplier_sku: 'BP-77',
+        package_upc: '987654321098',
+        unit_upc: '987654321081',
+        average_lead_time: 3,
+        is_discontinued: true,
+      }),
+      supplierLink({ id: 3, supplier_name: 'Gamma Wholesale', average_lead_time: 21, is_active: false }),
+    ]);
+
+    await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
+
+    // The figure you would plan around is de-emphasised on both unorderable
+    // links, so "3 days" cannot read as beating an orderable "14 days".
+    expect(screen.getByTestId('supplier-lead-time-2')).toHaveAttribute('data-emphasis', 'dimmed');
+    expect(screen.getByTestId('supplier-name-2')).toHaveAttribute('data-emphasis', 'dimmed');
+    expect(screen.getByTestId('supplier-lead-time-3')).toHaveAttribute('data-emphasis', 'dimmed');
+    expect(screen.getByTestId('supplier-name-3')).toHaveAttribute('data-emphasis', 'dimmed');
+
+    // The identifiers on that same discontinued link stay fully legible —
+    // they remain true for anyone looking up what was bought last year.
+    expect(screen.getByTestId('supplier-sku-2')).toHaveAttribute('data-emphasis', 'full');
+    expect(screen.getByTestId('supplier-package-upc-2')).toHaveAttribute('data-emphasis', 'full');
+    expect(screen.getByTestId('supplier-unit-upc-2')).toHaveAttribute('data-emphasis', 'full');
+    expect(screen.getByTestId('supplier-sku-2')).toHaveTextContent('BP-77');
+
+    // An orderable link is dimmed nowhere.
+    expect(screen.getByTestId('supplier-name-1')).toHaveAttribute('data-emphasis', 'full');
+    expect(screen.getByTestId('supplier-lead-time-1')).toHaveAttribute('data-emphasis', 'full');
+  });
+
   it('distinguishes an unrecorded value from an empty one', async () => {
     renderWith([
       supplierLink({

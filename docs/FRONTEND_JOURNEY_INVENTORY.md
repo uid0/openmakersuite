@@ -61,7 +61,7 @@ Authenticated staff and members manage the inventory catalog and reorder workflo
 | Journey | Entry route(s) | Auth | Key resilience expectations |
 | --- | --- | --- | --- |
 | Browse and search inventory list | `/inventory/items` (`InventoryListPage.tsx`) | member | Loading skeleton; empty-state with "Add item"; auth expiration preserves filter context |
-| View inventory item detail | `/inventory/items/:id` (`InventoryItemDetailPage.tsx`) | member | Forbidden state for staff-only fields; missing-item state |
+| View inventory item detail | `/inventory/items/:id` (`InventoryItemDetailPage.tsx`) | public route, member-gated sections | Forbidden state for staff-only fields; missing-item state. The route is not behind `RequireAuth`, so a signed-out visitor reaches it: they keep the single legacy "Primary Supplier" name, while the Suppliers table (every `suppliers[]` link with that supplier's own SKU, UPCs and lead time) renders only when signed in |
 | Create / edit inventory item | `/inventory/items/new`, `/inventory/items/:id/edit` (`InventoryItemFormPage.tsx`) | staff | Form save errors surface field-level validation; auth expiration returns to attempted edit |
 | Browse and search categories | `/inventory/categories` (`CategoryListPage.tsx`) | staff | Standard list resilience |
 | Create / edit category | `/inventory/categories/new`, `/inventory/categories/:id/edit` (`CategoryFormPage.tsx`) | staff | Same as above |

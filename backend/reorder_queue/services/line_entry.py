@@ -698,18 +698,30 @@ def assert_deletable(purchase_order):
     is a false statement in the one place they most need a true one, and it
     points them at void when void is not the instrument they need.
 
-    ``sent_at`` is the fact, so it is what the split reads. ``mark_sent`` is
-    its only writer, which makes it right in both awkward directions: an order
-    cancelled AFTER going out still carries the stamp and still owes the
-    supplier answer, while a draft cancelled without ever going out does not
-    and gets the closed-order answer instead.
+    The split is derived from the two frozensets, not from ``sent_at`` and not
+    from a list of status labels. The closed-and-never-sent case is exactly
+    "outside :attr:`~reorder_queue.models.PurchaseOrder.PRE_SUPPLIER_STATUSES`
+    AND outside :attr:`~reorder_queue.models.PurchaseOrder.IN_RECEIVING_STATUSES`"
+    — the terminal statuses, derived rather than typed out here — with
+    ``sent_at`` read only as corroboration. Everything receiving still owns,
+    ``SENT`` included, gets the supplier answer.
+
+    ``sent_at`` cannot carry the split on its own: it is not reliably written.
+    ``PurchaseOrderAdmin.mark_as_sent`` moves a whole queryset to ``SENT`` with
+    one ``update()`` and stamps ``sent_by`` but not ``sent_at``, and both
+    columns are editable on the change form. An order can therefore be live
+    with its supplier and hold no stamp, and a split that read the stamp alone
+    would tell that operator their order was never sent and is closed — three
+    false clauses, and it would withhold the one remedy that does work. Reading
+    the status sets first makes the answer immune to how the stamp got written.
     """
     if purchase_order.status in PurchaseOrder.PRE_SUPPLIER_STATUSES:
         return
 
     label = PurchaseOrder.Status(purchase_order.status).label
     name = purchase_order.po_number or "This order"
-    if purchase_order.sent_at is None:
+    terminal = purchase_order.status not in PurchaseOrder.IN_RECEIVING_STATUSES
+    if terminal and purchase_order.sent_at is None:
         raise LineEntryError(
             f"Line items can only be deleted while a purchase order is a draft. "
             f"{name} is {label} and never went to the supplier, so its lines are "

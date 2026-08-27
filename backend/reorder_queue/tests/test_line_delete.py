@@ -51,13 +51,12 @@ def _order(status=PurchaseOrder.Status.DRAFT, *, user=None, sent=None):
     Two lines on purpose: a single-line order cannot tell "the total was
     re-rolled" apart from "the total was zeroed".
 
-    ``sent`` stamps ``sent_at``, the record of the supplier having been handed
-    the document. It defaults to "stamped unless the order is still a draft",
-    because ``mark_sent`` is the only writer of that stamp and is how every
-    status past DRAFT is reached — an order in ``sent`` with no stamp is a
-    state the application cannot produce. The two terminal statuses are the
-    exception a draft can reach without going out, so tests that care pass
-    ``sent`` explicitly.
+    ``sent`` stamps ``sent_at``. It defaults to "stamped unless the order is
+    still a draft", which is what the ordinary ``mark_sent`` path produces —
+    but the stamp is NOT a reliable record of the supplier having been handed
+    the document, and no guard here may assume it is: the admin's bulk
+    "Mark selected orders as sent" writes the status and ``sent_by`` without
+    it. Tests that care about a particular pairing pass ``sent`` explicitly.
     """
     user = user or UserFactory()
     supplier = SupplierFactory()
@@ -246,8 +245,37 @@ def test_a_draft_cancelled_without_being_sent_is_not_told_the_supplier_has_it(cl
     assert PurchaseOrderItem.objects.filter(pk=first.pk).exists()
 
 
+def test_an_order_sent_by_the_admin_bulk_action_is_still_told_to_void(client):
+    """The stamp is not the record of what the supplier has, so it cannot decide this.
+
+    ``PurchaseOrderAdmin.mark_as_sent`` moves a whole queryset to ``SENT`` with
+    one ``update()`` and writes ``sent_by`` but never ``sent_at``. That state is
+    reproduced here exactly. The order is live with its supplier; telling this
+    operator it never went out, that it is closed, and to open a duplicate would
+    be three false clauses and would withhold the remedy that does work.
+    """
+    purchase_order, first, _second = _order()
+    PurchaseOrder.objects.filter(pk=purchase_order.pk).update(
+        status=PurchaseOrder.Status.SENT, sent_at=None
+    )
+
+    response = client.delete(_line_url(purchase_order, first))
+
+    assert response.status_code == 400
+    error = response.data["error"]
+    assert "the supplier already has this line" in error
+    assert "void it instead" in error
+    assert "never went to the supplier" not in error
+    assert "new order" not in error
+    assert PurchaseOrderItem.objects.filter(pk=first.pk).exists()
+
+
 def test_an_order_cancelled_after_being_sent_is_still_told_to_void(client):
-    """The same status, the opposite fact — and the stamp is what tells them apart."""
+    """Terminal, but the supplier saw it — and the stamp is what says so.
+
+    A cancelled order is outside both sets, so the terminal arm is in reach;
+    the corroborating stamp is what keeps it out.
+    """
     purchase_order, first, _second = _order(status=PurchaseOrder.Status.CANCELLED, sent=True)
 
     response = client.delete(_line_url(purchase_order, first))

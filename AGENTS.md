@@ -137,18 +137,26 @@ some other part of the codebase will never do.
 
 Outside the pre-send set sit two different reasons, and `assert_deletable` says
 whichever is true: "the supplier already has this line, void it instead" and
-"this order is closed and never went out, start a new one". The split reads
-`sent_at`, not the status label, because a draft can be cancelled or voided
-without ever going to the supplier and an order can be cancelled after it went
-— the stamp is right in both directions and a status name is right in neither.
-A refusal is only legitimate when the operator can act on it, and a refusal that
-misstates why is worse than a bare one.
+"this order is closed and never went out, start a new one". The split is derived
+from the two frozensets — the closed case is *outside `PRE_SUPPLIER_STATUSES`
+and outside `IN_RECEIVING_STATUSES`*, i.e. the terminal statuses, never a typed
+list of labels — with `sent_at` read only as corroboration. Do NOT key such a
+split on `sent_at` alone: `PurchaseOrderAdmin.mark_as_sent` moves a queryset to
+`SENT` with one `update()` and stamps `sent_by` but not `sent_at`, so an order
+can be live with its supplier and hold no stamp. A refusal is only legitimate
+when the operator can act on it, and a refusal that misstates why is worse than
+a bare one.
 
-One thing deliberately NOT changed here: `get_queryset` hides an order with no
-active lines from the list endpoint, so deleting a single-line draft's only line
-drops it off PurchaseOrderListPage. That was already reachable by voiding the
-only line; its root is the list filter rather than deletion, so it was routed to
-a separate product decision instead of being changed under this one.
+Two things found here and deliberately NOT changed, routed to follow-up instead:
+
+- `get_queryset` hides an order with no active lines from the list endpoint, so
+  deleting a single-line draft's only line drops it off PurchaseOrderListPage.
+  That was already reachable by voiding the only line; its root is the list
+  filter rather than deletion, so it is a product call across all orders.
+- `PurchaseOrderAdmin.mark_as_sent` never stamps `sent_at`, which also leaves
+  `days_since_ordered` reading 0 for orders sent that way. Changing it alters
+  existing admin behaviour, so instead nothing in this change depends on that
+  stamp being written.
 
 ### Purchase-order line settlement
 

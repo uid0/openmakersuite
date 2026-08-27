@@ -1380,7 +1380,10 @@ def serialize_lookup(purchase_order, query, result):
             "id": purchase_order.pk,
             "po_number": purchase_order.po_number,
             "status": purchase_order.status,
-            "can_add_items": purchase_order.status == PurchaseOrder.Status.DRAFT,
+            # The same set ``assert_addable`` gates on, never the status name:
+            # a payload that disagreed with the guard would hide an add the
+            # server would have honoured.
+            "can_add_items": purchase_order.status in PurchaseOrder.PRE_SUPPLIER_STATUSES,
         },
         "best_match_kind": best_tier,
         # True when a client may add straight from this lookup without asking

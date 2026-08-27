@@ -10,9 +10,14 @@ Everything here drives the REAL HTTP API. The three things worth stating up
 front, because each was established by experiment rather than assumed:
 
 * the pre-send boundary is derived from ``PRE_SUPPLIER_STATUSES`` on the order's
-  own state machine, not from the string ``"draft"`` — ``test_the_boundary_*``;
-* a pre-send line cannot carry a receipt, so deletion needs no receipt guard;
-  the impossibility is asserted here instead — ``test_a_draft_line_cannot_*``;
+  own state machine, not from the string ``"draft"`` — ``test_the_boundary_*``,
+  ``test_both_line_set_flags_*``;
+* a line carrying a receipt is REFUSED rather than assumed impossible —
+  ``test_delete_refuses_a_line_that_records_a_receipt``. DRAFT being
+  initial-only should make that unreachable, but an impossibility argument only
+  holds while every future change re-verifies it and a guard holds without
+  anyone re-verifying anything, so the guard is what the endpoint carries and
+  what is tested here;
 * the order's settlement status AND its stored ``estimated_total`` are both
   re-derived by the line's own ``post_delete`` (#1029 / #1030), with no
   explicit call from the endpoint — ``test_settlement_*`` / ``test_total_*``.
@@ -109,60 +114,30 @@ def test_the_boundary_cannot_overlap_receiving():
     assert not (PurchaseOrder.PRE_SUPPLIER_STATUSES & PurchaseOrder.RECEIVABLE_STATUSES)
 
 
-def test_a_draft_line_cannot_carry_a_receipt_so_deletion_needs_no_guard():
-    """The impossibility that stands in for a ``quantity_received`` check.
+def test_both_line_set_flags_follow_the_set_and_not_the_status_name(client, monkeypatch):
+    """One definition means one edit — proved by MOVING the set, not by reading it.
 
-    Two facts hold it up, and both are asserted rather than described:
-
-    * DRAFT is not receivable, so no receiving path will touch a draft's lines;
-    * DRAFT is initial-only — nothing transitions an order back into it — so a
-      line cannot acquire a receipt and then find itself on a draft again.
-
-    Together these make ``quantity_received > 0`` unreachable on a pre-send
-    line, which is why the delete endpoint carries no such branch: it could
-    never be watched failing, and an unreachable guard rots untested.
+    ``can_delete_items`` on the order and ``can_add_items`` on the item-lookup
+    payload are the two answers the web UI reads instead of keeping its own copy
+    of the status list. Either one comparing to ``DRAFT`` by name would leave
+    the UI hiding an affordance the server would honour the moment a second
+    pre-send state existed, which is the whole reason the set exists.
     """
-    assert PurchaseOrder.Status.DRAFT not in PurchaseOrder.RECEIVABLE_STATUSES
-    assert PurchaseOrder.Status.DRAFT not in PurchaseOrder.IN_RECEIVING_STATUSES
+    purchase_order, _first, _second = _order(status=PurchaseOrder.Status.CANCELLED)
+    detail_url = reverse("purchaseorder-detail", args=[purchase_order.pk])
+    lookup_url = reverse("purchaseorder-item-lookup", args=[purchase_order.pk])
 
-    # DRAFT is initial-only: it is the model default and nothing assigns it.
-    field = PurchaseOrder._meta.get_field("status")
-    assert field.default == PurchaseOrder.Status.DRAFT
+    assert client.get(detail_url).data["can_delete_items"] is False
+    assert client.get(lookup_url, {"q": "  "}).data["purchase_order"]["can_add_items"] is False
 
-    # Read as a SYNTAX TREE, not as text. The shape that could put an order
-    # back is an assignment to some object's ``.status`` — ``order.status =
-    # ... DRAFT``. The field DECLARATION assigns to a bare name and is a
-    # default, not a transition; ``!=`` / ``not in`` comparisons are the gates
-    # the rest of this module relies on. A regex could not tell the three
-    # apart, and the version that tried reported the declaration as a defect.
-    import ast
-    from pathlib import Path
-
-    import reorder_queue
-
-    app_root = Path(reorder_queue.__file__).resolve().parent.parent
-    offenders = []
-    for path in sorted(app_root.rglob("*.py")):
-        parts = path.relative_to(app_root).parts
-        if "migrations" in parts or "tests" in parts:
-            continue
-        tree = ast.parse(path.read_text(), filename=str(path))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Assign):
-                continue
-            targets_status = any(
-                isinstance(target, ast.Attribute) and target.attr == "status"
-                for target in node.targets
-            )
-            if not targets_status:
-                continue
-            if "Status.DRAFT" in ast.unparse(node.value):
-                offenders.append(f"{path.relative_to(app_root)}:{node.lineno}: {ast.unparse(node)}")
-    assert offenders == [], (
-        "Something assigns a purchase order back to DRAFT. A line could then "
-        "carry a receipt onto a pre-send order, and the delete endpoint has no "
-        "receipt guard because that was impossible:\n" + "\n".join(offenders)
+    monkeypatch.setattr(
+        PurchaseOrder,
+        "PRE_SUPPLIER_STATUSES",
+        frozenset({PurchaseOrder.Status.DRAFT, PurchaseOrder.Status.CANCELLED}),
     )
+
+    assert client.get(detail_url).data["can_delete_items"] is True
+    assert client.get(lookup_url, {"q": "  "}).data["purchase_order"]["can_add_items"] is True
 
 
 # --------------------------------------------------------------------------
@@ -232,6 +207,41 @@ def test_delete_is_refused_in_every_status_outside_the_pre_send_set(client, stat
 
     assert response.status_code == 400, f"{status} allowed a delete"
     assert PurchaseOrderItem.objects.filter(pk=first.pk).exists()
+
+
+def test_delete_refuses_a_line_that_records_a_receipt(client):
+    """Goods a receipt says arrived are not destroyed on the strength of an argument.
+
+    The receipt is written with ``update()`` because that is the only way it
+    gets there: no ordinary path can put one on a pre-send line, which is
+    exactly the case the guard exists for. The refusal has to be actionable, so
+    it names the recorded quantity and what to do about it.
+    """
+    purchase_order, first, _second = _order()
+    PurchaseOrderItem.objects.filter(pk=first.pk).update(quantity_received=3)
+
+    response = client.delete(_line_url(purchase_order, first))
+
+    assert response.status_code == 400, response.data
+    assert response.data["code"] == "line_received"
+    assert "3" in response.data["error"]
+    assert PurchaseOrderItem.objects.filter(pk=first.pk).exists()
+    purchase_order.refresh_from_db()
+    assert purchase_order.estimated_total == Decimal("50.00")
+    assert not PurchaseOrderAuditEvent.objects.filter(
+        action=PurchaseOrderAuditEvent.Action.PO_LINE_DELETE
+    ).exists()
+
+
+def test_the_receipt_refusal_comes_second_to_the_pre_send_refusal(client):
+    """A sent line with a receipt is told to VOID — the answer to what was asked."""
+    purchase_order, first, _second = _order(status=PurchaseOrder.Status.SENT)
+    PurchaseOrderItem.objects.filter(pk=first.pk).update(quantity_received=3)
+
+    response = client.delete(_line_url(purchase_order, first))
+
+    assert response.status_code == 400
+    assert response.data["code"] == "not_draft"
 
 
 def test_every_non_pre_send_status_is_covered_by_the_parametrisation():

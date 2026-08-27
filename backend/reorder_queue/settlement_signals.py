@@ -9,10 +9,15 @@ belong to ``ModelAdmin.save_model``. It belongs to the LINE: if a line was
 written or removed, whatever wrote it, the order it belongs to has to be asked
 its questions again.
 
-Two questions, not one, and they do not have the same triggers. A line SAVE
-can change the order's settlement status. A line DELETE changes that AND the
-order's stored ``estimated_total``, which no save reaches from here — see
-:func:`_rederive_after_line_delete`.
+Two questions, not one, and they do not have the same triggers. Every line
+SAVE that moved something can change the order's settlement status. The
+order's stored ``estimated_total`` moves on the narrower rule "a line's cost
+LEFT the order", which has two routes rather than one: a DELETE, and a SAVE
+that REPARENTS the line onto a different order — the second is a removal from
+the order it left and an addition to the order it joined, so both owe a
+re-roll. See :func:`_rederive_after_line_delete` for what the stored total is
+and why nobody else subtracts a line that is gone, and
+:func:`_rederive_after_line_save` for why ordinary saves are still excluded.
 
 So the routing lives here, on the model's own save/delete signals, and the
 admin hooks that used to carry it are gone.
@@ -121,7 +126,8 @@ def _run(order_ids, cost_order_ids=()) -> None:
     finishes receiving and stays displayed as partially received.
 
     ``cost_order_ids`` is the subset owing a stored-total re-roll as well —
-    deletes only; see :func:`_rederive_after_line_delete` for why.
+    the orders a line's cost LEFT or JOINED, which is deletes plus reparents;
+    see :func:`_rederive_after_line_delete` for why.
 
     ONE read covers both questions, and deliberately so. Reading the orders
     twice — once for the money, once for the status — would still be coalesced
@@ -247,9 +253,31 @@ def _remember_what_this_save_moves(sender, instance, update_fields=None, **kwarg
 
 @receiver(post_save, sender=PurchaseOrderItem)
 def _rederive_after_line_save(sender, instance, **kwargs):
+    """Re-derive the order this save touched, and the one it may have left.
+
+    Settlement status for both. The stored ``estimated_total`` only when the
+    line was REPARENTED, because that is the one save that removes a cost from
+    an order: the source order is left carrying money for a line it no longer
+    holds, exactly as a DELETE would leave it, and the destination is left
+    understating by the same amount. The rule
+    :func:`_rederive_after_line_delete` states — "a line's cost left the order,
+    and it applies to every route that can remove one" — is why this branch is
+    here rather than in the admin form that happens to be today's only reparent
+    door.
+
+    Ordinary saves are still excluded, and the reparent branch does not weaken
+    that: a save that merely moved a settlement field already re-rolls the
+    total on its own path (``add_line_item``, ``update_item``), so re-rolling
+    from here as well would write the order — and bump its ``updated_at`` — on
+    every line save, which is what :func:`_remember_what_this_save_moves`
+    exists to prevent one layer up. A reparent is distinguished before the
+    write and asks the question only for the two orders that really moved.
+    """
     if not getattr(instance, "_settlement_moved", True):
         return
-    _mark({instance.purchase_order_id, getattr(instance, "_settlement_source_order_id", None)})
+    source_order_id = getattr(instance, "_settlement_source_order_id", None)
+    reparented = source_order_id is not None and source_order_id != instance.purchase_order_id
+    _mark({instance.purchase_order_id, source_order_id}, costs=reparented)
 
 
 @receiver(post_delete, sender=PurchaseOrderItem)
@@ -269,9 +297,9 @@ def _rederive_after_line_delete(sender, instance, **kwargs):
     A collector that can FAST-delete sends no signal at all, and neither does
     ``_raw_delete``; see this module's own boundary above.
 
-    ``costs=True`` because a DELETE breaks a second invariant a save never
-    does, and it is the same door, so it rides the same signal rather than
-    growing a second receiver to keep in step with this one.
+    ``costs=True`` because a DELETE breaks a second invariant, and it rides the
+    same signal rather than growing a second receiver to keep in step with this
+    one.
 
     ``PurchaseOrder.estimated_total`` is STORED: frozen at create time from the
     sum of the line costs and re-rolled by ``recalculate_estimated_total`` at
@@ -291,9 +319,19 @@ def _rederive_after_line_delete(sender, instance, **kwargs):
     — and already overstating the total — before that endpoint existed. Fixing
     only the new door would have left the older three wrong and called it done.
 
-    Saves are untouched. A save that moves a cost already re-rolls the total on
-    its own path (``add_line_item``, ``update_item``); re-rolling again from
-    here would write the order on every line save — the silent ``updated_at``
-    bump :func:`_remember_what_this_save_moves` exists to prevent one layer up.
+    A DELETE is not the only such route, and stating the rule without honouring
+    it is how the fifth door stays open: the admin's change form can also MOVE a
+    line to another order, which removes its cost from the order it left just as
+    finally. That route re-rolls from :func:`_rederive_after_line_save`, on the
+    same rule and for the same reason.
+
+    Ordinary saves are untouched — see :func:`_rederive_after_line_save` for
+    what separates them from a reparent.
+
+    An order-level figure computed from lines that only SOME line-writing paths
+    re-derive is the general shape filed as ``oms-derived-totals-beyond-
+    settlement``; the reparent gap above is a worked instance of it, down to
+    how it was found (the rule was written down, then read back against every
+    route that can satisfy its antecedent).
     """
     _mark({instance.purchase_order_id}, costs=True)

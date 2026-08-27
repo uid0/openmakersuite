@@ -2601,14 +2601,17 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         must not discontinue a supplier's catalogue entry the way voiding
         deliberately does.
 
-        **Receipts are impossible here rather than refused.** ``DRAFT`` is an
-        initial-only state: nothing in the codebase ever writes a purchase order
-        back to it, and every writer of ``quantity_received`` gates on
-        ``RECEIVABLE_STATUSES``, which excludes it. So a pre-send line cannot
-        carry a receipt, and a ``quantity_received > 0`` guard here would be a
-        branch no request can reach — one that could never be watched failing
-        and would rot untested. The impossibility is asserted directly instead,
-        in ``test_line_delete``.
+        **A line carrying a receipt is REFUSED, not assumed away.** The
+        argument that it cannot happen is a good one — ``DRAFT`` is an
+        initial-only state, and every writer of ``quantity_received`` gates on
+        ``RECEIVABLE_STATUSES``, which excludes it — but an argument is only
+        true as long as every future change re-checks it, and a guard is true
+        without anyone re-checking anything. Destroying goods that a receipt
+        says arrived is not a failure worth trading for one unreachable branch,
+        so the branch is here, and the refusal says what the operator can do
+        about it: a receipt on a pre-send order means a quantity was entered
+        outside the ordinary receiving flow, and correcting that comes before
+        removing the line.
 
         Neither the order's settlement status nor its stored ``estimated_total``
         is refreshed from here. Both ride the line's own ``post_delete``
@@ -2624,6 +2627,24 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         except services.LineEntryError as exc:
             return Response(
                 {"error": exc.message, "code": exc.code},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # After the pre-send guard on purpose: an order the supplier already
+        # holds gets told to void, which is the answer to the question it was
+        # actually asked.
+        if line_item.quantity_received > 0:
+            return Response(
+                {
+                    "error": (
+                        f"This line records {line_item.quantity_received} received, so it "
+                        f"cannot be deleted. A receipt on an order the supplier has not "
+                        f"been sent means the quantity was entered outside the ordinary "
+                        f"receiving flow — correct the received quantity to 0 first, then "
+                        f"delete the line."
+                    ),
+                    "code": "line_received",
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -2643,15 +2664,21 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             "work_order": str(line_item.work_order_id) if line_item.work_order_id else None,
             "owning_group": line_item.owning_group_id,
         }
-        record_audit_event(
-            action=PurchaseOrderAuditEvent.Action.PO_LINE_DELETE,
-            actor=request.user,
-            purchase_order=purchase_order,
-            line_item=line_item,
-            metadata=destroyed,
-        )
+        # One transaction over both. The FK ordering forces the event to be
+        # written first, so without this a delete that raised would leave a
+        # ``po_line_delete`` row describing a line that still exists — a
+        # phantom in an append-only trail whose whole job here is to be the
+        # last account of something that is gone.
+        with transaction.atomic():
+            record_audit_event(
+                action=PurchaseOrderAuditEvent.Action.PO_LINE_DELETE,
+                actor=request.user,
+                purchase_order=purchase_order,
+                line_item=line_item,
+                metadata=destroyed,
+            )
 
-        services.delete_line_item(line_item)
+            services.delete_line_item(line_item)
 
         # Re-read rather than reusing ``purchase_order``: the viewset prefetches
         # ``items``, so that instance still holds the deleted line and the

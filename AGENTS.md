@@ -126,12 +126,14 @@ outright (no reason, irreversible, no ghost); once the supplier holds a copy it
 can only be VOIDED (reason required, struck off, kept on the record). The web
 page offers exactly one of the two, chosen off `can_delete_items`.
 
-`DRAFT` is initial-only — nothing in the codebase writes an order back to it —
-which is what makes a receipt on a pre-send line impossible and is why the
-delete path carries no `quantity_received` guard. That impossibility is asserted
-by `reorder_queue/tests/test_line_delete.py`, which walks the app's syntax trees
-for an assignment of `Status.DRAFT`; if you ever add one, that test tells you
-the guard is now needed.
+The delete path REFUSES a line carrying `quantity_received > 0`, with a 400 and
+a message naming the recorded quantity. `DRAFT` is initial-only — nothing in
+the codebase writes an order back to it — so that branch should be unreachable,
+and it is kept anyway: an impossibility argument is only true while every
+future change re-verifies it, whereas a guard holds without anyone re-verifying
+anything, and what it protects against is destroying goods a receipt says
+arrived. Prefer the guard to the argument wherever the argument is about what
+some other part of the codebase will never do.
 
 ### Purchase-order line settlement
 
@@ -174,10 +176,19 @@ subtracts them at read time), but a deleted line is subtracted by nobody, so
 without this the order reports money for a line that no longer exists. It rides
 `post_delete` rather than living in the delete endpoint because the Django
 admin's row / inline / bulk deletes are three more routes that remove a line,
-and they were already overstating the total before that endpoint existed. Line
-SAVES are deliberately excluded: `add_line_item` / `update_item` already re-roll
-on their own path, and doing it again from the signal would bump the order's
-`updated_at` on every line save.
+and they were already overstating the total before that endpoint existed.
+
+The rule is "a line's cost LEFT the order", so it covers the admin change
+form's REPARENT too — moving a line to another order removes its cost from the
+one it left exactly as a delete does, and leaves the one it joined
+understating. That case re-rolls both orders from the post_save receiver.
+Ordinary line SAVES stay excluded: `add_line_item` / `update_item` already
+re-roll on their own path, and doing it again from the signal would bump the
+order's `updated_at` on every line save. When you state a rule like this one in
+a docstring, read it back against every route that satisfies its antecedent —
+the reparent gap was a stated rule the code did not honour, and it is a worked
+instance of `oms-derived-totals-beyond-settlement` (order-level figures
+computed from lines that only some line-writing paths re-derive).
 
 **What the signal does NOT cover, and why the guard still has a job:**
 querysets fire no per-object save signal. `PurchaseOrderItem.objects.filter(...)

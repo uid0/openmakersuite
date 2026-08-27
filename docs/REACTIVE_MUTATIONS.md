@@ -184,7 +184,7 @@ Each row lists the file, the mutation, and the loader being called.
 | Status | File | Mutation | Currently calls |
 | --- | --- | --- | --- |
 | ✅ migrated | `pages/AdminDashboard.tsx` | reorder approve / mark ordered / mark received / cancel / update tracking | (now patches row from response) |
-| ✅ migrated | `pages/PurchaseOrderPage.tsx` | `mark-delivered` / `receive` (per-line-item) / `mark-received` / `reopen-short` / add-a-line (`items/`) | (now patches order from response) |
+| ✅ migrated | `pages/PurchaseOrderPage.tsx` | `mark-delivered` / `receive` (per-line-item) / `mark-received` / `reopen-short` / add-a-line (`items/`) / delete-a-line (`items/<item_id>/` DELETE) | (now patches order from response) |
 | ✅ migrated | `pages/LocationProblemDetailPage.tsx` | resolve / promote-standard / promote-third-party | (now patches problem from response) |
 | refresh-y | `pages/WorkOrderPage.tsx` | work-order status transition + save | `loadWorkOrder()` |
 | refresh-y | `pages/ChecklistCompletionPage.tsx` | submit checklist item | `loadData()` |

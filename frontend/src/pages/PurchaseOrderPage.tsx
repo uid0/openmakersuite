@@ -196,6 +196,10 @@ interface PurchaseOrder {
   // Served by the API from its own RECEIVABLE_STATUSES, so the button and the
   // endpoint cannot disagree about whether this order can be received against.
   can_receive: boolean;
+  // Served by the API from its own PRE_SUPPLIER_STATUSES — the same discipline,
+  // and for a sharper reason: this flag decides whether a line's action is an
+  // irreversible DESTROY or a recorded void. Never re-derive it from `status`.
+  can_delete_items: boolean;
   // Header terms (op-bwo9), all editable here. `order_date` is a datetime that
   // carries a business *day* — the server derives `payment_schedule` from its
   // UTC date — so it is read and written as a day (see `utcYmd`).
@@ -249,6 +253,24 @@ const getItemNameAndSku = (item: PurchaseOrderItem): { itemName: string; itemSku
     itemName: item.item_details?.name || 'Unknown Item',
     itemSku: item.item_details?.sku || '—',
   };
+};
+
+/**
+ * Money for prose rather than for a table cell — the delete confirmation has
+ * to name what it is about to destroy, and it is built before the component's
+ * own `formatCurrency` is in scope. Falls back to the raw string rather than
+ * to an em dash: a confirmation that says "—" where the cost should be tells
+ * the operator less than the unformatted number does.
+ */
+const money = (value: string | null): string => {
+  if (!value) return '$0.00';
+  const num = parseFloat(value);
+  if (Number.isNaN(num)) return value;
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+  }).format(num);
 };
 
 /**
@@ -690,6 +712,42 @@ const PurchaseOrderPage: React.FC = () => {
         }
       },
       { labels: { confirm: 'Void', cancel: 'Cancel' }, color: 'red' },
+    );
+  };
+
+  /**
+   * DESTROY a line on a pre-send order.
+   *
+   * Deliberately unlike {@link handleVoidItem} at every step, because the two
+   * must not be mistakable for one another: no reason field to fill in (the
+   * friction that made voiding the wrong tool for a typo), and a confirmation
+   * that NAMES the line and its quantity and cost rather than asking "are you
+   * sure?" about an unspecified row. An operator who misreads the button
+   * should still be stopped by the sentence in the dialog.
+   */
+  const handleDeleteItem = (item: PurchaseOrderItem) => {
+    const { itemName } = getItemNameAndSku(item);
+    confirmAction(
+      'Delete this line?',
+      `Permanently delete "${itemName}" — ${item.quantity_ordered} × ` +
+        `${money(item.unit_cost_ordered)}, ${money(item.estimated_cost)} total — from this order. ` +
+        'The line is removed entirely, leaving no record of it. This cannot be undone.',
+      async () => {
+        try {
+          setSaving(true);
+          const response = await purchaseOrderAPI.deleteLineItem(orderId!, item.id);
+          // Patch in place from the mutation response rather than re-running
+          // the initial loader (docs/REACTIVE_MUTATIONS.md).
+          setOrder(response.data.purchase_order);
+          showSuccess(`Deleted ${itemName} from this order`);
+        } catch (err: any) {
+          showError(extractErrorMessage(err, 'Failed to delete line item'));
+          console.error('Error deleting line item:', err);
+        } finally {
+          setSaving(false);
+        }
+      },
+      { labels: { confirm: 'Delete line', cancel: 'Keep it' }, color: 'red' },
     );
   };
 
@@ -2954,14 +3012,58 @@ const PurchaseOrderPage: React.FC = () => {
                               >
                                 Edit Shipment Date
                               </button>
-                              {item.quantity_received === 0 && (
-                                <button
-                                  onClick={() => setVoidingItemId(item.id)}
-                                  className="btn-void-item"
-                                  style={{ marginLeft: '0.5rem' }}
-                                >
-                                  Void Item
-                                </button>
+                              {/* Delete OR void, never both. Which one is
+                                  legitimate is the ORDER's question, not the
+                                  operator's, so it is answered once by the
+                                  API's `can_delete_items` and read here — the
+                                  operator is offered the one action that
+                                  applies and never has to know the rule.
+
+                                  While the order is still the shop's own
+                                  document a mistyped line is a typo, and the
+                                  honest record of a typo is no line at all.
+                                  Once the supplier holds a copy, erasing it
+                                  would be a lie about what was ordered, so
+                                  voiding — struck off, on the record, with a
+                                  reason — is the only thing offered. */}
+                              {order.can_delete_items ? (
+                                item.quantity_received === 0 ? (
+                                  <button
+                                    onClick={() => handleDeleteItem(item)}
+                                    disabled={saving}
+                                    className="btn-delete-item"
+                                    style={{ marginLeft: '0.5rem' }}
+                                    data-testid={`delete-line-${item.id}`}
+                                  >
+                                    Delete Line
+                                  </button>
+                                ) : (
+                                  /* Neither action applies: the server refuses
+                                     to delete a line carrying receipts, and
+                                     void refuses one too. Offering a button
+                                     the server would refuse is worse than
+                                     offering none, but an unexplained empty
+                                     cell is its own trap — so the row says
+                                     what is wrong, in the server's own words. */
+                                  <span
+                                    className="line-removal-blocked"
+                                    data-testid={`line-removal-blocked-${item.id}`}
+                                  >
+                                    {item.quantity_received} recorded as received — correct the
+                                    receipt before this line can be removed.
+                                  </span>
+                                )
+                              ) : (
+                                item.quantity_received === 0 && (
+                                  <button
+                                    onClick={() => setVoidingItemId(item.id)}
+                                    className="btn-void-item"
+                                    style={{ marginLeft: '0.5rem' }}
+                                    data-testid={`void-line-${item.id}`}
+                                  >
+                                    Void Item
+                                  </button>
+                                )
                               )}
                               {/* Correcting a close-short made in error. Only
                                   offered on a line that IS closed short: the

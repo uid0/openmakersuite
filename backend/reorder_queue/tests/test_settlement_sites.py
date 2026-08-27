@@ -1504,6 +1504,47 @@ class TestLineWritesReDeriveTheirOrder:
             "outstanding and both close-out actions will refuse it"
         )
 
+    def test_moving_a_line_takes_its_money_with_it(self, admin_client, supplier, operator):
+        """The stored total is a sum over lines, and a reparent moves a line.
+
+        ``estimated_total`` is STORED, frozen from the line costs. A line that
+        MOVES is removed from one order and added to another, so the order it
+        left keeps reporting money for a line it no longer holds — the same
+        wrong figure a DELETE produces, on its detail page, in
+        ``payment_schedule`` and to every API client — while the order that
+        gained it understates by the same amount. Driven through the real admin
+        change form, which is the route that can do this.
+        """
+        source = make_po(supplier, operator, PurchaseOrder.Status.DRAFT)
+        moving = add_line(source, make_item("Bearing", supplier), 4)
+        add_line(source, make_item("Shim", supplier), 1)
+        destination = make_po(supplier, operator, PurchaseOrder.Status.DRAFT)
+        for order in (source, destination):
+            order.calculate_estimated_total()
+            order.save(update_fields=["estimated_total"])
+        source.refresh_from_db()
+        destination.refresh_from_db()
+        assert source.estimated_total == Decimal("50.00")
+        assert destination.estimated_total == Decimal("0.00")
+        moving.refresh_from_db()
+
+        response = admin_client.post(
+            f"/admin/reorder_queue/purchaseorderitem/{moving.pk}/change/",
+            self._line_form_data(moving, operator, purchase_order=str(destination.pk)),
+        )
+
+        assert response.status_code == 302, getattr(response, "context_data", None)
+        source.refresh_from_db()
+        destination.refresh_from_db()
+        assert source.estimated_total == Decimal("10.00"), (
+            "the order the line LEFT still reports its cost — it is billing for "
+            "a line another order now holds"
+        )
+        assert destination.estimated_total == Decimal("40.00"), (
+            "the order the line JOINED does not report its cost — it is "
+            "understating by the amount that just landed on it"
+        )
+
     def _status_writes_receiving(self, client, supplier, operator, line_count, tag):
         """Receive a whole order in one request; return its writes to ``status``.
 

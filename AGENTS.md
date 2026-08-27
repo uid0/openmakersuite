@@ -109,6 +109,55 @@ from "explicitly cleared" give it an `UNCHANGED` sentinel default rather than
 is stated in `ReorderRequestViewSet.mark_ordered`'s docstring and pinned by
 `reorder_queue/tests/test_po_confirm_preserves_expected_delivery_date.py`.
 
+### The pre-send boundary: when a PO is still the shop's own document
+
+`PurchaseOrder.PRE_SUPPLIER_STATUSES` is the ONE definition of "the supplier has
+not seen this order", and it sits beside `RECEIVABLE_STATUSES` /
+`IN_RECEIVING_STATUSES` on the model. Both line-set guards read it —
+`services.line_entry.assert_addable` and `assert_deletable` — and the API serves
+the answer rather than making clients derive it: `can_delete_items` on the order
+serializer (beside `can_receive`, same discipline) and `can_add_items` on the
+item-lookup payload. Gate on the set; never compare to `Status.DRAFT` by name,
+or a second pre-send state becomes a hunt through the comparisons.
+
+It is what separates the two line-removal verbs, which are NOT variants of each
+other: while the order is pre-send a mistaken line is a typo and is DELETED
+outright (no reason, irreversible, no ghost); once the supplier holds a copy it
+can only be VOIDED (reason required, struck off, kept on the record). The web
+page offers exactly one of the two, chosen off `can_delete_items`.
+
+The delete path REFUSES a line carrying `quantity_received > 0`, with a 400 and
+a message naming the recorded quantity. `DRAFT` is initial-only — nothing in
+the codebase writes an order back to it — so that branch should be unreachable,
+and it is kept anyway: an impossibility argument is only true while every
+future change re-verifies it, whereas a guard holds without anyone re-verifying
+anything, and what it protects against is destroying goods a receipt says
+arrived. Prefer the guard to the argument wherever the argument is about what
+some other part of the codebase will never do.
+
+Outside the pre-send set sit two different reasons, and `assert_deletable` says
+whichever is true: "the supplier already has this line, void it instead" and
+"this order is closed and never went out, start a new one". The split is derived
+from the two frozensets — the closed case is *outside `PRE_SUPPLIER_STATUSES`
+and outside `IN_RECEIVING_STATUSES`*, i.e. the terminal statuses, never a typed
+list of labels — with `sent_at` read only as corroboration. Do NOT key such a
+split on `sent_at` alone: `PurchaseOrderAdmin.mark_as_sent` moves a queryset to
+`SENT` with one `update()` and stamps `sent_by` but not `sent_at`, so an order
+can be live with its supplier and hold no stamp. A refusal is only legitimate
+when the operator can act on it, and a refusal that misstates why is worse than
+a bare one.
+
+Two things found here and deliberately NOT changed, routed to follow-up instead:
+
+- `get_queryset` hides an order with no active lines from the list endpoint, so
+  deleting a single-line draft's only line drops it off PurchaseOrderListPage.
+  That was already reachable by voiding the only line; its root is the list
+  filter rather than deletion, so it is a product call across all orders.
+- `PurchaseOrderAdmin.mark_as_sent` never stamps `sent_at`, which also leaves
+  `days_since_ordered` reading 0 for orders sent that way. Changing it alters
+  existing admin behaviour, so instead nothing in this change depends on that
+  stamp being written.
+
 ### Purchase-order line settlement
 
 "Is receiving finished with this line?" is defined once, on
@@ -142,6 +191,35 @@ through `with_receipt_state()`, but neither decides it. A hook used to: the
 change form, then the inline formset, then row delete, then bulk delete, then
 reparenting, each closed by adding another method name to a list, which is the
 mistake this section exists to stop.
+
+**The delete signal carries a second, non-settlement obligation.** A line
+DELETE also re-rolls `PurchaseOrder.estimated_total`, which is a STORED sum
+frozen from the line costs — voided lines stay in it (`effective_estimated_total`
+subtracts them at read time), but a deleted line is subtracted by nobody, so
+without this the order reports money for a line that no longer exists. It rides
+`post_delete` rather than living in the delete endpoint because the Django
+admin's row / inline / bulk deletes are three more routes that remove a line,
+and they were already overstating the total before that endpoint existed.
+
+The rule is "a line's cost LEFT the order", so it covers the admin change
+form's REPARENT too — moving a line to another order removes its cost from the
+one it left exactly as a delete does, and leaves the one it joined
+understating. That case re-rolls both orders from the post_save receiver.
+
+Ordinary line SAVES stay excluded, and the boundary is narrower than it sounds:
+the API's own `add_line_item` / `update_item` re-roll on their own path, but the
+admin does NOT — neither `save_model` nor `save_formset` calls
+`recalculate_estimated_total` — so an admin quantity edit, reprice or inline add
+still leaves the stored total stale. It is left open deliberately, because the
+signal only compares fields inside the settlement closure and
+`unit_cost_ordered` is not one of them, so closing half of it would mean an
+invariant documented as held and not held. `oms-derived-totals-beyond-settlement`
+(order-level figures computed from lines that only some line-writing paths
+re-derive) is STILL NEEDED for the rest; removal is covered, editing is not.
+
+When you state a rule like this one in a docstring, read it back against every
+route that satisfies its antecedent — the reparent gap was a stated rule the
+code did not honour, and it is the worked instance to build that issue on.
 
 **What the signal does NOT cover, and why the guard still has a job:**
 querysets fire no per-object save signal. `PurchaseOrderItem.objects.filter(...)

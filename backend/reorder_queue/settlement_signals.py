@@ -1,4 +1,4 @@
-"""Re-derive a purchase order's status whenever one of its LINES moves.
+"""Re-derive a purchase order whenever one of its LINES moves.
 
 Closing this door-by-door did not work. Each round found another way into the
 admin — the change form, then the inline formset, then row delete, then the
@@ -7,7 +7,17 @@ fix was another method name added to a hand-maintained list, which is the exact
 shape of mistake this whole change exists to end. The obligation does not
 belong to ``ModelAdmin.save_model``. It belongs to the LINE: if a line was
 written or removed, whatever wrote it, the order it belongs to has to be asked
-again what its status is.
+its questions again.
+
+Two questions, not one, and they do not have the same triggers. Every line
+SAVE that moved something can change the order's settlement status. The
+order's stored ``estimated_total`` moves on the narrower rule "a line's cost
+LEFT the order", which has two routes rather than one: a DELETE, and a SAVE
+that REPARENTS the line onto a different order — the second is a removal from
+the order it left and an addition to the order it joined, so both owe a
+re-roll. See :func:`_rederive_after_line_delete` for what the stored total is
+and why nobody else subtracts a line that is gone, and
+:func:`_rederive_after_line_save` for why ordinary saves are still excluded.
 
 So the routing lives here, on the model's own save/delete signals, and the
 admin hooks that used to carry it are gone.
@@ -107,33 +117,57 @@ def _refreshing() -> bool:
     return getattr(_state, "refreshing", False)
 
 
-def _run(order_ids) -> None:
+def _run(order_ids, cost_order_ids=()) -> None:
     """Re-derive each order once, off a fresh read, with the signal suppressed.
 
     The read is deliberately not the caller's instance: a viewset that
     prefetched ``items`` holds a cached relation the line write did not
     invalidate, and deriving settlement from that cache is how an order
     finishes receiving and stays displayed as partially received.
+
+    ``cost_order_ids`` is the subset owing a stored-total re-roll as well —
+    the orders a line's cost LEFT or JOINED, which is deletes plus reparents;
+    see :func:`_rederive_after_line_delete` for why.
+
+    ONE read covers both questions, and deliberately so. Reading the orders
+    twice — once for the money, once for the status — would still be coalesced
+    per unit of work rather than per row, so nothing would look wrong, and the
+    test that counts re-derivations caught it precisely because it counts the
+    READ rather than the write. An order re-derived per unit of work should be
+    fetched once per unit of work.
+
+    Money first on each instance, so the one the status derivation then reads
+    is already whole.
     """
+    from .services.purchase_orders import recalculate_estimated_total
     from .services.receiving import refresh_receipt_status
 
+    order_ids = set(order_ids)
+    cost_order_ids = set(cost_order_ids)
     _state.refreshing = True
     try:
-        for purchase_order in PurchaseOrder.objects.filter(pk__in=sorted(order_ids)):
-            refresh_receipt_status(purchase_order)
+        for purchase_order in PurchaseOrder.objects.filter(
+            pk__in=sorted(order_ids | cost_order_ids)
+        ):
+            if purchase_order.pk in cost_order_ids:
+                recalculate_estimated_total(purchase_order)
+            if purchase_order.pk in order_ids:
+                refresh_receipt_status(purchase_order)
     finally:
         _state.refreshing = False
 
 
-def _mark(order_ids) -> None:
+def _mark(order_ids, *, costs: bool = False) -> None:
     order_ids = {order_id for order_id in order_ids if order_id is not None}
     if not order_ids or _refreshing():
         return
     pending = getattr(_state, "pending", None)
     if pending is None:
-        _run(order_ids)
+        _run(order_ids, order_ids if costs else ())
     else:
         pending.update(order_ids)
+        if costs:
+            _state.pending_costs.update(order_ids)
 
 
 @contextmanager
@@ -157,14 +191,17 @@ def settlement_batch():
     outermost = getattr(_state, "pending", None) is None
     if outermost:
         _state.pending = set()
+        _state.pending_costs = set()
     try:
         yield
         if outermost:
             pending, _state.pending = _state.pending, set()
-            _run(pending)
+            pending_costs, _state.pending_costs = _state.pending_costs, set()
+            _run(pending, pending_costs)
     finally:
         if outermost:
             _state.pending = None
+            _state.pending_costs = None
 
 
 @receiver(pre_save, sender=PurchaseOrderItem)
@@ -216,9 +253,55 @@ def _remember_what_this_save_moves(sender, instance, update_fields=None, **kwarg
 
 @receiver(post_save, sender=PurchaseOrderItem)
 def _rederive_after_line_save(sender, instance, **kwargs):
+    """Re-derive the order this save touched, and the one it may have left.
+
+    Settlement status for both. The stored ``estimated_total`` only when the
+    line was REPARENTED, because that is the one save that removes a cost from
+    an order: the source order is left carrying money for a line it no longer
+    holds, exactly as a DELETE would leave it, and the destination is left
+    understating by the same amount. The rule
+    :func:`_rederive_after_line_delete` states — "a line's cost left the order,
+    and it applies to every route that can remove one" — is why this branch is
+    here rather than in the admin form that happens to be today's only reparent
+    door.
+
+    Ordinary saves are excluded, and here is exactly what that leaves covered
+    and uncovered, because the rounding-up version of this paragraph was itself
+    the defect:
+
+    * COVERED — a line's cost LEAVING an order, by any route. Delete
+      (:func:`_rederive_after_line_delete`) and reparent (here).
+    * COVERED — a cost edit through the API, because ``add_line_item`` and
+      ``update_item`` re-roll the total on their own path before returning.
+    * NOT COVERED — a cost edit through the Django admin. Neither
+      ``PurchaseOrderItemAdmin.save_model`` nor
+      ``PurchaseOrderAdmin.save_formset`` calls ``recalculate_estimated_total``,
+      so lowering a line's quantity or price on the admin change form, or
+      adding a line on the inline formset, leaves the stored total describing
+      the lines as they were. That is wrong money on the detail page, in
+      ``payment_schedule`` and to every API client, and it is a known instance
+      of ``oms-derived-totals-beyond-settlement`` rather than something this
+      module quietly handles.
+
+    Closing that from here would take more than a flag. The cost of a line is
+    ``quantity_ordered * unit_cost_ordered``, and only the first is inside the
+    settlement closure :func:`settlement_fields` derives, so only the first is
+    already compared before the write. Marking costs on that half would leave
+    an admin REPRICE still stale while the docstring said saves were handled —
+    an invariant documented as held and not held, which is the shape of defect
+    this file has spent three rounds removing. So it stays open and named.
+
+    What the exclusion does buy is real: re-rolling on every line save would
+    write the order — and bump its ``updated_at`` — whenever anyone edited a
+    note, which is what :func:`_remember_what_this_save_moves` exists to
+    prevent one layer up. A reparent is distinguished before the write and asks
+    the question only for the two orders that really moved.
+    """
     if not getattr(instance, "_settlement_moved", True):
         return
-    _mark({instance.purchase_order_id, getattr(instance, "_settlement_source_order_id", None)})
+    source_order_id = getattr(instance, "_settlement_source_order_id", None)
+    reparented = source_order_id is not None and source_order_id != instance.purchase_order_id
+    _mark({instance.purchase_order_id, source_order_id}, costs=reparented)
 
 
 @receiver(post_delete, sender=PurchaseOrderItem)
@@ -237,5 +320,45 @@ def _rederive_after_line_delete(sender, instance, **kwargs):
 
     A collector that can FAST-delete sends no signal at all, and neither does
     ``_raw_delete``; see this module's own boundary above.
+
+    ``costs=True`` because a DELETE breaks a second invariant, and it rides the
+    same signal rather than growing a second receiver to keep in step with this
+    one.
+
+    ``PurchaseOrder.estimated_total`` is STORED: frozen at create time from the
+    sum of the line costs and re-rolled by ``recalculate_estimated_total`` at
+    every site that moves one. Voiding is deliberately not such a site — a
+    voided line stays in the stored sum and ``effective_estimated_total``
+    subtracts it at read time, which is what keeps the struck-off money
+    visible. A DELETED line is subtracted by nobody: it is gone from ``items``,
+    so the read-time subtraction cannot see it, while the stored sum it was
+    added to still carries its cost. The order then reports — on its detail
+    page, in ``payment_schedule``, and to every API client — money for a line
+    that does not exist, and no operator action brings the two back into line.
+
+    So the rule is "a line's cost left the order", and it applies to every
+    route that can remove one. That is why it is here and not in the delete
+    endpoint: the endpoint is one such route, and the admin's row delete,
+    inline delete and bulk "Delete selected" are three more that were reachable
+    — and already overstating the total — before that endpoint existed. Fixing
+    only the new door would have left the older three wrong and called it done.
+
+    A DELETE is not the only such route, and stating the rule without honouring
+    it is how the fifth door stays open: the admin's change form can also MOVE a
+    line to another order, which removes its cost from the order it left just as
+    finally. That route re-rolls from :func:`_rederive_after_line_save`, on the
+    same rule and for the same reason.
+
+    Ordinary saves are untouched — see :func:`_rederive_after_line_save` for
+    what separates them from a reparent.
+
+    An order-level figure computed from lines that only SOME line-writing paths
+    re-derive is the general shape filed as ``oms-derived-totals-beyond-
+    settlement``; the reparent gap above is a worked instance of it, down to
+    how it was found (the rule was written down, then read back against every
+    route that can satisfy its antecedent). That issue is STILL NEEDED — this
+    module now covers removal by every route, and leaves the admin's cost EDIT
+    open on purpose, named in :func:`_rederive_after_line_save`. The class is
+    narrowed, not closed.
     """
-    _mark({instance.purchase_order_id})
+    _mark({instance.purchase_order_id}, costs=True)

@@ -230,6 +230,29 @@ class PurchaseOrder(models.Model):
         }
     )
 
+    #: Statuses in which the order has NOT yet gone to the supplier — it is
+    #: still the shop's OWN document, so its line set is still the shop's to
+    #: change. The ONE definition of that boundary: ``assert_addable`` and
+    #: ``assert_deletable`` both gate on this, and the web UI reads the answer
+    #: off the API (``can_add_items`` / ``can_delete_items``) rather than
+    #: keeping its own copy of which statuses those are.
+    #:
+    #: The boundary is not the *label* ``draft`` — it is whether the supplier
+    #: has seen the document. That is why adding a second pre-send state (an
+    #: approval hold, say) is one edit HERE and the add and delete guards both
+    #: follow it, rather than two hard-coded status comparisons to find.
+    #:
+    #: CANCELLED and VOIDED are deliberately absent even though a *draft* can
+    #: reach both. They are terminal: the order is closed and its lines are a
+    #: record of what was closed, not a working set. "Nobody has seen it yet"
+    #: and "nobody is working on it any more" are different facts, and only the
+    #: first licenses editing.
+    #:
+    #: Disjoint from :attr:`IN_RECEIVING_STATUSES` by construction — a status
+    #: cannot be both un-sent and in receiving — and ``test_line_delete``
+    #: asserts that rather than trusting it.
+    PRE_SUPPLIER_STATUSES = frozenset({Status.DRAFT})
+
     #: Statuses in which receiving still owns the order: the receivable ones
     #: plus RECEIVED, which receiving can still be corrected *out of*. Reopening
     #: a line closed short in error is exactly that correction, and
@@ -1729,6 +1752,11 @@ class PurchaseOrderAuditEvent(models.Model):
         PO_VOID = "po_void", "Purchase order voided"
         PO_LINE_ADD = "po_line_add", "Purchase order line item added"
         PO_LINE_VOID = "po_line_void", "Purchase order line item voided"
+        # The line itself is gone, so this row's ``line_item`` FK is SET_NULL
+        # the moment it is written. That is the point of recording it: the
+        # ``purchase_order`` FK and the metadata below are what is left of the
+        # line, and they are written in full for exactly that reason.
+        PO_LINE_DELETE = "po_line_delete", "Purchase order line item deleted"
         PO_LINE_REPRICE = "po_line_reprice", "Purchase order line item repriced"
         PO_MARK_DELIVERED = "po_mark_delivered", "Purchase order marked delivered"
         PO_RECEIVE_ITEMS = "po_receive_items", "Purchase order line items received"

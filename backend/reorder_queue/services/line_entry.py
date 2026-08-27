@@ -657,19 +657,85 @@ def _coerce_unit_cost(unit_cost):
 
 
 def assert_addable(purchase_order):
-    """Guard: lines may only be added while the order is still a draft.
+    """Guard: lines may only be added while the order is still the shop's own.
 
     Once an order has gone to the supplier, what it contains is a matter of
     record — growing it is a new order, not an edit. Raised server-side so a
     non-browser client cannot skip it.
+
+    Gates on ``PurchaseOrder.PRE_SUPPLIER_STATUSES`` rather than comparing to
+    ``DRAFT`` by name, so this guard and :func:`assert_deletable` cannot come to
+    disagree about where the boundary is.
     """
-    if purchase_order.status != PurchaseOrder.Status.DRAFT:
+    if purchase_order.status not in PurchaseOrder.PRE_SUPPLIER_STATUSES:
         label = PurchaseOrder.Status(purchase_order.status).label
         raise LineEntryError(
             f"Line items can only be added while a purchase order is a draft. "
             f"{purchase_order.po_number or 'This order'} is {label}.",
             "not_draft",
         )
+
+
+def assert_deletable(purchase_order):
+    """Guard: a line may only be DESTROYED while the order is still the shop's own.
+
+    The mirror of :func:`assert_addable`, off the same set on purpose. A line
+    you may add is a line you may un-add: while the document is private, a line
+    entered by mistake is a typo, and the honest record of a typo is no line at
+    all. Once the supplier holds a copy, the line is part of a record someone
+    else also has, and erasing it would be a lie about what was ordered — which
+    is what voiding exists for.
+
+    The refusal NAMES the alternative. An operator who cannot delete has
+    somewhere to go, and a refusal that does not say so leaves them stuck on a
+    screen with two buttons and no explanation of why the one they wanted is
+    gone.
+
+    There are TWO true reasons, and which one applies is not a question about
+    the status name. Outside the pre-send set sit both "the supplier has it"
+    and "this order is closed", and a draft can be cancelled or voided without
+    ever going out — telling that operator the supplier already has their line
+    is a false statement in the one place they most need a true one, and it
+    points them at void when void is not the instrument they need.
+
+    The split is derived from the two frozensets, not from ``sent_at`` and not
+    from a list of status labels. The closed-and-never-sent case is exactly
+    "outside :attr:`~reorder_queue.models.PurchaseOrder.PRE_SUPPLIER_STATUSES`
+    AND outside :attr:`~reorder_queue.models.PurchaseOrder.IN_RECEIVING_STATUSES`"
+    — the terminal statuses, derived rather than typed out here — with
+    ``sent_at`` read only as corroboration. Everything receiving still owns,
+    ``SENT`` included, gets the supplier answer.
+
+    ``sent_at`` cannot carry the split on its own: it is not reliably written.
+    ``PurchaseOrderAdmin.mark_as_sent`` moves a whole queryset to ``SENT`` with
+    one ``update()`` and stamps ``sent_by`` but not ``sent_at``, and both
+    columns are editable on the change form. An order can therefore be live
+    with its supplier and hold no stamp, and a split that read the stamp alone
+    would tell that operator their order was never sent and is closed — three
+    false clauses, and it would withhold the one remedy that does work. Reading
+    the status sets first makes the answer immune to how the stamp got written.
+    """
+    if purchase_order.status in PurchaseOrder.PRE_SUPPLIER_STATUSES:
+        return
+
+    label = PurchaseOrder.Status(purchase_order.status).label
+    name = purchase_order.po_number or "This order"
+    terminal = purchase_order.status not in PurchaseOrder.IN_RECEIVING_STATUSES
+    if terminal and purchase_order.sent_at is None:
+        raise LineEntryError(
+            f"Line items can only be deleted while a purchase order is a draft. "
+            f"{name} is {label} and never went to the supplier, so its lines are "
+            f"the record of what was closed — nothing can be added to it or taken "
+            f"off it. Start a new order for anything you still need.",
+            "not_draft",
+        )
+    raise LineEntryError(
+        f"Line items can only be deleted while a purchase order is a draft. "
+        f"{name} is {label}, so the "
+        f"supplier already has this line — void it instead to strike it off "
+        f"while keeping it on the record.",
+        "not_draft",
+    )
 
 
 def resolve_item_supplier(purchase_order, item_supplier_id):
@@ -1350,7 +1416,10 @@ def serialize_lookup(purchase_order, query, result):
             "id": purchase_order.pk,
             "po_number": purchase_order.po_number,
             "status": purchase_order.status,
-            "can_add_items": purchase_order.status == PurchaseOrder.Status.DRAFT,
+            # The same set ``assert_addable`` gates on, never the status name:
+            # a payload that disagreed with the guard would hide an add the
+            # server would have honoured.
+            "can_add_items": purchase_order.status in PurchaseOrder.PRE_SUPPLIER_STATUSES,
         },
         "best_match_kind": best_tier,
         # True when a client may add straight from this lookup without asking

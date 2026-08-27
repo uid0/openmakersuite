@@ -135,11 +135,13 @@ off the API on the frontend. Anything that can settle a line must reach
 **Where the refresh actually lives.** Saving or deleting a LINE re-derives its
 order on its own — `reorder_queue/settlement_signals.py` hangs off
 `PurchaseOrderItem`'s `post_save` / `post_delete`, and `pre_save` captures the
-order a line is LEAVING so a reparent re-derives both ends. Nothing in the admin
-knows about settlement any more. It used to: the change form, then the inline
-formset, then row delete, then bulk delete, then reparenting, each closed by
-adding another method name to a list, which is the mistake this section exists
-to stop.
+order a line is LEAVING so a reparent re-derives both ends. No admin hook owns
+that re-derivation any more — the admin still opens `settlement_batch()` so a
+formset save asks once, and `ReceiptStatusFilter` still *reads* settlement
+through `with_receipt_state()`, but neither decides it. A hook used to: the
+change form, then the inline formset, then row delete, then bulk delete, then
+reparenting, each closed by adding another method name to a list, which is the
+mistake this section exists to stop.
 
 **What the signal does NOT cover, and why the guard still has a job:**
 querysets fire no per-object save signal. `PurchaseOrderItem.objects.filter(...)

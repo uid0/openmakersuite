@@ -703,6 +703,43 @@ describe('correcting a close-short from the purchase-order page', () => {
       ],
     });
 
+  test('the reopen prompt quotes the balance the server says is written off', async () => {
+    // The page used to subtract quantity_ordered - quantity_received itself to
+    // fill this sentence — a second derivation of what receiving is still
+    // owed, beside the server's. They part company on an over-received line
+    // (reachable by lowering quantity_ordered on a line already closed short):
+    // the server floors quantity_pending at zero, the subtraction goes
+    // negative, and the operator is told "-2 units written off".
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: makeOrder({
+        status: 'received',
+        can_receive: false,
+        is_settled: true,
+        outstanding_line_count: 0,
+        items: [
+          {
+            ...closedShortOrder().items[0],
+            quantity_ordered: 10,
+            quantity_received: 12,
+            quantity_pending: 0,
+          },
+        ],
+      }),
+    });
+    (promptInput as jest.Mock).mockResolvedValue(null);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('reopen-short-301'));
+
+    await waitFor(() => {
+      expect(promptInput).toHaveBeenCalled();
+    });
+    const [, message] = (promptInput as jest.Mock).mock.calls[0];
+    expect(message).toContain('0 units written off');
+    expect(message).not.toContain('-2');
+  });
+
   test('the reopen control is offered only on a line that is closed short', async () => {
     // Without it the mistake is uncorrectable from the browser: the receive
     // panel skips settled lines, so a closed-short line is never offered there.

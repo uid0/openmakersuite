@@ -354,6 +354,36 @@ class TestASweepCannotClaimAClearItDidNotEarn:
             "No site bypasses the derivation." not in printed
         ), "the summary rendered an unqualified all-clear over a file it never read"
 
+    def test_a_whole_tree_sweep_earns_the_unqualified_all_clear(
+        self, checkout, capsys, monkeypatch
+    ):
+        """The positive half of the verdict pair.
+
+        The other two assertions on this sentence are negative, so on their own
+        they are equally satisfied by a guard that has quietly stopped ever
+        earning it — an entry appended to ``unscanned`` on a complete checkout,
+        or a ``_roots`` regression that stops finding ``frontend/src``, would
+        make every run print the qualified form and still exit zero, downgrading
+        the guard to "partial" forever with nothing failing. This pins the
+        sentence a run that read everything is supposed to print.
+        """
+        monkeypatch.setattr(
+            settlement_sites,
+            "_roots",
+            lambda start=None: (
+                checkout,
+                checkout / "backend",
+                checkout / "frontend" / "src",
+            ),
+        )
+
+        assert settlement_sites.main([]) == 0
+
+        printed = capsys.readouterr().out
+        assert "No site bypasses the derivation." in printed
+        assert "NOT a whole-tree sweep" not in printed
+        assert "NOT scanned:" not in printed
+
     def test_a_run_missing_a_whole_tree_does_not_claim_a_clean_sweep(
         self, checkout, capsys, monkeypatch
     ):

@@ -317,7 +317,7 @@ def _truth_positions(node: ast.AST):
 
 def derive_anchor(models_path: Path, rel_models_path: str) -> Anchor:
     """Read the settlement definition off ``PurchaseOrderItem`` itself."""
-    tree = ast.parse(models_path.read_text())
+    tree = ast.parse(models_path.read_text(encoding="utf-8"))
     cls = next(
         node
         for node in ast.walk(tree)
@@ -853,9 +853,8 @@ def scan(start: Path | None = None) -> Report:
     for path in _walk(backend, ".py"):
         rel = rel_to_base(path)
         try:
-            source = path.read_text()
+            source = path.read_text(encoding="utf-8")
             scanner = _PyScanner(anchor, rel, source)
-            scanner.run()
         except (SyntaxError, ValueError, OSError) as exc:
             # NOT a `continue`. This file is in `backend/`, which `report.scanned`
             # says was swept; passing over it in silence is how a run that judged
@@ -871,6 +870,7 @@ def scan(start: Path | None = None) -> Report:
             # end — there as an unhandled crash rather than a silent pass.
             report.unreadable.append((rel, _why_unreadable(exc)))
             continue
+        scanner.run()
         report.sites.extend(scanner.sites)
         if _is_test_path(rel):
             continue
@@ -888,7 +888,7 @@ def scan(start: Path | None = None) -> Report:
         for path in _walk(frontend, ".ts", ".tsx"):
             rel = rel_to_base(path)
             try:
-                source = path.read_text()
+                source = path.read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError) as exc:
                 report.unreadable.append((rel, _why_unreadable(exc)))
                 continue

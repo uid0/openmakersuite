@@ -271,9 +271,11 @@ describe('InventoryItemDetailPage — suppliers card', () => {
 
     await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
 
-    expect(within(suppliersCard()).getByTestId('no-primary-supplier-note')).toHaveTextContent(
-      /no supplier is flagged primary/i
-    );
+    const note = within(suppliersCard()).getByTestId('no-primary-supplier-note');
+    expect(note).toHaveTextContent(/no supplier is flagged primary/i);
+    // A state the operator is shown is only legitimate when they can act on it,
+    // so the note must also name the action that resolves it.
+    expect(note).toHaveTextContent(/flag one/i);
     expect(within(suppliersCard()).queryByText('Primary')).not.toBeInTheDocument();
   });
 
@@ -327,6 +329,50 @@ describe('InventoryItemDetailPage — suppliers card', () => {
     // An orderable link is dimmed nowhere.
     expect(screen.getByTestId('supplier-name-1')).toHaveAttribute('data-emphasis', 'full');
     expect(screen.getByTestId('supplier-lead-time-1')).toHaveAttribute('data-emphasis', 'full');
+  });
+
+  it('renders that emphasis as a difference an operator can see', async () => {
+    // The rule is guarded above by `data-emphasis`; this pins the RENDERING of
+    // the rule. Colours are compared against a sibling element rather than
+    // against a named colour value: what has to hold is that the operator sees
+    // a difference, not which particular colour carries it.
+    renderWith([
+      supplierLink({
+        id: 1,
+        supplier_name: 'Acme Supplies',
+        supplier_sku: 'ACME-9',
+        average_lead_time: 14,
+        is_primary: true,
+      }),
+      supplierLink({
+        id: 2,
+        supplier_name: 'Beta Parts',
+        supplier_sku: 'BP-77',
+        average_lead_time: 3,
+        is_discontinued: true,
+      }),
+    ]);
+
+    await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
+
+    const declaredColor = (el: HTMLElement) => el.style.color;
+
+    const orderableName = within(supplierRow(1)).getByText('Acme Supplies');
+    const orderableSku = within(supplierRow(1)).getByText('ACME-9');
+    const orderableLeadTime = within(supplierRow(1)).getByText('14 days');
+    const unorderableName = within(supplierRow(2)).getByText('Beta Parts');
+    const unorderableSku = within(supplierRow(2)).getByText('BP-77');
+    const unorderableLeadTime = within(supplierRow(2)).getByText('3 days');
+
+    // The separation the rule exists for: a discontinued link's "3 days" does
+    // not look like an orderable link's "14 days".
+    expect(declaredColor(unorderableLeadTime)).not.toBe(declaredColor(orderableLeadTime));
+    expect(declaredColor(unorderableName)).not.toBe(declaredColor(orderableName));
+
+    // The identifier on that same discontinued row is rendered exactly like the
+    // orderable row's, and unlike its own row's lead time.
+    expect(declaredColor(unorderableSku)).toBe(declaredColor(orderableSku));
+    expect(declaredColor(unorderableSku)).not.toBe(declaredColor(unorderableLeadTime));
   });
 
   it('distinguishes an unrecorded value from an empty one', async () => {

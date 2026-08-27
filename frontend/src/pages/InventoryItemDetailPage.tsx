@@ -1048,13 +1048,21 @@ const InventoryItemDetailPage: React.FC = () => {
                     </Text>
                   ) : (
                     <>
-                      {/* The API's "primary" is `is_primary` first, then cheapest
-                          — so with nothing flagged, an unflagged row would wear a
-                          Primary badge it never earned. Say which case this is
-                          instead of implying a choice nobody made. */}
+                      {/* With nothing flagged `is_primary`, no row has earned a
+                          Primary badge — say that outright rather than implying
+                          a choice nobody made. The note deliberately names NO
+                          selection mechanism: two exist and they disagree. The
+                          order pad groups under `primary_item_supplier`, which
+                          with nothing flagged is the cheapest link regardless of
+                          whether you can buy from it; the recommendations
+                          endpoint first drops inactive and discontinued links
+                          and then scores cost alongside lead time and other
+                          factors. Any sentence naming one is false on the other,
+                          so this states the fact and the remedy instead. */}
                       {!supplierLinks.some((link) => link.is_primary) && (
                         <Text size="sm" c="dimmed" data-testid="no-primary-supplier-note">
-                          No supplier is flagged primary — reordering falls back to the cheapest.
+                          No supplier is flagged primary, so the system picks one for you. Flag one to choose it
+                          yourself.
                         </Text>
                       )}
                       <Table>

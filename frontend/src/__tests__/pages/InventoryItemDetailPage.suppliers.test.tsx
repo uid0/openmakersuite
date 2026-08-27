@@ -141,6 +141,10 @@ const supplierRow = (id: number) => screen.getByTestId(`item-supplier-${id}`);
 describe('InventoryItemDetailPage — suppliers card', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // The card is signed-in only: this route is not behind RequireAuth, and a
+    // logged-out visitor keeps the single legacy supplier name they saw before
+    // it existed. The JWT in localStorage is the app's auth signal.
+    localStorage.setItem('token', 'test-access-token');
     (api.inventoryAPI.getItemMetrics as jest.Mock).mockResolvedValue({ data: null });
     (api.inventoryAPI.getUsageLogs as jest.Mock).mockResolvedValue({ data: { results: [] } });
     (api.reorderAPI.listRequests as jest.Mock).mockResolvedValue({ data: { results: [] } });
@@ -148,6 +152,10 @@ describe('InventoryItemDetailPage — suppliers card', () => {
     (api.inventoryAPI.getPurchaseHistory as jest.Mock).mockResolvedValue({
       data: { order_costs: [], deliveries: [] },
     });
+  });
+
+  afterEach(() => {
+    localStorage.removeItem('token');
   });
 
   it('lists every linked supplier with its own SKU, UPCs and lead time', async () => {
@@ -208,6 +216,38 @@ describe('InventoryItemDetailPage — suppliers card', () => {
     await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
 
     expect(screen.getByText('Acme Supplies')).toBeInTheDocument();
+    expect(screen.queryByText('Legacy Accessor Co.')).not.toBeInTheDocument();
+  });
+
+  it('shows a logged-out visitor the legacy single supplier name and no suppliers card', async () => {
+    // `/inventory/items/:id` is not behind RequireAuth, so an anonymous visitor
+    // reaches this page. They see exactly what they saw before the card
+    // existed — one name under "Primary Supplier" — and not the sourcing table.
+    localStorage.removeItem('token');
+    renderWith([
+      supplierLink({ id: 1, supplier_name: 'Acme Supplies', is_primary: true }),
+      supplierLink({ id: 2, supplier_name: 'Beta Parts' }),
+    ]);
+
+    await waitFor(() => expect(screen.getByText('Primary Supplier')).toBeInTheDocument());
+
+    expect(screen.getByText('Legacy Accessor Co.')).toBeInTheDocument();
+    expect(screen.queryByTestId('item-suppliers-card')).not.toBeInTheDocument();
+    expect(screen.queryByText('Acme Supplies')).not.toBeInTheDocument();
+    expect(screen.queryByText('Beta Parts')).not.toBeInTheDocument();
+  });
+
+  it('shows a signed-in visitor the suppliers card instead of the legacy line', async () => {
+    renderWith([
+      supplierLink({ id: 1, supplier_name: 'Acme Supplies', is_primary: true }),
+      supplierLink({ id: 2, supplier_name: 'Beta Parts' }),
+    ]);
+
+    await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
+
+    expect(screen.getByText('Acme Supplies')).toBeInTheDocument();
+    expect(screen.getByText('Beta Parts')).toBeInTheDocument();
+    expect(screen.queryByText('Primary Supplier')).not.toBeInTheDocument();
     expect(screen.queryByText('Legacy Accessor Co.')).not.toBeInTheDocument();
   });
 

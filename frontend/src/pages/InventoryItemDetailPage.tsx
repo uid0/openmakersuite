@@ -32,6 +32,7 @@ import PurchaseReceiptsPanel from '../components/inventory/PurchaseReceiptsPanel
 import SerializedComponentsPanel from '../components/inventory/SerializedComponentsPanel';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import NFPADiamond from '../components/NFPADiamond';
+import { isAuthenticated } from '../components/RequireAuth';
 import StockHistoryChart from '../components/StockHistoryChart';
 import { useNotifications } from '../hooks/useNotifications';
 import { assetsAPI, CycleCountPayload, inventoryAPI, PackTransition, reorderAPI, sigAPI } from '../services/api';
@@ -63,12 +64,40 @@ const NotRecorded: React.FC = () => (
   </Text>
 );
 
-const recordedValue = (value: string | null | undefined) =>
-  value ? <Text size="sm">{value}</Text> : <NotRecorded />;
+/**
+ * A discontinued or inactive link is dimmed exactly where it carries an
+ * ACTIONABLE FIGURE — the name you would contact and the lead time you would
+ * plan around — and never where it carries an IDENTIFIER. A lead time is a
+ * promise about a future delivery and a link you cannot buy from makes none,
+ * so its "3 days" must not read as the better option beside an orderable
+ * "14 days". A SKU or UPC stays true whether or not you can order today and is
+ * exactly what someone needs to look up what was bought last year, so dimming
+ * it would cost legibility for no safety gain. The treatment stops there.
+ *
+ * Every supplier cell derives BOTH its colour and its `data-emphasis`
+ * attribute from this one function, so the rendered emphasis cannot drift from
+ * the attribute a test reads: reclassifying a column moves both together.
+ */
+type SupplierCellKind = 'actionable-figure' | 'identifier';
+type SupplierCellEmphasis = 'dimmed' | 'full';
 
-const leadTimeValue = (days: number | null | undefined) =>
+const cellEmphasis = (kind: SupplierCellKind, unorderable: boolean): SupplierCellEmphasis =>
+  kind === 'actionable-figure' && unorderable ? 'dimmed' : 'full';
+
+const dimColor = (emphasis: SupplierCellEmphasis) => (emphasis === 'dimmed' ? 'dimmed' : undefined);
+
+const recordedValue = (value: string | null | undefined, emphasis: SupplierCellEmphasis) =>
+  value ? (
+    <Text size="sm" c={dimColor(emphasis)}>
+      {value}
+    </Text>
+  ) : (
+    <NotRecorded />
+  );
+
+const leadTimeValue = (days: number | null | undefined, emphasis: SupplierCellEmphasis) =>
   typeof days === 'number' && Number.isFinite(days) ? (
-    <Text size="sm">
+    <Text size="sm" c={dimColor(emphasis)}>
       {days} day{days === 1 ? '' : 's'}
     </Text>
   ) : (
@@ -431,6 +460,11 @@ const LogUsageModal: React.FC<LogUsageModalProps> = ({
 const InventoryItemDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+
+  // `/inventory/items/:id` is NOT behind RequireAuth (App.tsx), so a logged-out
+  // visitor reaches this page. Read the app's auth signal once, as ScanPage
+  // does, so it cannot change midway through a render.
+  const [isLoggedIn] = useState<boolean>(isAuthenticated);
 
   const [item, setItem] = useState<InventoryItem | null>(null);
   const [metrics, setMetrics] = useState<InventoryItemMetrics | null>(null);
@@ -923,6 +957,17 @@ const InventoryItemDetailPage: React.FC = () => {
                     </Text>
                     <Text size="sm">{item.location || 'No location specified'}</Text>
                   </div>
+                  {/* A logged-out visitor keeps the single legacy name they saw
+                      before the Suppliers card existed — no more and no less.
+                      See the Suppliers card below for why the card is gated. */}
+                  {!isLoggedIn && item.supplier_name && (
+                    <div>
+                      <Text size="sm" fw={500} mb="xs">
+                        Primary Supplier
+                      </Text>
+                      <Text size="sm">{item.supplier_name}</Text>
+                    </div>
+                  )}
                 </Stack>
               </Card>
 
@@ -973,108 +1018,116 @@ const InventoryItemDetailPage: React.FC = () => {
                 `InventoryItemSerializer` documents as superseded by
                 `suppliers[]` — so an item with three suppliers showed exactly
                 one name, and the operator had no way to tell there were others.
-                Always rendered, including for an item with none: "no suppliers
-                are linked" is a fact worth stating on a reorder screen. */}
-            <Card withBorder p="md" data-testid="item-suppliers-card">
-              <Stack gap="md">
-                <Title order={4}>Suppliers</Title>
-                {supplierLinks === undefined ? (
-                  <Text size="sm" c="dimmed" data-testid="suppliers-unknown-note">
-                    Supplier information was not included in this response.
-                  </Text>
-                ) : supplierLinks.length === 0 ? (
-                  <Text size="sm" c="dimmed" data-testid="no-suppliers-note">
-                    No suppliers are linked to this item.
-                  </Text>
-                ) : (
-                  <>
-                    {/* The API's "primary" is `is_primary` first, then cheapest
-                        — so with nothing flagged, an unflagged row would wear a
-                        Primary badge it never earned. Say which case this is
-                        instead of implying a choice nobody made. */}
-                    {!supplierLinks.some((link) => link.is_primary) && (
-                      <Text size="sm" c="dimmed" data-testid="no-primary-supplier-note">
-                        No supplier is flagged primary — reordering falls back to the cheapest.
-                      </Text>
-                    )}
-                    <Table>
-                      <Table.Thead>
-                        <Table.Tr>
-                          <Table.Th>Supplier</Table.Th>
-                          <Table.Th>Their SKU</Table.Th>
-                          <Table.Th>Package UPC</Table.Th>
-                          <Table.Th>Unit UPC</Table.Th>
-                          <Table.Th>Lead Time</Table.Th>
-                        </Table.Tr>
-                      </Table.Thead>
-                      <Table.Tbody>
-                        {supplierLinks.map((link) => {
-                          // A discontinued or inactive link is dimmed exactly
-                          // where it carries an ACTIONABLE FIGURE — the name
-                          // you would contact and the lead time you would plan
-                          // around — and never where it carries an IDENTIFIER.
-                          // A lead time is a promise about a future delivery
-                          // and a link you cannot buy from makes none, so its
-                          // "3 days" must not read as the better option beside
-                          // an orderable "14 days". A SKU or UPC stays true
-                          // whether or not you can order today and is exactly
-                          // what someone needs to look up what was bought last
-                          // year, so dimming it would cost legibility for no
-                          // safety gain. The treatment stops there.
-                          const unorderable = link.is_discontinued || !link.is_active;
-                          return (
-                            <Table.Tr key={link.id} data-testid={`item-supplier-${link.id}`}>
-                              <Table.Td
-                                data-testid={`supplier-name-${link.id}`}
-                                data-emphasis={unorderable ? 'dimmed' : 'full'}
-                              >
-                                <Group gap="xs" wrap="wrap">
-                                  <Text size="sm" fw={500} c={unorderable ? 'dimmed' : undefined}>
-                                    {link.supplier_name}
-                                  </Text>
-                                  {link.is_primary && (
-                                    <Badge size="sm" color="blue">
-                                      Primary
-                                    </Badge>
-                                  )}
-                                  {link.is_discontinued && (
-                                    <Badge size="sm" color="red" variant="light">
-                                      Discontinued
-                                    </Badge>
-                                  )}
-                                  {!link.is_active && (
-                                    <Badge size="sm" color="gray" variant="light">
-                                      Inactive
-                                    </Badge>
-                                  )}
-                                </Group>
-                              </Table.Td>
-                              <Table.Td data-testid={`supplier-sku-${link.id}`} data-emphasis="full">
-                                {recordedValue(link.supplier_sku)}
-                              </Table.Td>
-                              <Table.Td data-testid={`supplier-package-upc-${link.id}`} data-emphasis="full">
-                                {recordedValue(link.package_upc)}
-                              </Table.Td>
-                              <Table.Td data-testid={`supplier-unit-upc-${link.id}`} data-emphasis="full">
-                                {recordedValue(link.unit_upc)}
-                              </Table.Td>
-                              <Table.Td
-                                data-testid={`supplier-lead-time-${link.id}`}
-                                data-emphasis={unorderable ? 'dimmed' : 'full'}
-                              >
-                                <Text span size="sm" c={unorderable ? 'dimmed' : undefined}>
-                                  {leadTimeValue(link.average_lead_time)}
-                                </Text>
-                              </Table.Td>
-                            </Table.Tr>
-                          );
-                        })}
-                      </Table.Tbody>
-                    </Table>
-                  </>
-                )}
-              </Stack>
-            </Card>
+                Rendered for an item with none too: "no suppliers are linked" is
+                a fact worth stating on a reorder screen.
+
+                SIGNED-IN ONLY, and this gate is DELIBERATELY PARTIAL. This
+                route is not behind RequireAuth and `retrieve` is AllowAny, so
+                without the gate this card would widen what an anonymous visitor
+                sees from one supplier name to the whole sourcing table. Gating
+                it removes that widening; it does NOT close the posture. The
+                same SKUs, UPCs and lead times remain anonymously reachable
+                through SupplierViewSet and ItemSupplierViewSet (both
+                IsAuthenticatedOrReadOnly) and through the equally unguarded
+                /inventory/suppliers/:id page, which already renders per-item
+                supplier SKU and lead time. Whether that data should be
+                anonymously readable at all is filed as separate work: a real
+                fix spans views.py, App.tsx and ScanTTY's contract, and is
+                outside this change's no-API-change constraint. */}
+            {isLoggedIn && (
+              <Card withBorder p="md" data-testid="item-suppliers-card">
+                <Stack gap="md">
+                  <Title order={4}>Suppliers</Title>
+                  {supplierLinks === undefined ? (
+                    <Text size="sm" c="dimmed" data-testid="suppliers-unknown-note">
+                      Supplier information was not included in this response.
+                    </Text>
+                  ) : supplierLinks.length === 0 ? (
+                    <Text size="sm" c="dimmed" data-testid="no-suppliers-note">
+                      No suppliers are linked to this item.
+                    </Text>
+                  ) : (
+                    <>
+                      {/* The API's "primary" is `is_primary` first, then cheapest
+                          — so with nothing flagged, an unflagged row would wear a
+                          Primary badge it never earned. Say which case this is
+                          instead of implying a choice nobody made. */}
+                      {!supplierLinks.some((link) => link.is_primary) && (
+                        <Text size="sm" c="dimmed" data-testid="no-primary-supplier-note">
+                          No supplier is flagged primary — reordering falls back to the cheapest.
+                        </Text>
+                      )}
+                      <Table>
+                        <Table.Thead>
+                          <Table.Tr>
+                            <Table.Th>Supplier</Table.Th>
+                            <Table.Th>Their SKU</Table.Th>
+                            <Table.Th>Package UPC</Table.Th>
+                            <Table.Th>Unit UPC</Table.Th>
+                            <Table.Th>Lead Time</Table.Th>
+                          </Table.Tr>
+                        </Table.Thead>
+                        <Table.Tbody>
+                          {supplierLinks.map((link) => {
+                            // Emphasis per column follows `cellEmphasis`'s
+                            // actionable-figure-vs-identifier rule; see it for why
+                            // the name and the lead time dim while the SKU and
+                            // UPCs stay fully legible.
+                            const unorderable = link.is_discontinued || !link.is_active;
+                            const nameEmphasis = cellEmphasis('actionable-figure', unorderable);
+                            const skuEmphasis = cellEmphasis('identifier', unorderable);
+                            const packageUpcEmphasis = cellEmphasis('identifier', unorderable);
+                            const unitUpcEmphasis = cellEmphasis('identifier', unorderable);
+                            const leadTimeEmphasis = cellEmphasis('actionable-figure', unorderable);
+                            return (
+                              <Table.Tr key={link.id} data-testid={`item-supplier-${link.id}`}>
+                                <Table.Td data-testid={`supplier-name-${link.id}`} data-emphasis={nameEmphasis}>
+                                  <Group gap="xs" wrap="wrap">
+                                    <Text size="sm" fw={500} c={dimColor(nameEmphasis)}>
+                                      {link.supplier_name}
+                                    </Text>
+                                    {link.is_primary && (
+                                      <Badge size="sm" color="blue">
+                                        Primary
+                                      </Badge>
+                                    )}
+                                    {link.is_discontinued && (
+                                      <Badge size="sm" color="red" variant="light">
+                                        Discontinued
+                                      </Badge>
+                                    )}
+                                    {!link.is_active && (
+                                      <Badge size="sm" color="gray" variant="light">
+                                        Inactive
+                                      </Badge>
+                                    )}
+                                  </Group>
+                                </Table.Td>
+                                <Table.Td data-testid={`supplier-sku-${link.id}`} data-emphasis={skuEmphasis}>
+                                  {recordedValue(link.supplier_sku, skuEmphasis)}
+                                </Table.Td>
+                                <Table.Td
+                                  data-testid={`supplier-package-upc-${link.id}`}
+                                  data-emphasis={packageUpcEmphasis}
+                                >
+                                  {recordedValue(link.package_upc, packageUpcEmphasis)}
+                                </Table.Td>
+                                <Table.Td data-testid={`supplier-unit-upc-${link.id}`} data-emphasis={unitUpcEmphasis}>
+                                  {recordedValue(link.unit_upc, unitUpcEmphasis)}
+                                </Table.Td>
+                                <Table.Td data-testid={`supplier-lead-time-${link.id}`} data-emphasis={leadTimeEmphasis}>
+                                  {leadTimeValue(link.average_lead_time, leadTimeEmphasis)}
+                                </Table.Td>
+                              </Table.Tr>
+                            );
+                          })}
+                        </Table.Tbody>
+                      </Table>
+                    </>
+                  )}
+                </Stack>
+              </Card>
+            )}
 
             {/* QR Code */}
             {item.qr_code && (

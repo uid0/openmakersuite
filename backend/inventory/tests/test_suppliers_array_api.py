@@ -299,7 +299,7 @@ class TestItemDetailSuppliersContract:
         assert beta["average_lead_time"] == 3
         assert beta["is_primary"] is False
         assert beta["is_discontinued"] is True
-        assert primary.pk != secondary.pk
+        assert {s["id"] for s in suppliers} == {primary.pk, secondary.pk}
 
     def test_unrecorded_supplier_text_fields_come_back_blank_not_missing(self, api_client):
         """A supplier with no UPC recorded still carries the keys, empty.

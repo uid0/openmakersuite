@@ -1,0 +1,333 @@
+/**
+ * Item detail — Suppliers card (op-item-suppliers).
+ *
+ * The page used to render `item.supplier_name`, the READ-ONLY legacy accessor
+ * for the item's primary supplier that `InventoryItemSerializer` documents as
+ * superseded by the `suppliers[]` array. An item with three suppliers therefore
+ * showed exactly one name — incomplete data presented as complete. These tests
+ * pin the corrected behaviour: every linked supplier, each with its own SKU,
+ * package/unit UPC and lead time, primary flagged, and discontinued/inactive
+ * links visibly separated.
+ */
+import { MantineProvider } from '@mantine/core';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { NotificationProvider } from '../../contexts/NotificationContext';
+import InventoryItemDetailPage from '../../pages/InventoryItemDetailPage';
+import * as api from '../../services/api';
+
+vi.mock('../../services/api');
+
+vi.mock('../../utils/dialogs', async () => ({
+  showError: vi.fn(),
+}));
+
+vi.mock('qrcode.react', async () => ({
+  QRCodeSVG: () => <div data-testid="qr-code">QR Code</div>,
+}));
+
+vi.mock('recharts', async () => ({
+  ResponsiveContainer: ({ children }: any) => <div>{children}</div>,
+  LineChart: () => <div />,
+  Line: () => <div />,
+  XAxis: () => <div />,
+  YAxis: () => <div />,
+  Tooltip: () => <div />,
+}));
+
+const supplierLink = (overrides: Record<string, unknown>) => ({
+  id: 1,
+  item: 'test-id',
+  item_name: 'Test Item',
+  supplier: 1,
+  supplier_name: 'Supplier One',
+  supplier_sku: 'SKU-1',
+  supplier_url: '',
+  package_upc: '',
+  unit_upc: '',
+  quantity_per_package: 1,
+  package_height: null,
+  package_width: null,
+  package_length: null,
+  package_weight: null,
+  package_volume: null,
+  unit_weight: null,
+  package_dimensions_display: '',
+  unit_cost: '1.00',
+  package_cost: '1.00',
+  average_lead_time: 7,
+  is_primary: false,
+  is_active: true,
+  is_discontinued: false,
+  notes: '',
+  created_at: '2024-01-01T00:00:00Z',
+  updated_at: '2024-01-01T00:00:00Z',
+  ...overrides,
+});
+
+const baseItem = {
+  id: 'test-id',
+  name: 'Test Item',
+  description: 'Test description',
+  sku: 'TEST-001',
+  category: 1,
+  category_name: 'Tools',
+  location: 'Shelf A',
+  current_stock: 10,
+  minimum_stock: 5,
+  reorder_quantity: 20,
+  unit_cost: '15.99',
+  // Legacy primary-supplier accessor. Present on every payload; must NOT be
+  // what the page shows.
+  supplier_name: 'Legacy Accessor Co.',
+  needs_reorder: false,
+  has_pending_reorder: false,
+  is_active: true,
+  image: null,
+  thumbnail: null,
+  qr_code: null,
+  use_case_based_reorder: false,
+  minimum_cases: 0,
+  reorder_cases: 0,
+  current_cases: 0,
+  supplier: null,
+  supplier_sku: '',
+  supplier_url: '',
+  average_lead_time: 7,
+  notes: '',
+  total_value: '159.90',
+  created_at: '2024-01-01T00:00:00Z',
+  updated_at: '2024-01-01T00:00:00Z',
+  ownership_type: 'space' as const,
+  owning_user: null,
+  owning_group: null,
+  reorder_status: '',
+  expected_delivery_date: null,
+  active_reorder_request: null,
+  is_hazardous: false,
+  msds_url: null,
+  nfpa_health_hazard: null,
+  nfpa_fire_hazard: null,
+  nfpa_instability_hazard: null,
+  nfpa_special_hazards: '',
+  nfpa_fire_diamond_display: '',
+  hazmat_compliance_status: '',
+  has_complete_nfpa_data: false,
+  last_counted_at: null,
+  days_since_last_count: null,
+  suppliers: [] as ReturnType<typeof supplierLink>[],
+};
+
+const renderWith = (suppliers: unknown[], itemOverrides: Record<string, unknown> = {}) => {
+  (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+    data: { ...baseItem, ...itemOverrides, suppliers },
+  });
+  return render(
+    <MantineProvider>
+      <NotificationProvider>
+        <MemoryRouter initialEntries={['/inventory/items/test-id']}>
+          <Routes>
+            <Route path="/inventory/items/:id" element={<InventoryItemDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </NotificationProvider>
+    </MantineProvider>
+  );
+};
+
+const suppliersCard = () => screen.getByTestId('item-suppliers-card');
+const supplierRow = (id: number) => screen.getByTestId(`item-supplier-${id}`);
+
+describe('InventoryItemDetailPage — suppliers card', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (api.inventoryAPI.getItemMetrics as jest.Mock).mockResolvedValue({ data: null });
+    (api.inventoryAPI.getUsageLogs as jest.Mock).mockResolvedValue({ data: { results: [] } });
+    (api.reorderAPI.listRequests as jest.Mock).mockResolvedValue({ data: { results: [] } });
+    (api.assetsAPI.listAssets as jest.Mock).mockResolvedValue({ data: { results: [] } });
+    (api.inventoryAPI.getPurchaseHistory as jest.Mock).mockResolvedValue({
+      data: { order_costs: [], deliveries: [] },
+    });
+  });
+
+  it('lists every linked supplier with its own SKU, UPCs and lead time', async () => {
+    renderWith([
+      supplierLink({
+        id: 1,
+        supplier_name: 'Acme Supplies',
+        supplier_sku: 'ACME-9',
+        package_upc: '012345678905',
+        unit_upc: '012345678912',
+        average_lead_time: 14,
+        is_primary: true,
+      }),
+      supplierLink({
+        id: 2,
+        supplier_name: 'Beta Parts',
+        supplier_sku: 'BP-77',
+        package_upc: '987654321098',
+        average_lead_time: 3,
+      }),
+      supplierLink({
+        id: 3,
+        supplier_name: 'Gamma Wholesale',
+        supplier_sku: 'GW-12',
+        unit_upc: '555555555550',
+        average_lead_time: 21,
+      }),
+    ]);
+
+    await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
+
+    // All three, not just the primary one.
+    const one = within(supplierRow(1));
+    expect(one.getByText('Acme Supplies')).toBeInTheDocument();
+    expect(one.getByText('ACME-9')).toBeInTheDocument();
+    expect(one.getByText('012345678905')).toBeInTheDocument();
+    expect(one.getByText('012345678912')).toBeInTheDocument();
+    expect(one.getByText('14 days')).toBeInTheDocument();
+
+    const two = within(supplierRow(2));
+    expect(two.getByText('Beta Parts')).toBeInTheDocument();
+    expect(two.getByText('BP-77')).toBeInTheDocument();
+    expect(two.getByText('987654321098')).toBeInTheDocument();
+    expect(two.getByText('3 days')).toBeInTheDocument();
+
+    const three = within(supplierRow(3));
+    expect(three.getByText('Gamma Wholesale')).toBeInTheDocument();
+    expect(three.getByText('GW-12')).toBeInTheDocument();
+    expect(three.getByText('555555555550')).toBeInTheDocument();
+    expect(three.getByText('21 days')).toBeInTheDocument();
+  });
+
+  it('stops treating the legacy supplier_name accessor as the source of truth', async () => {
+    renderWith([supplierLink({ id: 1, supplier_name: 'Acme Supplies', is_primary: true })], {
+      supplier_name: 'Legacy Accessor Co.',
+    });
+
+    await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
+
+    expect(screen.getByText('Acme Supplies')).toBeInTheDocument();
+    expect(screen.queryByText('Legacy Accessor Co.')).not.toBeInTheDocument();
+  });
+
+  it('marks the primary supplier and only the primary supplier', async () => {
+    renderWith([
+      supplierLink({ id: 1, supplier_name: 'Acme Supplies', is_primary: true }),
+      supplierLink({ id: 2, supplier_name: 'Beta Parts', is_primary: false }),
+    ]);
+
+    await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
+
+    expect(within(supplierRow(1)).getByText('Primary')).toBeInTheDocument();
+    expect(within(supplierRow(2)).queryByText('Primary')).not.toBeInTheDocument();
+  });
+
+  it('says so when no supplier is flagged primary rather than implying one', async () => {
+    renderWith([
+      supplierLink({ id: 1, supplier_name: 'Acme Supplies', is_primary: false }),
+      supplierLink({ id: 2, supplier_name: 'Beta Parts', is_primary: false }),
+    ]);
+
+    await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
+
+    expect(within(suppliersCard()).getByTestId('no-primary-supplier-note')).toHaveTextContent(
+      /no supplier is flagged primary/i
+    );
+    expect(within(suppliersCard()).queryByText('Primary')).not.toBeInTheDocument();
+  });
+
+  it('separates discontinued and inactive links from ones that can be ordered', async () => {
+    renderWith([
+      supplierLink({ id: 1, supplier_name: 'Acme Supplies', is_primary: true }),
+      supplierLink({ id: 2, supplier_name: 'Beta Parts', is_discontinued: true }),
+      supplierLink({ id: 3, supplier_name: 'Gamma Wholesale', is_active: false }),
+    ]);
+
+    await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
+
+    expect(within(supplierRow(2)).getByText('Discontinued')).toBeInTheDocument();
+    expect(within(supplierRow(3)).getByText('Inactive')).toBeInTheDocument();
+    // The orderable one carries neither label.
+    expect(within(supplierRow(1)).queryByText('Discontinued')).not.toBeInTheDocument();
+    expect(within(supplierRow(1)).queryByText('Inactive')).not.toBeInTheDocument();
+  });
+
+  it('distinguishes an unrecorded value from an empty one', async () => {
+    renderWith([
+      supplierLink({
+        id: 1,
+        supplier_name: 'Sparse Supply',
+        supplier_sku: '',
+        package_upc: '',
+        unit_upc: '',
+        average_lead_time: null,
+      }),
+    ]);
+
+    await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
+
+    const row = within(supplierRow(1));
+    expect(row.getByTestId('supplier-sku-1')).toHaveTextContent('Not recorded');
+    expect(row.getByTestId('supplier-package-upc-1')).toHaveTextContent('Not recorded');
+    expect(row.getByTestId('supplier-unit-upc-1')).toHaveTextContent('Not recorded');
+    expect(row.getByTestId('supplier-lead-time-1')).toHaveTextContent('Not recorded');
+  });
+
+  it('shows a zero-day lead time as zero, not as unrecorded', async () => {
+    renderWith([supplierLink({ id: 1, supplier_name: 'Same Day Co.', average_lead_time: 0 })]);
+
+    await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
+
+    const leadTime = screen.getByTestId('supplier-lead-time-1');
+    expect(leadTime).toHaveTextContent(/^0 days$/);
+    expect(leadTime).not.toHaveTextContent('Not recorded');
+  });
+
+  it('uses the singular for a one-day lead time', async () => {
+    renderWith([supplierLink({ id: 1, supplier_name: 'Overnight Co.', average_lead_time: 1 })]);
+
+    await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
+
+    // Anchored: `toHaveTextContent('1 day')` also passes for the wrong "1 days".
+    expect(screen.getByTestId('supplier-lead-time-1')).toHaveTextContent(/^1 day$/);
+  });
+
+  it('states plainly that an item has no suppliers linked', async () => {
+    renderWith([]);
+
+    await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
+
+    expect(within(suppliersCard()).getByTestId('no-suppliers-note')).toHaveTextContent(
+      /no suppliers are linked to this item/i
+    );
+    expect(screen.queryByText('Legacy Accessor Co.')).not.toBeInTheDocument();
+  });
+
+  it('does not read a payload with no suppliers key as "this item has none"', async () => {
+    // "We were not told" and "there are none" are different facts. The detail
+    // endpoint always sends the key, so this only fires for a narrowed payload
+    // — but it must not fall back to the legacy single name either.
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: { ...baseItem, suppliers: undefined },
+    });
+    render(
+      <MantineProvider>
+        <NotificationProvider>
+          <MemoryRouter initialEntries={['/inventory/items/test-id']}>
+            <Routes>
+              <Route path="/inventory/items/:id" element={<InventoryItemDetailPage />} />
+            </Routes>
+          </MemoryRouter>
+        </NotificationProvider>
+      </MantineProvider>
+    );
+
+    await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
+    expect(within(suppliersCard()).getByTestId('suppliers-unknown-note')).toHaveTextContent(
+      /was not included in this response/i
+    );
+    expect(within(suppliersCard()).queryByTestId('no-suppliers-note')).not.toBeInTheDocument();
+    expect(screen.queryByText('Legacy Accessor Co.')).not.toBeInTheDocument();
+  });
+});

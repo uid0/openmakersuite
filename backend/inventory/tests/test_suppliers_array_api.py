@@ -5,10 +5,20 @@ Simple test for suppliers array functionality without factory complications.
 from decimal import Decimal
 
 from django.test import TestCase
+from django.urls import reverse
+
+import pytest
+from rest_framework import status
 
 from inventory.models import InventoryItem, ItemSupplier
 from inventory.serializers import InventoryItemSerializer
-from inventory.tests.factories import CategoryFactory, LocationFactory, SupplierFactory
+from inventory.tests.factories import (
+    CategoryFactory,
+    InventoryItemFactory,
+    ItemSupplierFactory,
+    LocationFactory,
+    SupplierFactory,
+)
 
 
 class TestSimpleSuppliersArray(TestCase):
@@ -213,3 +223,121 @@ class TestSimpleSuppliersArray(TestCase):
         # Check suppliers array is still present
         self.assertEqual(len(data["suppliers"]), 1)
         self.assertEqual(data["suppliers"][0]["supplier_name"], "Hazmat Supplier")
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestItemDetailSuppliersContract:
+    """``GET /inventory/items/<id>/`` supplier contract (op-item-suppliers).
+
+    The web item-detail page and ScanTTY's detail screen both read ``suppliers[]``
+    off this payload — supplier name, that supplier's own SKU, the package and
+    unit UPCs, the lead time, and the primary/active/discontinued flags. Nothing
+    pinned those last three keys, so dropping one from
+    ``ItemSupplierSerializer.Meta.fields`` would have silently blanked a column
+    on both clients. These assert the response itself rather than the serializer
+    in isolation.
+    """
+
+    # Exactly what the item-detail surfaces read off each supplier link.
+    UI_KEYS = {
+        "supplier_name",
+        "supplier_sku",
+        "package_upc",
+        "unit_upc",
+        "average_lead_time",
+        "is_primary",
+        "is_active",
+        "is_discontinued",
+    }
+
+    def test_detail_response_carries_every_supplier_with_the_keys_the_ui_reads(self, api_client):
+        # The factory always seeds one supplier link; clear it so this test
+        # controls the whole set.
+        item = InventoryItemFactory()
+        item.item_suppliers.all().delete()
+        primary = ItemSupplierFactory(
+            item=item,
+            supplier=SupplierFactory(name="Acme Supplies"),
+            supplier_sku="ACME-9",
+            package_upc="012345678905",
+            unit_upc="012345678912",
+            average_lead_time=14,
+            is_primary=True,
+        )
+        secondary = ItemSupplierFactory(
+            item=item,
+            supplier=SupplierFactory(name="Beta Parts"),
+            supplier_sku="BP-77",
+            average_lead_time=3,
+            is_primary=False,
+            is_discontinued=True,
+        )
+
+        url = reverse("inventoryitem-detail", kwargs={"pk": item.id})
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        suppliers = response.data["suppliers"]
+        # BOTH links, not just the one the legacy flat fields resolve to.
+        assert {s["supplier_name"] for s in suppliers} == {"Acme Supplies", "Beta Parts"}
+
+        by_name = {s["supplier_name"]: s for s in suppliers}
+        for link in suppliers:
+            assert self.UI_KEYS <= set(link), self.UI_KEYS - set(link)
+
+        acme = by_name["Acme Supplies"]
+        assert acme["supplier_sku"] == "ACME-9"
+        assert acme["package_upc"] == "012345678905"
+        assert acme["unit_upc"] == "012345678912"
+        assert acme["average_lead_time"] == 14
+        assert acme["is_primary"] is True
+        assert acme["is_discontinued"] is False
+
+        beta = by_name["Beta Parts"]
+        assert beta["supplier_sku"] == "BP-77"
+        assert beta["average_lead_time"] == 3
+        assert beta["is_primary"] is False
+        assert beta["is_discontinued"] is True
+        assert primary.pk != secondary.pk
+
+    def test_unrecorded_supplier_text_fields_come_back_blank_not_missing(self, api_client):
+        """A supplier with no UPC recorded still carries the keys, empty.
+
+        The page renders "Not recorded" for these; it can only do that if the
+        keys are present and falsy rather than absent.
+        """
+        item = InventoryItemFactory()
+        item.item_suppliers.all().delete()
+        ItemSupplierFactory(
+            item=item,
+            supplier=SupplierFactory(name="Sparse Supply"),
+            supplier_sku="",
+            package_upc="",
+            unit_upc="",
+            average_lead_time=0,
+        )
+
+        url = reverse("inventoryitem-detail", kwargs={"pk": item.id})
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        link = response.data["suppliers"][0]
+        assert link["supplier_sku"] == ""
+        assert link["package_upc"] == ""
+        assert link["unit_upc"] == ""
+        # A recorded 0-day lead time is a real value, not an absence.
+        assert link["average_lead_time"] == 0
+
+    def test_item_with_no_supplier_links_returns_an_empty_array(self, api_client):
+        """Empty array, never a missing key — "none" must stay distinguishable
+        from "we were not told"."""
+        item = InventoryItemFactory()
+        item.item_suppliers.all().delete()
+
+        url = reverse("inventoryitem-detail", kwargs={"pk": item.id})
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert "suppliers" in response.data
+        assert list(response.data["suppliers"]) == []

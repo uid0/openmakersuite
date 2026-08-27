@@ -35,7 +35,7 @@ import NFPADiamond from '../components/NFPADiamond';
 import StockHistoryChart from '../components/StockHistoryChart';
 import { useNotifications } from '../hooks/useNotifications';
 import { assetsAPI, CycleCountPayload, inventoryAPI, PackTransition, reorderAPI, sigAPI } from '../services/api';
-import { Asset, InventoryItem, InventoryItemMetrics, ItemPurchaseHistory, KitSummary, ReorderRequest, SIG, StockHistory, UsageLog } from '../types';
+import { Asset, InventoryItem, InventoryItemMetrics, ItemPurchaseHistory, ItemSupplier, KitSummary, ReorderRequest, SIG, StockHistory, UsageLog } from '../types';
 import { showError } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 import {
@@ -47,6 +47,33 @@ import {
   onHandLabel,
   pluralizeUnit,
 } from '../utils/packaging';
+
+/**
+ * Supplier-section rendering helpers (op-item-suppliers).
+ *
+ * A value nobody recorded is a different fact from an empty string or a zero,
+ * so both get said out loud rather than rendered as a blank cell. In
+ * particular: `ItemSupplier.average_lead_time` is NOT NULL with a default of 7,
+ * so `0` means "arrives same day" and must never read the same as a payload
+ * that carried no lead time at all.
+ */
+const NotRecorded: React.FC = () => (
+  <Text size="sm" c="dimmed" fs="italic">
+    Not recorded
+  </Text>
+);
+
+const recordedValue = (value: string | null | undefined) =>
+  value ? <Text size="sm">{value}</Text> : <NotRecorded />;
+
+const leadTimeValue = (days: number | null | undefined) =>
+  typeof days === 'number' && Number.isFinite(days) ? (
+    <Text size="sm">
+      {days} day{days === 1 ? '' : 's'}
+    </Text>
+  ) : (
+    <NotRecorded />
+  );
 
 // Cycle-count reason options (op-c7y4). Mirrors the reconciliation grid's
 // user-facing set — the system-only `vision_supply_check` reason is omitted.
@@ -623,6 +650,14 @@ const InventoryItemDetailPage: React.FC = () => {
     );
   }
 
+  // Item suppliers (op-item-suppliers). `undefined` and `[]` are DIFFERENT
+  // facts and the card renders them differently: a payload that carried no
+  // `suppliers` key never told us anything, while an empty array is a positive
+  // "this item has no supplier linked". The detail endpoint always sends the
+  // key, so the undefined branch only fires for a narrowed/partial payload —
+  // but it must not read as "none".
+  const supplierLinks: ItemSupplier[] | undefined = item.suppliers;
+
   // Packaging matrix (op-lkxl). `packCounted` is the one predicate the new
   // surfaces branch on: false for an each-mode item AND for a half-configured
   // one, which keeps everything below on today's base-unit behaviour.
@@ -888,14 +923,6 @@ const InventoryItemDetailPage: React.FC = () => {
                     </Text>
                     <Text size="sm">{item.location || 'No location specified'}</Text>
                   </div>
-                  {item.supplier_name && (
-                    <div>
-                      <Text size="sm" fw={500} mb="xs">
-                        Primary Supplier
-                      </Text>
-                      <Text size="sm">{item.supplier_name}</Text>
-                    </div>
-                  )}
                 </Stack>
               </Card>
 
@@ -939,6 +966,98 @@ const InventoryItemDetailPage: React.FC = () => {
                 </Card>
               )}
             </Group>
+
+            {/* Suppliers (op-item-suppliers). Every ItemSupplier link for this
+                item, which is the supplier source of truth. The page used to
+                render `item.supplier_name` — the READ-ONLY legacy accessor that
+                `InventoryItemSerializer` documents as superseded by
+                `suppliers[]` — so an item with three suppliers showed exactly
+                one name, and the operator had no way to tell there were others.
+                Always rendered, including for an item with none: "no suppliers
+                are linked" is a fact worth stating on a reorder screen. */}
+            <Card withBorder p="md" data-testid="item-suppliers-card">
+              <Stack gap="md">
+                <Title order={4}>Suppliers</Title>
+                {supplierLinks === undefined ? (
+                  <Text size="sm" c="dimmed" data-testid="suppliers-unknown-note">
+                    Supplier information was not included in this response.
+                  </Text>
+                ) : supplierLinks.length === 0 ? (
+                  <Text size="sm" c="dimmed" data-testid="no-suppliers-note">
+                    No suppliers are linked to this item.
+                  </Text>
+                ) : (
+                  <>
+                    {/* The API's "primary" is `is_primary` first, then cheapest
+                        — so with nothing flagged, an unflagged row would wear a
+                        Primary badge it never earned. Say which case this is
+                        instead of implying a choice nobody made. */}
+                    {!supplierLinks.some((link) => link.is_primary) && (
+                      <Text size="sm" c="dimmed" data-testid="no-primary-supplier-note">
+                        No supplier is flagged primary — reordering falls back to the cheapest.
+                      </Text>
+                    )}
+                    <Table>
+                      <Table.Thead>
+                        <Table.Tr>
+                          <Table.Th>Supplier</Table.Th>
+                          <Table.Th>Their SKU</Table.Th>
+                          <Table.Th>Package UPC</Table.Th>
+                          <Table.Th>Unit UPC</Table.Th>
+                          <Table.Th>Lead Time</Table.Th>
+                        </Table.Tr>
+                      </Table.Thead>
+                      <Table.Tbody>
+                        {supplierLinks.map((link) => {
+                          // Nothing can be ordered against a discontinued or
+                          // inactive link, so its lead time must not sit beside
+                          // an orderable one looking equally actionable.
+                          const unorderable = link.is_discontinued || !link.is_active;
+                          return (
+                            <Table.Tr key={link.id} data-testid={`item-supplier-${link.id}`}>
+                              <Table.Td>
+                                <Group gap="xs" wrap="wrap">
+                                  <Text size="sm" fw={500} c={unorderable ? 'dimmed' : undefined}>
+                                    {link.supplier_name}
+                                  </Text>
+                                  {link.is_primary && (
+                                    <Badge size="sm" color="blue">
+                                      Primary
+                                    </Badge>
+                                  )}
+                                  {link.is_discontinued && (
+                                    <Badge size="sm" color="red" variant="light">
+                                      Discontinued
+                                    </Badge>
+                                  )}
+                                  {!link.is_active && (
+                                    <Badge size="sm" color="gray" variant="light">
+                                      Inactive
+                                    </Badge>
+                                  )}
+                                </Group>
+                              </Table.Td>
+                              <Table.Td data-testid={`supplier-sku-${link.id}`}>
+                                {recordedValue(link.supplier_sku)}
+                              </Table.Td>
+                              <Table.Td data-testid={`supplier-package-upc-${link.id}`}>
+                                {recordedValue(link.package_upc)}
+                              </Table.Td>
+                              <Table.Td data-testid={`supplier-unit-upc-${link.id}`}>
+                                {recordedValue(link.unit_upc)}
+                              </Table.Td>
+                              <Table.Td data-testid={`supplier-lead-time-${link.id}`}>
+                                {leadTimeValue(link.average_lead_time)}
+                              </Table.Td>
+                            </Table.Tr>
+                          );
+                        })}
+                      </Table.Tbody>
+                    </Table>
+                  </>
+                )}
+              </Stack>
+            </Card>
 
             {/* QR Code */}
             {item.qr_code && (

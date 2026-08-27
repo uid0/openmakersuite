@@ -129,9 +129,16 @@ export interface ItemSupplier {
   // Pricing
   unit_cost: string | null;
   package_cost: string | null;
+  // Days. `ItemSupplier.average_lead_time` is NOT NULL with a default of 7, so
+  // a value of 0 means "arrives same day" — a different fact from a narrowed
+  // payload that carries no lead time at all. Renderers must not collapse the
+  // two into one blank.
   average_lead_time: number;
   is_primary: boolean;
   is_active: boolean;
+  // Discontinued BY this supplier: the link still exists (and its history is
+  // still worth reading) but nothing can be ordered against it.
+  is_discontinued: boolean;
   notes: string;
   created_at: string;
   updated_at: string;
@@ -279,8 +286,15 @@ export interface InventoryItem {
     reviewed_by: string | null;
     reviewed_at: string | null;
   } | null;
-  // Supplier relationships with dimensional data
-  item_suppliers?: ItemSupplier[];
+  // Every supplier link for this item, with that supplier's own SKU, UPCs,
+  // pricing and lead time. This is the supplier source of truth; the flat
+  // `supplier_name` / `supplier_sku` / `supplier_url` / `average_lead_time`
+  // keys above are read-only legacy accessors for whichever link the API
+  // treats as primary (`-is_primary`, then cheapest) and are superseded by
+  // this array — see `InventoryItemSerializer` in inventory/serializers.py.
+  // Optional because list payloads a caller narrowed may omit it; absent is
+  // "we were not told", which is not the same as an empty array.
+  suppliers?: ItemSupplier[];
   // Hazmat fields
   is_hazardous: boolean;
   msds_url: string | null;

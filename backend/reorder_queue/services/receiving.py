@@ -15,6 +15,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from ..models import DeliveryItem, LeadTimeLog, OrderDelivery, PurchaseOrder, ReorderRequest
+from ..settlement_signals import settlement_batch
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from inventory.models import InventoryItem
@@ -380,7 +381,7 @@ def receive_delivery(
     """
     receipts = [as_line_receipt(entry) for entry in line_quantities]
 
-    with transaction.atomic():
+    with transaction.atomic(), settlement_batch():
         delivery = OrderDelivery.objects.create(
             purchase_order=purchase_order,
             delivery_date=delivery_datetime,
@@ -573,7 +574,13 @@ def refresh_receipt_status(purchase_order) -> str:
     unaffected: its last outstanding line settling still finishes it off,
     however that line settles.
 
-    Returns the resulting status.
+    Writes only when the answer MOVED. Line saves reach this through
+    :mod:`reorder_queue.settlement_signals` now, so an unconditional save here
+    would touch the order — and bump its ``auto_now`` ``updated_at``, which is
+    serialized — every time a line was written, including for the many saves
+    that leave the derived status exactly where it already was.
+
+    Returns the resulting status either way.
     """
     if purchase_order.status not in PurchaseOrder.IN_RECEIVING_STATUSES:
         return purchase_order.status
@@ -586,11 +593,15 @@ def refresh_receipt_status(purchase_order) -> str:
     if not purchase_order.has_received_anything:
         return purchase_order.status
 
-    purchase_order.status = (
+    derived = (
         PurchaseOrder.Status.RECEIVED
         if purchase_order.is_settled
         else PurchaseOrder.Status.PARTIALLY_RECEIVED
     )
+    if derived == purchase_order.status:
+        return purchase_order.status
+
+    purchase_order.status = derived
     purchase_order.save(update_fields=["status", "updated_at"])
     return purchase_order.status
 
@@ -606,7 +617,7 @@ def close_lines_short(purchase_order, closures, *, actor):
     Returns the lines that were closed.
     """
     closed = []
-    with transaction.atomic():
+    with transaction.atomic(), settlement_batch():
         for po_item, reason in closures:
             po_item.close_short(actor=actor, reason=reason)
             closed.append(po_item)
@@ -630,7 +641,7 @@ def reopen_lines_short(purchase_order, reopenings, *, actor):
     Returns the lines that were reopened.
     """
     reopened = []
-    with transaction.atomic():
+    with transaction.atomic(), settlement_batch():
         for po_item, reason in reopenings:
             po_item.reopen_short(actor=actor, reason=reason)
             reopened.append(po_item)

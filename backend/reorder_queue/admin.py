@@ -23,6 +23,7 @@
 """
 
 from django.contrib import admin
+from django.db import transaction
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
@@ -34,9 +35,11 @@ from .models import (
     PurchaseOrder,
     PurchaseOrderAttachment,
     PurchaseOrderItem,
+    PurchaseOrderItemQuerySet,
     ReorderRequest,
     WebHook,
 )
+from .settlement_signals import settlement_batch
 
 
 class DeliveryPerformanceFilter(admin.SimpleListFilter):
@@ -62,29 +65,31 @@ class DeliveryPerformanceFilter(admin.SimpleListFilter):
 
 
 class ReceiptStatusFilter(admin.SimpleListFilter):
-    """Custom filter for order item receipt status."""
+    """Filter the line changelist by a line's receipt state.
+
+    Both halves come off :class:`PurchaseOrderItem.ReceiptState` — the options
+    from its choices, the rows from the queryset's own twin of ``receipt_state``
+    — so this filter and the "Pending" column beside it always describe a line
+    the same way, and a state added to the enum turns up here on its own.
+
+    It used to spell three of the states out in SQL by hand and knew nothing of
+    the other three: a struck-off line was filed under "Pending Receipt" and a
+    line closed short under "Partially Received", each directly contradicting
+    what its own row said.
+    """
 
     title = "receipt status"
     parameter_name = "receipt_status"
 
     def lookups(self, request, model_admin):
-        return (
-            ("fully_received", "Fully Received"),
-            ("partially_received", "Partially Received"),
-            ("pending", "Pending Receipt"),
-        )
+        return PurchaseOrderItem.ReceiptState.choices
 
     def queryset(self, request, queryset):
-        from django.db.models import F
-
-        if self.value() == "fully_received":
-            return queryset.filter(quantity_received__gte=F("quantity_ordered"))
-        elif self.value() == "partially_received":
-            return queryset.filter(
-                quantity_received__gt=0, quantity_received__lt=F("quantity_ordered")
-            )
-        elif self.value() == "pending":
-            return queryset.filter(quantity_received=0)
+        value = self.value()
+        if not value:
+            return queryset
+        alias = PurchaseOrderItemQuerySet.RECEIPT_STATE_ALIAS
+        return queryset.with_receipt_state().filter(**{alias: value})
 
 
 @admin.register(ReorderRequest)
@@ -261,6 +266,19 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         line-item change form does, so it owes the same trace. Inline saves go
         through here rather than ``save_model``, so closing one without the
         other would leave the price-trace invariant with a hole beside it.
+
+        It edits the settlement columns too, and used to owe the status
+        re-derivation from here as well. It no longer does, and no admin hook
+        does: that obligation moved onto the line's own save/delete signals
+        (:mod:`reorder_queue.settlement_signals`), which is what finally stopped
+        each new admin door — inline, row delete, bulk delete, reparent —
+        needing its own entry in a hand-maintained list of method names.
+
+        A welcome consequence: ``save_related`` runs this for every inline on
+        every save whether or not a row moved, and the old refresh here was
+        gated by hand so it would not overwrite the ``status`` an operator had
+        just chosen on the same form. The signal derives that gate instead —
+        an unchanged inline row is never saved, so nothing re-derives.
         """
         previous_unit_costs = {}
         if formset.model is PurchaseOrderItem:
@@ -270,7 +288,8 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
                 ).values_list("pk", "unit_cost_ordered")
             )
 
-        super().save_formset(request, form, formset, change)
+        with transaction.atomic(), settlement_batch():
+            super().save_formset(request, form, formset, change)
 
         if not previous_unit_costs:
             return
@@ -438,6 +457,13 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
         The right answer is that such a correction leaves a trace, not that it
         becomes impossible, so it emits the same event every other route that
         rewrites that field emits.
+
+        The settlement columns stay editable for the same reason, and this hook
+        no longer answers for them. ``purchase_order`` is editable here too, so
+        this form can MOVE a line to another order — a settlement transition
+        for the order it left as much as for the one it joined, and one no
+        amount of refreshing ``obj.purchase_order_id`` after the save could
+        have seen. :mod:`reorder_queue.settlement_signals` re-derives both.
         """
         previous_unit_cost = None
         if change and obj.pk:
@@ -447,7 +473,8 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
                 .first()
             )
 
-        super().save_model(request, obj, form, change)
+        with transaction.atomic(), settlement_batch():
+            super().save_model(request, obj, form, change)
 
         if previous_unit_cost is not None and previous_unit_cost != obj.unit_cost_ordered:
             record_line_reprice(

@@ -82,8 +82,19 @@ jobs:
         run: |
           cd backend
           pip install --upgrade pip
-          # Pull just the lint tools we need; mirrors versions in requirements-dev.txt.
-          pip install black isort flake8
+          # Pull just the lint tools we need, AT THE VERSIONS requirements-dev.txt
+          # pins, so this gate is the same one a developer and pre-commit run
+          # locally. Installing them unpinned made the step float onto whatever
+          # was newest on PyPI that morning: isort 9.0.0 and the pinned isort
+          # 8.0.1 disagree about `from .audit import (snapshot,)` in
+          # customization/views.py — each rewrites what the other demands — so
+          # this job failed on a PR that never touched the file, and nothing a
+          # developer could run reproduced it. Renovate owns the bumps, in
+          # requirements-dev.txt, where the pin is visible.
+          # The `==` anchor deliberately takes flake8 alone and not
+          # flake8-docstrings/flake8-bugbear: this job runs bare `flake8 .`, and
+          # installing the plugins would change what it reports.
+          pip install $(grep -E '^(black|isort|flake8)==' requirements-dev.txt)
 
       - name: Check code formatting with black
         run: cd backend && black --check .
@@ -282,6 +293,19 @@ jobs:
         run: |
           cd frontend
           npm run lint
+
+      - name: Check no site bypasses the settlement derivation
+        run: |
+          # The web UI can decide whether a purchase-order line is settled
+          # client-side just as easily as the backend can, and a frontend-only
+          # PR skips Backend Tests entirely — where this same check runs as
+          # reorder_queue/tests/test_settlement_sites.py. Running it here too is
+          # what stops the guard having a hole exactly the size of "only
+          # touched the frontend".
+          #
+          # Stdlib-only and Django-free on purpose, so it needs no backend
+          # environment: see backend/reorder_queue/settlement_sites.py.
+          python3 backend/reorder_queue/settlement_sites.py
 
   frontend-tests:
     name: Frontend Tests

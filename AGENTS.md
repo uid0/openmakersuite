@@ -109,6 +109,61 @@ from "explicitly cleared" give it an `UNCHANGED` sentinel default rather than
 is stated in `ReorderRequestViewSet.mark_ordered`'s docstring and pinned by
 `reorder_queue/tests/test_po_confirm_preserves_expected_delivery_date.py`.
 
+### Purchase-order line settlement
+
+"Is receiving finished with this line?" is defined once, on
+`PurchaseOrderItem.is_settled`, and nowhere else. Six defects had come from
+code answering it with a predicate of its own — the last one from another app
+entirely — so `backend/reorder_queue/settlement_sites.py` derives the whole set
+of sites from that property (it walks it with `ast` to the model fields, then
+sweeps `backend/` and `frontend/src`) and fails when one bypasses it. Run it for
+the report, `--sites` for every reader:
+
+```
+python3 backend/reorder_queue/settlement_sites.py
+```
+
+It runs as `reorder_queue/tests/test_settlement_sites.py` in Backend Tests and
+as a step in Frontend Lint, so a frontend-only PR is covered too. If it flags
+your change, route the site through the derivation rather than widening the
+guard: `PurchaseOrderItem.receipt_state` / `is_settled` in Python,
+`PurchaseOrderItem.q_settled()` / `objects.outstanding()` /
+`objects.with_receipt_state()` in the ORM, and `receipt_state` / `is_settled`
+off the API on the frontend. Anything that can settle a line must reach
+`services.refresh_receipt_status` before it returns.
+
+**Where the refresh actually lives.** Saving or deleting a LINE re-derives its
+order on its own — `reorder_queue/settlement_signals.py` hangs off
+`PurchaseOrderItem`'s `post_save` / `post_delete`, and `pre_save` captures the
+order a line is LEAVING so a reparent re-derives both ends. No admin hook owns
+that re-derivation any more — the admin still opens `settlement_batch()` so a
+formset save asks once, and `ReceiptStatusFilter` still *reads* settlement
+through `with_receipt_state()`, but neither decides it. A hook used to: the
+change form, then the inline formset, then row delete, then bulk delete, then
+reparenting, each closed by adding another method name to a list, which is the
+mistake this section exists to stop.
+
+**What the signal does NOT cover, and why the guard still has a job:**
+querysets fire no per-object save signal. `PurchaseOrderItem.objects.filter(...)
+.update(...)` and `bulk_update` write settlement columns with nothing hearing
+about it, so those paths must call `services.refresh_receipt_status` themselves
+— `services.purchase_orders.void_po` is the live example. Ordinary
+`queryset.delete()` IS covered (it fans `post_delete` out per row), but a FAST
+DELETE is not: a collector that can drop rows with one `_raw_delete` sends no
+signal, and `_raw_delete` called directly never does.
+
+Three properties the routing holds, all pinned by tests rather than asserted:
+receiving a twenty-line order re-derives the order ONCE (`settlement_batch()`
+coalesces inside the caller's unit of work, never on `transaction.on_commit` —
+endpoints serialize `purchase_order.status` into the response and ScanTTY reads
+it); a save that moved no settlement field and did not move the line to another
+order re-derives NOTHING, so editing a note leaves an operator's chosen status
+alone; and a refresh cannot re-enter its own signal.
+
+Do not read a clean run as "there is nothing left". The scan prints the write
+shapes it can and cannot see on every run; that list is the honest boundary and
+it has grown twice already.
+
 ### Django upgrade history
 
 The backend now runs **Django 6.0.7**. The notes below cover the earlier 4.2 -> 5.1

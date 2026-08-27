@@ -16,7 +16,7 @@ The ``payload`` dict shape is the pinned contract consumed by
 ``InventoryMetricsSerializer`` and the ScanTTY worker — do not rename keys.
 """
 
-from django.db.models import ExpressionWrapper, F, IntegerField, Q, Sum
+from django.db.models import Q, Sum
 
 from inventory.models import ItemSupplier, MaintenanceMaterial, WorkOrder, WorkOrderMaterialUsage
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
@@ -219,26 +219,26 @@ def compute_item_metrics_batch(items):
         )
     }
 
-    # QIT — still-pending units on partially-received lines, grouped by item. A
-    # subset of QOO (partially_received is an on-order status). (1 query)
+    # QIT — units still on their way, grouped by item. A subset of QOO
+    # (partially_received is an on-order status). (1 query)
+    #
+    # "Still on their way" is the settlement question, so it is asked through
+    # the line's own derivation rather than re-derived here. It used to be
+    # spelled ``is_voided=False, quantity_received__lt=F("quantity_ordered")``,
+    # which has no notion of a line closed short: units an operator had
+    # explicitly written off as never arriving went on counting as in transit,
+    # and inflated QIT could suppress a reorder for stock that was not coming.
+    # ``outstanding()`` covers the voided case too, so nothing was lost.
     quantity_in_transit = {
         row["item_supplier__item"]: row["total"] or 0
         for row in (
-            PurchaseOrderItem.objects.filter(
+            PurchaseOrderItem.objects.outstanding()
+            .filter(
                 item_supplier__item_id__in=item_ids,
-                is_voided=False,
                 purchase_order__status=PurchaseOrder.Status.PARTIALLY_RECEIVED,
-                quantity_received__lt=F("quantity_ordered"),
             )
             .values("item_supplier__item")
-            .annotate(
-                total=Sum(
-                    ExpressionWrapper(
-                        F("quantity_ordered") - F("quantity_received"),
-                        output_field=IntegerField(),
-                    )
-                )
-            )
+            .annotate(total=Sum(PurchaseOrderItem.outstanding_quantity_expression()))
             .order_by()  # clear Meta ordering so it can't contaminate GROUP BY
         )
     }

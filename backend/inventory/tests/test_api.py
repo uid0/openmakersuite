@@ -299,7 +299,13 @@ class TestInventoryItemAPI:
     def test_unretire_action_clears_flag_and_stamp(self, authenticated_client):
         """The unretire action clears the flag and the retired_at stamp."""
         client, _ = authenticated_client
-        item = InventoryItemFactory(is_retired=True, retired_at=timezone.now())
+        # Stock is pinned, not left to the factory's random 0..100: a retired
+        # item with no stock left is auto-hidden from the default queryset the
+        # detail route resolves through (see the include_retired chokepoint in
+        # InventoryItemViewSet.get_queryset), so a random 0 turned this into a
+        # 404 roughly one run in a hundred. What is under test here is the
+        # action, not the visibility rule, which has its own tests above.
+        item = InventoryItemFactory(is_retired=True, retired_at=timezone.now(), current_stock=5)
 
         url = reverse("inventoryitem-unretire", kwargs={"pk": str(item.id)})
         response = client.post(url)
@@ -315,7 +321,10 @@ class TestInventoryItemAPI:
         """Retiring an already-retired item is a no-op that keeps retired_at."""
         client, _ = authenticated_client
         original = timezone.now() - timedelta(days=3)
-        item = InventoryItemFactory(is_retired=True, retired_at=original)
+        # Stock pinned for the same reason as the unretire test above: retired
+        # and empty is hidden from the queryset the detail route resolves
+        # through, and the factory's stock is otherwise random.
+        item = InventoryItemFactory(is_retired=True, retired_at=original, current_stock=5)
 
         url = reverse("inventoryitem-retire", kwargs={"pk": str(item.id)})
         response = client.post(url)

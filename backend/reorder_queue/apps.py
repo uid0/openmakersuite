@@ -7,4 +7,5 @@ class ReorderQueueConfig(AppConfig):
 
     def ready(self):
         """Import signal handlers when the app is ready."""
+        import reorder_queue.settlement_signals  # noqa: F401
         import reorder_queue.signals  # noqa: F401

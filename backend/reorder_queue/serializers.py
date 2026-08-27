@@ -568,6 +568,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     outstanding_line_count = serializers.IntegerField(read_only=True)
     variance_line_count = serializers.IntegerField(read_only=True)
     can_receive = serializers.SerializerMethodField()
+    can_delete_items = serializers.SerializerMethodField()
     serials_outstanding = serializers.SerializerMethodField()
     days_since_ordered = serializers.IntegerField(read_only=True)
     estimated_total = serializers.DecimalField(
@@ -629,6 +630,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "outstanding_line_count",
             "variance_line_count",
             "can_receive",
+            "can_delete_items",
             "serials_outstanding",
             "days_since_ordered",
             "payment_schedule",
@@ -657,6 +659,21 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
         about whether an order was receivable.
         """
         return obj.status in PurchaseOrder.RECEIVABLE_STATUSES
+
+    def get_can_delete_items(self, obj):
+        """Whether this order's lines may be DESTROYED rather than voided.
+
+        Served from ``PurchaseOrder.PRE_SUPPLIER_STATUSES`` for the same reason
+        ``can_receive`` is served from ``RECEIVABLE_STATUSES``: the client must
+        never keep its own copy of which statuses those are. Here that matters
+        more than usual — a client that guessed wrong would offer an
+        irreversible destroy on an order the supplier already holds, or hide it
+        on one where voiding leaves a meaningless ghost.
+
+        The web page renders exactly one of the two line actions off this flag,
+        so the operator is never asked to know which applies.
+        """
+        return obj.status in PurchaseOrder.PRE_SUPPLIER_STATUSES
 
     def validate(self, attrs):
         """Re-attaching an agreement must respect the order's supplier."""

@@ -1,4 +1,4 @@
-"""Re-derive a purchase order's status whenever one of its LINES moves.
+"""Re-derive a purchase order whenever one of its LINES moves.
 
 Closing this door-by-door did not work. Each round found another way into the
 admin — the change form, then the inline formset, then row delete, then the
@@ -7,7 +7,12 @@ fix was another method name added to a hand-maintained list, which is the exact
 shape of mistake this whole change exists to end. The obligation does not
 belong to ``ModelAdmin.save_model``. It belongs to the LINE: if a line was
 written or removed, whatever wrote it, the order it belongs to has to be asked
-again what its status is.
+its questions again.
+
+Two questions, not one, and they do not have the same triggers. A line SAVE
+can change the order's settlement status. A line DELETE changes that AND the
+order's stored ``estimated_total``, which no save reaches from here — see
+:func:`_rederive_after_line_delete`.
 
 So the routing lives here, on the model's own save/delete signals, and the
 admin hooks that used to carry it are gone.
@@ -107,33 +112,56 @@ def _refreshing() -> bool:
     return getattr(_state, "refreshing", False)
 
 
-def _run(order_ids) -> None:
+def _run(order_ids, cost_order_ids=()) -> None:
     """Re-derive each order once, off a fresh read, with the signal suppressed.
 
     The read is deliberately not the caller's instance: a viewset that
     prefetched ``items`` holds a cached relation the line write did not
     invalidate, and deriving settlement from that cache is how an order
     finishes receiving and stays displayed as partially received.
+
+    ``cost_order_ids`` is the subset owing a stored-total re-roll as well —
+    deletes only; see :func:`_rederive_after_line_delete` for why.
+
+    ONE read covers both questions, and deliberately so. Reading the orders
+    twice — once for the money, once for the status — would still be coalesced
+    per unit of work rather than per row, so nothing would look wrong, and the
+    test that counts re-derivations caught it precisely because it counts the
+    READ rather than the write. An order re-derived per unit of work should be
+    fetched once per unit of work.
+
+    Money first on each instance, so the one the status derivation then reads
+    is already whole.
     """
+    from .services.purchase_orders import recalculate_estimated_total
     from .services.receiving import refresh_receipt_status
 
+    order_ids = set(order_ids)
+    cost_order_ids = set(cost_order_ids)
     _state.refreshing = True
     try:
-        for purchase_order in PurchaseOrder.objects.filter(pk__in=sorted(order_ids)):
-            refresh_receipt_status(purchase_order)
+        for purchase_order in PurchaseOrder.objects.filter(
+            pk__in=sorted(order_ids | cost_order_ids)
+        ):
+            if purchase_order.pk in cost_order_ids:
+                recalculate_estimated_total(purchase_order)
+            if purchase_order.pk in order_ids:
+                refresh_receipt_status(purchase_order)
     finally:
         _state.refreshing = False
 
 
-def _mark(order_ids) -> None:
+def _mark(order_ids, *, costs: bool = False) -> None:
     order_ids = {order_id for order_id in order_ids if order_id is not None}
     if not order_ids or _refreshing():
         return
     pending = getattr(_state, "pending", None)
     if pending is None:
-        _run(order_ids)
+        _run(order_ids, order_ids if costs else ())
     else:
         pending.update(order_ids)
+        if costs:
+            _state.pending_costs.update(order_ids)
 
 
 @contextmanager
@@ -157,14 +185,17 @@ def settlement_batch():
     outermost = getattr(_state, "pending", None) is None
     if outermost:
         _state.pending = set()
+        _state.pending_costs = set()
     try:
         yield
         if outermost:
             pending, _state.pending = _state.pending, set()
-            _run(pending)
+            pending_costs, _state.pending_costs = _state.pending_costs, set()
+            _run(pending, pending_costs)
     finally:
         if outermost:
             _state.pending = None
+            _state.pending_costs = None
 
 
 @receiver(pre_save, sender=PurchaseOrderItem)
@@ -237,5 +268,32 @@ def _rederive_after_line_delete(sender, instance, **kwargs):
 
     A collector that can FAST-delete sends no signal at all, and neither does
     ``_raw_delete``; see this module's own boundary above.
+
+    ``costs=True`` because a DELETE breaks a second invariant a save never
+    does, and it is the same door, so it rides the same signal rather than
+    growing a second receiver to keep in step with this one.
+
+    ``PurchaseOrder.estimated_total`` is STORED: frozen at create time from the
+    sum of the line costs and re-rolled by ``recalculate_estimated_total`` at
+    every site that moves one. Voiding is deliberately not such a site — a
+    voided line stays in the stored sum and ``effective_estimated_total``
+    subtracts it at read time, which is what keeps the struck-off money
+    visible. A DELETED line is subtracted by nobody: it is gone from ``items``,
+    so the read-time subtraction cannot see it, while the stored sum it was
+    added to still carries its cost. The order then reports — on its detail
+    page, in ``payment_schedule``, and to every API client — money for a line
+    that does not exist, and no operator action brings the two back into line.
+
+    So the rule is "a line's cost left the order", and it applies to every
+    route that can remove one. That is why it is here and not in the delete
+    endpoint: the endpoint is one such route, and the admin's row delete,
+    inline delete and bulk "Delete selected" are three more that were reachable
+    — and already overstating the total — before that endpoint existed. Fixing
+    only the new door would have left the older three wrong and called it done.
+
+    Saves are untouched. A save that moves a cost already re-rolls the total on
+    its own path (``add_line_item``, ``update_item``); re-rolling again from
+    here would write the order on every line save — the silent ``updated_at``
+    bump :func:`_remember_what_this_save_moves` exists to prevent one layer up.
     """
-    _mark({instance.purchase_order_id})
+    _mark({instance.purchase_order_id}, costs=True)

@@ -2247,14 +2247,29 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         except (Group.DoesNotExist, DjangoValidationError, ValueError, TypeError):
             raise services.LineEntryError(f"Committee {group_id} not found.", "group_not_found")
 
-    @action(detail=True, methods=["patch"], url_path="items/(?P<item_id>[^/.]+)")
+    @action(detail=True, methods=["patch", "delete"], url_path="items/(?P<item_id>[^/.]+)")
     def update_item(self, request, pk=None, item_id=None):
-        """Update a specific line item in a purchase order."""
+        """Update — or, on a pre-send order, DESTROY — a specific line item.
+
+        ``DELETE`` is a pure ADDITION to this path: the method previously
+        answered 405 here, and ``PATCH`` below is untouched. It shares the
+        action (and therefore the URL name ``purchaseorder-update-item``)
+        because DRF routes one url_path to one view function — a second
+        ``@action`` on the same path would be shadowed by this one and answer
+        405 for ever, which is a worse thing to discover in production than a
+        two-line dispatch is to read here.
+
+        See :meth:`_destroy_item` for what deletion means and why it is refused
+        once the supplier holds a copy.
+        """
         purchase_order = self.get_object()
         try:
             line_item = PurchaseOrderItem.objects.get(id=item_id, purchase_order=purchase_order)
         except PurchaseOrderItem.DoesNotExist:
             return Response({"error": "Line item not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.method == "DELETE":
+            return self._destroy_item(request, purchase_order, line_item)
 
         # Quantity edits (op-yh4h) — "we actually need 12, not 10" on an order
         # that is already out. Applied before the cost branches below so a
@@ -2551,6 +2566,107 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         serializer = PurchaseOrderItemSerializer(line_item)
         return Response(serializer.data)
+
+    def _destroy_item(self, request, purchase_order, line_item):
+        """Destroy a line on an order the supplier has not seen (oms-po-line-delete).
+
+        The counterpart to :meth:`void_item`, and deliberately NOT a variant of
+        it. While the order is the shop's own document a line added by mistake
+        is a typo, and the honest record of a typo is no line at all — leaving a
+        struck-off ghost with a mandatory written reason misrepresents what
+        happened. Once the supplier holds a copy the line is part of a record
+        someone else also has, so it can only be voided, and this refuses with
+        that alternative named (``assert_deletable``).
+
+        **Nothing is stranded, and the set was derived rather than guessed** —
+        from ``PurchaseOrderItem``'s own reverse relations, not from a search of
+        this app:
+
+        * ``DeliveryItem`` (CASCADE) — a receipt line. Unreachable here; see
+          the receipts note below.
+        * ``inventory.WorkOrderMaterialUsage`` (SET_NULL) — written by the
+          receiving bridge, so likewise only exists once goods have arrived.
+        * ``inventory.SerializedComponent.provenance_purchase_order_item``
+          (SET_NULL) — provenance stamped at receipt, same.
+        * ``PurchaseOrderAuditEvent.line_item`` (SET_NULL) — the trail of what
+          was done to this line, and the one reference that DOES exist on a
+          draft. SET_NULL is what keeps it: the rows survive with their
+          ``purchase_order`` FK and metadata intact, which is why the event
+          recorded below carries the whole line in its metadata rather than
+          relying on an FK that is about to be nulled.
+
+        A draft line's ``item_supplier``, ``asset``, ``work_order`` and
+        ``owning_group`` are things the line points AT, not things that point at
+        it; they are unaffected, which is correct — deleting a mistyped line
+        must not discontinue a supplier's catalogue entry the way voiding
+        deliberately does.
+
+        **Receipts are impossible here rather than refused.** ``DRAFT`` is an
+        initial-only state: nothing in the codebase ever writes a purchase order
+        back to it, and every writer of ``quantity_received`` gates on
+        ``RECEIVABLE_STATUSES``, which excludes it. So a pre-send line cannot
+        carry a receipt, and a ``quantity_received > 0`` guard here would be a
+        branch no request can reach — one that could never be watched failing
+        and would rot untested. The impossibility is asserted directly instead,
+        in ``test_line_delete``.
+
+        Neither the order's settlement status nor its stored ``estimated_total``
+        is refreshed from here. Both ride the line's own ``post_delete``
+        (:mod:`reorder_queue.settlement_signals`), which is what makes this
+        endpoint and the Django admin's three delete doors agree without either
+        knowing about the other.
+
+        Returns the **full** refreshed purchase order so the caller can patch
+        its view in place (docs/REACTIVE_MUTATIONS.md).
+        """
+        try:
+            services.assert_deletable(purchase_order)
+        except services.LineEntryError as exc:
+            return Response(
+                {"error": exc.message, "code": exc.code},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Recorded BEFORE the delete, and describing the line in full. The FK is
+        # SET_NULL, so a moment from now this row's ``line_item`` is null and
+        # this metadata is the only remaining account of what was destroyed.
+        destroyed = {
+            "line_item": str(line_item.pk),
+            "line_shape": line_item.target_type,
+            "label": _po_line_display_name(line_item),
+            "item_supplier": line_item.item_supplier_id,
+            "asset_id": str(line_item.asset_id) if line_item.asset_id else None,
+            "description": line_item.description or "",
+            "quantity_ordered": line_item.quantity_ordered,
+            "unit_cost_ordered": str(line_item.unit_cost_ordered),
+            "estimated_cost": str(line_item.estimated_cost),
+            "work_order": str(line_item.work_order_id) if line_item.work_order_id else None,
+            "owning_group": line_item.owning_group_id,
+        }
+        record_audit_event(
+            action=PurchaseOrderAuditEvent.Action.PO_LINE_DELETE,
+            actor=request.user,
+            purchase_order=purchase_order,
+            line_item=line_item,
+            metadata=destroyed,
+        )
+
+        services.delete_line_item(line_item)
+
+        # Re-read rather than reusing ``purchase_order``: the viewset prefetches
+        # ``items``, so that instance still holds the deleted line and the
+        # pre-delete total.
+        refreshed = self.get_queryset().get(pk=purchase_order.pk)
+
+        return Response(
+            {
+                "deleted": destroyed,
+                "purchase_order": PurchaseOrderSerializer(
+                    refreshed, context=self.get_serializer_context()
+                ).data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["post"], url_path="items/(?P<item_id>[^/.]+)/void")
     def void_item(self, request, pk=None, item_id=None):

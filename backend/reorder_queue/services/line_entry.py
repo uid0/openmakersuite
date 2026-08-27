@@ -657,17 +657,47 @@ def _coerce_unit_cost(unit_cost):
 
 
 def assert_addable(purchase_order):
-    """Guard: lines may only be added while the order is still a draft.
+    """Guard: lines may only be added while the order is still the shop's own.
 
     Once an order has gone to the supplier, what it contains is a matter of
     record — growing it is a new order, not an edit. Raised server-side so a
     non-browser client cannot skip it.
+
+    Gates on ``PurchaseOrder.PRE_SUPPLIER_STATUSES`` rather than comparing to
+    ``DRAFT`` by name, so this guard and :func:`assert_deletable` cannot come to
+    disagree about where the boundary is.
     """
-    if purchase_order.status != PurchaseOrder.Status.DRAFT:
+    if purchase_order.status not in PurchaseOrder.PRE_SUPPLIER_STATUSES:
         label = PurchaseOrder.Status(purchase_order.status).label
         raise LineEntryError(
             f"Line items can only be added while a purchase order is a draft. "
             f"{purchase_order.po_number or 'This order'} is {label}.",
+            "not_draft",
+        )
+
+
+def assert_deletable(purchase_order):
+    """Guard: a line may only be DESTROYED while the order is still the shop's own.
+
+    The mirror of :func:`assert_addable`, off the same set on purpose. A line
+    you may add is a line you may un-add: while the document is private, a line
+    entered by mistake is a typo, and the honest record of a typo is no line at
+    all. Once the supplier holds a copy, the line is part of a record someone
+    else also has, and erasing it would be a lie about what was ordered — which
+    is what voiding exists for.
+
+    The refusal NAMES the alternative. An operator who cannot delete has
+    somewhere to go (void the line, keeping it on the record struck off), and a
+    refusal that does not say so leaves them stuck on a screen with two buttons
+    and no explanation of why the one they wanted is gone.
+    """
+    if purchase_order.status not in PurchaseOrder.PRE_SUPPLIER_STATUSES:
+        label = PurchaseOrder.Status(purchase_order.status).label
+        raise LineEntryError(
+            f"Line items can only be deleted while a purchase order is a draft. "
+            f"{purchase_order.po_number or 'This order'} is {label}, so the "
+            f"supplier already has this line — void it instead to strike it off "
+            f"while keeping it on the record.",
             "not_draft",
         )
 

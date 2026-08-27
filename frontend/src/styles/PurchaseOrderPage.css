@@ -652,6 +652,43 @@
   background-color: #fecaca;
 }
 
+/* Deleting a line DESTROYS it; voiding strikes it off and keeps it. The two
+   are never offered together, so they cannot be told apart by comparison —
+   whichever one an operator is looking at has to announce on its own which
+   kind of act it is.
+
+   So this is deliberately not a louder shade of the void button's pink. Void
+   is a soft tinted chip; delete is solid, filled, high-contrast, and carries
+   the bin glyph — the vocabulary this app already uses for irreversible
+   destruction. An operator who reaches for "the red one on the right" out of
+   habit meets a control that does not look like the one they remember, which
+   is the point: the muscle memory should break BEFORE the confirmation, not
+   be caught by it. */
+.btn-delete-item {
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  background-color: #b91c1c;
+  color: #fff;
+  border: 1px solid #991b1b;
+}
+
+.btn-delete-item::before {
+  content: '🗑 ';
+}
+
+.btn-delete-item:hover:not(:disabled) {
+  background-color: #991b1b;
+}
+
+.btn-delete-item:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* Reopening a line closed short is a correction, not a destructive act, so it
    reads as an ordinary secondary action rather than borrowing the void red. */
 .btn-reopen-short {

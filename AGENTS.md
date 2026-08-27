@@ -109,6 +109,30 @@ from "explicitly cleared" give it an `UNCHANGED` sentinel default rather than
 is stated in `ReorderRequestViewSet.mark_ordered`'s docstring and pinned by
 `reorder_queue/tests/test_po_confirm_preserves_expected_delivery_date.py`.
 
+### The pre-send boundary: when a PO is still the shop's own document
+
+`PurchaseOrder.PRE_SUPPLIER_STATUSES` is the ONE definition of "the supplier has
+not seen this order", and it sits beside `RECEIVABLE_STATUSES` /
+`IN_RECEIVING_STATUSES` on the model. Both line-set guards read it —
+`services.line_entry.assert_addable` and `assert_deletable` — and the API serves
+the answer rather than making clients derive it: `can_delete_items` on the order
+serializer (beside `can_receive`, same discipline) and `can_add_items` on the
+item-lookup payload. Gate on the set; never compare to `Status.DRAFT` by name,
+or a second pre-send state becomes a hunt through the comparisons.
+
+It is what separates the two line-removal verbs, which are NOT variants of each
+other: while the order is pre-send a mistaken line is a typo and is DELETED
+outright (no reason, irreversible, no ghost); once the supplier holds a copy it
+can only be VOIDED (reason required, struck off, kept on the record). The web
+page offers exactly one of the two, chosen off `can_delete_items`.
+
+`DRAFT` is initial-only — nothing in the codebase writes an order back to it —
+which is what makes a receipt on a pre-send line impossible and is why the
+delete path carries no `quantity_received` guard. That impossibility is asserted
+by `reorder_queue/tests/test_line_delete.py`, which walks the app's syntax trees
+for an assignment of `Status.DRAFT`; if you ever add one, that test tells you
+the guard is now needed.
+
 ### Purchase-order line settlement
 
 "Is receiving finished with this line?" is defined once, on
@@ -142,6 +166,18 @@ through `with_receipt_state()`, but neither decides it. A hook used to: the
 change form, then the inline formset, then row delete, then bulk delete, then
 reparenting, each closed by adding another method name to a list, which is the
 mistake this section exists to stop.
+
+**The delete signal carries a second, non-settlement obligation.** A line
+DELETE also re-rolls `PurchaseOrder.estimated_total`, which is a STORED sum
+frozen from the line costs — voided lines stay in it (`effective_estimated_total`
+subtracts them at read time), but a deleted line is subtracted by nobody, so
+without this the order reports money for a line that no longer exists. It rides
+`post_delete` rather than living in the delete endpoint because the Django
+admin's row / inline / bulk deletes are three more routes that remove a line,
+and they were already overstating the total before that endpoint existed. Line
+SAVES are deliberately excluded: `add_line_item` / `update_item` already re-roll
+on their own path, and doing it again from the signal would bump the order's
+`updated_at` on every line save.
 
 **What the signal does NOT cover, and why the guard still has a job:**
 querysets fire no per-object save signal. `PurchaseOrderItem.objects.filter(...)

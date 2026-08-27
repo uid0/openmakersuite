@@ -589,3 +589,32 @@ def void_line_item(line_item, user, reason):
 
         line_item.save()
         refresh_receipt_status(line_item.purchase_order)
+
+
+def delete_line_item(line_item):
+    """Destroy a line on an order the supplier has not seen.
+
+    The caller owns the pre-send guard (:func:`~reorder_queue.services.line_entry.assert_deletable`)
+    and records the ``po_line_delete`` audit event, exactly as
+    :func:`void_line_item`'s caller owns its guards.
+
+    Deliberately does NOT re-derive anything itself. Removing a line changes two
+    of the order's answers, and both are already routed off the line's own
+    ``post_delete``:
+
+    * its settlement status, since #1029 —
+      :mod:`reorder_queue.settlement_signals`;
+    * its stored ``estimated_total``, which rides the same door.
+
+    Adding an explicit call to either here would put this function back on the
+    hand-maintained list of sites that must remember, which is precisely what
+    that routing exists to delete — and it would leave the Django admin's own
+    delete (row, inline and bulk) as the one door that still forgot.
+
+    A per-object ``.delete()`` on purpose: it fires ``post_delete``, which a
+    manager-level bulk path would not be guaranteed to (see
+    :class:`~reorder_queue.models.PurchaseOrderItemQuerySet` on ``delete`` being
+    withheld from the manager, and ``settlement_signals`` on fast deletes).
+    """
+    with transaction.atomic():
+        line_item.delete()

@@ -2368,6 +2368,22 @@ export const purchaseOrderAPI = {
     api.patch(`/reorders/purchase-orders/${orderId}/items/${itemId}/`, data),
   voidLineItem: (orderId: string, itemId: string, reason?: string) =>
     api.post(`/reorders/purchase-orders/${orderId}/items/${itemId}/void/`, { reason }),
+  /**
+   * DESTROY a line on a pre-send purchase order. Not an undo of anything and
+   * not reversible: the line is gone, with no ghost left behind, which is why
+   * it takes no reason. Rejects with 400 `not_draft` once the supplier holds a
+   * copy of the order — void the line instead, as that refusal says.
+   *
+   * Offer it only where the order's own `can_delete_items` says so; never
+   * re-derive that from `status` here (see `can_receive`).
+   *
+   * Returns the full refreshed order for an in-place patch, plus a `deleted`
+   * block describing what was destroyed.
+   */
+  deleteLineItem: (orderId: string, itemId: string) =>
+    api.delete<{ deleted: Record<string, unknown>; purchase_order: any }>(
+      `/reorders/purchase-orders/${orderId}/items/${itemId}/`,
+    ),
   voidOrder: (orderId: string, reason: string) =>
     api.post<any>(`/reorders/purchase-orders/${orderId}/void/`, { reason }),
   sendToSupplier: (id: string) =>

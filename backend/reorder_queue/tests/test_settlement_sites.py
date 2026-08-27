@@ -26,8 +26,10 @@ from __future__ import annotations
 
 import itertools
 import json
+import sys
 from datetime import datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 from django.contrib import admin
 from django.contrib.admin.sites import AdminSite
@@ -174,10 +176,18 @@ class TestDerivationIsHonoured:
         ), "the frontend tree is neither reported as scanned nor as unreadable"
 
     def test_the_command_line_form_reports_and_exits_zero(self, capsys):
-        """The exact form CI's Frontend Lint step runs."""
+        """The exact form CI's Frontend Lint step runs.
+
+        Asserted without the full stop on purpose. The unqualified sentence is a
+        claim about the whole repository and is only earned by a run that read
+        all of it; the docker-compose job mounts ``backend/`` alone and gets the
+        qualified form instead. Which sentence each run earns is
+        :class:`TestASweepCannotClaimAClearItDidNotEarn`'s subject — what this
+        one asserts is that the clean path exits zero and says what it read.
+        """
         assert settlement_sites.main([]) == 0
         printed = capsys.readouterr().out
-        assert "No site bypasses the derivation." in printed
+        assert "No site bypasses the derivation" in printed
         assert "Scanned:" in printed
 
     def test_the_report_names_the_write_shapes_it_cannot_see(self, capsys):
@@ -217,6 +227,283 @@ class TestDerivationIsHonoured:
         printed = capsys.readouterr().out
         assert "sites naming a settlement field" in printed
         assert model_sites[0] in printed
+
+
+@pytest.fixture
+def checkout(tmp_path):
+    """A checkout-shaped tree on disk that :func:`scan` can be pointed at.
+
+    The scan walks real files, so the only honest way to test what it does with
+    a file it cannot read is to hand it one. ``models.py`` is the real one
+    because the anchor is derived from it — a stub would be a second definition
+    of settlement, which is the thing this whole module exists to prevent.
+    """
+    backend = tmp_path / "backend"
+    package = backend / "reorder_queue"
+    package.mkdir(parents=True)
+    real_models = Path(settlement_sites.__file__).resolve().parent / "models.py"
+    (package / "models.py").write_text(real_models.read_text())
+    (tmp_path / "frontend" / "src").mkdir(parents=True)
+    return tmp_path
+
+
+def scan_checkout(checkout):
+    """Sweep ``checkout`` the way a run inside it would sweep it."""
+    return settlement_sites.scan(
+        start=checkout / "backend" / "reorder_queue" / "settlement_sites.py"
+    )
+
+
+class TestASweepCannotClaimAClearItDidNotEarn:
+    """A file the guard could not read is not a file the guard cleared.
+
+    ``scan`` used to swallow ``SyntaxError`` and ``UnicodeDecodeError`` per file
+    with a bare ``continue``. A run in which N modules failed to parse still
+    printed ``Scanned: backend, frontend/src`` and ``No site bypasses the
+    derivation`` and exited 0 — a partial sweep reading as a clean one, which
+    is the exact failure the whole derivation was built to make impossible.
+
+    It was not hypothetical. CI's Frontend Lint job runs this scan under the
+    runner's default ``python3`` against a backend pinned to a newer Python, so
+    every module using newer syntax was skipped in silence and the guard was
+    inert in that job with nothing saying so.
+
+    "Found nothing" and "could not tell" are different facts. These say which
+    one each run is reporting.
+    """
+
+    BROKEN = "def unparseable(:\n"
+    #: Not valid UTF-8 in any position, so ``read_text()`` cannot decode it.
+    UNDECODABLE = b"\xff\xfe\x00 not text"
+
+    def test_a_backend_file_it_cannot_parse_is_recorded(self, checkout):
+        broken = checkout / "backend" / "reorder_queue" / "broken.py"
+        broken.write_text(self.BROKEN)
+
+        report = scan_checkout(checkout)
+
+        assert [path for path, _ in report.unreadable] == [
+            "backend/reorder_queue/broken.py"
+        ], "a file the sweep could not parse left no trace in the report"
+        assert "SyntaxError" in report.unreadable[0][1]
+
+    def test_a_backend_file_it_cannot_decode_is_recorded(self, checkout):
+        (checkout / "backend" / "reorder_queue" / "binary.py").write_bytes(self.UNDECODABLE)
+
+        report = scan_checkout(checkout)
+
+        assert [path for path, _ in report.unreadable] == ["backend/reorder_queue/binary.py"]
+        assert "UnicodeDecodeError" in report.unreadable[0][1]
+
+    def test_a_module_the_interpreter_rejects_outright_is_recorded(self, checkout):
+        """Which exception a bad file raises is the interpreter's choice.
+
+        A NUL byte in a module is a ``SyntaxError`` from ``ast.parse`` on 3.12+
+        and a ``ValueError`` before it. The scan runs under whatever ``python3``
+        the job provides, so a handler that names only the newest one leaves the
+        older interpreters — the ones this whole fix is about — crashing out of
+        the sweep instead of reporting it.
+        """
+        (checkout / "backend" / "reorder_queue" / "nul.py").write_bytes(b"x = 1\x00\n")
+
+        report = scan_checkout(checkout)
+
+        assert [path for path, _ in report.unreadable] == ["backend/reorder_queue/nul.py"]
+        assert not report.swept_whole_tree
+
+    def test_a_frontend_file_it_cannot_read_is_recorded_too(self, checkout):
+        """The rule is about reading, not about Python.
+
+        The frontend arm had no handler at all, so this is the same blindness
+        approached from the other side rather than a second, separate one.
+        """
+        (checkout / "frontend" / "src" / "opaque.ts").write_bytes(self.UNDECODABLE)
+
+        report = scan_checkout(checkout)
+
+        assert [path for path, _ in report.unreadable] == ["frontend/src/opaque.ts"]
+
+    def test_a_tree_it_read_whole_is_reported_as_read_whole(self, checkout):
+        """The control. Without this the tests above would pass on a scan that
+        called every file unreadable."""
+        report = scan_checkout(checkout)
+
+        assert report.unreadable == []
+        assert report.swept_whole_tree
+
+    def test_an_unreadable_file_fails_the_run(self, checkout, capsys, monkeypatch):
+        """The property CI depends on: a shrug is not an exit code."""
+        broken = checkout / "backend" / "reorder_queue" / "broken.py"
+        broken.write_text(self.BROKEN)
+        monkeypatch.setattr(
+            settlement_sites,
+            "_roots",
+            lambda start=None: (
+                checkout,
+                checkout / "backend",
+                checkout / "frontend" / "src",
+            ),
+        )
+
+        assert settlement_sites.main([]) == 1
+
+        printed = capsys.readouterr().out
+        assert "backend/reorder_queue/broken.py" in printed
+        assert "NOT cleared" in printed
+        assert (
+            "No site bypasses the derivation." not in printed
+        ), "the summary rendered an unqualified all-clear over a file it never read"
+
+    def test_a_run_missing_a_whole_tree_does_not_claim_a_clean_sweep(
+        self, checkout, capsys, monkeypatch
+    ):
+        """The docker-compose job's shape.
+
+        A tree absent from the checkout is a known and legitimate way to run
+        this — unlike an unreadable file, which is a hole inside a tree the
+        report claims to have swept — so it still exits zero. What it may not
+        do is print the sentence a whole-tree sweep earns.
+        """
+        monkeypatch.setattr(
+            settlement_sites,
+            "_roots",
+            lambda start=None: (checkout, checkout / "backend", None),
+        )
+
+        assert settlement_sites.main([]) == 0
+
+        printed = capsys.readouterr().out
+        assert "NOT scanned: frontend/src" in printed
+        assert "No site bypasses the derivation." not in printed
+        assert "NOT a whole-tree sweep" in printed
+
+
+class TestNoQuerySetOverrideLeaksOntoItsManager:
+    """A queryset override must not hand the manager a method Django withholds.
+
+    ``PurchaseOrderItemQuerySet.delete`` was added to coalesce the per-row
+    settlement signals a bulk delete fans out. Django hands ``BaseManager`` every
+    public queryset method EXCEPT the ones marked ``queryset_only``, and
+    ``QuerySet.delete`` is marked precisely so that ``Model.objects.delete()``
+    does not exist — because it would take no filter and empty the table. An
+    override that does not re-set the marker silently un-withholds it, and the
+    settlement change shipped exactly that: ``PurchaseOrderItem.objects.delete``
+    became a bound, callable method that no one declared and no caller wanted.
+
+    Asserted as REACHABILITY, not as attribute presence. ``queryset_only`` is
+    the mechanism Django happens to use today; "the manager does not expose
+    this" is the property that matters, and it is what would still be checked if
+    Django changed how it copies methods.
+
+    And it derives the set rather than naming ``delete``: the question is which
+    methods a stock ``Manager`` does not get from a stock ``QuerySet``, which
+    the two classes answer between them. A future override of any of them —
+    or a second queryset class in any app — is in scope without an edit here.
+    """
+
+    @staticmethod
+    def withheld_from_managers() -> set[str]:
+        """Every public queryset method Django keeps off a stock manager."""
+        from django.db.models import QuerySet
+        from django.db.models.manager import Manager
+
+        return {
+            name
+            for name in dir(QuerySet)
+            if not name.startswith("_") and not hasattr(Manager, name)
+        }
+
+    @staticmethod
+    def project_models():
+        """The models defined in this repository.
+
+        Derived from where a model's module lives rather than from a list of
+        apps, so a new app is covered on the day it is added. Third-party models
+        are excluded because their managers are not ours to correct — not
+        because they are assumed innocent.
+        """
+        from django.apps import apps
+
+        backend_root = Path(settlement_sites.__file__).resolve().parents[1]
+        for model in apps.get_models():
+            module = sys.modules.get(model.__module__)
+            path = getattr(module, "__file__", None)
+            if path and Path(path).resolve().is_relative_to(backend_root):
+                yield model
+
+    def test_django_still_withholds_delete_from_a_stock_manager(self):
+        """The premise. If this ever fails, the test below is checking nothing."""
+        withheld = self.withheld_from_managers()
+        assert "delete" in withheld, (
+            "a stock Manager now exposes delete(), so Django no longer withholds "
+            "it and the guard below has lost its subject"
+        )
+
+    def test_no_project_manager_exposes_a_withheld_queryset_method(self):
+        leaks = [
+            f"{model._meta.label}.{manager.name}.{name}()"
+            for model in self.project_models()
+            for manager in model._meta.managers
+            for name in sorted(self.withheld_from_managers())
+            if hasattr(type(manager), name)
+        ]
+        assert leaks == [], (
+            "these managers expose a queryset method Django deliberately keeps "
+            "off managers — a custom QuerySet override needs "
+            "`<method>.queryset_only = True` (and `alters_data = True`) after "
+            "its def, the way QuerySet's own does:\n  " + "\n  ".join(leaks)
+        )
+
+    def test_deleting_every_line_is_not_reachable_from_the_manager(self, supplier, operator):
+        """The concrete capability, exercised rather than described."""
+        line = add_line(make_po(supplier, operator), make_item("Bolt", supplier), 4)
+
+        assert not hasattr(PurchaseOrderItem.objects, "delete"), (
+            "PurchaseOrderItem.objects.delete() exists; calling it takes no "
+            "filter and deletes every purchase-order line in the table"
+        )
+        assert PurchaseOrderItem.objects.filter(pk=line.pk).exists()
+
+    def test_the_queryset_form_still_deletes_and_still_coalesces(self, supplier, operator):
+        """The fix withholds the method from the manager without disabling it.
+
+        A guard that closed the hole by breaking ``queryset.delete()`` would
+        take the settlement coalescing down with it.
+        """
+        purchase_order = make_po(supplier, operator)
+        line = add_line(purchase_order, make_item("Washer", supplier), 2)
+
+        PurchaseOrderItem.objects.filter(pk=line.pk).delete()
+
+        assert not PurchaseOrderItem.objects.filter(pk=line.pk).exists()
+
+    def test_a_template_cannot_call_delete_on_a_queryset_of_lines(self, supplier, operator):
+        """The template engine calls any callable it resolves; this one may not.
+
+        Stated as measured, not as assumed. Removing ``delete.alters_data = True``
+        from the override does NOT break this test on Django 6: ``QuerySet``
+        inherits ``AltersData``, and its ``__init_subclass__`` copies the
+        attribute onto an override that lacks it. ``queryset_only`` gets no such
+        help, which is why that was the live hole and this was not.
+
+        The test earns its place anyway, and behaviourally rather than by
+        attribute: setting ``alters_data = False`` on the override empties the
+        queryset through ``{{ lines.delete }}``, which is what it was watched
+        doing. It is the assertion that survives Django dropping the propagation
+        it currently provides for free.
+        """
+        from django.template import Context, Template
+
+        line = add_line(make_po(supplier, operator), make_item("Nut", supplier), 3)
+        lines = PurchaseOrderItem.objects.filter(pk=line.pk)
+
+        Template("{{ lines.delete }}").render(Context({"lines": lines}))
+
+        assert PurchaseOrderItem.objects.filter(pk=line.pk).exists(), (
+            "rendering a template that resolves `.delete` on a queryset of lines "
+            "deleted them: the override is template-callable, so it needs "
+            "alters_data = True"
+        )
 
 
 class TestOrmAndPythonAgree:

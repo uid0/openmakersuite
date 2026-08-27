@@ -164,6 +164,26 @@ Do not read a clean run as "there is nothing left". The scan prints the write
 shapes it can and cannot see on every run; that list is the honest boundary and
 it has grown twice already.
 
+**A file it could not read is not a file it cleared.** The scan exits non-zero
+for a module it cannot parse or decode, not just for a site that bypasses the
+derivation, and names each one under `NOT scanned`. It used to `continue` past
+them, so a run in which N modules failed to parse still printed `Scanned:
+backend, frontend/src` and a clean verdict — which is why Frontend Lint now sets
+up Python 3.14 before running it. Run the scan under the version the backend
+targets; a partial sweep says so in its summary rather than passing for a whole
+one.
+
+**A custom `QuerySet` method can become a `Manager` method by accident.**
+`BaseManager._get_queryset_methods` copies every public queryset method onto the
+manager EXCEPT those marked `queryset_only`, and that marker does not survive an
+override. `PurchaseOrderItemQuerySet.delete` shipped without re-setting it,
+which made `PurchaseOrderItem.objects.delete()` a real, callable method that
+takes no filter and empties the table. Any override of a method Django withholds
+needs `<name>.queryset_only = True` after its `def`, the way `QuerySet`'s own
+does. Enforced across every model in the repo — the check derives the withheld
+set from `QuerySet` and `Manager` rather than naming `delete`, so a second
+queryset class in any app is already covered.
+
 ### Django upgrade history
 
 The backend now runs **Django 6.0.7**. The notes below cover the earlier 4.2 -> 5.1

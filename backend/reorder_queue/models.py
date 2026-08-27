@@ -728,6 +728,23 @@ class PurchaseOrderItemQuerySet(models.QuerySet):
         with settlement_batch():
             return super().delete(*args, **kwargs)
 
+    # Django withholds ``delete`` from managers on purpose, and it does it with
+    # an attribute rather than a name list: ``queryset_only`` is what stops
+    # ``BaseManager._get_queryset_methods`` copying the method onto the manager.
+    # It does NOT survive an override — redeclaring ``delete`` here without it
+    # un-withholds it, and ``PurchaseOrderItem.objects.delete()`` becomes a bound,
+    # callable method that takes no filter and empties the table.
+    #
+    # ``alters_data`` (which stops a template resolving ``{{ qs.delete }}`` into
+    # a call) is a different story and is set here for symmetry, not to close a
+    # hole: ``QuerySet`` inherits ``AltersData``, whose ``__init_subclass__``
+    # copies ``alters_data`` onto a subclass's overrides automatically. Deleting
+    # this line changes nothing on Django 6. Deleting the one above changes
+    # everything, which is why the test asserts REACHABILITY on the manager
+    # rather than the presence of either attribute.
+    delete.queryset_only = True
+    delete.alters_data = True
+
     def settled(self):
         """Lines receiving is finished with — the queryset twin of ``is_settled``."""
         return self.filter(self.model.q_settled())

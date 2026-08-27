@@ -294,6 +294,17 @@ jobs:
           cd frontend
           npm run lint
 
+      # The scan is stdlib-only and imports nothing from Django, so this job
+      # needs no backend ENVIRONMENT — but it does need an interpreter that can
+      # PARSE the backend. Without this step it ran under the runner's default
+      # python3 against a tree targeting 3.14, and every module using newer
+      # syntax was one the scan could not read. It now fails rather than
+      # skipping those in silence, so give it the version they are written for.
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.14"
+
       - name: Check no site bypasses the settlement derivation
         run: |
           # The web UI can decide whether a purchase-order line is settled
@@ -303,8 +314,8 @@ jobs:
           # what stops the guard having a hole exactly the size of "only
           # touched the frontend".
           #
-          # Stdlib-only and Django-free on purpose, so it needs no backend
-          # environment: see backend/reorder_queue/settlement_sites.py.
+          # Exits non-zero for a site that bypasses the derivation AND for a
+          # file it could not read: see backend/reorder_queue/settlement_sites.py.
           python3 backend/reorder_queue/settlement_sites.py
 
   frontend-tests:

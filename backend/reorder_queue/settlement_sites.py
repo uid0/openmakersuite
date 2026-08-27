@@ -86,10 +86,14 @@ Run it directly for a report::
 
     python3 backend/reorder_queue/settlement_sites.py
 
-Exits non-zero when a site bypasses the derivation, which is what
-``reorder_queue/tests/test_settlement_sites.py`` asserts on and what CI runs.
-Stdlib only, and it imports nothing from Django, so the frontend-lint job can
-run it without a backend environment.
+Exits non-zero when a site bypasses the derivation, and equally when a file in a
+tree it swept could not be read at all — an unparseable module is a site nobody
+judged, and reporting one as clean is the failure this whole derivation exists to
+prevent. Both are what ``reorder_queue/tests/test_settlement_sites.py`` asserts on
+and what CI runs. Stdlib only, and it imports nothing from Django, so the
+frontend-lint job can run it without a backend environment — but it must run it
+under an interpreter that can parse the backend, or it reports on nothing and
+says so.
 """
 
 from __future__ import annotations
@@ -249,6 +253,24 @@ class Report:
     #: Trees it could not, and why. Never silently empty: a run that saw less
     #: than the whole tree has to say so rather than read as a clean sweep.
     unscanned: list[str] = field(default_factory=list)
+    #: Files that WERE there and could not be read, as ``(path, reason)``: a
+    #: decode failure, or source this interpreter cannot parse.
+    #:
+    #: Deliberately separate from :attr:`unscanned`. A tree missing from the
+    #: checkout is a known shape of run — the docker-compose job mounts
+    #: ``backend/`` alone — and the report names it and carries on. An
+    #: unreadable file is not that: it is a hole INSIDE a tree this run has
+    #: already claimed, in :attr:`scanned`, to have swept. Every other file in
+    #: that tree was judged; this one was skipped, and skipping is not clearing.
+    #: So it FAILS the run. "Found nothing" and "could not tell" are different
+    #: facts, and a guard that renders a clean verdict without reading the
+    #: evidence is worse than one that errors, because it is believed.
+    unreadable: list[tuple[str, str]] = field(default_factory=list)
+
+    @property
+    def swept_whole_tree(self) -> bool:
+        """Whether this run actually read everything it set out to read."""
+        return not self.unscanned and not self.unreadable
 
 
 # --------------------------------------------------------------------------
@@ -295,7 +317,7 @@ def _truth_positions(node: ast.AST):
 
 def derive_anchor(models_path: Path, rel_models_path: str) -> Anchor:
     """Read the settlement definition off ``PurchaseOrderItem`` itself."""
-    tree = ast.parse(models_path.read_text())
+    tree = ast.parse(models_path.read_text(encoding="utf-8"))
     cls = next(
         node
         for node in ast.walk(tree)
@@ -799,8 +821,25 @@ def _walk(root: Path, *suffixes: str):
         yield path
 
 
+def _why_unreadable(exc: Exception) -> str:
+    """One line naming what stopped this file being read, for the report."""
+    if isinstance(exc, SyntaxError):
+        where = f", line {exc.lineno}" if exc.lineno else ""
+        return (
+            f"SyntaxError: {exc.msg}{where} — this interpreter "
+            f"(Python {sys.version_info.major}.{sys.version_info.minor}) "
+            f"cannot parse the file"
+        )
+    return f"{type(exc).__name__}: {exc}"
+
+
 def scan(start: Path | None = None) -> Report:
-    """Derive the anchor, then report every settlement site the tree exposes."""
+    """Derive the anchor, then report every settlement site the tree exposes.
+
+    A file the sweep could not read lands in :attr:`Report.unreadable` rather
+    than being skipped, because the alternative is a report that says
+    ``Scanned: backend`` over a backend it only partly read.
+    """
     base, backend, frontend = _roots(start)
 
     def rel_to_base(path: Path) -> str:
@@ -814,11 +853,24 @@ def scan(start: Path | None = None) -> Report:
     for path in _walk(backend, ".py"):
         rel = rel_to_base(path)
         try:
-            source = path.read_text()
+            source = path.read_text(encoding="utf-8")
             scanner = _PyScanner(anchor, rel, source)
-            scanner.run()
-        except (SyntaxError, UnicodeDecodeError):
+        except (SyntaxError, ValueError, OSError) as exc:
+            # NOT a `continue`. This file is in `backend/`, which `report.scanned`
+            # says was swept; passing over it in silence is how a run that judged
+            # nothing reads as a run that judged everything and approved it.
+            #
+            # `ValueError` covers the decode failure (`UnicodeDecodeError` is a
+            # subclass of it) and one more case, because the interpreter decides
+            # which exception a bad file raises and the versions disagree: a NUL
+            # byte in a module is a `SyntaxError` from `ast.parse` on 3.12+ and a
+            # bare `ValueError` before it. This scan runs under whatever `python3`
+            # the job has, so catching only what the newest one raises reproduces
+            # the very blindness on older interpreters that this handler exists to
+            # end — there as an unhandled crash rather than a silent pass.
+            report.unreadable.append((rel, _why_unreadable(exc)))
             continue
+        scanner.run()
         report.sites.extend(scanner.sites)
         if _is_test_path(rel):
             continue
@@ -835,7 +887,12 @@ def scan(start: Path | None = None) -> Report:
         report.scanned.append(rel_to_base(frontend))
         for path in _walk(frontend, ".ts", ".tsx"):
             rel = rel_to_base(path)
-            findings, sites = _scan_ts(anchor, rel, path.read_text())
+            try:
+                source = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError) as exc:
+                report.unreadable.append((rel, _why_unreadable(exc)))
+                continue
+            findings, sites = _scan_ts(anchor, rel, source)
             report.sites.extend(sites)
             if not _is_test_path(rel):
                 report.findings.extend(findings)
@@ -981,6 +1038,8 @@ def main(argv: list[str] | None = None) -> int:
     print("Scanned: " + ", ".join(report.scanned))
     for missing in report.unscanned:
         print(f"NOT scanned: {missing}")
+    for path, reason in report.unreadable:
+        print(f"NOT scanned: {path} ({reason})")
     print()
 
     # The edges travel with the report. This arm has been blind to a write
@@ -1000,9 +1059,35 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {path}:{line}  {names}\n      {snippet}")
         print()
 
+    if report.unreadable:
+        # Printed before the verdict, not after it, because it CHANGES the
+        # verdict: none of these files was judged, so none of them was cleared.
+        print(
+            f"{len(report.unreadable)} file(s) in a tree above could not be read, "
+            f"so they are NOT cleared:\n"
+        )
+        for path, reason in report.unreadable:
+            print(f"  {path}\n      {reason}")
+        print(
+            "\nA guard that cannot read a file has not cleared it, so this run "
+            "FAILS rather than reporting a sweep it did not perform. If these are "
+            "SyntaxErrors, the interpreter running this scan is older than the one "
+            "the backend targets: run it under that version."
+        )
+        print()
+
     if not report.findings:
-        print("No site bypasses the derivation.")
-        return 0
+        if report.swept_whole_tree:
+            print("No site bypasses the derivation.")
+        else:
+            # The wording is load-bearing. The unqualified sentence is a claim
+            # about the repository; this run only earned a claim about the part
+            # of it that was read.
+            print(
+                "No site bypasses the derivation in what was read — this was NOT a "
+                "whole-tree sweep, see the NOT scanned lines above."
+            )
+        return 1 if report.unreadable else 0
 
     print(f"{len(report.findings)} site(s) bypass the settlement derivation:\n")
     for finding in report.findings:

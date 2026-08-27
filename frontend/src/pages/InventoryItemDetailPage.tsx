@@ -32,10 +32,11 @@ import PurchaseReceiptsPanel from '../components/inventory/PurchaseReceiptsPanel
 import SerializedComponentsPanel from '../components/inventory/SerializedComponentsPanel';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import NFPADiamond from '../components/NFPADiamond';
+import { isAuthenticated } from '../components/RequireAuth';
 import StockHistoryChart from '../components/StockHistoryChart';
 import { useNotifications } from '../hooks/useNotifications';
 import { assetsAPI, CycleCountPayload, inventoryAPI, PackTransition, reorderAPI, sigAPI } from '../services/api';
-import { Asset, InventoryItem, InventoryItemMetrics, ItemPurchaseHistory, KitSummary, ReorderRequest, SIG, StockHistory, UsageLog } from '../types';
+import { Asset, InventoryItem, InventoryItemMetrics, ItemPurchaseHistory, ItemSupplier, KitSummary, ReorderRequest, SIG, StockHistory, UsageLog } from '../types';
 import { showError } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 import {
@@ -47,6 +48,61 @@ import {
   onHandLabel,
   pluralizeUnit,
 } from '../utils/packaging';
+
+/**
+ * Supplier-section rendering helpers (op-item-suppliers).
+ *
+ * A value nobody recorded is a different fact from an empty string or a zero,
+ * so both get said out loud rather than rendered as a blank cell. In
+ * particular: `ItemSupplier.average_lead_time` is NOT NULL with a default of 7,
+ * so `0` means "arrives same day" and must never read the same as a payload
+ * that carried no lead time at all.
+ */
+const NotRecorded: React.FC = () => (
+  <Text size="sm" c="dimmed" fs="italic">
+    Not recorded
+  </Text>
+);
+
+/**
+ * A discontinued or inactive link is dimmed exactly where it carries an
+ * ACTIONABLE FIGURE — the name you would contact and the lead time you would
+ * plan around — and never where it carries an IDENTIFIER. A lead time is a
+ * promise about a future delivery and a link you cannot buy from makes none,
+ * so its "3 days" must not read as the better option beside an orderable
+ * "14 days". A SKU or UPC stays true whether or not you can order today and is
+ * exactly what someone needs to look up what was bought last year, so dimming
+ * it would cost legibility for no safety gain. The treatment stops there.
+ *
+ * Every supplier cell derives BOTH its colour and its `data-emphasis`
+ * attribute from this one function, so the rendered emphasis cannot drift from
+ * the attribute a test reads: reclassifying a column moves both together.
+ */
+type SupplierCellKind = 'actionable-figure' | 'identifier';
+type SupplierCellEmphasis = 'dimmed' | 'full';
+
+const cellEmphasis = (kind: SupplierCellKind, unorderable: boolean): SupplierCellEmphasis =>
+  kind === 'actionable-figure' && unorderable ? 'dimmed' : 'full';
+
+const dimColor = (emphasis: SupplierCellEmphasis) => (emphasis === 'dimmed' ? 'dimmed' : undefined);
+
+const recordedValue = (value: string | null | undefined, emphasis: SupplierCellEmphasis) =>
+  value ? (
+    <Text size="sm" c={dimColor(emphasis)}>
+      {value}
+    </Text>
+  ) : (
+    <NotRecorded />
+  );
+
+const leadTimeValue = (days: number | null | undefined, emphasis: SupplierCellEmphasis) =>
+  typeof days === 'number' && Number.isFinite(days) ? (
+    <Text size="sm" c={dimColor(emphasis)}>
+      {days} day{days === 1 ? '' : 's'}
+    </Text>
+  ) : (
+    <NotRecorded />
+  );
 
 // Cycle-count reason options (op-c7y4). Mirrors the reconciliation grid's
 // user-facing set — the system-only `vision_supply_check` reason is omitted.
@@ -405,6 +461,11 @@ const InventoryItemDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
+  // `/inventory/items/:id` is NOT behind RequireAuth (App.tsx), so a logged-out
+  // visitor reaches this page. Read the app's auth signal once, as ScanPage
+  // does, so it cannot change midway through a render.
+  const [isLoggedIn] = useState<boolean>(isAuthenticated);
+
   const [item, setItem] = useState<InventoryItem | null>(null);
   const [metrics, setMetrics] = useState<InventoryItemMetrics | null>(null);
   // Kits that contain this item (op-8n0). Empty means the card is not rendered
@@ -622,6 +683,14 @@ const InventoryItemDetailPage: React.FC = () => {
       </WorkspacePage>
     );
   }
+
+  // Item suppliers (op-item-suppliers). `undefined` and `[]` are DIFFERENT
+  // facts and the card renders them differently: a payload that carried no
+  // `suppliers` key never told us anything, while an empty array is a positive
+  // "this item has no supplier linked". The detail endpoint always sends the
+  // key, so the undefined branch only fires for a narrowed/partial payload —
+  // but it must not read as "none".
+  const supplierLinks: ItemSupplier[] | undefined = item.suppliers;
 
   // Packaging matrix (op-lkxl). `packCounted` is the one predicate the new
   // surfaces branch on: false for an each-mode item AND for a half-configured
@@ -888,7 +957,10 @@ const InventoryItemDetailPage: React.FC = () => {
                     </Text>
                     <Text size="sm">{item.location || 'No location specified'}</Text>
                   </div>
-                  {item.supplier_name && (
+                  {/* A logged-out visitor keeps the single legacy name they saw
+                      before the Suppliers card existed — no more and no less.
+                      See the Suppliers card below for why the card is gated. */}
+                  {!isLoggedIn && item.supplier_name && (
                     <div>
                       <Text size="sm" fw={500} mb="xs">
                         Primary Supplier
@@ -939,6 +1011,141 @@ const InventoryItemDetailPage: React.FC = () => {
                 </Card>
               )}
             </Group>
+
+            {/* Suppliers (op-item-suppliers). Every ItemSupplier link for this
+                item, which is the supplier source of truth. The page used to
+                render `item.supplier_name` — the READ-ONLY legacy accessor that
+                `InventoryItemSerializer` documents as superseded by
+                `suppliers[]` — so an item with three suppliers showed exactly
+                one name, and the operator had no way to tell there were others.
+                Rendered for an item with none too: "no suppliers are linked" is
+                a fact worth stating on a reorder screen.
+
+                SIGNED-IN ONLY, and this gate is DELIBERATELY PARTIAL. This
+                route is not behind RequireAuth and `retrieve` is AllowAny, so
+                without the gate this card would widen what an anonymous visitor
+                sees from one supplier name to the whole sourcing table. Gating
+                it removes that widening; it does NOT close the posture. The
+                same SKUs, UPCs and lead times remain anonymously reachable
+                through SupplierViewSet and ItemSupplierViewSet (both
+                IsAuthenticatedOrReadOnly) and through the equally unguarded
+                /inventory/suppliers/:id page, which already renders per-item
+                supplier SKU and lead time. Whether that data should be
+                anonymously readable at all is filed as separate work: a real
+                fix spans views.py, App.tsx and ScanTTY's contract, and is
+                outside this change's no-API-change constraint. */}
+            {isLoggedIn && (
+              <Card withBorder p="md" data-testid="item-suppliers-card">
+                <Stack gap="md">
+                  <Title order={4}>Suppliers</Title>
+                  {supplierLinks === undefined ? (
+                    <Text size="sm" c="dimmed" data-testid="suppliers-unknown-note">
+                      Supplier information was not included in this response.
+                    </Text>
+                  ) : supplierLinks.length === 0 ? (
+                    <Text size="sm" c="dimmed" data-testid="no-suppliers-note">
+                      No suppliers are linked to this item.
+                    </Text>
+                  ) : (
+                    <>
+                      {/* With nothing flagged `is_primary`, no row has earned a
+                          Primary badge — say that outright rather than implying
+                          a choice nobody made. The note is deliberately bare on
+                          two counts.
+
+                          It names NO selection mechanism, because two exist and
+                          they disagree: the order pad groups under
+                          `primary_item_supplier`, which with nothing flagged is
+                          the cheapest link regardless of whether you can buy
+                          from it, while the recommendations endpoint first drops
+                          inactive and discontinued links and then scores cost
+                          alongside lead time and other factors. Any sentence
+                          naming one is false on the other.
+
+                          It names NO remedy, because the web app has no write
+                          path for `is_primary`: the API client exposes only a
+                          GET and mark_discontinued, and the item form's "Set as
+                          Primary" control mutates local state that its submit
+                          discards. Telling an operator to flag one would name an
+                          action they cannot take. Building that write path is
+                          real work on a public surface and is routed as separate
+                          follow-up, not folded in here. */}
+                      {!supplierLinks.some((link) => link.is_primary) && (
+                        <Text size="sm" c="dimmed" data-testid="no-primary-supplier-note">
+                          No supplier is flagged primary, so the system picks one for you.
+                        </Text>
+                      )}
+                      <Table>
+                        <Table.Thead>
+                          <Table.Tr>
+                            <Table.Th>Supplier</Table.Th>
+                            <Table.Th>Their SKU</Table.Th>
+                            <Table.Th>Package UPC</Table.Th>
+                            <Table.Th>Unit UPC</Table.Th>
+                            <Table.Th>Lead Time</Table.Th>
+                          </Table.Tr>
+                        </Table.Thead>
+                        <Table.Tbody>
+                          {supplierLinks.map((link) => {
+                            // Emphasis per column follows `cellEmphasis`'s
+                            // actionable-figure-vs-identifier rule; see it for why
+                            // the name and the lead time dim while the SKU and
+                            // UPCs stay fully legible.
+                            const unorderable = link.is_discontinued || !link.is_active;
+                            const nameEmphasis = cellEmphasis('actionable-figure', unorderable);
+                            const skuEmphasis = cellEmphasis('identifier', unorderable);
+                            const packageUpcEmphasis = cellEmphasis('identifier', unorderable);
+                            const unitUpcEmphasis = cellEmphasis('identifier', unorderable);
+                            const leadTimeEmphasis = cellEmphasis('actionable-figure', unorderable);
+                            return (
+                              <Table.Tr key={link.id} data-testid={`item-supplier-${link.id}`}>
+                                <Table.Td data-testid={`supplier-name-${link.id}`} data-emphasis={nameEmphasis}>
+                                  <Group gap="xs" wrap="wrap">
+                                    <Text size="sm" fw={500} c={dimColor(nameEmphasis)}>
+                                      {link.supplier_name}
+                                    </Text>
+                                    {link.is_primary && (
+                                      <Badge size="sm" color="blue">
+                                        Primary
+                                      </Badge>
+                                    )}
+                                    {link.is_discontinued && (
+                                      <Badge size="sm" color="red" variant="light">
+                                        Discontinued
+                                      </Badge>
+                                    )}
+                                    {!link.is_active && (
+                                      <Badge size="sm" color="gray" variant="light">
+                                        Inactive
+                                      </Badge>
+                                    )}
+                                  </Group>
+                                </Table.Td>
+                                <Table.Td data-testid={`supplier-sku-${link.id}`} data-emphasis={skuEmphasis}>
+                                  {recordedValue(link.supplier_sku, skuEmphasis)}
+                                </Table.Td>
+                                <Table.Td
+                                  data-testid={`supplier-package-upc-${link.id}`}
+                                  data-emphasis={packageUpcEmphasis}
+                                >
+                                  {recordedValue(link.package_upc, packageUpcEmphasis)}
+                                </Table.Td>
+                                <Table.Td data-testid={`supplier-unit-upc-${link.id}`} data-emphasis={unitUpcEmphasis}>
+                                  {recordedValue(link.unit_upc, unitUpcEmphasis)}
+                                </Table.Td>
+                                <Table.Td data-testid={`supplier-lead-time-${link.id}`} data-emphasis={leadTimeEmphasis}>
+                                  {leadTimeValue(link.average_lead_time, leadTimeEmphasis)}
+                                </Table.Td>
+                              </Table.Tr>
+                            );
+                          })}
+                        </Table.Tbody>
+                      </Table>
+                    </>
+                  )}
+                </Stack>
+              </Card>
+            )}
 
             {/* QR Code */}
             {item.qr_code && (

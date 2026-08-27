@@ -1050,19 +1050,29 @@ const InventoryItemDetailPage: React.FC = () => {
                     <>
                       {/* With nothing flagged `is_primary`, no row has earned a
                           Primary badge — say that outright rather than implying
-                          a choice nobody made. The note deliberately names NO
-                          selection mechanism: two exist and they disagree. The
-                          order pad groups under `primary_item_supplier`, which
-                          with nothing flagged is the cheapest link regardless of
-                          whether you can buy from it; the recommendations
-                          endpoint first drops inactive and discontinued links
-                          and then scores cost alongside lead time and other
-                          factors. Any sentence naming one is false on the other,
-                          so this states the fact and the remedy instead. */}
+                          a choice nobody made. The note is deliberately bare on
+                          two counts.
+
+                          It names NO selection mechanism, because two exist and
+                          they disagree: the order pad groups under
+                          `primary_item_supplier`, which with nothing flagged is
+                          the cheapest link regardless of whether you can buy
+                          from it, while the recommendations endpoint first drops
+                          inactive and discontinued links and then scores cost
+                          alongside lead time and other factors. Any sentence
+                          naming one is false on the other.
+
+                          It names NO remedy, because the web app has no write
+                          path for `is_primary`: the API client exposes only a
+                          GET and mark_discontinued, and the item form's "Set as
+                          Primary" control mutates local state that its submit
+                          discards. Telling an operator to flag one would name an
+                          action they cannot take. Building that write path is
+                          real work on a public surface and is routed as separate
+                          follow-up, not folded in here. */}
                       {!supplierLinks.some((link) => link.is_primary) && (
                         <Text size="sm" c="dimmed" data-testid="no-primary-supplier-note">
-                          No supplier is flagged primary, so the system picks one for you. Flag one to choose it
-                          yourself.
+                          No supplier is flagged primary, so the system picks one for you.
                         </Text>
                       )}
                       <Table>

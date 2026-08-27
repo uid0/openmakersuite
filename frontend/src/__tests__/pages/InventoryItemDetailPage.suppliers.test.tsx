@@ -273,9 +273,10 @@ describe('InventoryItemDetailPage — suppliers card', () => {
 
     const note = within(suppliersCard()).getByTestId('no-primary-supplier-note');
     expect(note).toHaveTextContent(/no supplier is flagged primary/i);
-    // A state the operator is shown is only legitimate when they can act on it,
-    // so the note must also name the action that resolves it.
-    expect(note).toHaveTextContent(/flag one/i);
+    // It states the fact and stops. The web app has no write path for
+    // is_primary, so directing the operator to flag, set, choose or edit one
+    // would name an action they cannot take from anywhere in this app.
+    expect(note.textContent).not.toMatch(/\b(flag|set|choose|select|edit|contact|ask)\b/i);
     expect(within(suppliersCard()).queryByText('Primary')).not.toBeInTheDocument();
   });
 

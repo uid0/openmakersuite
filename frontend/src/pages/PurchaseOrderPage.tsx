@@ -3027,15 +3027,32 @@ const PurchaseOrderPage: React.FC = () => {
                                   voiding — struck off, on the record, with a
                                   reason — is the only thing offered. */}
                               {order.can_delete_items ? (
-                                <button
-                                  onClick={() => handleDeleteItem(item)}
-                                  disabled={saving}
-                                  className="btn-delete-item"
-                                  style={{ marginLeft: '0.5rem' }}
-                                  data-testid={`delete-line-${item.id}`}
-                                >
-                                  Delete Line
-                                </button>
+                                item.quantity_received === 0 ? (
+                                  <button
+                                    onClick={() => handleDeleteItem(item)}
+                                    disabled={saving}
+                                    className="btn-delete-item"
+                                    style={{ marginLeft: '0.5rem' }}
+                                    data-testid={`delete-line-${item.id}`}
+                                  >
+                                    Delete Line
+                                  </button>
+                                ) : (
+                                  /* Neither action applies: the server refuses
+                                     to delete a line carrying receipts, and
+                                     void refuses one too. Offering a button
+                                     the server would refuse is worse than
+                                     offering none, but an unexplained empty
+                                     cell is its own trap — so the row says
+                                     what is wrong, in the server's own words. */
+                                  <span
+                                    className="line-removal-blocked"
+                                    data-testid={`line-removal-blocked-${item.id}`}
+                                  >
+                                    {item.quantity_received} recorded as received — correct the
+                                    receipt before this line can be removed.
+                                  </span>
+                                )
                               ) : (
                                 item.quantity_received === 0 && (
                                   <button

@@ -265,13 +265,37 @@ def _rederive_after_line_save(sender, instance, **kwargs):
     here rather than in the admin form that happens to be today's only reparent
     door.
 
-    Ordinary saves are still excluded, and the reparent branch does not weaken
-    that: a save that merely moved a settlement field already re-rolls the
-    total on its own path (``add_line_item``, ``update_item``), so re-rolling
-    from here as well would write the order — and bump its ``updated_at`` — on
-    every line save, which is what :func:`_remember_what_this_save_moves`
-    exists to prevent one layer up. A reparent is distinguished before the
-    write and asks the question only for the two orders that really moved.
+    Ordinary saves are excluded, and here is exactly what that leaves covered
+    and uncovered, because the rounding-up version of this paragraph was itself
+    the defect:
+
+    * COVERED — a line's cost LEAVING an order, by any route. Delete
+      (:func:`_rederive_after_line_delete`) and reparent (here).
+    * COVERED — a cost edit through the API, because ``add_line_item`` and
+      ``update_item`` re-roll the total on their own path before returning.
+    * NOT COVERED — a cost edit through the Django admin. Neither
+      ``PurchaseOrderItemAdmin.save_model`` nor
+      ``PurchaseOrderAdmin.save_formset`` calls ``recalculate_estimated_total``,
+      so lowering a line's quantity or price on the admin change form, or
+      adding a line on the inline formset, leaves the stored total describing
+      the lines as they were. That is wrong money on the detail page, in
+      ``payment_schedule`` and to every API client, and it is a known instance
+      of ``oms-derived-totals-beyond-settlement`` rather than something this
+      module quietly handles.
+
+    Closing that from here would take more than a flag. The cost of a line is
+    ``quantity_ordered * unit_cost_ordered``, and only the first is inside the
+    settlement closure :func:`settlement_fields` derives, so only the first is
+    already compared before the write. Marking costs on that half would leave
+    an admin REPRICE still stale while the docstring said saves were handled —
+    an invariant documented as held and not held, which is the shape of defect
+    this file has spent three rounds removing. So it stays open and named.
+
+    What the exclusion does buy is real: re-rolling on every line save would
+    write the order — and bump its ``updated_at`` — whenever anyone edited a
+    note, which is what :func:`_remember_what_this_save_moves` exists to
+    prevent one layer up. A reparent is distinguished before the write and asks
+    the question only for the two orders that really moved.
     """
     if not getattr(instance, "_settlement_moved", True):
         return
@@ -332,6 +356,9 @@ def _rederive_after_line_delete(sender, instance, **kwargs):
     re-derive is the general shape filed as ``oms-derived-totals-beyond-
     settlement``; the reparent gap above is a worked instance of it, down to
     how it was found (the rule was written down, then read back against every
-    route that can satisfy its antecedent).
+    route that can satisfy its antecedent). That issue is STILL NEEDED — this
+    module now covers removal by every route, and leaves the admin's cost EDIT
+    open on purpose, named in :func:`_rederive_after_line_save`. The class is
+    narrowed, not closed.
     """
     _mark({instance.purchase_order_id}, costs=True)

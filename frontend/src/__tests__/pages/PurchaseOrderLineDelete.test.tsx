@@ -293,6 +293,34 @@ describe('PurchaseOrderPage — deleting vs voiding a line', () => {
     });
   });
 
+  describe('a pre-send line that somehow carries receipts', () => {
+    beforeEach(() => {
+      (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+        data: order({
+          items: [line({ quantity_received: 3, quantity_pending: 7 })],
+        }),
+      });
+    });
+
+    test('offers neither Delete nor Void — the server refuses both', async () => {
+      renderPage();
+
+      await screen.findByTestId('line-removal-blocked-line-1');
+      expect(screen.queryByTestId('delete-line-line-1')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('void-line-line-1')).not.toBeInTheDocument();
+    });
+
+    test('says why, in the same terms the server would have refused in', async () => {
+      renderPage();
+
+      const note = await screen.findByTestId('line-removal-blocked-line-1');
+      // The recorded quantity, and the correction that has to come first.
+      expect(note).toHaveTextContent('3');
+      expect(note).toHaveTextContent(/received/i);
+      expect(note).toHaveTextContent(/correct the receipt/i);
+    });
+  });
+
   describe('a voided line', () => {
     test('offers neither action — there is nothing left to do to it', async () => {
       (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({

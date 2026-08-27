@@ -135,6 +135,21 @@ anything, and what it protects against is destroying goods a receipt says
 arrived. Prefer the guard to the argument wherever the argument is about what
 some other part of the codebase will never do.
 
+Outside the pre-send set sit two different reasons, and `assert_deletable` says
+whichever is true: "the supplier already has this line, void it instead" and
+"this order is closed and never went out, start a new one". The split reads
+`sent_at`, not the status label, because a draft can be cancelled or voided
+without ever going to the supplier and an order can be cancelled after it went
+— the stamp is right in both directions and a status name is right in neither.
+A refusal is only legitimate when the operator can act on it, and a refusal that
+misstates why is worse than a bare one.
+
+One thing deliberately NOT changed here: `get_queryset` hides an order with no
+active lines from the list endpoint, so deleting a single-line draft's only line
+drops it off PurchaseOrderListPage. That was already reachable by voiding the
+only line; its root is the list filter rather than deletion, so it was routed to
+a separate product decision instead of being changed under this one.
+
 ### Purchase-order line settlement
 
 "Is receiving finished with this line?" is defined once, on
@@ -182,13 +197,21 @@ The rule is "a line's cost LEFT the order", so it covers the admin change
 form's REPARENT too — moving a line to another order removes its cost from the
 one it left exactly as a delete does, and leaves the one it joined
 understating. That case re-rolls both orders from the post_save receiver.
-Ordinary line SAVES stay excluded: `add_line_item` / `update_item` already
-re-roll on their own path, and doing it again from the signal would bump the
-order's `updated_at` on every line save. When you state a rule like this one in
-a docstring, read it back against every route that satisfies its antecedent —
-the reparent gap was a stated rule the code did not honour, and it is a worked
-instance of `oms-derived-totals-beyond-settlement` (order-level figures
-computed from lines that only some line-writing paths re-derive).
+
+Ordinary line SAVES stay excluded, and the boundary is narrower than it sounds:
+the API's own `add_line_item` / `update_item` re-roll on their own path, but the
+admin does NOT — neither `save_model` nor `save_formset` calls
+`recalculate_estimated_total` — so an admin quantity edit, reprice or inline add
+still leaves the stored total stale. It is left open deliberately, because the
+signal only compares fields inside the settlement closure and
+`unit_cost_ordered` is not one of them, so closing half of it would mean an
+invariant documented as held and not held. `oms-derived-totals-beyond-settlement`
+(order-level figures computed from lines that only some line-writing paths
+re-derive) is STILL NEEDED for the rest; removal is covered, editing is not.
+
+When you state a rule like this one in a docstring, read it back against every
+route that satisfies its antecedent — the reparent gap was a stated rule the
+code did not honour, and it is the worked instance to build that issue on.
 
 **What the signal does NOT cover, and why the guard still has a job:**
 querysets fire no per-object save signal. `PurchaseOrderItem.objects.filter(...)

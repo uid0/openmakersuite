@@ -687,19 +687,43 @@ def assert_deletable(purchase_order):
     is what voiding exists for.
 
     The refusal NAMES the alternative. An operator who cannot delete has
-    somewhere to go (void the line, keeping it on the record struck off), and a
-    refusal that does not say so leaves them stuck on a screen with two buttons
-    and no explanation of why the one they wanted is gone.
+    somewhere to go, and a refusal that does not say so leaves them stuck on a
+    screen with two buttons and no explanation of why the one they wanted is
+    gone.
+
+    There are TWO true reasons, and which one applies is not a question about
+    the status name. Outside the pre-send set sit both "the supplier has it"
+    and "this order is closed", and a draft can be cancelled or voided without
+    ever going out — telling that operator the supplier already has their line
+    is a false statement in the one place they most need a true one, and it
+    points them at void when void is not the instrument they need.
+
+    ``sent_at`` is the fact, so it is what the split reads. ``mark_sent`` is
+    its only writer, which makes it right in both awkward directions: an order
+    cancelled AFTER going out still carries the stamp and still owes the
+    supplier answer, while a draft cancelled without ever going out does not
+    and gets the closed-order answer instead.
     """
-    if purchase_order.status not in PurchaseOrder.PRE_SUPPLIER_STATUSES:
-        label = PurchaseOrder.Status(purchase_order.status).label
+    if purchase_order.status in PurchaseOrder.PRE_SUPPLIER_STATUSES:
+        return
+
+    label = PurchaseOrder.Status(purchase_order.status).label
+    name = purchase_order.po_number or "This order"
+    if purchase_order.sent_at is None:
         raise LineEntryError(
             f"Line items can only be deleted while a purchase order is a draft. "
-            f"{purchase_order.po_number or 'This order'} is {label}, so the "
-            f"supplier already has this line — void it instead to strike it off "
-            f"while keeping it on the record.",
+            f"{name} is {label} and never went to the supplier, so its lines are "
+            f"the record of what was closed — nothing can be added to it or taken "
+            f"off it. Start a new order for anything you still need.",
             "not_draft",
         )
+    raise LineEntryError(
+        f"Line items can only be deleted while a purchase order is a draft. "
+        f"{name} is {label}, so the "
+        f"supplier already has this line — void it instead to strike it off "
+        f"while keeping it on the record.",
+        "not_draft",
+    )
 
 
 def resolve_item_supplier(purchase_order, item_supplier_id):

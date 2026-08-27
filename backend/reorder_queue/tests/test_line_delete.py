@@ -28,6 +28,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.urls import reverse
+from django.utils import timezone
 
 import pytest
 
@@ -44,15 +45,30 @@ pytestmark = pytest.mark.django_db
 # --------------------------------------------------------------------------
 
 
-def _order(status=PurchaseOrder.Status.DRAFT, *, user=None):
+def _order(status=PurchaseOrder.Status.DRAFT, *, user=None, sent=None):
     """A two-line order in ``status``, with its stored total rolled up.
 
     Two lines on purpose: a single-line order cannot tell "the total was
     re-rolled" apart from "the total was zeroed".
+
+    ``sent`` stamps ``sent_at``, the record of the supplier having been handed
+    the document. It defaults to "stamped unless the order is still a draft",
+    because ``mark_sent`` is the only writer of that stamp and is how every
+    status past DRAFT is reached — an order in ``sent`` with no stamp is a
+    state the application cannot produce. The two terminal statuses are the
+    exception a draft can reach without going out, so tests that care pass
+    ``sent`` explicitly.
     """
     user = user or UserFactory()
     supplier = SupplierFactory()
-    purchase_order = PurchaseOrder.objects.create(supplier=supplier, created_by=user, status=status)
+    if sent is None:
+        sent = status != PurchaseOrder.Status.DRAFT
+    purchase_order = PurchaseOrder.objects.create(
+        supplier=supplier,
+        created_by=user,
+        status=status,
+        sent_at=timezone.now() if sent else None,
+    )
     first = PurchaseOrderItem.objects.create(
         purchase_order=purchase_order,
         item_supplier=ItemSupplierFactory(supplier=supplier),
@@ -207,6 +223,39 @@ def test_delete_is_refused_in_every_status_outside_the_pre_send_set(client, stat
 
     assert response.status_code == 400, f"{status} allowed a delete"
     assert PurchaseOrderItem.objects.filter(pk=first.pk).exists()
+
+
+def test_a_draft_cancelled_without_being_sent_is_not_told_the_supplier_has_it(client):
+    """The refusal has to be TRUE, not only present.
+
+    A draft cancelled before it ever went out is closed, not disclosed. Telling
+    that operator the supplier already holds their line is a false statement in
+    the one place they most need a true one, and it sends them to void, which
+    is not the instrument for an order nobody outside the shop has seen.
+    """
+    purchase_order, first, _second = _order(status=PurchaseOrder.Status.CANCELLED, sent=False)
+
+    response = client.delete(_line_url(purchase_order, first))
+
+    assert response.status_code == 400
+    error = response.data["error"]
+    assert "supplier already has" not in error
+    # Still actionable: it says why, and what to do instead.
+    assert "never went to the supplier" in error
+    assert "new order" in error
+    assert PurchaseOrderItem.objects.filter(pk=first.pk).exists()
+
+
+def test_an_order_cancelled_after_being_sent_is_still_told_to_void(client):
+    """The same status, the opposite fact — and the stamp is what tells them apart."""
+    purchase_order, first, _second = _order(status=PurchaseOrder.Status.CANCELLED, sent=True)
+
+    response = client.delete(_line_url(purchase_order, first))
+
+    assert response.status_code == 400
+    error = response.data["error"]
+    assert "the supplier already has this line" in error
+    assert "void it instead" in error
 
 
 def test_delete_refuses_a_line_that_records_a_receipt(client):

@@ -689,6 +689,15 @@
   cursor: not-allowed;
 }
 
+/* A pre-send line that somehow carries receipts can be neither deleted nor
+   voided, so the row carries the reason instead of an empty cell. Plain text,
+   not a disabled button: there is no action here to re-enable. */
+.line-removal-blocked {
+  margin-left: 0.5rem;
+  font-size: 0.8125rem;
+  color: #92400e;
+}
+
 /* Reopening a line closed short is a correction, not a destructive act, so it
    reads as an ordinary secondary action rather than borrowing the void red. */
 .btn-reopen-short {

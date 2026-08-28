@@ -147,13 +147,11 @@ can be live with its supplier and hold no stamp. A refusal is only legitimate
 when the operator can act on it, and a refusal that misstates why is worse than
 a bare one.
 
-Two things found here and deliberately NOT changed, routed to follow-up instead
-(the first has since been fixed — see the next section):
+One thing found here and deliberately NOT changed, routed to follow-up instead
+(the list-filter defect found alongside it — `get_queryset` dropping a draft
+off the list once its only line was gone — has since been fixed, and the next
+section owns that rule):
 
-- `get_queryset` hides an order with no active lines from the list endpoint, so
-  deleting a single-line draft's only line drops it off PurchaseOrderListPage.
-  That was already reachable by voiding the only line; its root is the list
-  filter rather than deletion, so it is a product call across all orders.
 - `PurchaseOrderAdmin.mark_as_sent` never stamps `sent_at`, which also leaves
   `days_since_ordered` reading 0 for orders sent that way. Changing it alters
   existing admin behaviour, so instead nothing in this change depends on that

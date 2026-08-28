@@ -2045,12 +2045,15 @@ class TestPurchaseOrderListVoidHandling:
     """Tests for oms-a8o: zero-out and red-out voided POs in the list endpoint.
 
     The /reorders/purchase-orders/ list must hide POs whose line items are all
-    voided, and the displayed estimated total must subtract voided line items.
-    Detail retrieval is unaffected — deep links to fully-voided POs still work.
+    voided *once the order has left the shop* — the fixtures here are all
+    ``sent`` — and the displayed estimated total must subtract voided line
+    items. Detail retrieval is unaffected — deep links to fully-voided POs
+    still work.
 
-    The hide is EMPTIED BY VOIDING only: lines exist and none survive. An order
-    with no line items at all is a different thing and is listed — see
-    ``tests/test_po_list_emptiness.py``, which owns that boundary.
+    The hide is EMPTIED BY VOIDING only: lines exist, none survive, and the
+    order is outside ``PRE_SUPPLIER_STATUSES``. An order with no line items at
+    all, and any order still pre-send, are different things and are listed —
+    see ``tests/test_po_list_emptiness.py``, which owns that boundary.
     """
 
     def _make_po_with_items(self, user, *, item_count=2, unit_cost=None):
@@ -2085,7 +2088,7 @@ class TestPurchaseOrderListVoidHandling:
         item.save()
 
     def test_list_excludes_po_with_all_voided_items(self, authenticated_client):
-        """A PO whose every line item is voided must not appear in the list."""
+        """A sent PO whose every line item is voided must not appear in the list."""
         client, user = authenticated_client
         all_voided_po, items = self._make_po_with_items(user, item_count=2)
         for item in items:
@@ -2154,9 +2157,9 @@ class TestPurchaseOrderListDraftFilter:
     has line items, and that drafts stay server-side private from the public
     list. No view change was needed — these pin the behaviour the web relies on.
 
-    A draft with NO line items is covered in ``tests/test_po_list_emptiness.py``:
-    the filter used to swallow that one, which is what the delete workflow made
-    reachable.
+    A draft with NO line items — and a draft whose lines were all voided — are
+    covered in ``tests/test_po_list_emptiness.py``: the filter used to swallow
+    those, which is what the delete workflow made reachable.
     """
 
     def _make_po(self, user, *, po_status, item_count=1):

@@ -147,16 +147,33 @@ can be live with its supplier and hold no stamp. A refusal is only legitimate
 when the operator can act on it, and a refusal that misstates why is worse than
 a bare one.
 
-Two things found here and deliberately NOT changed, routed to follow-up instead:
+One thing found here and deliberately NOT changed, routed to follow-up instead
+(the list-filter defect found alongside it — `get_queryset` dropping a draft
+off the list once its only line was gone — has since been fixed, and the next
+section owns that rule):
 
-- `get_queryset` hides an order with no active lines from the list endpoint, so
-  deleting a single-line draft's only line drops it off PurchaseOrderListPage.
-  That was already reachable by voiding the only line; its root is the list
-  filter rather than deletion, so it is a product call across all orders.
 - `PurchaseOrderAdmin.mark_as_sent` never stamps `sent_at`, which also leaves
   `days_since_ordered` reading 0 for orders sent that way. Changing it alters
   existing admin behaviour, so instead nothing in this change depends on that
   stamp being written.
+
+### Two kinds of empty purchase order, and when emptiness hides one
+
+The LIST action hides an order **emptied by voiding** that is outside
+`PurchaseOrder.PRE_SUPPLIER_STATUSES`, and nothing else. An order with **no
+line items at all** is listed in every status.
+
+No status NAME appears in the condition: the pre-send clause reads the
+`PRE_SUPPLIER_STATUSES` frozenset, the same one `assert_addable` /
+`assert_deletable` / `get_can_delete_items` read, so a second pre-send status
+is one edit to that frozenset and none of it is here.
+
+`PurchaseOrderViewSet.get_queryset` owns the derivation;
+`reorder_queue/tests/test_po_list_emptiness.py` owns the behaviour, crossing
+status × line-population rather than enumerating cases in prose.
+
+Two related questions are known and filed separately: the `VOIDED`-order
+display inconsistency on staff's list, and `void_item` carrying no status gate.
 
 ### Purchase-order line settlement
 

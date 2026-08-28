@@ -101,8 +101,10 @@ def test_list_endpoint_carries_the_label_too():
     the list route specifically rather than trusting that they share one.
     """
     user = _staff()
-    # The list hides orders with no active line item (oms-a8o), so each needs
-    # one to appear at all.
+    # The list hides an order EMPTIED BY VOIDING — lines exist, none survive
+    # (oms-a8o) — so each of these carries an active line. An order with no
+    # lines at all is listed now, but a status row for a populated order is
+    # the case this is about.
     for status_value in (PurchaseOrder.Status.DRAFT, PurchaseOrder.Status.VOIDED):
         _line(_po(user, status=status_value))
 

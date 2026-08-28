@@ -195,9 +195,12 @@ carry no line-count precondition.
 
 Two things follow, and both are worth keeping in mind before touching this:
 
-- The condition is on the LINES, never on `status`. There is no status name in
-  it, so a new status needs no edit here; `tests/test_po_list_emptiness.py`
-  crosses status × line-population instead of enumerating cases in prose.
+- No status NAME appears in the condition. The pre-send clause reads the
+  `PRE_SUPPLIER_STATUSES` frozenset off the order's own state machine, and the
+  zero-line clause is the same sentence in every status, so a second pre-send
+  status is one edit to that frozenset and none in any of the four places that
+  read it, this filter included; `tests/test_po_list_emptiness.py` crosses
+  status × line-population instead of enumerating cases in prose.
 - Two things were REPORTED rather than changed, both post-send and both filed
   separately. (a) Staff's list is inconsistent about `VOIDED` orders: one that
   had lines is hidden (`void_po` cascades the void to every line), an empty one

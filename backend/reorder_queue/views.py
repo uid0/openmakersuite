@@ -851,9 +851,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         # what it is — lines exist, none survive — rather than inferred from a
         # count that cannot tell the two apart.
         #
-        # The condition is on the LINES, not on the order's status, so it is
-        # the same sentence in every status; ``tests/test_po_list_emptiness.py``
-        # crosses both axes rather than naming statuses here.
+        # No status NAME appears in the condition: the pre-send clause reads
+        # ``PRE_SUPPLIER_STATUSES`` off the order's own state machine, the same
+        # set the three line-editing sites read, and the zero-line clause is
+        # the same sentence in every status. So a second pre-send status is one
+        # edit to that frozenset and none in any of the four places that read
+        # it, this one included; ``tests/test_po_list_emptiness.py`` crosses
+        # both axes rather than naming statuses here.
         if self.action == "list":
             queryset = queryset.annotate(
                 _items_count=Count("items", distinct=True),

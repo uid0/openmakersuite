@@ -147,7 +147,8 @@ can be live with its supplier and hold no stamp. A refusal is only legitimate
 when the operator can act on it, and a refusal that misstates why is worse than
 a bare one.
 
-Two things found here and deliberately NOT changed, routed to follow-up instead:
+Two things found here and deliberately NOT changed, routed to follow-up instead
+(the first has since been fixed — see the next section):
 
 - `get_queryset` hides an order with no active lines from the list endpoint, so
   deleting a single-line draft's only line drops it off PurchaseOrderListPage.
@@ -157,6 +158,54 @@ Two things found here and deliberately NOT changed, routed to follow-up instead:
   `days_since_ordered` reading 0 for orders sent that way. Changing it alters
   existing admin behaviour, so instead nothing in this change depends on that
   stamp being written.
+
+### Two kinds of empty purchase order, and when emptiness hides one
+
+`PurchaseOrderViewSet.get_queryset` hides an order from the LIST action only.
+The rule it applies is **emptied by voiding after it left the shop**: the order
+has line items, every one of them is struck off, and it is outside
+`PRE_SUPPLIER_STATUSES`, so there is nothing left to show or pay for.
+
+The third clause is derived, not a status list. *"Nothing to pay for"
+presupposes something that was owed*, and nothing is owed while the order is
+still the shop's own private document — striking a line off a draft is the
+operator editing their own work, which is the very act line DELETION replaced.
+So the boundary is the same frozenset `assert_addable` / `assert_deletable` /
+`can_delete_items` already read, and a second pre-send status is one edit in all
+four places. It is reachable, not theoretical: `void_item` carries **no status
+gate**, so voiding the only line of a draft was a live second route into the
+same trap deleting it was. Fixing one route and not the other is the
+all-but-one-site failure this repo keeps closing.
+
+An order with **no line items at all** is deliberately NOT that, and is listed
+in every status. The two were once one condition — "no line is active" is
+vacuously true of an order with no lines — and that is the shape of the bug: an
+order still being built has not discharged an obligation, it has not taken one
+on yet. Deleting the only line of a draft made the operator's own order vanish
+from the only list that leads back to it, and detail retrieval staying
+unfiltered is no answer when the link is what you no longer have.
+
+Two facts about that order, both established by driving the real API rather
+than read off the models: `POST /reorders/purchase-orders/` REFUSES an empty
+`items` list, so a zero-line order is one whose lines were DELETED (or one
+built in the admin) and never one created that way; and every status is
+reachable on a zero-line order, because `status` is writable on
+`PurchaseOrderSerializer` and `send_to_supplier` / `confirm_order` / `void`
+carry no line-count precondition.
+
+Two things follow, and both are worth keeping in mind before touching this:
+
+- The condition is on the LINES, never on `status`. There is no status name in
+  it, so a new status needs no edit here; `tests/test_po_list_emptiness.py`
+  crosses status × line-population instead of enumerating cases in prose.
+- Two things were REPORTED rather than changed, both post-send and both filed
+  separately. (a) Staff's list is inconsistent about `VOIDED` orders: one that
+  had lines is hidden (`void_po` cascades the void to every line), an empty one
+  is listed. That is post-send display and its own question. (b) `void_item`
+  has no status gate at all, so now that a draft line can be DELETED, voiding
+  one leaves exactly the meaningless ghost `get_can_delete_items` warns about.
+  Neither was widened into quietly: this list is what every member and staff
+  member sees.
 
 ### Purchase-order line settlement
 

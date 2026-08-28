@@ -818,14 +818,51 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 | Q(notes__icontains=search)
             )
 
-        # Hide POs with no active line items from the list view (oms-a8o).
-        # A PO whose items are all voided has nothing to show or pay for, so it
-        # should not appear in the public/admin purchase order list. Detail
-        # retrieval is unaffected so deep links and audit trails still resolve.
+        # Hide from the list an order that was EMPTIED BY VOIDING AFTER IT LEFT
+        # THE SHOP, and only that (oms-a8o). Such an order HAS line items, every
+        # one of them has been struck off, and it once carried a real
+        # obligation: it has nothing left to show or pay for, which is the whole
+        # of the rationale this filter has ever had. Detail retrieval is
+        # unaffected so deep links and audit trails still resolve.
+        #
+        # THE THIRD CLAUSE IS DERIVED, NOT A STATUS LIST. "Nothing to pay for"
+        # presupposes something that was owed, and nothing is owed while the
+        # order is still the shop's own private document — striking a line off
+        # a draft is the operator editing their own work, which is the very act
+        # line DELETION replaced. So the boundary is
+        # ``PurchaseOrder.PRE_SUPPLIER_STATUSES``, read off the order's own
+        # state machine, the same set ``assert_addable`` / ``assert_deletable``
+        # / ``can_delete_items`` read and for the same reason. A second pre-send
+        # status is one edit, there and here. This is reachable rather than
+        # theoretical: ``void_item`` carries NO status gate, so voiding the only
+        # line of a draft is a live second route into the same trap that
+        # deleting it was.
+        #
+        # AN ORDER WITH NO LINE ITEMS AT ALL IS NOT THAT, and is not hidden.
+        # The two used to be one condition, because "no line is active" is
+        # vacuously true of an order that has no lines — but such an order has
+        # not discharged an obligation, it has not taken one on yet. Creation
+        # refuses an empty ``items`` list, so this is the order whose lines were
+        # DELETED: "delete the wrong line, then add the right one" is the
+        # workflow line deletion exists for (oms-po-line-delete), and it made
+        # the operator's own draft vanish mid-edit. Detail retrieval staying
+        # unfiltered is no answer when the link is the thing you no longer
+        # have. The emptiness that hides an order is therefore spelled out as
+        # what it is — lines exist, none survive — rather than inferred from a
+        # count that cannot tell the two apart.
+        #
+        # The condition is on the LINES, not on the order's status, so it is
+        # the same sentence in every status; ``tests/test_po_list_emptiness.py``
+        # crosses both axes rather than naming statuses here.
         if self.action == "list":
             queryset = queryset.annotate(
-                _active_items_count=Count("items", filter=Q(items__is_voided=False))
-            ).filter(_active_items_count__gt=0)
+                _items_count=Count("items", distinct=True),
+                _active_items_count=Count("items", filter=Q(items__is_voided=False), distinct=True),
+            ).filter(
+                Q(_items_count=0)
+                | Q(_active_items_count__gt=0)
+                | Q(status__in=PurchaseOrder.PRE_SUPPLIER_STATUSES)
+            )
 
         return queryset
 

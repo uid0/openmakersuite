@@ -2047,6 +2047,10 @@ class TestPurchaseOrderListVoidHandling:
     The /reorders/purchase-orders/ list must hide POs whose line items are all
     voided, and the displayed estimated total must subtract voided line items.
     Detail retrieval is unaffected — deep links to fully-voided POs still work.
+
+    The hide is EMPTIED BY VOIDING only: lines exist and none survive. An order
+    with no line items at all is a different thing and is listed — see
+    ``tests/test_po_list_emptiness.py``, which owns that boundary.
     """
 
     def _make_po_with_items(self, user, *, item_count=2, unit_cost=None):
@@ -2149,6 +2153,10 @@ class TestPurchaseOrderListDraftFilter:
     all-line-items-voided filter (oms-a8o, above) does not swallow a draft that
     has line items, and that drafts stay server-side private from the public
     list. No view change was needed — these pin the behaviour the web relies on.
+
+    A draft with NO line items is covered in ``tests/test_po_list_emptiness.py``:
+    the filter used to swallow that one, which is what the delete workflow made
+    reachable.
     """
 
     def _make_po(self, user, *, po_status, item_count=1):

@@ -322,6 +322,12 @@ Updated packages:
 - Use custom hooks for reusable logic
 - Implement proper error boundaries and loading states
 - Optimize images and assets for mobile performance
+- API errors arrive in the standardized envelope from `backend/config/api_errors.py`
+  (`{error: {code, message, details}}`), where a DRF field rejection sits in
+  `error.details` behind a flat "One or more fields failed validation." message.
+  `src/utils/extractErrorMessage.ts` returns only that flat message, so a form that
+  needs to tell the operator *which* field was rejected has to read `details` itself —
+  see `src/utils/supplierRelationships.ts` for the pattern.
 
 ## Maintaining this file
 

@@ -25,6 +25,13 @@ import { promptInput, showError } from '../utils/dialogs';
 import { InventoryItemFormData, inventoryItemSchema } from '../utils/formSchemas';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 import {
+  relationshipChanged,
+  relationshipPayload,
+  relationshipWriteOrder,
+  supplierWriteError,
+  validateSupplierRelationships,
+} from '../utils/supplierRelationships';
+import {
   COUNT_MODE_LABELS,
   PackagingRow,
   pluralizeUnit,
@@ -56,7 +63,10 @@ const InventoryItemFormPage: React.FC = () => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [_itemSuppliers, setItemSuppliers] = useState<ItemSupplier[]>([]);
+  // What the server currently has, as loaded. The relationship editor diffs
+  // against this so an untouched row sends no request, and a create that has
+  // already landed is not posted twice by a retry.
+  const [itemSuppliers, setItemSuppliers] = useState<ItemSupplier[]>([]);
   const [showCreateCategory, setShowCreateCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [_newLocationName, setNewLocationName] = useState('');
@@ -307,12 +317,85 @@ const InventoryItemFormPage: React.FC = () => {
     });
   };
 
+  /**
+   * Write the supplier-relationship editor back to the `item-suppliers` API.
+   *
+   * The editor is a list, and `ItemSupplierViewSet` is a plain `ModelViewSet`
+   * with no bulk route, so this is one request per changed row: DELETE for the
+   * rows the operator removed, POST for the ones added, PATCH for the ones
+   * edited, and nothing at all for a row left alone.
+   *
+   * Two things follow from writing a list one row at a time:
+   *
+   * 1. **Order matters for the primary flag.** "Only one primary" belongs to
+   *    the server — saving a row with `is_primary` set clears the flag on the
+   *    item's other suppliers in the same transaction
+   *    (`inventory.services.suppliers.enforce_single_primary`). So the promotion
+   *    goes first: the operator's choice then holds even if a later row fails,
+   *    instead of leaving the item with no primary at all.
+   * 2. **Progress has to be kept.** A failure part-way through is reported, not
+   *    swallowed, and the rows that did land are recorded back into state — so
+   *    the retry PATCHes a row that was already created rather than POSTing it
+   *    again and colliding with the `(item, supplier)` uniqueness constraint.
+   */
+  const saveSupplierRelationships = async (savedItem: InventoryItem) => {
+    const keptIds = new Set(
+      supplierRelationships
+        .map((relationship) => relationship.id)
+        .filter((relationshipId): relationshipId is number => relationshipId !== undefined)
+    );
+    const nextRelationships = [...supplierRelationships];
+    let nextSaved = [...itemSuppliers];
+
+    try {
+      // Removals first: they can only free up the (item, supplier) pair that a
+      // create later in this same save might need.
+      for (const removed of itemSuppliers) {
+        if (keptIds.has(removed.id)) continue;
+        await inventoryAPI.deleteItemSupplier(removed.id);
+        nextSaved = nextSaved.filter((saved) => saved.id !== removed.id);
+      }
+
+      for (const index of relationshipWriteOrder(nextRelationships)) {
+        const relationship = nextRelationships[index];
+        try {
+          if (relationship.id === undefined) {
+            const created = await inventoryAPI.createItemSupplier(
+              relationshipPayload(relationship, savedItem.id)
+            );
+            nextRelationships[index] = { ...relationship, id: created.data.id };
+            nextSaved = [...nextSaved, created.data];
+          } else if (
+            relationshipChanged(
+              relationship,
+              nextSaved.find((saved) => saved.id === relationship.id)
+            )
+          ) {
+            const updated = await inventoryAPI.updateItemSupplier(
+              relationship.id,
+              relationshipPayload(relationship)
+            );
+            nextSaved = nextSaved.map((saved) =>
+              saved.id === relationship.id ? updated.data : saved
+            );
+          }
+        } catch (err) {
+          throw supplierWriteError(err, relationship, index, suppliers);
+        }
+      }
+    } finally {
+      setSupplierRelationships(nextRelationships);
+      setItemSuppliers(nextSaved);
+    }
+  };
+
   const onSubmit = async (data: InventoryItemFormData) => {
-    // Refuse an impossible chain here rather than sending it: the backend
-    // rejects the same combinations, but the item write would already have
-    // landed by then.
-    if (chainErrors.length > 0 || countLevelError) {
-      setError([...chainErrors, countLevelError].filter(Boolean).join(' '));
+    // Refuse an impossible chain — or an unfinished supplier row — here rather
+    // than sending it: the backend rejects the same things, but the item write
+    // would already have landed by then, leaving half a save behind.
+    const supplierErrors = validateSupplierRelationships(supplierRelationships, suppliers);
+    if (chainErrors.length > 0 || countLevelError || supplierErrors.length > 0) {
+      setError([...chainErrors, countLevelError, ...supplierErrors].filter(Boolean).join(' '));
       return;
     }
 
@@ -361,8 +444,22 @@ const InventoryItemFormPage: React.FC = () => {
         savedItem = (await inventoryAPI.createItem(formData)).data;
       }
 
-      // Save supplier relationships
-      // TODO: Implement supplier relationship saving via ItemSupplier API
+      // Supplier relationships are their own resource, so they are written
+      // after the item and reported on their own: by this point the item is
+      // already saved, and the operator needs to know which half failed and
+      // that nothing they typed has been thrown away.
+      try {
+        await saveSupplierRelationships(savedItem);
+      } catch (err: any) {
+        console.error('Error saving supplier relationships:', err);
+        setError(
+          `Item saved, but a supplier relationship did not: ${extractErrorMessage(
+            err,
+            'please try again.'
+          )} Your supplier entries are still on this page — fix that one and save again.`
+        );
+        return;
+      }
 
       // The packaging matrix rides a JSON follow-up. It is reported separately
       // because the item itself is already saved by this point — the user needs

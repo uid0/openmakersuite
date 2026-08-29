@@ -228,6 +228,22 @@ export const inventoryAPI = {
   markItemSupplierDiscontinued: (itemSupplierId: string) =>
     api.post(`/inventory/item-suppliers/${itemSupplierId}/mark_discontinued/`),
 
+  // Item-supplier links are written one row at a time against the same
+  // `item-suppliers` ModelViewSet the list above reads: there is no bulk route,
+  // and none is needed — saving a row with `is_primary` set demotes the item's
+  // other primaries server-side, so "make this one primary" is a single request.
+  createItemSupplier: (data: ItemSupplierWritePayload) =>
+    api.post<ItemSupplier>('/inventory/item-suppliers/', data),
+
+  // PATCH, never PUT: the inventory item form offers only part of ItemSupplier
+  // (no UPCs, package dimensions, notes or the active/discontinued flags), and
+  // a full replace would blank everything it does not show.
+  updateItemSupplier: (itemSupplierId: number, data: Partial<ItemSupplierWritePayload>) =>
+    api.patch<ItemSupplier>(`/inventory/item-suppliers/${itemSupplierId}/`, data),
+
+  deleteItemSupplier: (itemSupplierId: number) =>
+    api.delete(`/inventory/item-suppliers/${itemSupplierId}/`),
+
   listItems: (params?: {
     category?: number;
     location?: number;
@@ -515,6 +531,22 @@ export interface InventoryItemPackagingPayload {
   packaging_levels?: PackagingLevelInput[];
   /** Set on-hand as a count of whole `count_level` packs; not with current_stock. */
   current_stock_at_level?: number;
+}
+
+/**
+ * The half of `ItemSupplier` the inventory item form's relationship editor
+ * offers. `item` is sent on create only — an existing row never changes item.
+ */
+export interface ItemSupplierWritePayload {
+  item?: string;
+  supplier: number;
+  supplier_sku: string;
+  supplier_url: string;
+  unit_cost: string | null;
+  package_cost: string | null;
+  quantity_per_package: number;
+  average_lead_time: number;
+  is_primary: boolean;
 }
 
 export type PackTransition = 'open' | 'finish';

@@ -62,7 +62,7 @@ Authenticated staff and members manage the inventory catalog and reorder workflo
 | --- | --- | --- | --- |
 | Browse and search inventory list | `/inventory/items` (`InventoryListPage.tsx`) | member | Loading skeleton; empty-state with "Add item"; auth expiration preserves filter context |
 | View inventory item detail | `/inventory/items/:id` (`InventoryItemDetailPage.tsx`) | public route, member-gated sections | Forbidden state for staff-only fields; missing-item state. The route is not behind `RequireAuth`, so a signed-out visitor reaches it: they keep the single legacy "Primary Supplier" name, while the Suppliers table (every `suppliers[]` link with that supplier's own SKU, UPCs and lead time) renders only when signed in |
-| Create / edit inventory item | `/inventory/items/new`, `/inventory/items/:id/edit` (`InventoryItemFormPage.tsx`) | staff | Form save errors surface field-level validation; auth expiration returns to attempted edit |
+| Create / edit inventory item | `/inventory/items/new`, `/inventory/items/:id/edit` (`InventoryItemFormPage.tsx`) | staff | Form save errors surface field-level validation; auth expiration returns to attempted edit. The save spans more than the item: the supplier-relationship editor is written back through `item-suppliers` (one request per changed row — removals first, then the primary promotion ahead of the rows the server demotes with it — and no request at all for a row left alone). A rejected row is named with the server's own field reason and holds the page with everything typed still on screen instead of navigating, and the rows that did land are remembered so a retry patches them rather than re-posting into the `(item, supplier)` uniqueness constraint |
 | Browse and search categories | `/inventory/categories` (`CategoryListPage.tsx`) | staff | Standard list resilience |
 | Create / edit category | `/inventory/categories/new`, `/inventory/categories/:id/edit` (`CategoryFormPage.tsx`) | staff | Same as above |
 | Browse / view / edit locations | `/inventory/locations`, `/inventory/locations/:id`, `/inventory/locations/:id/edit` (`LocationListPage.tsx`, `LocationDetailPage.tsx`, `LocationFormPage.tsx`) | staff | Detail page exposes problem and traffic panels |
@@ -74,6 +74,7 @@ Tests: `e2e/inventory-browse.spec.ts`, `e2e/public-to-staff.spec.ts`,
 `__tests__/pages/InventoryListPage.test.tsx`,
 `__tests__/pages/InventoryItemDetailPage.test.tsx`,
 `__tests__/pages/InventoryItemFormPage.test.tsx`,
+`__tests__/pages/InventoryItemFormPage.suppliers.test.tsx`,
 `__tests__/pages/InventoryReconciliationPage.test.tsx`,
 `__tests__/pages/LocationListPage.test.tsx`,
 `__tests__/pages/AdminDashboard.test.tsx`.

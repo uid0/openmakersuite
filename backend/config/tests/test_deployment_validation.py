@@ -6,14 +6,17 @@ regression in the validator, the example env, or the deploy compose file
 fails CI before merge.
 """
 
+import fnmatch
 import os
 import re
 import shutil
 import subprocess
 import textwrap
-from pathlib import Path
+from collections import defaultdict
+from pathlib import Path, PurePosixPath
 
 import pytest
+import yaml
 
 
 def _find_repo_root():
@@ -573,3 +576,131 @@ def test_validator_handles_quoted_values(tmp_path):
     env.write_text(body)
     result = _run_validator(env)
     assert result.returncode == 0, result.stdout
+
+
+def _dockerignore_matcher(context):
+    """Build a predicate over context-relative POSIX paths that answers "would
+    `docker build` drop this file?".
+
+    Follows Docker's exclusion rules as far as this check needs them: a path is
+    excluded when it — or one of its parent directories — matches a pattern,
+    with a later `!` pattern re-including it.
+    """
+    rules = []
+    ignore_file = context / ".dockerignore"
+    if ignore_file.is_file():
+        for raw in ignore_file.read_text().splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            negated = line.startswith("!")
+            pattern = line.lstrip("!").strip().strip("/")
+            if pattern:
+                rules.append((negated, pattern))
+
+    def excluded(rel_path):
+        candidates = [rel_path] + [
+            str(parent) for parent in PurePosixPath(rel_path).parents if str(parent) != "."
+        ]
+        verdict = False
+        for negated, pattern in rules:
+            if any(fnmatch.fnmatch(c, pattern) for c in candidates):
+                verdict = not negated
+        return verdict
+
+    return excluded
+
+
+def _context_files_under(context, rel_dir):
+    """Files under `context/rel_dir` that survive the context's `.dockerignore`
+    and would therefore land in the image."""
+    root = context / rel_dir if rel_dir else context
+    if not root.is_dir():
+        return []
+    excluded = _dockerignore_matcher(context)
+    return sorted(
+        path.relative_to(context).as_posix()
+        for path in root.rglob("*")
+        if path.is_file() and not excluded(path.relative_to(context).as_posix())
+    )
+
+
+def _mount_source_and_target(entry):
+    """(source, target) for one compose volume entry, short or long syntax."""
+    if isinstance(entry, dict):
+        return entry.get("source"), entry.get("target")
+    parts = str(entry).split(":")
+    if len(parts) < 2:
+        return None, None
+    return parts[0], parts[1]
+
+
+def _image_workdir(context, dockerfile):
+    """The WORKDIR the build context gets copied into, i.e. the container path
+    that corresponds to the root of the build context."""
+    workdir = "/"
+    for line in (context / dockerfile).read_text().splitlines():
+        stripped = line.strip()
+        if stripped.upper().startswith("WORKDIR "):
+            workdir = stripped.split(None, 1)[1].strip()
+    return workdir
+
+
+@pytest.mark.parametrize("compose_rel", ["docker-compose.yml", "docker-compose.prod.yml"])
+def test_images_ship_nothing_at_shared_named_volume_mount_points(compose_rel):
+    """No image may carry files at a path that several services mount the same
+    named volume on.
+
+    Docker seeds a freshly created named volume from the image content at the
+    mount point, at container-create time. `docker compose up` creates services
+    in parallel, so when two of them mount the same empty volume and the image
+    has files there, both copy the same tree in at once and the loser dies:
+
+        Container openmakersuite-backend-1  Error response from daemon: failed
+        to mkdir /var/lib/docker/volumes/openmakersuite_media_volume/_data/
+        inventory: file exists
+
+    That is what took down the Docker Build Test job: `backend/media/` is
+    tracked in git, so `COPY . /app/` baked it into the image that backend,
+    celery and firmware_builder all mount `media_volume` over. Mount points
+    have to stay empty in the image; `backend/.dockerignore` keeps them so.
+    """
+    compose = yaml.safe_load((REPO_ROOT / compose_rel).read_text())
+    declared = set(compose.get("volumes") or {})
+    services = compose.get("services") or {}
+
+    mounts = defaultdict(list)
+    for service, spec in services.items():
+        for entry in (spec or {}).get("volumes") or []:
+            source, target = _mount_source_and_target(entry)
+            if target and source in declared:
+                mounts[source].append((service, target))
+
+    offenders = []
+    for volume, users in mounts.items():
+        if len(users) < 2:
+            continue
+        for service, target in users:
+            build = services[service].get("build")
+            if not isinstance(build, dict) or not build.get("context"):
+                continue
+            context = (REPO_ROOT / build["context"]).resolve()
+            workdir = _image_workdir(context, build.get("dockerfile", "Dockerfile"))
+            target_path = PurePosixPath(target)
+            if not target_path.is_relative_to(workdir):
+                continue
+            rel_dir = target_path.relative_to(workdir).as_posix()
+            shipped = _context_files_under(context, "" if rel_dir == "." else rel_dir)
+            if shipped:
+                offenders.append(
+                    f"{compose_rel}: service `{service}` builds from "
+                    f"{build['context']} with {len(shipped)} file(s) at "
+                    f"{rel_dir} (e.g. {shipped[0]}), which Docker would seed "
+                    f"into the shared `{volume}` volume"
+                )
+
+    assert not offenders, (
+        "Image content at a shared named-volume mount point races itself into "
+        "the volume when compose starts those services together. Exclude the "
+        "directory in the build context's .dockerignore:\n  " + "\n  ".join(offenders)
+    )

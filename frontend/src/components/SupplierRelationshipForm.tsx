@@ -1,6 +1,16 @@
 /**
  * SupplierRelationshipForm - Component for managing supplier relationships
  * Can be used in a modal or inline in a form
+ *
+ * Every control here is written back through the `item-suppliers` API when the
+ * containing form is saved. `Supplier` and `Supplier SKU` carry an asterisk
+ * because `ItemSupplier` cannot be stored without them.
+ *
+ * `withAsterisk` rather than `required`: the native attribute would have the
+ * browser block the whole item form on an unfinished row with only a transient
+ * bubble as explanation. The containing form checks both fields before it sends
+ * anything and names what is missing in its own error banner, which stays on
+ * screen — and which the operator can act on.
  */
 import { ActionIcon, Button, Group, Select, Stack, Text, TextInput } from '@mantine/core';
 import { IconPlus, IconTrash } from '@tabler/icons-react';
@@ -114,6 +124,7 @@ export const SupplierRelationshipForm: React.FC<SupplierRelationshipFormProps> =
                 <ActionIcon
                   color="red"
                   variant="subtle"
+                  aria-label={`Remove supplier #${index + 1}`}
                   onClick={() => removeRelationship(index)}
                   disabled={disabled}
                 >
@@ -124,6 +135,7 @@ export const SupplierRelationshipForm: React.FC<SupplierRelationshipFormProps> =
               <Group grow>
                 <Select
                   label="Supplier"
+                  withAsterisk
                   data={supplierOptions}
                   searchable
                   value={rel.supplier ? String(rel.supplier) : ''}
@@ -137,6 +149,7 @@ export const SupplierRelationshipForm: React.FC<SupplierRelationshipFormProps> =
               <Group grow>
                 <TextInput
                   label="Supplier SKU"
+                  withAsterisk
                   value={rel.supplier_sku}
                   onChange={(e) =>
                     updateRelationship(index, { supplier_sku: e.target.value })

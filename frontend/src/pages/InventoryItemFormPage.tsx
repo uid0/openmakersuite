@@ -67,6 +67,12 @@ const InventoryItemFormPage: React.FC = () => {
   // against this so an untouched row sends no request, and a create that has
   // already landed is not posted twice by a retry.
   const [itemSuppliers, setItemSuppliers] = useState<ItemSupplier[]>([]);
+  // The item this page created, once a create has landed. A save can fail after
+  // it (a supplier row, the packaging chain), and the operator retries from the
+  // same mounted page — so every later submit updates that item instead of
+  // creating a second one and orphaning the supplier rows already attached to
+  // the first.
+  const [createdItemId, setCreatedItemId] = useState<string | null>(null);
   const [showCreateCategory, setShowCreateCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [_newLocationName, setNewLocationName] = useState('');
@@ -350,9 +356,13 @@ const InventoryItemFormPage: React.FC = () => {
     try {
       // Removals first: they can only free up the (item, supplier) pair that a
       // create later in this same save might need.
-      for (const removed of itemSuppliers) {
+      for (const [index, removed] of itemSuppliers.entries()) {
         if (keptIds.has(removed.id)) continue;
-        await inventoryAPI.deleteItemSupplier(removed.id);
+        try {
+          await inventoryAPI.deleteItemSupplier(removed.id);
+        } catch (err) {
+          throw supplierWriteError(err, removed, index, suppliers);
+        }
         nextSaved = nextSaved.filter((saved) => saved.id !== removed.id);
       }
 
@@ -393,7 +403,11 @@ const InventoryItemFormPage: React.FC = () => {
     // Refuse an impossible chain — or an unfinished supplier row — here rather
     // than sending it: the backend rejects the same things, but the item write
     // would already have landed by then, leaving half a save behind.
-    const supplierErrors = validateSupplierRelationships(supplierRelationships, suppliers);
+    const supplierErrors = validateSupplierRelationships(
+      supplierRelationships,
+      suppliers,
+      itemSuppliers
+    );
     if (chainErrors.length > 0 || countLevelError || supplierErrors.length > 0) {
       setError([...chainErrors, countLevelError, ...supplierErrors].filter(Boolean).join(' '));
       return;
@@ -438,10 +452,12 @@ const InventoryItemFormPage: React.FC = () => {
 
       // Save item
       let savedItem: InventoryItem;
-      if (isEditMode && id) {
-        savedItem = (await inventoryAPI.updateItem(id, formData)).data;
+      const existingId = isEditMode && id ? id : createdItemId;
+      if (existingId) {
+        savedItem = (await inventoryAPI.updateItem(existingId, formData)).data;
       } else {
         savedItem = (await inventoryAPI.createItem(formData)).data;
+        setCreatedItemId(savedItem.id);
       }
 
       // Supplier relationships are their own resource, so they are written

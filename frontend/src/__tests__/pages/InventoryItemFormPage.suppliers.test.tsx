@@ -160,7 +160,25 @@ const renderEdit = (relationships: Record<string, unknown>[]) => {
   );
 };
 
+/** Render the create form, the way an operator reaches it from the item list. */
+const renderCreate = () =>
+  render(
+    <MantineProvider env="test">
+      <MemoryRouter initialEntries={['/inventory/items/new']}>
+        <Routes>
+          <Route path="/inventory/items/new" element={<InventoryItemFormPage />} />
+        </Routes>
+      </MemoryRouter>
+    </MantineProvider>
+  );
+
 const save = () => fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
+const create = () => fireEvent.click(screen.getByRole('button', { name: /create item/i }));
+
+/** Item writes the page sent, by verb — a create is a POST to the collection. */
+const itemWrites = (method: 'post' | 'patch') =>
+  mock.history[method].filter((request) => /^\/inventory\/items\//.test(request.url ?? ''));
 
 /**
  * Wait for the item itself to land in the form.
@@ -471,6 +489,121 @@ describe('InventoryItemFormPage — supplier relationships', { timeout: 30000 },
     expect(
       supplierWrites('post').filter((request) => JSON.parse(request.data as string).supplier === 1)
     ).toHaveLength(1);
+  });
+
+  it('updates the item it already created when a create-mode save is retried', async () => {
+    // Echoed back exactly as the editor holds it, so the retry has no reason to
+    // re-send this row.
+    const createdAcme = {
+      id: 93,
+      supplier: 1,
+      supplier_name: 'Acme Fasteners',
+      supplier_sku: 'A-NEW',
+      supplier_url: '',
+      unit_cost: null,
+      package_cost: null,
+      quantity_per_package: 1,
+      average_lead_time: 0,
+      is_primary: true,
+    };
+    let boltFails = true;
+    mock.onPost('/inventory/items/').reply(201, { ...baseItem, id: 'new-id' });
+    mock.onPatch('/inventory/items/new-id/').reply(200, { ...baseItem, id: 'new-id' });
+    mock.onPost('/inventory/item-suppliers/').reply((config) => {
+      const body = JSON.parse(config.data as string);
+      if (body.supplier === 1) return [201, itemSupplier({ ...createdAcme, item: 'new-id' })];
+      if (boltFails) {
+        boltFails = false;
+        return [500, {}];
+      }
+      return [201, itemSupplier({ id: 94, supplier: 2, item: 'new-id' })];
+    });
+    renderCreate();
+
+    await waitFor(() => expect(screen.getByTestId('page-hero-title')).toBeInTheDocument());
+    fireEvent.change(screen.getAllByLabelText(/^Name/i)[0], { target: { value: 'Hex bolt' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Supplier' }));
+    await chooseSupplier('Acme Fasteners');
+    fireEvent.change(screen.getByLabelText(/Supplier SKU/), { target: { value: 'A-NEW' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Supplier' }));
+    await chooseSupplier('Bolt Depot', 1);
+    fireEvent.change(screen.getAllByLabelText(/Supplier SKU/)[1], { target: { value: 'B-NEW' } });
+    create();
+
+    // The item and the Acme row landed; the Bolt row did not, so the operator
+    // is told which one and stays on the page with both rows in front of them.
+    await waitFor(() => expect(screen.getByText(/Bolt Depot —/)).toBeInTheDocument());
+    expect(mockNavigate).not.toHaveBeenCalled();
+
+    create();
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/inventory/items/new-id'));
+    // One item, not two: the retry updates the item the first save created,
+    // which is the item the already-created Acme row hangs off.
+    expect(itemWrites('post')).toHaveLength(1);
+    expect(itemWrites('patch')).toHaveLength(1);
+    expect(itemWrites('patch')[0].url).toBe('/inventory/items/new-id/');
+    // Acme is not created a second time — that would hit the (item, supplier)
+    // uniqueness constraint — and Bolt is created against the same item.
+    expect(
+      supplierWrites('post').filter((request) => JSON.parse(request.data as string).supplier === 1)
+    ).toHaveLength(1);
+    const boltPosts = supplierWrites('post').filter(
+      (request) => JSON.parse(request.data as string).supplier === 2
+    );
+    expect(boltPosts).toHaveLength(2);
+    boltPosts.forEach((request) =>
+      expect(JSON.parse(request.data as string)).toMatchObject({ item: 'new-id', supplier: 2 })
+    );
+  });
+
+  it('refuses a supplier swap before sending it, and names the way out', async () => {
+    renderEdit([
+      itemSupplier(),
+      itemSupplier({
+        id: 92,
+        supplier: 2,
+        supplier_name: 'Bolt Depot',
+        supplier_sku: 'BD-9',
+        is_primary: false,
+      }),
+    ]);
+
+    await waitFor(() => expect(screen.getByDisplayValue('BD-9')).toBeInTheDocument());
+    // Exchange the two rows' suppliers. Written one row at a time in a fixed
+    // order, the first PATCH would land on a pair the other row still holds:
+    // a 400 that every identical retry reproduces forever.
+    await chooseSupplier('Bolt Depot', 0);
+    await chooseSupplier('Acme Fasteners', 1);
+    save();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          /two rows cannot exchange suppliers in one save\. Remove one of those two rows, save, then add it back with the other supplier\./
+        )
+      ).toBeInTheDocument()
+    );
+    expect(supplierWrites('patch')).toHaveLength(0);
+    expect(supplierWrites('post')).toHaveLength(0);
+    expect(supplierWrites('delete')).toHaveLength(0);
+    expect(itemWrites('patch')).toHaveLength(0);
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('names the supplier whose removal the server refused', async () => {
+    mock.onDelete('/inventory/item-suppliers/91/').reply(500, {});
+    renderEdit([itemSupplier()]);
+
+    await waitFor(() => expect(screen.getByDisplayValue('ACME-1')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Remove supplier #1/ }));
+    save();
+
+    await waitFor(() => expect(supplierWrites('delete')).toHaveLength(1));
+    // Several rows can be removed in one save, so a failed removal has to say
+    // which one, exactly as a failed create or update does.
+    await waitFor(() => expect(screen.getByText(/Acme Fasteners —/)).toBeInTheDocument());
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 
   it('refuses an unfinished row with a reason, before anything is written', async () => {

@@ -36,13 +36,21 @@ export const SUPPLIER_FIELD_LABELS: Record<string, string> = {
   is_primary: 'Primary Supplier',
 };
 
-/** How a row is named in a message: the chosen supplier, else its position. */
+/**
+ * How a row is named in a message: the chosen supplier, else its position.
+ *
+ * Takes a persisted `ItemSupplier` as readily as an editor row, so a failed
+ * removal names its supplier the same way a failed create or update does — the
+ * removed row is gone from the editor by then and only the server's copy is
+ * left to name it with.
+ */
 export const relationshipLabel = (
-  relationship: SupplierRelationship,
+  relationship: { supplier: number | null; supplier_name?: string },
   index: number,
   suppliers: Supplier[]
 ): string =>
-  suppliers.find((supplier) => supplier.id === relationship.supplier)?.name ??
+  suppliers.find((supplier) => supplier.id === relationship.supplier)?.name ||
+  relationship.supplier_name ||
   `Supplier #${index + 1}`;
 
 /**
@@ -55,10 +63,17 @@ export const relationshipLabel = (
  */
 export const validateSupplierRelationships = (
   relationships: SupplierRelationship[],
-  suppliers: Supplier[]
+  suppliers: Supplier[],
+  saved: ItemSupplier[] = []
 ): string[] => {
   const errors: string[] = [];
   const seen = new Map<number, number>();
+  const savedById = new Map(saved.map((row) => [row.id, row]));
+  const keptIds = new Set(
+    relationships
+      .map((relationship) => relationship.id)
+      .filter((id): id is number => id !== undefined)
+  );
 
   relationships.forEach((relationship, index) => {
     const label = relationshipLabel(relationship, index, suppliers);
@@ -84,6 +99,29 @@ export const validateSupplierRelationships = (
       );
     } else {
       seen.set(relationship.supplier, index);
+    }
+
+    // The same `unique_together`, seen from the other side: this row is being
+    // moved onto a supplier another row still holds on the server. Rows are
+    // written one at a time in a fixed order, so the pair is still taken when
+    // this row's turn comes — a 400 no retry can get past, since every retry
+    // repeats the same order. Refused here with the way out named, because the
+    // operator cannot infer it from what the server says.
+    const persisted = relationship.id === undefined ? undefined : savedById.get(relationship.id);
+    if (persisted !== undefined && persisted.supplier !== relationship.supplier) {
+      const holder = saved.find(
+        (row) =>
+          row.id !== persisted.id && row.supplier === relationship.supplier && keptIds.has(row.id)
+      );
+      if (holder !== undefined) {
+        const holderIndex = relationships.findIndex((row) => row.id === holder.id);
+        errors.push(
+          `Supplier #${index + 1} (${relationshipLabel(persisted, index, suppliers)}) cannot ` +
+            `move to ${label} while Supplier #${holderIndex + 1} still holds it — two rows ` +
+            'cannot exchange suppliers in one save. Remove one of those two rows, save, then ' +
+            'add it back with the other supplier.'
+        );
+      }
     }
   });
 
@@ -198,7 +236,7 @@ export const supplierFieldErrors = (err: unknown): string | null => {
  */
 export const supplierWriteError = (
   err: unknown,
-  relationship: SupplierRelationship,
+  relationship: { supplier: number | null; supplier_name?: string },
   index: number,
   suppliers: Supplier[]
 ): { detail: string } => ({

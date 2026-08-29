@@ -54,12 +54,33 @@ export const relationshipLabel = (
   `Supplier #${index + 1}`;
 
 /**
+ * The way out of an `(item, supplier)` collision, in the operator's terms.
+ *
+ * Shared by the pre-flight refusal and the report of a collision the server
+ * caught first, so both name the same escape route: the rows are written one at
+ * a time and there is no order in which two of them can trade suppliers, so the
+ * pair has to be freed by a save of its own.
+ */
+export const SUPPLIER_PAIR_ESCAPE =
+  'Two rows cannot exchange suppliers in one save. Remove the row that holds it, save, then ' +
+  'add it back with the other supplier.';
+
+/** DRF's `UniqueTogetherValidator` sentence, which names nothing to act on. */
+const UNIQUE_TOGETHER_REASON = /must make a unique set/i;
+
+/**
  * Reasons the editor's current rows cannot be written, in operator language.
  *
  * Checked before anything is sent, for the same reason the packaging chain is:
  * the item write lands first, so a row the server is certain to reject would
  * otherwise fail *after* half the save had already happened. Every reason here
  * is one the operator can act on without leaving the page.
+ *
+ * The `(item, supplier)` check walks the real write sequence rather than
+ * judging rows in isolation, because whether a pair is free depends entirely on
+ * what has already been written when a row's turn comes. Only a conflict the
+ * walk can actually prove is refused — anything it cannot prove is sent, and a
+ * rejection is reported with the same escape route (`supplierFieldErrors`).
  */
 export const validateSupplierRelationships = (
   relationships: SupplierRelationship[],
@@ -74,6 +95,47 @@ export const validateSupplierRelationships = (
       .map((relationship) => relationship.id)
       .filter((id): id is number => id !== undefined)
   );
+
+  // What the server still holds when the first create/update goes out. Removals
+  // run ahead of every other write in `saveSupplierRelationships`, so a row the
+  // editor no longer keeps has already let its pair go by then.
+  const heldBy = new Map<number, number>();
+  saved.forEach((row) => {
+    if (keptIds.has(row.id)) {
+      heldBy.set(row.supplier, row.id);
+    }
+  });
+
+  relationshipWriteOrder(relationships).forEach((index) => {
+    const relationship = relationships[index];
+    if (relationship.supplier === null) return;
+
+    const persisted =
+      relationship.id === undefined ? undefined : savedById.get(relationship.id);
+    // A row that keeps its supplier never frees the pair — it may not even send
+    // a request. Only a row moving away releases what it held.
+    if (
+      persisted !== undefined &&
+      persisted.supplier !== relationship.supplier &&
+      heldBy.get(persisted.supplier) === persisted.id
+    ) {
+      heldBy.delete(persisted.supplier);
+    }
+
+    const holderId = heldBy.get(relationship.supplier);
+    if (holderId === undefined || holderId === relationship.id) return;
+
+    // Still held, and its holder has not been written yet — every retry repeats
+    // this same order and collides in the same place.
+    const holderIndex = relationships.findIndex((row) => row.id === holderId);
+    const targetName =
+      suppliers.find((supplier) => supplier.id === relationship.supplier)?.name ??
+      `supplier #${relationship.supplier}`;
+    errors.push(
+      `Supplier #${index + 1} cannot take ${targetName}: Supplier #${holderIndex + 1} still ` +
+        `holds it on this item. ${SUPPLIER_PAIR_ESCAPE}`
+    );
+  });
 
   relationships.forEach((relationship, index) => {
     const label = relationshipLabel(relationship, index, suppliers);
@@ -99,29 +161,6 @@ export const validateSupplierRelationships = (
       );
     } else {
       seen.set(relationship.supplier, index);
-    }
-
-    // The same `unique_together`, seen from the other side: this row is being
-    // moved onto a supplier another row still holds on the server. Rows are
-    // written one at a time in a fixed order, so the pair is still taken when
-    // this row's turn comes — a 400 no retry can get past, since every retry
-    // repeats the same order. Refused here with the way out named, because the
-    // operator cannot infer it from what the server says.
-    const persisted = relationship.id === undefined ? undefined : savedById.get(relationship.id);
-    if (persisted !== undefined && persisted.supplier !== relationship.supplier) {
-      const holder = saved.find(
-        (row) =>
-          row.id !== persisted.id && row.supplier === relationship.supplier && keptIds.has(row.id)
-      );
-      if (holder !== undefined) {
-        const holderIndex = relationships.findIndex((row) => row.id === holder.id);
-        errors.push(
-          `Supplier #${index + 1} (${relationshipLabel(persisted, index, suppliers)}) cannot ` +
-            `move to ${label} while Supplier #${holderIndex + 1} still holds it — two rows ` +
-            'cannot exchange suppliers in one save. Remove one of those two rows, save, then ' +
-            'add it back with the other supplier.'
-        );
-      }
     }
   });
 
@@ -219,6 +258,14 @@ export const supplierFieldErrors = (err: unknown): string | null => {
       ? value.find((entry) => typeof entry === 'string' && entry.trim() !== '')
       : value;
     if (typeof reason !== 'string' || reason.trim() === '') {
+      return;
+    }
+    // The one rejection whose own wording names nothing the operator can do:
+    // the pre-flight walk proves what it can and lets the rest through, so this
+    // is where an `(item, supplier)` collision it could not prove has to become
+    // actionable rather than "must make a unique set".
+    if (UNIQUE_TOGETHER_REASON.test(reason)) {
+      parts.push(`this supplier is already linked to this item by another row. ${SUPPLIER_PAIR_ESCAPE}`);
       return;
     }
     parts.push(

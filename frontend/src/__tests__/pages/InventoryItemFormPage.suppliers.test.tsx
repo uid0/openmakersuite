@@ -40,6 +40,7 @@ vi.mock('react-router-dom', async () => ({
 const SUPPLIERS = [
   { id: 1, name: 'Acme Fasteners', supplier_type: 'amazon', website: '', notes: '' },
   { id: 2, name: 'Bolt Depot', supplier_type: 'other', website: '', notes: '' },
+  { id: 3, name: 'McMaster', supplier_type: 'other', website: '', notes: '' },
 ];
 
 const baseItem = {
@@ -250,6 +251,10 @@ const chooseSupplier = async (name: string, row = 0) => {
   }
   fireEvent.click(option);
 };
+
+/** How many times a phrase appears in what the banner renders. */
+const occurrencesIn = (element: HTMLElement, phrase: RegExp): number =>
+  (element.textContent ?? '').match(phrase)?.length ?? 0;
 
 /** Requests the page actually sent to the item-suppliers endpoints. */
 const supplierWrites = (method: 'get' | 'post' | 'patch' | 'delete') =>
@@ -577,17 +582,101 @@ describe('InventoryItemFormPage — supplier relationships', { timeout: 30000 },
     await chooseSupplier('Acme Fasteners', 1);
     save();
 
-    await waitFor(() =>
-      expect(
-        screen.getByText(
-          /two rows cannot exchange suppliers in one save\. Remove one of those two rows, save, then add it back with the other supplier\./
-        )
-      ).toBeInTheDocument()
+    const banner = await screen.findByText(/still holds it on this item/);
+    expect(banner).toHaveTextContent(
+      'Two rows cannot exchange suppliers in one save. Remove the row that holds it, save, then add it back with the other supplier.'
     );
+    // One message per conflicting PAIR. Reported per row instead, the operator
+    // reads the same instruction twice with the row numbers reversed.
+    expect(occurrencesIn(banner, /still holds it on this item/g)).toBe(1);
     expect(supplierWrites('patch')).toHaveLength(0);
     expect(supplierWrites('post')).toHaveLength(0);
     expect(supplierWrites('delete')).toHaveLength(0);
     expect(itemWrites('patch')).toHaveLength(0);
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('permits a chain reassignment the write order makes legal', async () => {
+    mock.onPatch(/\/inventory\/item-suppliers\/9[12]\/$/).reply(200, itemSupplier());
+    renderEdit([
+      itemSupplier({ is_primary: false }),
+      itemSupplier({
+        id: 92,
+        supplier: 2,
+        supplier_name: 'Bolt Depot',
+        supplier_sku: 'BD-9',
+        is_primary: true,
+      }),
+    ]);
+
+    await waitFor(() => expect(screen.getByDisplayValue('BD-9')).toBeInTheDocument());
+    // Not a swap: the primary row vacates Bolt Depot for McMaster and is written
+    // first, so the pair the other row moves onto is already free by its turn.
+    // The server accepts both, so refusing this would cost two extra saves for
+    // nothing — and would throw away this submit's item edits as well.
+    await chooseSupplier('McMaster', 1);
+    await chooseSupplier('Bolt Depot', 0);
+    save();
+
+    await waitFor(() => expect(supplierWrites('patch')).toHaveLength(2));
+    const [first, second] = supplierWrites('patch');
+    expect(first.url).toBe('/inventory/item-suppliers/92/');
+    expect(JSON.parse(first.data as string)).toMatchObject({ supplier: 3 });
+    expect(second.url).toBe('/inventory/item-suppliers/91/');
+    expect(JSON.parse(second.data as string)).toMatchObject({ supplier: 2 });
+    expect(itemWrites('patch')).toHaveLength(1);
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalled());
+  });
+
+  it('refuses a new row claiming the supplier an existing row is vacating', async () => {
+    renderEdit([itemSupplier()]);
+
+    await waitFor(() => expect(screen.getByDisplayValue('ACME-1')).toBeInTheDocument());
+    // The persisted row moves to Bolt Depot; a brand-new primary row claims the
+    // Acme pair it is vacating. The new row is written first — onto a pair the
+    // old row still holds — so this deadlocks exactly like a swap.
+    await chooseSupplier('Bolt Depot', 0);
+    fireEvent.click(screen.getByRole('button', { name: 'Add Supplier' }));
+    await chooseSupplier('Acme Fasteners', 1);
+    fireEvent.change(screen.getAllByLabelText(/Supplier SKU/)[1], { target: { value: 'A-NEW' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Set as Primary' }));
+    save();
+
+    const banner = await screen.findByText(/Supplier #2 cannot take Acme Fasteners/);
+    expect(banner).toHaveTextContent(
+      'Two rows cannot exchange suppliers in one save. Remove the row that holds it, save, then add it back with the other supplier.'
+    );
+    expect(supplierWrites('post')).toHaveLength(0);
+    expect(supplierWrites('patch')).toHaveLength(0);
+    expect(supplierWrites('delete')).toHaveLength(0);
+    expect(itemWrites('patch')).toHaveLength(0);
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('turns a server unique-together rejection into the same escape route', async () => {
+    // The pre-flight walk only refuses collisions it can prove; anything it lets
+    // through has to arrive as something the operator can act on, and DRF's own
+    // sentence names nothing.
+    mock.onPatch('/inventory/item-suppliers/91/').reply(400, {
+      error: {
+        code: 'validation_failed',
+        message: 'One or more fields failed validation.',
+        details: {
+          non_field_errors: ['The fields item, supplier must make a unique set.'],
+        },
+      },
+    });
+    renderEdit([itemSupplier()]);
+
+    await waitFor(() => expect(screen.getByDisplayValue('ACME-1')).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText(/Supplier SKU/), { target: { value: 'ACME-2' } });
+    save();
+
+    const banner = await screen.findByText(/Acme Fasteners — this supplier is already linked/);
+    expect(banner).toHaveTextContent(
+      'Two rows cannot exchange suppliers in one save. Remove the row that holds it, save, then add it back with the other supplier.'
+    );
+    expect(screen.queryByText(/must make a unique set/)).not.toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 

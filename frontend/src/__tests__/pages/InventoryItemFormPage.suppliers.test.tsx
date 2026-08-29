@@ -710,6 +710,56 @@ describe('InventoryItemFormPage — supplier relationships', { timeout: 30000 },
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
+  it('locks the relationship editor while a supplier write is in flight', async () => {
+    let release: (reply: [number, unknown]) => void = () => {};
+    mock
+      .onPatch('/inventory/item-suppliers/91/')
+      .reply(() => new Promise<[number, unknown]>((resolve) => {
+        release = resolve;
+      }));
+    renderEdit([itemSupplier()]);
+
+    await waitFor(() => expect(screen.getByDisplayValue('ACME-1')).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText(/Supplier SKU/), { target: { value: 'ACME-2' } });
+    save();
+
+    // The save writes back the rows it captured when it started, so anything
+    // typed into the editor meanwhile would be reverted without a word.
+    await waitFor(() => expect(supplierWrites('patch')).toHaveLength(1));
+    await waitFor(() => expect(screen.getByLabelText(/Supplier SKU/)).toBeDisabled());
+    expect(screen.getByRole('button', { name: 'Add Supplier' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Remove supplier #1/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Primary Supplier' })).toBeDisabled();
+
+    release([500, {}]);
+
+    // Back in the operator's hands once it settles — the banner names a row
+    // they now have to fix.
+    await waitFor(() => expect(screen.getByText(/Acme Fasteners —/)).toBeInTheDocument());
+    expect(screen.getByLabelText(/Supplier SKU/)).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Add Supplier' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Remove supplier #1/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Primary Supplier' })).toBeEnabled();
+  });
+
+  it('saves an item whose untouched supplier row has a blank SKU', async () => {
+    // A blank SKU is reachable on stored rows (the kit serializer writes the
+    // relationship without one), and this row sends no request at all — so
+    // refusing the save would block an item edit the server would have taken.
+    renderEdit([itemSupplier({ supplier_sku: '' })]);
+
+    await loaded();
+    fireEvent.change(screen.getAllByLabelText(/^Name/i)[0], { target: { value: 'Hex bolt M6' } });
+    save();
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalled());
+    expect(screen.queryByText(/needs a supplier SKU/)).not.toBeInTheDocument();
+    expect(itemWrites('patch')).toHaveLength(1);
+    expect(supplierWrites('patch')).toHaveLength(0);
+    expect(supplierWrites('post')).toHaveLength(0);
+    expect(supplierWrites('delete')).toHaveLength(0);
+  });
+
   it('refuses a row whose SKU the endpoint would reject as blank', async () => {
     renderEdit([]);
 

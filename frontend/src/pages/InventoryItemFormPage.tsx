@@ -905,6 +905,7 @@ const InventoryItemFormPage: React.FC = () => {
               suppliers={suppliers}
               relationships={supplierRelationships}
               onChange={setSupplierRelationships}
+              disabled={saving}
             />
           </Paper>
 

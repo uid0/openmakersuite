@@ -145,6 +145,21 @@ export const validateSupplierRelationships = (
       return;
     }
 
+    const first = seen.get(relationship.supplier);
+    if (first === undefined) {
+      seen.set(relationship.supplier, index);
+    }
+
+    // Only a row this save actually writes can be rejected by the server; a
+    // persisted row nobody touched sends no request, so refusing it would only
+    // block work that would have succeeded.
+    if (
+      relationship.id !== undefined &&
+      !relationshipChanged(relationship, savedById.get(relationship.id))
+    ) {
+      return;
+    }
+
     // `ItemSupplier.supplier_sku` is a non-blank CharField, so an empty SKU is
     // a guaranteed 400 rather than a stored blank.
     if (relationship.supplier_sku.trim() === '') {
@@ -153,14 +168,11 @@ export const validateSupplierRelationships = (
 
     // `unique_together = [["item", "supplier"]]` — two rows for one supplier
     // cannot both be stored, and which one survives would be an accident.
-    const first = seen.get(relationship.supplier);
     if (first !== undefined) {
       errors.push(
         `${label} is listed twice (Supplier #${first + 1} and #${index + 1}); ` +
           'an item can only link a supplier once.'
       );
-    } else {
-      seen.set(relationship.supplier, index);
     }
   });
 

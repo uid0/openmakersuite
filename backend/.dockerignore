@@ -1,0 +1,13 @@
+# Build-context exclusions for backend/Dockerfile*, whose `COPY . /app/`
+# would otherwise bake these runtime directories into the image.
+#
+# media/ and staticfiles/ are named-volume mount points, not build input:
+# docker-compose.yml mounts `media_volume` at /app/media on backend, celery
+# and firmware_builder, and Docker seeds a freshly created named volume from
+# the image content at the mount point. With media/ in the image, `compose
+# up` creates those containers in parallel and each copies the same tree into
+# the same empty volume, so the loser of the race fails to start with
+#   failed to mkdir .../openmakersuite_media_volume/_data/inventory: file exists
+# Keeping the mount points empty in the image means there is nothing to seed.
+media
+staticfiles

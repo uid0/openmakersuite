@@ -344,6 +344,36 @@ def test_a_dead_vendors_delivery_history_does_not_contaminate_the_forecast():
     assert _forecast_row(item)["lead_time_days"] == 7.0
 
 
+def test_forecast_lead_time_follows_the_flagged_primary_not_a_faster_rival():
+    """History against a vendor we will NOT buy from must not set the reorder point.
+
+    The operator flagged SlowVendor primary, so the gate makes it binding on
+    every other surface. Delivery history exists only against a live FastVendor
+    link averaging 7 days. Averaging across every orderable link answered 7 for
+    an item that will in fact take 30 days to arrive — a reorder point roughly
+    four times too low, which is running out of stock while the numbers look
+    fine.
+    """
+    item = _serialized_item("Solenoid")
+    _link(item, "SlowVendor", unit_cost="9.00", lead=30, is_primary=True)
+    fast = _link(item, "FastVendor", unit_cost="1.00", lead=3)
+    _observed_delivery(fast, 7)
+
+    assert _forecast_row(item)["lead_time_days"] == 30.0
+
+
+def test_observed_history_still_beats_the_estimate_for_the_chosen_supplier():
+    """Scoping to the chosen supplier must not demote history where it applies.
+
+    What that supplier ACTUALLY delivered in beats what it claims it will.
+    """
+    item = _serialized_item("Rectifier")
+    chosen = _link(item, "OnlyVendor", unit_cost="4.00", lead=30)
+    _observed_delivery(chosen, 12)
+
+    assert _forecast_row(item)["lead_time_days"] == 12.0
+
+
 def test_forecast_lead_time_matches_the_item_property_it_claims_to_mirror():
     """It previously ordered by ``-is_primary`` alone and could pick another row."""
     item = _serialized_item("Diode")
@@ -446,3 +476,74 @@ def test_a_flagged_primary_gates_every_surface_alike(api):
     assert list(pad.data) == ["Chosen"]
     assert [rec["supplier_name"] for rec in recommendations.data["recommendations"]] == ["Chosen"]
     assert detail.data["supplier_name"] == "Chosen"
+
+
+# ── Case counting is NOT a "which supplier" question ─────────────────────────
+#
+# Deriving from the READERS OF A SYMBOL is not the same as deriving from the
+# QUESTION BEING ASKED. ``current_cases`` reads ``primary_item_supplier`` but
+# asks a different question — how many units are in a box on the shelf — which
+# has nothing to do with who we buy from. Routing it through the orderability
+# rule made a ``None`` invert a boolean rather than degrade to a null: the item
+# whose last supplier just died is exactly the one that most needs a low-stock
+# alert, and it stopped getting one.
+
+
+def _case_based_item_with_a_dead_supplier():
+    """10 loose units, a discontinued link packing 50 to a case, reorder at 1 case."""
+    item = _item(
+        "Solvent",
+        current_stock=10,
+        minimum_stock=10,
+        use_case_based_reorder=True,
+        minimum_cases=1,
+        reorder_cases=2,
+    )
+    ItemSupplier.objects.create(
+        item=item,
+        supplier=Supplier.objects.create(
+            name="GoneAway", supplier_type=Supplier.SupplierType.LOCAL
+        ),
+        supplier_sku="GoneAway-sku",
+        unit_cost=Decimal("1.00"),
+        quantity_per_package=50,
+        average_lead_time=7,
+        is_discontinued=True,
+    )
+    return InventoryItem.objects.get(pk=item.pk)
+
+
+def test_a_case_based_item_stays_flagged_low_when_its_last_supplier_dies():
+    """0.2 of a case on hand, reorder at 1 — still low, however dead the vendor is.
+
+    While ``current_cases`` read the orderability-filtered helper this returned
+    the raw 10 and ``10 <= 1`` was False, silently suppressing the alert.
+    """
+    item = _case_based_item_with_a_dead_supplier()
+
+    assert item.current_cases == pytest.approx(0.2)
+    assert item.needs_reorder is True
+
+
+def test_the_kanban_card_counts_a_dead_vendors_cases_not_loose_units():
+    """ "10 cases on hand" for 10 loose units is a wrong number on a printed card."""
+    from inventory.services.packaging import reorder_display
+
+    item = _case_based_item_with_a_dead_supplier()
+    display = reorder_display(item)
+
+    assert display["unit"] == "case"
+    assert display["current"] == pytest.approx(0.2)
+    assert display["needs_reorder"] is True
+    assert "10 cases on hand" not in display["text"]
+
+
+def test_needs_reorder_and_the_low_stock_query_agree_for_that_shape():
+    """The property and its SQL twin disagreed while the bug was live."""
+    from inventory.services.packaging import low_stock_q
+
+    item = _case_based_item_with_a_dead_supplier()
+    matched = InventoryItem.objects.filter(low_stock_q(), pk=item.pk).exists()
+
+    assert item.needs_reorder is True
+    assert matched is True

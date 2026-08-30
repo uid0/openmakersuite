@@ -24,10 +24,10 @@ This module turns that usage history into a demand forecast:
   point) without lowering ``on_hand``; only a depleting transition lowers both.
 
 * ``reorder_point = avg_daily_use * lead_time_days + safety_stock`` — the
-  classic reorder trigger. ``lead_time_days`` reuses observed supplier
-  performance from :class:`reorder_queue.models.LeadTimeLog` (falling back to
-  the supplier's estimated ``average_lead_time``) — both restricted to
-  suppliers the item can still be ORDERED from — and ``safety_stock`` reuses
+  classic reorder trigger. ``lead_time_days`` describes the supplier the item
+  would actually be bought through — observed performance from
+  :class:`reorder_queue.models.LeadTimeLog` for THAT supplier, falling back to
+  THAT supplier's estimated ``average_lead_time`` — and ``safety_stock`` reuses
   the item's existing ``minimum_stock`` buffer.
 
 The output feeds the inventory + purchasing overview dashboards.
@@ -76,48 +76,43 @@ _DEPLETING_ACTIONS = {
 def _lead_time_days_by_item(items: list[InventoryItem]) -> dict[Any, Optional[float]]:
     """Resolve each item's lead time in days, batched to avoid N+1 queries.
 
-    Prefers the mean of *observed* lead times recorded in
-    ``reorder_queue.LeadTimeLog`` across the item's ORDERABLE suppliers; falls
-    back to the estimated ``average_lead_time`` of the supplier the item would
-    actually be bought through; maps to ``None`` when neither is available.
+    Both branches describe ONE supplier: the one the item would actually be
+    bought through, resolved by the shared ``supplier_selection`` derivation.
+    Prefers the mean of that supplier's *observed* deliveries recorded in
+    ``reorder_queue.LeadTimeLog``; falls back to that same supplier's estimated
+    ``average_lead_time``; maps to ``None`` when the item has no supplier it can
+    be ordered from at all.
 
-    **Both branches share one orderability precondition.** Whichever branch
-    answers, the number is a wait some supplier you can still buy from will
-    make you serve — never a vendor who no longer sells the item.
+    Scoping matters both ways. Averaging history across every link forecast an
+    item on a vendor it will not be bought from — an operator's flagged primary
+    quoting 30 days, with history only against a faster second link, produced a
+    reorder point roughly four times too low, i.e. running out while the numbers
+    looked fine. Including dead links did the same with a vendor who no longer
+    sells the item (op-2rsp).
     """
     # Imported lazily so this module has no hard import-time dependency on the
     # reorder_queue app (mirrors how the rest of inventory references it).
     from reorder_queue.models import LeadTimeLog
 
-    # Observed history, restricted to links that can still be ordered through.
-    # Without this filter a discontinued vendor's deliveries kept setting the
-    # forecast — and because ``observed`` takes precedence over ``estimated``,
-    # it did so THROUGH the fallback that had already been fixed to skip dead
-    # links, leaving the orderability rule incomplete at this one site (op-2rsp).
-    observed = {
-        row["item_supplier__item_id"]: row["avg"]
-        for row in (
-            LeadTimeLog.objects.filter(
-                item_supplier__item__in=items,
-                item_supplier__is_active=True,
-                item_supplier__is_discontinued=False,
-            )
-            .values("item_supplier__item_id")
-            .annotate(avg=Avg("actual_lead_time_days"))
-        )
-    }
+    # The one supplier per item, from the shared derivation: orderable, the
+    # operator's flagged primary if they set one, else the best-scoring
+    # candidate. One query per page. Everything below is scoped to it.
+    selected = primary_suppliers_for(items)
+    selected_link_ids = [link.id for link in selected.values() if link is not None]
 
-    # Estimated fallback: the lead time of the supplier the item would actually
-    # be bought through, resolved by the shared derivation so this genuinely
-    # matches ``InventoryItem.average_lead_time`` rather than approximating it.
-    # It previously ordered by ``-is_primary`` alone, dropping the ``unit_cost``
-    # tiebreak the model applies, so an unflagged item could be forecast off a
-    # different supplier than the one quoted everywhere else; and it read dead
-    # links, so an item could be forecast on the lead time of a vendor that no
-    # longer sells it (op-2rsp). One query per page, as before.
+    observed: dict[Any, Any] = {}
+    if selected_link_ids:
+        observed = {
+            row["item_supplier__item_id"]: row["avg"]
+            for row in (
+                LeadTimeLog.objects.filter(item_supplier_id__in=selected_link_ids)
+                .values("item_supplier__item_id")
+                .annotate(avg=Avg("actual_lead_time_days"))
+            )
+        }
+
     estimated: dict[Any, Any] = {
-        item_id: link.average_lead_time if link else None
-        for item_id, link in primary_suppliers_for(items).items()
+        item_id: link.average_lead_time if link else None for item_id, link in selected.items()
     }
 
     resolved: dict[Any, Optional[float]] = {}

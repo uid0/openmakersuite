@@ -558,16 +558,31 @@ class InventoryItem(OwnableModel):
 
     @property
     def current_cases(self) -> float:
-        """Calculate current number of cases/packages in stock."""
+        """Current number of cases/packages in stock.
+
+        Reads ``quantity_per_package`` from ANY supplier link — orderable or
+        not — because this asks how many units are in a box already sitting on
+        the shelf, which has nothing to do with who we would buy the next one
+        from. It deliberately does NOT go through
+        :attr:`primary_item_supplier` / the ``supplier_selection`` derivation
+        (op-2rsp): that helper answers "which supplier", and routing this
+        through it made a case-based item STOP being flagged low the moment its
+        last supplier was discontinued — ``None`` there does not degrade to a
+        null here, it silently divides by 1 and inverts ``needs_reorder``.
+
+        Rows come from ``item_suppliers.all()`` in ``Meta.ordering``, so a
+        flagged primary's pack size still wins, and a caller that prefetched
+        ``item_suppliers`` hits the cache instead of firing a per-row query —
+        the same N+1 discipline as :meth:`lowest_unit_cost`. The 1-unit
+        fallback is now reached only by an item with no supplier links at all.
+        """
         if not self.use_case_based_reorder:
             return 0
 
-        # Get quantity per package from primary supplier
-        primary_supplier = self.primary_item_supplier
-        if primary_supplier and primary_supplier.quantity_per_package > 0:
-            return self.current_stock / primary_supplier.quantity_per_package
+        for link in self.item_suppliers.all():
+            if link.quantity_per_package and link.quantity_per_package > 0:
+                return self.current_stock / link.quantity_per_package
 
-        # Fallback to 1 unit per package if no supplier info
         return self.current_stock
 
     @property

@@ -1056,19 +1056,22 @@ const InventoryItemDetailPage: React.FC = () => {
                           collapsing them into one line is the mistake this
                           replaces.
 
-                          The selection sentence can now name its mechanism.
-                          Every backend path resolves the supplier through
-                          `inventory.services.supplier_selection`, which skips
-                          inactive and discontinued links and then takes the
-                          flagged primary, or the cheapest of what is left. (The
-                          reorder recommendations endpoint still RANKS the
-                          orderable candidates by its own weighted score; which
-                          ranking should win is an open product decision. Both
-                          agree on eligibility, which is what this note claims.)
+                          The selection sentence names its mechanism, and must
+                          keep matching it. EVERY backend path now resolves the
+                          supplier through
+                          `inventory.services.supplier_selection`: skip the
+                          links you cannot order through, honour a flagged
+                          primary outright, and otherwise score the rest on
+                          price AND lead time. "Cheapest" would be wrong — the
+                          fallback weighs speed too, so the chosen row is not
+                          always the one with the lowest number in a column on
+                          this very table, and a note claiming otherwise would
+                          be contradicted on screen.
 
-                          It can also name a remedy now: `is_primary` became
-                          writable from the item form in #1034, so "flag one on
-                          the item form" is an action the operator can take. */}
+                          It also names a remedy: `is_primary` became writable
+                          from the item form in #1034, and it is a GATE rather
+                          than a bonus, so flagging one really does decide the
+                          answer rather than nudging it. */}
                       {!supplierLinks.some((link) => link.is_active && !link.is_discontinued) ? (
                         <Text size="sm" c="orange" data-testid="no-orderable-supplier-note">
                           No supplier here can be ordered from — every link is inactive or
@@ -1080,9 +1083,9 @@ const InventoryItemDetailPage: React.FC = () => {
                           (link) => link.is_primary && link.is_active && !link.is_discontinued
                         ) && (
                           <Text size="sm" c="dimmed" data-testid="no-primary-supplier-note">
-                            No supplier you can order from is flagged primary, so the system buys
-                            from the cheapest one that is available. Flag one on the item form to
-                            choose for yourself.
+                            No supplier you can order from is flagged primary, so the system picks
+                            one on price and lead time. Flag one on the item form to decide for
+                            yourself instead.
                           </Text>
                         )
                       )}

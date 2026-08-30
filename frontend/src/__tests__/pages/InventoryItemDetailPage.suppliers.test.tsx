@@ -273,6 +273,11 @@ describe('InventoryItemDetailPage — suppliers card', () => {
 
     const note = within(suppliersCard()).getByTestId('no-primary-supplier-note');
     expect(note).toHaveTextContent(/no supplier you can order from is flagged primary/i);
+    // It must describe the rule the backend actually applies. The fallback
+    // weighs lead time as well as price, so calling it "the cheapest" would be
+    // contradicted by the very table this note sits above.
+    expect(note).toHaveTextContent(/price and lead time/i);
+    expect(note.textContent).not.toMatch(/cheapest/i);
     // The note used to stop at the fact, because `is_primary` had no write path
     // in this app and naming one would have described an action the operator
     // could not take. #1034 made the item form persist it, so the remedy is

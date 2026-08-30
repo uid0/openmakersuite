@@ -5,9 +5,11 @@ The service (``inventory.services.supplier_selection``) and the thin
 
 * never hand back a link nobody can order through — inactive or discontinued
   (op-2rsp), including one an operator flagged primary and later discontinued;
-* among the links that ARE orderable, select the IDENTICAL row the legacy
-  ``filter(is_primary=True).first() or first()`` chose (primary-first, then
-  cheapest) — the ranking is unchanged, only the candidate set narrowed;
+* treat a flagged primary as a GATE: an orderable link an operator flagged wins
+  outright and is never scored, so their choice cannot be outbid;
+* otherwise rank the orderable candidates by :func:`score_candidate` (cost and
+  lead time) — see ``test_supplier_scoring.py`` for whether it ranks SENSIBLY,
+  which is a separate question from whether it runs;
 * tell "this item has no suppliers" apart from "every supplier is dead", because
   those are different facts an operator acts on differently;
 * cost ZERO extra queries when ``item_suppliers`` is prefetched (killing the
@@ -24,7 +26,7 @@ import pytest
 
 from inventory.models import InventoryItem, ItemSupplier, Supplier
 from inventory.services.supplier_selection import (
-    BASIS_CHEAPEST_ORDERABLE,
+    BASIS_BEST_SCORED,
     BASIS_FLAGGED_PRIMARY,
     NO_SUPPLIERS,
     NONE_ORDERABLE,
@@ -97,7 +99,8 @@ def test_prefers_the_flagged_primary_over_a_cheaper_non_primary():
     assert primary_item_supplier(item).pk == primary.pk
 
 
-def test_falls_back_to_cheapest_when_none_is_primary():
+def test_falls_back_to_the_cheapest_when_nothing_else_separates_them():
+    """With lead times equal, the score reduces to price and the cheaper wins."""
     item = _item()
     _link(item, "A", is_primary=False, unit_cost="5.00")
     cheapest = _link(item, "B", is_primary=False, unit_cost="1.00")
@@ -124,11 +127,15 @@ def test_among_multiple_primaries_picks_the_cheapest():
     ],
 )
 def test_selection_matches_legacy_query(rows):
-    """For every ORDERABLE supplier arrangement, the service picks the legacy row.
+    """These arrangements still resolve to the row the pre-#882 pair returned.
 
-    op-2rsp narrowed the candidate set but not the ranking, so with every link
-    orderable — which every row here is — the answer is byte-for-byte what the
-    pre-#882 ``filter(is_primary=True).first() or first()`` pair returned.
+    Not a general guarantee any more, and deliberately so: every row here shares
+    the default lead time, which is the case where the score reduces to price
+    and therefore agrees with the legacy ``filter(is_primary=True).first() or
+    first()``. Where lead times differ the score can and should disagree — that
+    is the decision the captain took, and ``test_supplier_scoring.py`` pins it.
+    What this test guards is that adopting the score did not disturb the
+    price-only cases, which are the bulk of the catalogue.
     """
     item = _item()
     for name, is_primary, cost in rows:
@@ -253,7 +260,7 @@ def test_flagged_primary_is_skipped_when_it_cannot_be_ordered():
     live = _link(item, "Live", is_primary=False, unit_cost="9.00")
     choice = select_supplier(item)
     assert choice.item_supplier.pk == live.pk
-    assert choice.basis == BASIS_CHEAPEST_ORDERABLE
+    assert choice.basis == BASIS_BEST_SCORED
     # The operator DID choose, and their choice was overridden — say so.
     assert choice.flagged_primary_unorderable is True
 

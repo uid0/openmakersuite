@@ -7,12 +7,14 @@ of model properties (``supplier``, ``supplier_sku``, ``unit_cost``,
 page of items was therefore an N+1, and the selection logic was buried in the
 model rather than named anywhere. #882 named it here.
 
-op-2rsp made it the ONLY answer, and gave it a filter. The rule is:
+op-2rsp made it the ONLY answer. The rule is three things in strict order:
 
-    Among the item's ORDERABLE supplier links — ``is_active`` and not
-    ``is_discontinued`` — take the first under ``ItemSupplier.Meta.ordering``
-    (``["-is_primary", "unit_cost"]``): the link flagged primary, or, when
-    nothing orderable is flagged, the cheapest orderable one.
+    1. **Eligibility.** Only ORDERABLE links are candidates — ``is_active`` and
+       not ``is_discontinued``.
+    2. **The gate.** If an operator flagged one of those primary, it wins
+       outright and scoring never runs.
+    3. **The score.** Otherwise :func:`score_candidate` ranks the candidates on
+       cost and lead time, and the best scoring one wins.
 
 **Orderability is not a tiebreak, it is a precondition.** An inactive or
 discontinued link is a supplier nobody can buy from; handing one to a purchase
@@ -22,23 +24,33 @@ actionable — this module is why that dimming is not contradicted one screen
 later. ``mark_discontinued`` deliberately does not clear ``is_primary``, so even
 a FLAGGED primary can be unorderable and gets skipped like any other.
 
+**A flagged primary is a GATE, not a term in the sum.** It does not earn points
+that a cheap enough rival could outbid — that would make an operator's explicit
+choice merely expensive rather than binding. It short-circuits the ranking
+entirely. The scoring therefore carries no primary-supplier term at all: under
+the gate, no scored candidate is ever flagged.
+
 **A refusal is a result, not a blank.** ``select_supplier`` distinguishes "this
-item has no suppliers at all" from "it has suppliers but none you can buy from"
-(:class:`NoChoice`), because those need different words in front of an operator
-and different actions from them. Callers that only need the row keep using
+item has no suppliers at all" from "it has suppliers but none you can buy from",
+because those need different words in front of an operator and different actions
+from them. Callers that only need the row keep using
 :func:`primary_item_supplier`, which is that result with the reason dropped.
 
-**Ranking among orderable candidates is deliberately unchanged** and is NOT this
-module's to decide. ``reorder_queue.views.PurchaseOrderViewSet._find_best_supplier``
-scores orderable candidates on cost/lead time/primary-flag instead, and whether
-that weighted score should replace "cheapest" as the fallback when nothing is
-flagged primary is an open product question — it changes what gets bought and
-what gets spent. Until it is answered the two paths agree on WHO IS ELIGIBLE and
-differ only in how they rank the eligible, which is the difference that is
-actually about money.
+**History, because it bears on trusting this.** The scoring below came from
+``reorder_queue.views.PurchaseOrderViewSet._find_best_supplier``, which was a
+second, rival answer to this same question — it filtered orderability but ranked
+by weighted score where every other surface ranked by price. It also raised
+``TypeError`` on ``Decimal * float`` for any candidate priced below 150% of the
+item's average, so it had **never once completed** in production; the one test
+that touched it set ``unit_cost=None`` to route around the crash. Adopting it
+here (the captain's decision) therefore turns on a rule that has never run, and
+changes which supplier the whole system chooses for every item with no flagged
+primary. That is a real behaviour change on member-facing surfaces, and on
+``/metrics/``, which ScanTTY reads.
 """
 
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Dict, Iterable, List, Optional
 
 from inventory.models import ItemSupplier
@@ -54,13 +66,43 @@ NO_SUPPLIERS = "no_suppliers"
 #: different facts and must not collapse into the same silence.
 NONE_ORDERABLE = "none_orderable"
 
-#: The chosen link is the one an operator flagged primary.
+#: An operator flagged this link primary and it is orderable, so it won the GATE
+#: and scoring never ran.
 BASIS_FLAGGED_PRIMARY = "flagged_primary"
 
-#: Nothing orderable is flagged primary, so the cheapest orderable link was
-#: taken. This is the fallback the system picks for you; see the module
-#: docstring on why the ranking is not settled.
-BASIS_CHEAPEST_ORDERABLE = "cheapest_orderable"
+#: Nothing orderable was flagged primary, so :func:`score_candidate` ranked the
+#: orderable candidates and this one scored highest.
+BASIS_BEST_SCORED = "best_scored"
+
+# ── Scoring weights ──────────────────────────────────────────────────────────
+#
+# Carried over UNCHANGED from ``reorder_queue.views``'s ``_find_best_supplier``,
+# which is where this scoring lived while it was one of two rival rules. The
+# captain authorised repairing the scoring and adopting it everywhere, NOT
+# retuning it — what cost or lead time is worth is a separate product question.
+# Two things about these weights are worth a reader's attention; both are
+# reported rather than changed:
+#
+# * ``COST_TOLERANCE`` makes the cost term a CLIFF, not a curve. A candidate
+#   priced at or above 150% of the item's average orderable price scores 0 on
+#   cost, and everything past that point is equally bad. Below average the
+#   factor is NOT clamped at 1 either, so a candidate far cheaper than its peers
+#   can contribute more than the nominal 40%.
+# * ``PERFORMANCE_FACTOR * PERFORMANCE_WEIGHT`` is 0.01 — a constant added to
+#   every candidate alike, so it cannot affect an ordering. The comment it
+#   carried called it a "10% weight"; it is 1%, and inert either way until the
+#   ``LeadTimeLog``-driven version it is a placeholder for exists.
+COST_WEIGHT = Decimal("0.4")
+LEAD_TIME_WEIGHT = Decimal("0.3")
+PERFORMANCE_WEIGHT = Decimal("0.1")
+PERFORMANCE_FACTOR = Decimal("0.1")
+
+#: Percentage points above the item's average orderable unit cost at which the
+#: cost term reaches zero.
+COST_TOLERANCE = Decimal("50")
+
+#: Lead time (days) at which the lead-time term reaches zero.
+MAX_REASONABLE_LEAD_DAYS = Decimal("30")
 
 
 @dataclass(frozen=True)
@@ -89,29 +131,116 @@ def _orderable(link: ItemSupplier) -> bool:
     return link.is_active and not link.is_discontinued
 
 
+def average_orderable_unit_cost(candidates: List[ItemSupplier]) -> Optional[Decimal]:
+    """Mean ``unit_cost`` across ``candidates`` that have one, or ``None``.
+
+    The yardstick the cost term measures each candidate against. Computed in
+    Python from rows the caller already holds rather than with a ``Avg()``
+    aggregate, because the aggregate cost one query PER ITEM — inside the
+    scoring loop, at that — and would bypass the ``item_suppliers`` prefetch
+    every read path relies on. Rows with no price are excluded from the mean,
+    exactly as SQL ``AVG`` skips NULLs.
+    """
+    costs = [link.unit_cost for link in candidates if link.unit_cost is not None]
+    if not costs:
+        return None
+    return sum(costs) / Decimal(len(costs))
+
+
+def score_candidate(link: ItemSupplier, average_unit_cost: Optional[Decimal]) -> Decimal:
+    """Score one ORDERABLE, UNFLAGGED candidate. Higher is better.
+
+    Decimal throughout. The original raised ``TypeError`` on
+    ``Decimal * float`` for any candidate priced below 150% of the item's
+    average — which is nearly all of them, and always so for a single-supplier
+    item — so this scoring had never once completed in production. Money is
+    Decimal; mixing in binary floats was the bug, and casting to ``float`` would
+    have been the wrong repair.
+
+    A flagged primary is NOT scored. It is a gate: an orderable link an operator
+    flagged wins outright in :func:`_choose` and never reaches here, so the
+    operator's explicit choice is binding rather than merely worth some number
+    of points that a cheap enough rival could outbid. The scoring accordingly
+    has no primary-supplier term — under the gate it would be unreachable.
+    """
+    score = Decimal(0)
+
+    # Cost (nominal 40%) — cheaper than the item's average orderable price is
+    # better. See COST_TOLERANCE on the cliff and the missing upper clamp.
+    if link.unit_cost and average_unit_cost:
+        relative = (link.unit_cost / average_unit_cost - 1) * 100
+        cost_factor = max(Decimal(0), COST_TOLERANCE - relative) / COST_TOLERANCE
+        score += cost_factor * COST_WEIGHT
+
+    # Lead time (30%) — sooner is better, flat zero at/after 30 days.
+    if link.average_lead_time:
+        lead_time_factor = max(
+            Decimal(0),
+            (MAX_REASONABLE_LEAD_DAYS - Decimal(link.average_lead_time)) / MAX_REASONABLE_LEAD_DAYS,
+        )
+        score += lead_time_factor * LEAD_TIME_WEIGHT
+
+    # Historical performance — a placeholder constant pending LeadTimeLog-driven
+    # scoring. Identical for every candidate, so it shifts no ordering.
+    score += PERFORMANCE_FACTOR * PERFORMANCE_WEIGHT
+
+    return score
+
+
+def _best_scored(candidates: List[ItemSupplier]) -> ItemSupplier:
+    """Highest-scoring candidate; a tie goes to the FIRST one in ``candidates``.
+
+    ``candidates`` arrives in ``Meta.ordering`` and ``max`` returns the first
+    maximal element, so the answer is a pure function of that order.
+
+    In practice the only reachable tie is between rows identical on price AND
+    lead time: the cost yardstick is the mean of the candidates themselves, so
+    two of them cannot both sit past the 150% cliff, and any third cheap enough
+    to drag the mean down would outscore them. Such rows are interchangeable —
+    "the cheaper one" is not a meaningful tie-break between them — and which one
+    wins is whichever the database returned first. Stable within a query, and
+    deliberately not claimed to be more than that.
+    """
+    average = average_orderable_unit_cost(candidates)
+    return max(candidates, key=lambda link: score_candidate(link, average))
+
+
 def _choose(links: List[ItemSupplier]) -> SupplierChoice:
     """Resolve one item's ``ItemSupplier`` rows, already in ``Meta.ordering``.
+
+    Two steps, in this order, and the order is the whole point:
+
+    1. **The gate.** An orderable link flagged primary wins outright. Scoring
+       never runs. An operator's explicit choice is not a term in a sum that
+       something else can outbid.
+    2. **The score.** Only when nothing orderable is flagged does
+       :func:`score_candidate` rank what is left.
 
     Filtering happens HERE, in Python, rather than as a ``.filter()`` on the
     queryset: the callers that matter serialise a whole page and rely on the
     ``item_suppliers`` prefetch cache, and a fresh ``.filter()`` would bypass
-    that cache and reintroduce the per-row query #882 removed. The rows arrive
-    primary-first then cheapest, so the first orderable row IS the answer.
+    that cache and reintroduce the per-row query #882 removed.
     """
     if not links:
         return SupplierChoice(reason=NO_SUPPLIERS)
 
     flagged_exists = any(link.is_primary for link in links)
-    for link in links:
-        if not _orderable(link):
-            continue
-        basis = BASIS_FLAGGED_PRIMARY if link.is_primary else BASIS_CHEAPEST_ORDERABLE
-        return SupplierChoice(
-            item_supplier=link,
-            basis=basis,
-            flagged_primary_unorderable=flagged_exists and not link.is_primary,
-        )
-    return SupplierChoice(reason=NONE_ORDERABLE, flagged_primary_unorderable=flagged_exists)
+    candidates = [link for link in links if _orderable(link)]
+    if not candidates:
+        return SupplierChoice(reason=NONE_ORDERABLE, flagged_primary_unorderable=flagged_exists)
+
+    # 1. The gate. ``enforce_single_primary`` keeps at most one flagged per item,
+    #    and the rows arrive primary-first, so this is the first candidate if any.
+    for link in candidates:
+        if link.is_primary:
+            return SupplierChoice(item_supplier=link, basis=BASIS_FLAGGED_PRIMARY)
+
+    # 2. The score, over candidates none of which is flagged.
+    return SupplierChoice(
+        item_supplier=_best_scored(candidates),
+        basis=BASIS_BEST_SCORED,
+        flagged_primary_unorderable=flagged_exists,
+    )
 
 
 def _links_for(item) -> List[ItemSupplier]:

@@ -11,12 +11,10 @@ The fixture shape is deliberately the awkward one: **the cheapest supplier is
 discontinued**. Under the old rule it won every one of these surfaces, because
 selection was ``ORDER BY -is_primary, unit_cost`` with nothing filtered.
 
-One surface is deliberately absent: ``PurchaseOrderViewSet._find_best_supplier``
-ranks the orderable candidates by a weighted cost/lead-time score instead of by
-cost alone. It already filters orderability, so it never had this defect;
-whether its RANKING should replace "cheapest" as the fallback when nothing is
-flagged primary is an open product decision that changes what gets bought, and
-is not settled here.
+``_find_best_supplier`` — once the rival rule — now delegates here too, so the
+last two surfaces that could name different suppliers for one item agree; see
+``test_the_order_pad_and_the_recommendations_name_the_same_supplier``, which
+could not be written while the two rules disagreed AND the second one crashed.
 """
 
 from decimal import Decimal
@@ -316,3 +314,75 @@ def test_kanban_card_lead_time_comes_from_a_supplier_you_can_still_buy_from():
 
     fresh = InventoryItem.objects.prefetch_related("item_suppliers__supplier").get(pk=item.pk)
     assert fresh.average_lead_time == 20
+
+
+# ── The two rules that used to disagree ─────────────────────────────────────
+
+
+def test_create_optimized_order_no_longer_500s_on_a_priced_supplier(api):
+    """The crash that made the weighted rule inert: ``Decimal * float``.
+
+    It fired for any candidate priced below 150% of the item's average, so a
+    single-supplier low-stock item — the commonest shape there is — took the
+    endpoint down. Nothing in the suite caught it because the one test that
+    reached this code set ``unit_cost=None`` to route around it.
+    """
+    item = _item("Bracket")
+    _link(item, "Only", unit_cost="7.00", lead=9)
+
+    response = api.post("/api/reorders/purchase-orders/create_optimized_order/")
+
+    assert response.status_code == 200, response.content
+    lines = [line for rec in response.data["recommendations"] for line in rec["items"]]
+    assert [line["item_name"] for line in lines] == ["Bracket"]
+
+
+def test_the_order_pad_and_the_recommendations_name_the_same_supplier(api):
+    """One item, two surfaces, one answer — on the shape that used to split them.
+
+    Cheapest-but-slow against slightly-dearer-but-fast is exactly where a
+    price-only rule and a weighted one part company. The order pad used to group
+    under the cheapest link while the recommendations engine scored lead time in
+    (or rather, would have, had it not crashed first).
+    """
+    item = _item("Coupling")
+    _link(item, "SlowCheap", unit_cost="5.00", lead=28)
+    _link(item, "FastDear", unit_cost="5.25", lead=3)
+    ReorderRequest.objects.create(
+        item=item,
+        quantity=3,
+        status=ReorderRequest.Status.APPROVED,
+        requested_by="tester",
+    )
+
+    pad = api.get("/api/reorders/requests/generate_cart_links/")
+    recommendations = api.post("/api/reorders/purchase-orders/create_optimized_order/")
+
+    assert pad.status_code == 200, pad.content
+    assert recommendations.status_code == 200, recommendations.content
+    assert list(pad.data) == [
+        rec["supplier_name"] for rec in recommendations.data["recommendations"]
+    ]
+    # And it is the weighted answer, not the price-only one.
+    assert list(pad.data) == ["FastDear"]
+
+
+def test_a_flagged_primary_gates_every_surface_alike(api):
+    """The operator's choice binds the pad and the recommendations equally."""
+    item = _item("Flange")
+    _link(item, "Chosen", unit_cost="20.00", lead=25, is_primary=True)
+    _link(item, "CheapAndFast", unit_cost="1.00", lead=2)
+    ReorderRequest.objects.create(
+        item=item,
+        quantity=3,
+        status=ReorderRequest.Status.APPROVED,
+        requested_by="tester",
+    )
+
+    pad = api.get("/api/reorders/requests/generate_cart_links/")
+    recommendations = api.post("/api/reorders/purchase-orders/create_optimized_order/")
+    detail = api.get(f"/api/inventory/items/{item.id}/")
+
+    assert list(pad.data) == ["Chosen"]
+    assert [rec["supplier_name"] for rec in recommendations.data["recommendations"]] == ["Chosen"]
+    assert detail.data["supplier_name"] == "Chosen"

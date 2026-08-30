@@ -118,11 +118,18 @@ the seven flat compat properties, `item_metrics` (the pinned ScanTTY contract),
 it: three copies of `ORDER BY -is_primary, unit_cost` had already drifted apart
 before op-2rsp collapsed them.
 
-**Orderability is a precondition, not a tiebreak.** A link that is not
-`is_active`, or that is `is_discontinued`, is never the answer — including one an
-operator flagged primary, because `mark_discontinued` deliberately leaves
-`is_primary` set. Among the links that remain, ranking is `Meta.ordering`
-(flagged primary, else cheapest) and is unchanged.
+The rule is three things, in this order:
+
+1. **Eligibility.** Only orderable links are candidates — a link that is not
+   `is_active`, or that is `is_discontinued`, is never the answer. That includes
+   one an operator flagged primary, because `mark_discontinued` deliberately
+   leaves `is_primary` set.
+2. **The gate.** An orderable link flagged primary wins OUTRIGHT and is never
+   scored. A flagged primary is not a term in a sum — any weight can be outbid,
+   and then the operator's explicit choice is merely expensive rather than
+   binding. Do not "fix" a selection problem by adjusting a bonus.
+3. **The score.** Only when nothing orderable is flagged does `score_candidate`
+   rank the candidates on cost and lead time.
 
 Ask `select_supplier` / `select_suppliers_for` when you must explain yourself to
 an operator: they separate `NO_SUPPLIERS` from `NONE_ORDERABLE`, which are
@@ -132,14 +139,19 @@ with the reason dropped.
 
 Filtering happens in Python, on `item_suppliers.all()`, so the prefetch cache
 still serves it — a fresh `.filter()` reintroduces the per-row N+1 that #882
-removed and that `docs/API_LIST_CONTRACT.md` bounds in CI.
+removed and that `docs/API_LIST_CONTRACT.md` bounds in CI. The cost yardstick
+(`average_orderable_unit_cost`) is computed in Python for the same reason.
 
-`PurchaseOrderViewSet._find_best_supplier` is the deliberate exception: it ranks
-the same orderable candidates by a weighted cost/lead-time score. Whether that
-ranking should be the fallback is an open product question. It also raises
-`TypeError` (`Decimal * float`) for any supplier priced under 150% of the item's
-average, so `create_optimized_order` currently 500s on real data — do not treat
-it as a working reference.
+**The scoring weights are a product decision, not an implementation detail.**
+They came from the rival rule this replaced and are pinned as they stand;
+`inventory/tests/test_supplier_scoring.py` asserts each one and names four
+places the judgement is questionable (`REPORTED, NOT FIXED`) — most importantly
+that an unpriced supplier can never beat a priced one, because a missing price
+scores like a bad price. Retuning any of them needs a captain decision, and the
+tests will fail until it is deliberate.
+
+`PurchaseOrderViewSet._find_best_supplier` is now a thin delegation, kept for its
+call site's readability. It has no rule of its own.
 
 Aggregates that value stock rather than choose a vendor (`lowest_unit_cost`,
 `total_value`, the report averages) deliberately still read every link.

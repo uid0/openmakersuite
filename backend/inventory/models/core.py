@@ -556,6 +556,23 @@ class InventoryItem(OwnableModel):
                 {"count_level": "Count level must be one of this item's packaging levels."}
             )
 
+    @cached_property
+    def _case_pack_size(self) -> Optional[int]:
+        """Units per package for case counting, or ``None`` if nothing says.
+
+        Memoised, so the readers that chain — ``reorder_display`` asks for
+        ``current_cases`` and then ``needs_reorder``, which asks again — cost
+        one query per instance rather than one per read, the protection
+        ``current_cases`` used to inherit from ``primary_item_supplier`` being
+        a ``cached_property``. Where the pack size should be READ FROM is a
+        separate question from how often it is read, so this cache holds
+        whichever answer :attr:`current_cases` documents.
+        """
+        for link in self.item_suppliers.all():
+            if link.quantity_per_package and link.quantity_per_package > 0:
+                return link.quantity_per_package
+        return None
+
     @property
     def current_cases(self) -> float:
         """Current number of cases/packages in stock.
@@ -570,20 +587,16 @@ class InventoryItem(OwnableModel):
         last supplier was discontinued — ``None`` there does not degrade to a
         null here, it silently divides by 1 and inverts ``needs_reorder``.
 
-        Rows come from ``item_suppliers.all()`` in ``Meta.ordering``, so a
-        flagged primary's pack size still wins, and a caller that prefetched
-        ``item_suppliers`` hits the cache instead of firing a per-row query —
-        the same N+1 discipline as :meth:`lowest_unit_cost`. The 1-unit
-        fallback is now reached only by an item with no supplier links at all.
+        The pack size comes from :attr:`_case_pack_size`; the 1-unit fallback
+        is now reached only by an item with no usable pack size on any link.
         """
         if not self.use_case_based_reorder:
             return 0
 
-        for link in self.item_suppliers.all():
-            if link.quantity_per_package and link.quantity_per_package > 0:
-                return self.current_stock / link.quantity_per_package
-
-        return self.current_stock
+        pack_size = self._case_pack_size
+        if pack_size is None:
+            return self.current_stock
+        return self.current_stock / pack_size
 
     @property
     def needs_reorder(self) -> bool:

@@ -273,12 +273,39 @@ def _serialized_item(name):
     return _item(name, is_serialized=True)
 
 
-def _forecast_row(item):
+def _forecast_row(item, **kwargs):
     from inventory.services.component_forecast import build_component_forecast
 
-    rows = [row for row in build_component_forecast() if row["item_id"] == str(item.id)]
+    rows = [row for row in build_component_forecast(**kwargs) if row["item_id"] == str(item.id)]
     assert rows, "item missing from forecast"
     return rows[0]
+
+
+def _stock_and_daily_use(item, *, in_stock, consumed_today):
+    """``in_stock`` available units, and ``consumed_today`` depletions in a 1-day window.
+
+    With ``window_days=1`` the depletion rate is exactly ``consumed_today`` per
+    day, which keeps the reorder-point arithmetic legible.
+    """
+    from inventory.models import ComponentUsageEvent, SerializedComponent
+
+    for i in range(in_stock):
+        SerializedComponent.objects.create(
+            item=item,
+            serial_number=f"{item.sku}-stock-{i}",
+            status=SerializedComponent.Status.IN_STOCK,
+        )
+    for i in range(consumed_today):
+        component = SerializedComponent.objects.create(
+            item=item,
+            serial_number=f"{item.sku}-used-{i}",
+            status=SerializedComponent.Status.CONSUMED,
+        )
+        ComponentUsageEvent.objects.create(
+            component=component,
+            action=SerializedComponent.Action.CONSUME,
+            at=timezone.now() - timedelta(hours=1),
+        )
 
 
 def _observed_delivery(link, days):
@@ -547,3 +574,60 @@ def test_needs_reorder_and_the_low_stock_query_agree_for_that_shape():
 
     assert item.needs_reorder is True
     assert matched is True
+
+
+# ── An honest null must not become a confident zero ──────────────────────────
+#
+# The class both of this branch's fix-review regressions belong to: a value made
+# honestly ``None`` gets collapsed by downstream arithmetic into a confident,
+# OPTIMISTIC answer, inverting a boolean and suppressing an alert on exactly the
+# item that most needs one. Asserting the honest null and stopping there is what
+# let it through — these follow the null into the arithmetic that consumes it.
+
+
+def test_an_item_nobody_can_order_is_flagged_however_much_stock_it_has():
+    """40 on hand, burning 2/day, and the only vendor is gone.
+
+    ``lead_time_days`` is honestly ``None``; ``reorder_point`` used to read that
+    as a ZERO-day wait — the most optimistic assumption available — giving the
+    hardest item to buy the shortest horizon and dropping it off the low-stock
+    report as well stocked. The remedy here is a supplier, not a purchase order,
+    so the row says which.
+    """
+    item = _serialized_item("Thermistor")
+    item.minimum_stock = 10
+    item.save(update_fields=["minimum_stock"])
+    _link(item, "GoneAway", unit_cost="1.00", lead=30, is_discontinued=True)
+    _stock_and_daily_use(item, in_stock=40, consumed_today=2)
+
+    row = _forecast_row(item, window_days=1)
+
+    assert row["available"] == 40
+    assert row["avg_daily_use"] == 2.0
+    assert row["lead_time_days"] is None
+    assert row["needs_reorder"] is True
+    assert row["no_orderable_supplier"] is True
+
+    low_stock = _forecast_row(item, window_days=1, low_stock_only=True)
+    assert low_stock["item_id"] == str(item.id)
+
+
+def test_a_live_supplier_still_drives_an_ordinary_horizon():
+    """The unconditional flag must not swallow the normal path.
+
+    Same burn rate and buffer, a live 30-day vendor and no delivery history:
+    the ESTIMATE sets the reorder point (2/day x 30 + 10 = 70), and 100 on hand
+    is comfortably above it, so this item is not flagged.
+    """
+    item = _serialized_item("Capacitor")
+    item.minimum_stock = 10
+    item.save(update_fields=["minimum_stock"])
+    _link(item, "StillSelling", unit_cost="1.00", lead=30)
+    _stock_and_daily_use(item, in_stock=100, consumed_today=2)
+
+    row = _forecast_row(item, window_days=1)
+
+    assert row["lead_time_days"] == 30.0
+    assert row["reorder_point"] == 70
+    assert row["needs_reorder"] is False
+    assert row["no_orderable_supplier"] is False

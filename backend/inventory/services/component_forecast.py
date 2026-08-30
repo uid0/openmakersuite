@@ -28,7 +28,10 @@ This module turns that usage history into a demand forecast:
   would actually be bought through — observed performance from
   :class:`reorder_queue.models.LeadTimeLog` for THAT supplier, falling back to
   THAT supplier's estimated ``average_lead_time`` — and ``safety_stock`` reuses
-  the item's existing ``minimum_stock`` buffer.
+  the item's existing ``minimum_stock`` buffer. An item with NO supplier it can
+  be ordered from has no horizon to compute, so it is flagged
+  ``needs_reorder`` outright rather than given the zero-day one that an unknown
+  lead time would otherwise imply; ``no_orderable_supplier`` says so on the row.
 
 The output feeds the inventory + purchasing overview dashboards.
 """
@@ -43,7 +46,12 @@ from django.db.models import Avg, Count
 from django.utils import timezone
 
 from inventory.models import ComponentUsageEvent, InventoryItem, SerializedComponent
-from inventory.services.supplier_selection import primary_suppliers_for
+from inventory.services.supplier_selection import (
+    NO_SUPPLIERS,
+    NONE_ORDERABLE,
+    primary_suppliers_for,
+    select_suppliers_for,
+)
 
 # Default trailing window used to estimate the depletion rate.
 DEFAULT_WINDOW_DAYS = 90
@@ -73,7 +81,9 @@ _DEPLETING_ACTIONS = {
 }
 
 
-def _lead_time_days_by_item(items: list[InventoryItem]) -> dict[Any, Optional[float]]:
+def _lead_time_days_by_item(
+    items: list[InventoryItem], selected: Optional[dict[Any, Any]] = None
+) -> dict[Any, Optional[float]]:
     """Resolve each item's lead time in days, batched to avoid N+1 queries.
 
     Both branches describe ONE supplier: the one the item would actually be
@@ -89,6 +99,11 @@ def _lead_time_days_by_item(items: list[InventoryItem]) -> dict[Any, Optional[fl
     reorder point roughly four times too low, i.e. running out while the numbers
     looked fine. Including dead links did the same with a vendor who no longer
     sells the item (op-2rsp).
+
+    ``selected`` is the already-resolved ``{item_id: ItemSupplier | None}`` map
+    when the caller holds one — :func:`build_component_forecast` does, because
+    it also needs the REASON there is no supplier — and is resolved here
+    otherwise.
     """
     # Imported lazily so this module has no hard import-time dependency on the
     # reorder_queue app (mirrors how the rest of inventory references it).
@@ -97,7 +112,8 @@ def _lead_time_days_by_item(items: list[InventoryItem]) -> dict[Any, Optional[fl
     # The one supplier per item, from the shared derivation: orderable, the
     # operator's flagged primary if they set one, else the best-scoring
     # candidate. One query per page. Everything below is scoped to it.
-    selected = primary_suppliers_for(items)
+    if selected is None:
+        selected = primary_suppliers_for(items)
     selected_link_ids = [link.id for link in selected.values() if link is not None]
 
     observed: dict[Any, Any] = {}
@@ -216,8 +232,9 @@ def build_component_forecast(
     Args:
         window_days: Trailing window (in days) used to estimate the depletion
             rate. Clamped to a minimum of 1.
-        low_stock_only: When ``True``, only rows whose ``available`` stock is at
-            or below their ``reorder_point`` are returned.
+        low_stock_only: When ``True``, only rows flagged ``needs_reorder`` are
+            returned — stock at or below the reorder point, OR no supplier the
+            item can be ordered from at all.
         now: Reference "now" (defaults to :func:`django.utils.timezone.now`);
             injectable for deterministic tests.
 
@@ -239,7 +256,12 @@ def build_component_forecast(
 
     split_by_item = _stock_split_by_item(items)
     depleted_by_item = _depletion_counts(items, window_start, now)
-    lead_time_by_item = _lead_time_days_by_item(items)
+    # Resolved once and used for two different questions: which supplier sets
+    # the lead time, and whether there IS one. Those are different facts.
+    choice_by_item = select_suppliers_for(items)
+    lead_time_by_item = _lead_time_days_by_item(
+        items, {item_id: choice.item_supplier for item_id, choice in choice_by_item.items()}
+    )
 
     rows: list[dict[str, Any]] = []
     for item in items:
@@ -265,7 +287,21 @@ def build_component_forecast(
         safety_stock = item.minimum_stock or 0
         lead_component = avg_daily_use * (lead_time_days or 0)
         reorder_point = int(math.ceil(lead_component + safety_stock))
-        needs_reorder = available <= reorder_point
+
+        # An item nobody can order needs attention UNCONDITIONALLY. Its lead
+        # time is honestly ``None``, and ``or 0`` above would otherwise read
+        # that as a zero-day wait — the most optimistic assumption available —
+        # giving the item that is hardest to buy the SHORTEST horizon and
+        # dropping it off the low-stock report as well stocked. The condition
+        # comes from the shared derivation, not from the null lead time: "we
+        # cannot tell you how long it takes" and "you cannot buy this at all"
+        # are different facts (op-2rsp, RULE 4).
+        choice = choice_by_item.get(item.id)
+        no_orderable_supplier = choice is not None and choice.reason in (
+            NO_SUPPLIERS,
+            NONE_ORDERABLE,
+        )
+        needs_reorder = no_orderable_supplier or available <= reorder_point
 
         if low_stock_only and not needs_reorder:
             continue
@@ -296,6 +332,10 @@ def build_component_forecast(
                 "safety_stock": safety_stock,
                 "reorder_point": reorder_point,
                 "needs_reorder": needs_reorder,
+                # Additive: says WHY a row can be flagged while its stock sits
+                # above its reorder point, so the flag is actionable rather
+                # than mysterious. The remedy is a supplier, not a purchase.
+                "no_orderable_supplier": no_orderable_supplier,
             }
         )
 

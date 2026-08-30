@@ -159,6 +159,23 @@ call site's readability. It has no rule of its own.
 Aggregates that value stock rather than choose a vendor (`lowest_unit_cost`,
 `total_value`, the report averages) deliberately still read every link.
 
+`InventoryItem.current_cases` is likewise EXCLUDED from this supplier
+derivation. Deriving from the READERS OF A SYMBOL is not the same as deriving
+from the QUESTION BEING ASKED: it reads the helper but asks a different
+question — how many units are in a box on the shelf — which has nothing to do
+with who we buy from. Routing it through the orderability rule cost a low-stock
+alert, because a `None` supplier there does not degrade to a null, it divides by
+1 and inverts `needs_reorder` on exactly the item whose last supplier just died.
+(Which links it should read its pack size from is a separate question, still
+under review — but not this rule's to answer.)
+
+Watch for that shape generally: an honest `None` collapsed by downstream
+arithmetic or a fallback into a confident, OPTIMISTIC answer. The forecast's
+`reorder_point` had the same bug via `lead_time_days or 0`; it now flags an item
+with no orderable supplier outright instead of computing a zero-day horizon for
+it. When you make a value nullable here, follow it into the arithmetic that
+consumes it — asserting the honest null and stopping there is how both survived.
+
 ### The pre-send boundary: when a PO is still the shop's own document
 
 `PurchaseOrder.PRE_SUPPLIER_STATUSES` is the ONE definition of "the supplier has

@@ -190,8 +190,11 @@ def compute_item_metrics_batch(items):
 
     ``items`` is an iterable of already-loaded ``InventoryItem`` instances
     (typically a single paginated page). The number of database queries is
-    constant — six grouped aggregates — regardless of how many items are
-    passed, so the list endpoint stays O(1) in queries rather than O(n). Every
+    constant regardless of how many items are passed, so the list endpoint
+    stays O(1) in queries rather than O(n): five grouped aggregates (on-order,
+    in-transit, committed-from-usage, committed-from-template, last PO cost),
+    plus a SIXTH for the supplier selection only when the caller has not
+    prefetched ``item_suppliers`` — the list path has, so it pays five. Every
     item id in ``items`` is present in the result (with zeros / ``None`` where
     there is no PO / work-order / supplier data).
     """

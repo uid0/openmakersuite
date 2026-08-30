@@ -2429,20 +2429,27 @@ class TestCreateOptimizedOrder:
     def test_retired_low_stock_item_excluded_from_recommendations(self, authenticated_client):
         """A retired low-stock item is never recommended; an active one still is.
 
-        Both items carry a real ``unit_cost``, which is the shape the optimizer
-        used to 500 on: its cost scoring raised ``TypeError`` on
-        ``Decimal * float`` for any candidate priced below 150% of the item's
-        average — always true of a single-supplier item. This test previously
-        set ``unit_cost=None`` to route around that, which is why nothing in the
-        suite caught it (op-2rsp).
+        Both items carry a real ``unit_cost`` AND an unflagged supplier link,
+        which together are the shape the optimizer used to 500 on: its cost
+        scoring raised ``TypeError`` on ``Decimal * float`` for any candidate
+        priced below 150% of the item's average — always true of a
+        single-supplier item. ``is_primary=False`` matters as much as the price:
+        the factory flags the link primary by default, and a flagged primary
+        wins at the GATE, so the scoring would never run (op-2rsp). This test
+        previously set ``unit_cost=None`` to route around the crash, which is
+        why nothing in the suite caught it.
         """
         client, _ = authenticated_client
 
         active_low = InventoryItemFactory(
-            current_stock=1, minimum_stock=10, unit_cost=Decimal("4.50")
+            current_stock=1, minimum_stock=10, unit_cost=Decimal("4.50"), is_primary=False
         )
         retired_low = InventoryItemFactory(
-            current_stock=1, minimum_stock=10, is_retired=True, unit_cost=Decimal("4.50")
+            current_stock=1,
+            minimum_stock=10,
+            is_retired=True,
+            unit_cost=Decimal("4.50"),
+            is_primary=False,
         )
 
         response = client.post(self.URL, {}, format="json")
@@ -2582,7 +2589,10 @@ class TestReorderQuantityIsModeAware:
 
         It previously passed ``unit_cost=None`` to route around the optimizer's
         ``Decimal * float`` crash; that crash is fixed on this branch, so the
-        item now carries the price a real one would (op-2rsp).
+        item now carries the price a real one would. ``is_primary=False`` so the
+        link is actually SCORED — the factory flags it primary by default, and a
+        flagged primary wins at the gate without the scoring ever running, so a
+        real price alone would not reach the line that used to raise (op-2rsp).
         """
         client = APIClient()
         user = User.objects.create_user(username="optimized", password="pw")
@@ -2594,6 +2604,7 @@ class TestReorderQuantityIsModeAware:
             reorder_quantity=3,
             quantity_per_package=50,
             unit_cost=Decimal("2.25"),
+            is_primary=False,
         )
 
         response = client.post(self.OPTIMIZED_URL, {}, format="json")

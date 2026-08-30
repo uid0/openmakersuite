@@ -192,6 +192,72 @@ class IndexCardRendererTests(TestCase):
         shutil.rmtree(settings.MEDIA_ROOT, ignore_errors=True)
 
 
+class LongestLeadTimeTests(TestCase):
+    """The card's "Max Lead" line must not quote a vendor you cannot buy from.
+
+    A kanban card is printed and stuck on a shelf, so a lead time it states
+    outlives the screen it came from. ``op-2rsp`` made every "which supplier"
+    answer skip inactive and discontinued links; this is the same rule applied
+    to a spread across suppliers rather than to a single choice.
+    """
+
+    def setUp(self) -> None:
+        from inventory.models import Supplier
+
+        self.item = InventoryItem.objects.create(
+            name="Belt",
+            description="x",
+            reorder_quantity=1,
+            current_stock=1,
+            minimum_stock=1,
+        )
+        self.renderer = IndexCardRenderer(base_url="http://localhost:3000")
+        self.supplier_type = Supplier.SupplierType.LOCAL
+
+    def _link(self, name, lead, **flags):
+        from inventory.models import ItemSupplier, Supplier
+
+        return ItemSupplier.objects.create(
+            item=self.item,
+            supplier=Supplier.objects.create(name=name, supplier_type=self.supplier_type),
+            supplier_sku=f"{name}-sku",
+            unit_cost=1,
+            average_lead_time=lead,
+            is_active=flags.get("is_active", True),
+            is_discontinued=flags.get("is_discontinued", False),
+        )
+
+    def _longest(self):
+        item = InventoryItem.objects.prefetch_related("item_suppliers__supplier").get(
+            pk=self.item.pk
+        )
+        return self.renderer._get_longest_lead_time(item)
+
+    def test_ignores_a_discontinued_suppliers_longer_lead_time(self) -> None:
+        self._link("Live", 10)
+        self._link("Dead", 45, is_discontinued=True)
+
+        self.assertEqual(self._longest(), 10)
+
+    def test_ignores_an_inactive_suppliers_longer_lead_time(self) -> None:
+        self._link("Live", 10)
+        self._link("Off", 45, is_active=False)
+
+        self.assertEqual(self._longest(), 10)
+
+    def test_reports_nothing_when_no_supplier_can_be_ordered_from(self) -> None:
+        """Not a dead vendor's 45 days dressed up as a plan."""
+        self._link("Dead", 45, is_discontinued=True)
+
+        self.assertIsNone(self._longest())
+
+    def test_still_spans_every_supplier_you_can_actually_buy_from(self) -> None:
+        self._link("Fast", 3)
+        self._link("Slow", 21)
+
+        self.assertEqual(self._longest(), 21)
+
+
 class ReorderAtLineTests(TestCase):
     """The card's "Reorder at:" line names the unit the item is counted in (op-es7c).
 

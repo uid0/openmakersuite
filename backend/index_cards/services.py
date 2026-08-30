@@ -828,14 +828,24 @@ class IndexCardRenderer:
         return f"Reorder at: {self._pluralize(threshold, unit)}"
 
     def _get_longest_lead_time(self, item: InventoryItem) -> int | None:
-        """Get the longest lead time across all suppliers for this item."""
+        """Longest lead time across the suppliers this item can still be BOUGHT from.
+
+        The card is printed and stuck on a shelf, where "Max Lead: 30 days"
+        outlives whatever screen it was derived from. Counting a discontinued or
+        inactive link would print a wait for a vendor that will never fill the
+        order — the same rule the rest of the app applies through
+        ``inventory.services.supplier_selection`` (op-2rsp), applied here to a
+        spread rather than to a single choice. Reads the ``item_suppliers``
+        prefetch the batch view sets up, so the filter stays in Python.
+        """
         if not hasattr(item, "item_suppliers"):
             return None
 
-        lead_times = []
-        for supplier_link in item.item_suppliers.all():
-            if supplier_link.average_lead_time:
-                lead_times.append(supplier_link.average_lead_time)
+        lead_times = [
+            link.average_lead_time
+            for link in item.item_suppliers.all()
+            if link.average_lead_time and link.is_active and not link.is_discontinued
+        ]
 
         return max(lead_times) if lead_times else None
 

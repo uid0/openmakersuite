@@ -739,15 +739,22 @@ class InventoryItem(OwnableModel):
 
     @cached_property
     def primary_item_supplier(self) -> Optional["ItemSupplier"]:
-        """Preferred supplier relationship for this item — prefetch-friendly.
+        """The supplier relationship to BUY this item through, or ``None``.
 
         Delegates to the named :mod:`inventory.services.supplier_selection`
         service (issue #882) so the selection lives in one place rather than a
-        hidden model query. The chosen row is byte-for-byte the one the previous
-        ``filter(is_primary=True).first() or first()`` returned — the supplier
-        flagged primary with the lowest unit cost, or the cheapest supplier when
-        none is primary — because the service resolves it from
-        ``item_suppliers``' ``Meta.ordering`` (``["-is_primary", "unit_cost"]``).
+        hidden model query. That service resolves it from ``item_suppliers``'
+        ``Meta.ordering`` (``["-is_primary", "unit_cost"]``) restricted to the
+        links you can actually order through — ``is_active`` and not
+        ``is_discontinued`` (op-2rsp).
+
+        ``None`` therefore means "no supplier you can buy from", which covers
+        both "no suppliers at all" and "every supplier link is dead". A caller
+        that has to explain that to an operator should ask
+        :func:`~inventory.services.supplier_selection.select_supplier` instead
+        and read the reason; the seven flat compat properties below cannot, so
+        they simply go ``None`` as they already do for an item with no
+        suppliers.
 
         The result rides an ``item_suppliers`` prefetch when the caller set one
         up (the list/detail/reorder read paths all do), so serialising the seven

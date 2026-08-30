@@ -41,12 +41,8 @@ from typing import Any, Optional
 from django.db.models import Avg, Count
 from django.utils import timezone
 
-from inventory.models import (
-    ComponentUsageEvent,
-    InventoryItem,
-    ItemSupplier,
-    SerializedComponent,
-)
+from inventory.models import ComponentUsageEvent, InventoryItem, SerializedComponent
+from inventory.services.supplier_selection import primary_suppliers_for
 
 # Default trailing window used to estimate the depletion rate.
 DEFAULT_WINDOW_DAYS = 90
@@ -97,16 +93,18 @@ def _lead_time_days_by_item(items: list[InventoryItem]) -> dict[Any, Optional[fl
         )
     }
 
-    # Estimated fallback: the primary supplier's average_lead_time (or any
-    # supplier's if none is flagged primary), matching InventoryItem's own
-    # ``average_lead_time`` resolution without a query per item.
-    estimated: dict[Any, Any] = {}
-    for row in (
-        ItemSupplier.objects.filter(item__in=items)
-        .order_by("item_id", "-is_primary")
-        .values("item_id", "average_lead_time")
-    ):
-        estimated.setdefault(row["item_id"], row["average_lead_time"])
+    # Estimated fallback: the lead time of the supplier the item would actually
+    # be bought through, resolved by the shared derivation so this genuinely
+    # matches ``InventoryItem.average_lead_time`` rather than approximating it.
+    # It previously ordered by ``-is_primary`` alone, dropping the ``unit_cost``
+    # tiebreak the model applies, so an unflagged item could be forecast off a
+    # different supplier than the one quoted everywhere else; and it read dead
+    # links, so an item could be forecast on the lead time of a vendor that no
+    # longer sells it (op-2rsp). One query per page, as before.
+    estimated: dict[Any, Any] = {
+        item_id: link.average_lead_time if link else None
+        for item_id, link in primary_suppliers_for(items).items()
+    }
 
     resolved: dict[Any, Optional[float]] = {}
     for item in items:

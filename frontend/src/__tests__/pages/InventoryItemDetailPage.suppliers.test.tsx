@@ -263,7 +263,7 @@ describe('InventoryItemDetailPage — suppliers card', () => {
     expect(within(supplierRow(2)).queryByText('Primary')).not.toBeInTheDocument();
   });
 
-  it('says so when no supplier is flagged primary rather than implying one', async () => {
+  it('says so when no supplier is flagged primary, and names the remedy', async () => {
     renderWith([
       supplierLink({ id: 1, supplier_name: 'Acme Supplies', is_primary: false }),
       supplierLink({ id: 2, supplier_name: 'Beta Parts', is_primary: false }),
@@ -272,12 +272,64 @@ describe('InventoryItemDetailPage — suppliers card', () => {
     await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
 
     const note = within(suppliersCard()).getByTestId('no-primary-supplier-note');
-    expect(note).toHaveTextContent(/no supplier is flagged primary/i);
-    // It states the fact and stops. The web app has no write path for
-    // is_primary, so directing the operator to flag, set, choose or edit one
-    // would name an action they cannot take from anywhere in this app.
-    expect(note.textContent).not.toMatch(/\b(flag|set|choose|select|edit|contact|ask)\b/i);
+    expect(note).toHaveTextContent(/no supplier you can order from is flagged primary/i);
+    // The note used to stop at the fact, because `is_primary` had no write path
+    // in this app and naming one would have described an action the operator
+    // could not take. #1034 made the item form persist it, so the remedy is
+    // real and withholding it is now the defect.
+    expect(note).toHaveTextContent(/flag one on the item form/i);
     expect(within(suppliersCard()).queryByText('Primary')).not.toBeInTheDocument();
+  });
+
+  it('treats a discontinued flagged primary as unflagged, not as the choice', async () => {
+    // `mark_discontinued` does not clear `is_primary`, so an operator can flag a
+    // supplier and later mark it discontinued. The badge stays, but the backend
+    // skips the row — so the note has to say a choice is being made for them.
+    renderWith([
+      supplierLink({ id: 1, supplier_name: 'Acme Supplies', is_primary: true, is_discontinued: true }),
+      supplierLink({ id: 2, supplier_name: 'Beta Parts', is_primary: false }),
+    ]);
+
+    await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
+
+    const note = within(suppliersCard()).getByTestId('no-primary-supplier-note');
+    expect(note).toHaveTextContent(/no supplier you can order from is flagged primary/i);
+  });
+
+  it('says outright when nothing on the table can be ordered from', async () => {
+    // Distinct from "nobody flagged one": there is no cheapest-available row to
+    // fall back to, so the operator has to change something before this item can
+    // be bought at all. The two notes must not collapse into one.
+    renderWith([
+      supplierLink({ id: 1, supplier_name: 'Acme Supplies', is_discontinued: true }),
+      supplierLink({ id: 2, supplier_name: 'Beta Parts', is_active: false }),
+    ]);
+
+    await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
+
+    const note = within(suppliersCard()).getByTestId('no-orderable-supplier-note');
+    expect(note).toHaveTextContent(/no supplier here can be ordered from/i);
+    expect(note).toHaveTextContent(/reactivate one, or add a supplier/i);
+    // Not the softer "we picked one for you" note — nothing was picked.
+    expect(
+      within(suppliersCard()).queryByTestId('no-primary-supplier-note')
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows neither note when an orderable supplier is flagged primary', async () => {
+    renderWith([
+      supplierLink({ id: 1, supplier_name: 'Acme Supplies', is_primary: true }),
+      supplierLink({ id: 2, supplier_name: 'Beta Parts', is_discontinued: true }),
+    ]);
+
+    await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
+
+    expect(
+      within(suppliersCard()).queryByTestId('no-primary-supplier-note')
+    ).not.toBeInTheDocument();
+    expect(
+      within(suppliersCard()).queryByTestId('no-orderable-supplier-note')
+    ).not.toBeInTheDocument();
   });
 
   it('separates discontinued and inactive links from ones that can be ordered', async () => {

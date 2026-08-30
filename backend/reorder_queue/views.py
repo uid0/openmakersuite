@@ -31,6 +31,7 @@ from inventory.services.packaging import (
     reorder_display,
     resolve_base_quantity,
 )
+from inventory.services.supplier_selection import NO_SUPPLIERS, select_supplier
 
 from . import services
 from .audit import record_event as record_audit_event
@@ -1104,6 +1105,12 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         # Build supplier data with their available items
         supplier_data = {}
+        # Low items that no supplier group below can carry, and why. Without
+        # this they simply do not appear: ``total_low_stock_items`` counts them
+        # and no pad offers them, which reads as "already handled" rather than
+        # "you cannot order this" (op-2rsp). A refusal an operator can act on
+        # has to name the item and the remedy.
+        unorderable_items = []
 
         for item in all_items:
             # Get all active, non-discontinued suppliers for this item
@@ -1111,6 +1118,27 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 is_active=True,
                 is_discontinued=False,
             ).select_related("supplier")
+
+            choice = select_supplier(item)
+            if not choice:
+                unorderable_items.append(
+                    {
+                        "item_id": str(item.id),
+                        "item_name": item.name,
+                        "item_sku": item.sku,
+                        "reason": choice.reason,
+                        "detail": (
+                            f"No supplier is linked to {item.name}. Add one on the "
+                            "item before it can go on an order."
+                            if choice.reason == NO_SUPPLIERS
+                            else (
+                                f"Every supplier link for {item.name} is inactive or "
+                                "discontinued. Reactivate one, or add a supplier that "
+                                "still carries it."
+                            )
+                        ),
+                    }
+                )
 
             for item_supplier in item_suppliers:
                 supplier = item_supplier.supplier
@@ -1369,6 +1397,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 "total_suppliers": len(suppliers_list),
                 "total_low_stock_items": len(all_items),
                 "items_with_requests": items_with_requests.count(),
+                # Additive (op-2rsp): existing clients that only read
+                # ``suppliers`` are unaffected, and one that wants to warn the
+                # operator now has the list to warn about.
+                "items_without_orderable_supplier": unorderable_items,
             }
         )
 

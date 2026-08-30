@@ -18,7 +18,8 @@ The ``payload`` dict shape is the pinned contract consumed by
 
 from django.db.models import Q, Sum
 
-from inventory.models import ItemSupplier, MaintenanceMaterial, WorkOrder, WorkOrderMaterialUsage
+from inventory.models import MaintenanceMaterial, WorkOrder, WorkOrderMaterialUsage
+from inventory.services.supplier_selection import primary_suppliers_for
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
 
 # PO statuses that count as "on order" (QOO): units committed on a live PO that
@@ -261,25 +262,20 @@ def compute_item_metrics_batch(items):
         if item_id not in last_po_unit_cost:
             last_po_unit_cost[item_id] = row["unit_cost_ordered"]
 
-    # Primary ItemSupplier per item (unit/package cost, lead time, case size).
-    # Mirrors ``InventoryItem.primary_item_supplier`` — is_primary first, then
-    # cheapest — but batched so the per-item property never fires. (1 query)
-    primary_supplier = {}
-    for row in (
-        ItemSupplier.objects.filter(item_id__in=item_ids)
-        .order_by("item", "-is_primary", "unit_cost")
-        .values("item", "unit_cost", "package_cost", "average_lead_time", "quantity_per_package")
-    ):
-        item_id = row["item"]
-        if item_id not in primary_supplier:
-            primary_supplier[item_id] = row
+    # The supplier to buy each item through (unit/package cost, lead time, case
+    # size). Resolved through the shared derivation rather than re-ordered here,
+    # so these numbers are the ones the item detail, the order pad and the PO
+    # screens quote — and so an inactive or discontinued link never sets the
+    # cost or lead time of a row that reads as buyable (op-2rsp). Batched, so
+    # the per-item property never fires. (1 query)
+    primary_supplier = primary_suppliers_for(items)
 
     for item in items:
         supplier = primary_supplier.get(item.id)
-        unit_cost = supplier["unit_cost"] if supplier else None
-        package_cost = supplier["package_cost"] if supplier else None
-        lead_time_days = supplier["average_lead_time"] if supplier else None
-        case_size = supplier["quantity_per_package"] if supplier else None
+        unit_cost = supplier.unit_cost if supplier else None
+        package_cost = supplier.package_cost if supplier else None
+        lead_time_days = supplier.average_lead_time if supplier else None
+        case_size = supplier.quantity_per_package if supplier else None
 
         committed = quantity_committed.get(item.id, 0.0)
         # Cost shown on the row: the case cost for case-based items (what you

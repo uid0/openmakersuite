@@ -109,6 +109,41 @@ from "explicitly cleared" give it an `UNCHANGED` sentinel default rather than
 is stated in `ReorderRequestViewSet.mark_ordered`'s docstring and pinned by
 `reorder_queue/tests/test_po_confirm_preserves_expected_delivery_date.py`.
 
+### Which supplier an item is bought from: one derivation, orderable only
+
+`inventory.services.supplier_selection` is the ONE answer to "which supplier for
+this item". Everything else reads it — `InventoryItem.primary_item_supplier` and
+the seven flat compat properties, `item_metrics` (the pinned ScanTTY contract),
+`component_forecast`, the order pad and the PO-building screens. Do not re-derive
+it: three copies of `ORDER BY -is_primary, unit_cost` had already drifted apart
+before op-2rsp collapsed them.
+
+**Orderability is a precondition, not a tiebreak.** A link that is not
+`is_active`, or that is `is_discontinued`, is never the answer — including one an
+operator flagged primary, because `mark_discontinued` deliberately leaves
+`is_primary` set. Among the links that remain, ranking is `Meta.ordering`
+(flagged primary, else cheapest) and is unchanged.
+
+Ask `select_supplier` / `select_suppliers_for` when you must explain yourself to
+an operator: they separate `NO_SUPPLIERS` from `NONE_ORDERABLE`, which are
+different facts needing different actions, and flag when the operator's own
+choice was the row that got skipped. `primary_item_supplier` is the same answer
+with the reason dropped.
+
+Filtering happens in Python, on `item_suppliers.all()`, so the prefetch cache
+still serves it — a fresh `.filter()` reintroduces the per-row N+1 that #882
+removed and that `docs/API_LIST_CONTRACT.md` bounds in CI.
+
+`PurchaseOrderViewSet._find_best_supplier` is the deliberate exception: it ranks
+the same orderable candidates by a weighted cost/lead-time score. Whether that
+ranking should be the fallback is an open product question. It also raises
+`TypeError` (`Decimal * float`) for any supplier priced under 150% of the item's
+average, so `create_optimized_order` currently 500s on real data — do not treat
+it as a working reference.
+
+Aggregates that value stock rather than choose a vendor (`lowest_unit_cost`,
+`total_value`, the report averages) deliberately still read every link.
+
 ### The pre-send boundary: when a PO is still the shop's own document
 
 `PurchaseOrder.PRE_SUPPLIER_STATUSES` is the ONE definition of "the supplier has

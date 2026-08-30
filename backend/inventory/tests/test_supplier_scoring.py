@@ -16,13 +16,13 @@ suppliers separated on only one axis, a single-supplier item, missing prices.
 
 Where the scoring's judgement is questionable it is PINNED AND NAMED here rather
 than quietly corrected — the captain authorised repairing the scoring, not
-retuning it, so what cost or lead time is worth stays a product question. Four
+retuning it, so what cost or lead time is worth stays a product question. FIVE
 such findings, each with its own test, all named ``REPORTED, NOT FIXED``:
 
 * ``test_an_unpriced_supplier_can_never_beat_a_priced_one`` — a missing price is
   scored as if it were a bad price, and cost outweighs lead time, so an unpriced
   supplier is unpickable whenever any priced rival exists. This one decides real
-  purchases and is the most consequential of the four.
+  purchases and is the most consequential of the five.
 * ``test_a_same_day_supplier_scores_worse_on_speed_than_a_next_day_one`` — a
   lead time of 0 is falsy and reads as "unknown", so the best possible lead time
   scores worst.
@@ -30,6 +30,9 @@ such findings, each with its own test, all named ``REPORTED, NOT FIXED``:
   every price scores alike; ``..._is_not_clamped_above_...`` covers the other end.
 * ``test_the_performance_term_cannot_affect_any_ordering`` — a constant, and 1%
   rather than the 10% its comment claimed.
+* ``test_a_free_supplier_earns_nothing_for_being_free`` — a ``unit_cost`` of 0 is
+  falsy too, so a free link is scored as unpriced while still counting as a real
+  price in the yardstick every rival is measured against.
 """
 
 from decimal import Decimal
@@ -40,7 +43,6 @@ from inventory.models import InventoryItem, ItemSupplier, Supplier
 from inventory.services.supplier_selection import (
     BASIS_BEST_SCORED,
     BASIS_FLAGGED_PRIMARY,
-    COST_WEIGHT,
     _best_scored,
     average_orderable_unit_cost,
     score_candidate,
@@ -226,13 +228,33 @@ def test_an_item_whose_suppliers_have_no_prices_at_all_still_resolves():
     assert _chosen(item).item_supplier.pk == fast.pk
 
 
-def test_a_zero_price_is_not_treated_as_a_free_lunch():
-    """``unit_cost`` of 0 scores no cost points rather than an infinite bonus."""
-    item = _item()
-    _link(item, "Zero", cost="0.00", lead=20)
-    fast = _link(item, "Real", cost="5.00", lead=2)
+def test_a_free_supplier_earns_nothing_for_being_free():
+    """REPORTED, NOT FIXED: ``unit_cost`` of 0 is falsy, so FREE reads as "unpriced".
 
-    assert _chosen(item).item_supplier.pk == fast.pk
+    Structurally the same falsy-guard flaw as the ``average_lead_time`` of 0
+    below, and the row is treated as two contradictory things at once: the cost
+    term skips it as unpriced, while ``average_orderable_unit_cost`` counts the
+    0.00 as a real price and lets it drag the yardstick down.
+
+    The consequence, at IDENTICAL lead times: a link that costs $4.00 outscores
+    a link that costs nothing, and the free link scores exactly what the most
+    expensive candidate scores — the best possible price is graded as the worst.
+
+    Not hypothetical at a makerspace: donated stock, vendor samples and
+    zero-cost internal transfers are all real, and all get a $0.00 link.
+
+    Pinned rather than corrected — the guard and the weights are the captain's
+    to retune, and this test exists so that retune is a visible change.
+    """
+    item = _item()
+    free = _link(item, "Free", cost="0.00", lead=7)
+    four = _link(item, "FourDollars", cost="4.00", lead=7)
+    five = _link(item, "FiveDollars", cost="5.00", lead=7)
+
+    average = average_orderable_unit_cost([free, four, five])
+    assert score_candidate(four, average) > score_candidate(free, average)
+    assert score_candidate(free, average) == score_candidate(five, average)
+    assert _chosen(item).item_supplier.pk == four.pk
 
 
 def test_a_tie_resolves_to_the_first_candidate_offered():
@@ -340,8 +362,12 @@ def test_the_cost_term_is_not_clamped_above_and_can_exceed_its_nominal_weight():
 
     average = average_orderable_unit_cost(list(item.item_suppliers.all()))
     # A candidate priced exactly at the average earns exactly the nominal weight.
+    # Asserted as a LITERAL, not as ``COST_WEIGHT + ...``: an assertion built
+    # from the constant it guards holds for every value that constant could
+    # take, so it cannot detect the retune it exists to detect. 0.40 cost + 0.00
+    # lead (at the 30-day horizon) + 0.01 performance.
     at_average = _link(item, "AtAverage", cost=str(average), lead=30)
-    assert score_candidate(at_average, average) == COST_WEIGHT + Decimal("0.01")
+    assert score_candidate(at_average, average) == Decimal("0.41")
     # The bargain earns MORE than the nominal weight, which a clamp would cap.
     assert score_candidate(bargain, average) > score_candidate(at_average, average)
 
@@ -352,18 +378,39 @@ def test_the_performance_term_cannot_affect_any_ordering():
     Its comment called it a "10% weight"; ``0.1 * 0.1`` is 1%, and being
     constant it is inert regardless. It is a placeholder for LeadTimeLog-driven
     scoring that does not exist yet.
+
+    Asserted by subtracting each candidate's cost and lead-time contributions,
+    computed here independently of the implementation, and checking that what is
+    LEFT OVER is the same number for both. An earlier version asserted that
+    subtracting the same constant from two scores preserved their difference,
+    which is a Decimal identity — true of every possible implementation,
+    including one where the term varies per candidate.
     """
+
+    def _cost_and_lead(link, average):
+        cost = (
+            max(Decimal(0), Decimal("50") - (link.unit_cost / average - 1) * 100)
+            / Decimal("50")
+            * Decimal("0.4")
+        )
+        lead = max(
+            Decimal(0), (Decimal("30") - Decimal(link.average_lead_time)) / Decimal("30")
+        ) * Decimal("0.3")
+        return cost + lead
+
     item = _item()
     a = _link(item, "A", cost="5.00", lead=7)
     b = _link(item, "B", cost="9.00", lead=20)
 
     average = average_orderable_unit_cost([a, b])
-    # Removing the identical constant from both leaves the ordering unchanged.
-    assert (score_candidate(a, average) - score_candidate(b, average)) == (
-        (score_candidate(a, average) - Decimal("0.01"))
-        - (score_candidate(b, average) - Decimal("0.01"))
-    )
-    assert score_candidate(a, average) > Decimal("0.01")
+    residual_a = score_candidate(a, average) - _cost_and_lead(a, average)
+    residual_b = score_candidate(b, average) - _cost_and_lead(b, average)
+
+    # Same leftover for two candidates that differ on BOTH scored axes, so the
+    # term cannot be tracking either of them.
+    assert residual_a == residual_b
+    # And it is the 1% constant, not the 10% its comment claimed.
+    assert residual_a == Decimal("0.01")
 
 
 def test_a_same_day_supplier_scores_worse_on_speed_than_a_next_day_one():

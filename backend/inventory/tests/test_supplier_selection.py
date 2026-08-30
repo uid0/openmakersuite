@@ -14,7 +14,8 @@ The service (``inventory.services.supplier_selection``) and the thin
   those are different facts an operator acts on differently;
 * cost ZERO extra queries when ``item_suppliers`` is prefetched (killing the
   per-row N+1 behind the seven flat compat fields), and one query otherwise;
-* resolve a whole page in a single query via the batch helper.
+* resolve a whole page in a single query via the batch helper — and in NO query
+  when the page already carries an ``item_suppliers`` prefetch.
 """
 
 from decimal import Decimal
@@ -345,6 +346,37 @@ def test_batch_skips_unorderable_links_exactly_as_the_single_lookup_does():
         assert (single.item_supplier and single.item_supplier.pk) == (
             batch[it.id].item_supplier and batch[it.id].item_supplier.pk
         )
+
+
+def test_batch_rides_a_prefetch_instead_of_re_reading_the_same_rows():
+    """The list paths that call this already prefetch ``item_suppliers``.
+
+    Re-querying identical rows would be a wasted round-trip on every page, so
+    the batch resolves prefetched items from the cache — the same cache the
+    single lookup uses — and queries only for what is left.
+    """
+    prefetched_item = _item("Prefetched")
+    _link(prefetched_item, "P-dead", is_primary=False, unit_cost="1.00", is_discontinued=True)
+    p_live = _link(prefetched_item, "P-live", is_primary=False, unit_cost="9.00")
+
+    bare_item = _item("NotPrefetched")
+    b_live = _link(bare_item, "B-live", is_primary=False, unit_cost="3.00")
+
+    prefetched = InventoryItem.objects.prefetch_related("item_suppliers__supplier").get(
+        pk=prefetched_item.pk
+    )
+
+    with CaptureQueriesContext(connection) as ctx:
+        only_cached = select_suppliers_for([prefetched])
+    assert len(ctx.captured_queries) == 0
+    assert only_cached[prefetched.id].item_supplier.pk == p_live.pk
+
+    # Mixed page: one query, for the item that has no cache to ride.
+    with CaptureQueriesContext(connection) as ctx:
+        mixed = select_suppliers_for([prefetched, bare_item])
+    assert len(ctx.captured_queries) == 1
+    assert mixed[prefetched.id].item_supplier.pk == p_live.pk
+    assert mixed[bare_item.id].item_supplier.pk == b_live.pk
 
 
 # ── The flat compat properties inherit the filter ────────────────────────────

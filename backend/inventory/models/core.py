@@ -743,10 +743,18 @@ class InventoryItem(OwnableModel):
 
         Delegates to the named :mod:`inventory.services.supplier_selection`
         service (issue #882) so the selection lives in one place rather than a
-        hidden model query. That service resolves it from ``item_suppliers``'
-        ``Meta.ordering`` (``["-is_primary", "unit_cost"]``) restricted to the
-        links you can actually order through — ``is_active`` and not
-        ``is_discontinued`` (op-2rsp).
+        hidden model query. That service applies three things in strict order
+        (op-2rsp):
+
+        1. **Eligibility.** Only ORDERABLE links are candidates — ``is_active``
+           and not ``is_discontinued``. This is a precondition, not a tiebreak.
+        2. **The gate.** An orderable link an operator flagged ``is_primary``
+           wins OUTRIGHT and is never scored.
+        3. **The score.** Otherwise the candidates are ranked on cost AND lead
+           time together, and the best-scoring one wins. It is emphatically NOT
+           "the cheapest": a modest premium that buys a large lead-time saving
+           wins here. ``Meta.ordering`` only supplies the order the candidates
+           arrive in, which settles a tie between otherwise identical rows.
 
         ``None`` therefore means "no supplier you can buy from", which covers
         both "no suppliers at all" and "every supplier link is dead". A caller

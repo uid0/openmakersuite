@@ -17,9 +17,11 @@ last two surfaces that could name different suppliers for one item agree; see
 could not be written while the two rules disagreed AND the second one crashed.
 """
 
+from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 import pytest
 from rest_framework.test import APIClient
@@ -279,6 +281,31 @@ def _forecast_row(item):
     return rows[0]
 
 
+def _observed_delivery(link, days):
+    """Record an actual delivery of ``days`` against ``link``.
+
+    The forecast prefers OBSERVED history over the supplier's estimate, so a
+    test that creates no ``LeadTimeLog`` never reaches that branch at all.
+    """
+    from reorder_queue.models import LeadTimeLog, PurchaseOrder
+
+    user = get_user_model().objects.filter(username="forecast").first() or (
+        get_user_model().objects.create_user(username="forecast", password="pw")
+    )
+    po = PurchaseOrder.objects.create(supplier=link.supplier, created_by=user)
+    return LeadTimeLog.objects.create(
+        item_supplier=link,
+        purchase_order=po,
+        order_date=timezone.now() - timedelta(days=days + 5),
+        expected_delivery_date=(timezone.now() - timedelta(days=5)).date(),
+        actual_delivery_date=timezone.now().date(),
+        estimated_lead_time_days=days,
+        actual_lead_time_days=days,
+        quantity_ordered=1,
+        quantity_received=1,
+    )
+
+
 def test_forecast_lead_time_uses_the_orderable_supplier():
     item = _serialized_item("Fuse")
     _cheap_dead_dear_live(item)
@@ -287,11 +314,34 @@ def test_forecast_lead_time_uses_the_orderable_supplier():
 
 
 def test_forecast_lead_time_is_unknown_when_nothing_is_orderable():
-    """``None`` is "we cannot tell you", which is the truth — not a dead vendor's 1 day."""
+    """``None`` is "we cannot tell you", which is the truth — not a dead vendor's 1 day.
+
+    The dead link carries DELIVERY HISTORY, so this drives the observed branch —
+    the one that takes precedence. Without those logs the test passed for the
+    wrong reason: it exercised only the estimated fallback, which is how the
+    observed branch went on reading dead links unnoticed.
+    """
     item = _serialized_item("Relay")
-    _link(item, "DeadOnly", unit_cost="1.00", lead=1, is_discontinued=True)
+    dead = _link(item, "DeadOnly", unit_cost="1.00", lead=1, is_discontinued=True)
+    _observed_delivery(dead, 45)
 
     assert _forecast_row(item)["lead_time_days"] is None
+
+
+def test_a_dead_vendors_delivery_history_does_not_contaminate_the_forecast():
+    """45 days of history from a vendor who no longer sells it, 7 from one who does.
+
+    Averaging both would forecast a 26-day wait that nobody will ever make you
+    serve, and would inflate the reorder point of every item a lapsed vendor
+    was ever slow on.
+    """
+    item = _serialized_item("Contactor")
+    dead = _link(item, "DeadSlow", unit_cost="1.00", lead=1, is_discontinued=True)
+    live = _link(item, "LiveQuick", unit_cost="9.00", lead=30)
+    _observed_delivery(dead, 45)
+    _observed_delivery(live, 7)
+
+    assert _forecast_row(item)["lead_time_days"] == 7.0
 
 
 def test_forecast_lead_time_matches_the_item_property_it_claims_to_mirror():
@@ -308,12 +358,22 @@ def test_forecast_lead_time_matches_the_item_property_it_claims_to_mirror():
 
 
 def test_kanban_card_lead_time_comes_from_a_supplier_you_can_still_buy_from():
-    """The card is printed and stuck on a shelf; a dead vendor's promise outlives it."""
+    """The card is printed and stuck on a shelf; a dead vendor's promise outlives it.
+
+    Drives the renderer's own stock-info block rather than the model property it
+    reads, so this keeps holding the CARD to the rule — it would fail if the
+    card stopped sourcing "Avg Lead" from the shared derivation.
+    """
+    from index_cards.services import IndexCardRenderer
+
     item = _item("Grommet")
     _cheap_dead_dear_live(item)
 
     fresh = InventoryItem.objects.prefetch_related("item_suppliers__supplier").get(pk=item.pk)
-    assert fresh.average_lead_time == 20
+    lines = IndexCardRenderer(base_url="http://localhost:3000")._stock_info_lines(fresh)
+
+    assert "Avg Lead: 20 days" in lines
+    assert not any("Lead: 1 day" in line for line in lines)
 
 
 # ── The two rules that used to disagree ─────────────────────────────────────

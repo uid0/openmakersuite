@@ -267,7 +267,8 @@ def compute_item_metrics_batch(items):
     # so these numbers are the ones the item detail, the order pad and the PO
     # screens quote — and so an inactive or discontinued link never sets the
     # cost or lead time of a row that reads as buyable (op-2rsp). Batched, so
-    # the per-item property never fires. (1 query)
+    # the per-item property never fires. (1 query, or ZERO when the caller
+    # already prefetched ``item_suppliers`` — the list path does.)
     primary_supplier = primary_suppliers_for(items)
 
     for item in items:

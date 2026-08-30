@@ -144,11 +144,14 @@ removed and that `docs/API_LIST_CONTRACT.md` bounds in CI. The cost yardstick
 
 **The scoring weights are a product decision, not an implementation detail.**
 They came from the rival rule this replaced and are pinned as they stand;
-`inventory/tests/test_supplier_scoring.py` asserts each one and names four
+`inventory/tests/test_supplier_scoring.py` asserts each one and names five
 places the judgement is questionable (`REPORTED, NOT FIXED`) — most importantly
 that an unpriced supplier can never beat a priced one, because a missing price
-scores like a bad price. Retuning any of them needs a captain decision, and the
-tests will fail until it is deliberate.
+scores like a bad price. Two of the five are the same falsy-guard mistake: a
+`unit_cost` of 0 and an `average_lead_time` of 0 both read as "unknown", so the
+best possible price and the best possible lead time are each graded as the
+worst. Retuning any of them needs a captain decision, and the tests will fail
+until it is deliberate.
 
 `PurchaseOrderViewSet._find_best_supplier` is now a thin delegation, kept for its
 call site's readability. It has no rule of its own.

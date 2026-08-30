@@ -167,6 +167,14 @@ def score_candidate(link: ItemSupplier, average_unit_cost: Optional[Decimal]) ->
 
     # Cost (nominal 40%) — cheaper than the item's average orderable price is
     # better. See COST_TOLERANCE on the cliff and the missing upper clamp.
+    #
+    # REPORTED, NOT FIXED: this guard is truthiness, so a ``unit_cost`` of 0.00
+    # is skipped as "unpriced" — while ``average_orderable_unit_cost`` still
+    # counts that 0.00 as a real price. A free link (donated stock, a sample, an
+    # internal transfer) therefore earns nothing for being free AND drags the
+    # yardstick its rivals are measured against. Pinned by
+    # ``test_a_free_supplier_earns_nothing_for_being_free``; the fix is a weight
+    # and semantics decision the captain reserved.
     if link.unit_cost and average_unit_cost:
         relative = (link.unit_cost / average_unit_cost - 1) * 100
         cost_factor = max(Decimal(0), COST_TOLERANCE - relative) / COST_TOLERANCE
@@ -243,11 +251,19 @@ def _choose(links: List[ItemSupplier]) -> SupplierChoice:
     )
 
 
-def _links_for(item) -> List[ItemSupplier]:
-    """This item's supplier rows in ``Meta.ordering``, riding a prefetch if set."""
+def _prefetched_links(item) -> Optional[List[ItemSupplier]]:
+    """This item's rows from an ``item_suppliers`` prefetch, or ``None`` if unset."""
     prefetched = getattr(item, "_prefetched_objects_cache", None) or {}
     if "item_suppliers" in prefetched:
         return list(item.item_suppliers.all())
+    return None
+
+
+def _links_for(item) -> List[ItemSupplier]:
+    """This item's supplier rows in ``Meta.ordering``, riding a prefetch if set."""
+    prefetched = _prefetched_links(item)
+    if prefetched is not None:
+        return prefetched
     return list(item.item_suppliers.select_related("supplier").all())
 
 
@@ -270,24 +286,40 @@ def select_suppliers_for(items: Iterable) -> Dict:
     the result — a :class:`SupplierChoice` carrying :data:`NO_SUPPLIERS` where
     the item has no links — so callers can index the map directly.
 
-    Every candidate row for the page is pulled, not just the orderable ones:
-    "none orderable" can only be told apart from "no suppliers" by seeing the
-    rows that were rejected. The batch is one ``select_related("supplier")``
-    query ordered by ``item`` then the selection ordering, so each item's rows
-    arrive together and in the same order :func:`select_supplier` sees them.
+    Items that already carry an ``item_suppliers`` prefetch are resolved from
+    that cache and cost NOTHING — the list endpoints that annotate a page with
+    metrics prefetch it, so re-querying identical rows here would be a wasted
+    round-trip per page. Only the remainder is fetched, in ONE
+    ``select_related("supplier")`` query ordered by ``item`` then the selection
+    ordering, so each item's rows arrive together and in the same order
+    :func:`select_supplier` sees them.
+
+    Every candidate row is pulled, not just the orderable ones: "none orderable"
+    can only be told apart from "no suppliers" by seeing the rows that were
+    rejected.
     """
     items = list(items)
-    grouped: Dict = {item.id: [] for item in items}
     if not items:
         return {}
 
-    for link in (
-        ItemSupplier.objects.filter(item_id__in=list(grouped))
-        .select_related("supplier")
-        .order_by("item", "-is_primary", "unit_cost")
-    ):
-        grouped[link.item_id].append(link)
-    return {item_id: _choose(links) for item_id, links in grouped.items()}
+    resolved: Dict = {}
+    grouped: Dict = {}
+    for item in items:
+        prefetched = _prefetched_links(item)
+        if prefetched is not None:
+            resolved[item.id] = _choose(prefetched)
+        else:
+            grouped[item.id] = []
+
+    if grouped:
+        for link in (
+            ItemSupplier.objects.filter(item_id__in=list(grouped))
+            .select_related("supplier")
+            .order_by("item", "-is_primary", "unit_cost")
+        ):
+            grouped[link.item_id].append(link)
+        resolved.update({item_id: _choose(links) for item_id, links in grouped.items()})
+    return resolved
 
 
 def primary_item_supplier(item) -> Optional[ItemSupplier]:

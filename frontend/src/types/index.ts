@@ -289,9 +289,14 @@ export interface InventoryItem {
   // Every supplier link for this item, with that supplier's own SKU, UPCs,
   // pricing and lead time. This is the supplier source of truth; the flat
   // `supplier_name` / `supplier_sku` / `supplier_url` / `average_lead_time`
-  // keys above are read-only legacy accessors for whichever link the API
-  // treats as primary (`-is_primary`, then cheapest) and are superseded by
-  // this array — see `InventoryItemSerializer` in inventory/serializers.py.
+  // keys above are read-only legacy accessors for the ONE link the API says to
+  // buy through, and are superseded by this array. That link is never one you
+  // cannot order from (inactive or discontinued links are skipped outright);
+  // among the rest, a link the operator flagged primary wins, and otherwise the
+  // API weighs price AND lead time together — it is not simply the cheapest.
+  // Null flats mean "no supplier you can buy from", which is not the same as
+  // "no suppliers" — read `suppliers` to tell those apart. See
+  // `inventory/services/supplier_selection.py`.
   // Optional because list payloads a caller narrowed may omit it; absent is
   // "we were not told", which is not the same as an empty array.
   suppliers?: ItemSupplier[];

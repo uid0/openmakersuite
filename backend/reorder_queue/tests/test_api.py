@@ -2429,16 +2429,20 @@ class TestCreateOptimizedOrder:
     def test_retired_low_stock_item_excluded_from_recommendations(self, authenticated_client):
         """A retired low-stock item is never recommended; an active one still is.
 
-        ``unit_cost=None`` on the item makes its auto-created primary supplier
-        score via the lead-time/primary path, sidestepping a pre-existing
-        ``Decimal * float`` bug in the optimizer's cost scoring that is
-        unrelated to retirement.
+        Both items carry a real ``unit_cost``, which is the shape the optimizer
+        used to 500 on: its cost scoring raised ``TypeError`` on
+        ``Decimal * float`` for any candidate priced below 150% of the item's
+        average — always true of a single-supplier item. This test previously
+        set ``unit_cost=None`` to route around that, which is why nothing in the
+        suite caught it (op-2rsp).
         """
         client, _ = authenticated_client
 
-        active_low = InventoryItemFactory(current_stock=1, minimum_stock=10, unit_cost=None)
+        active_low = InventoryItemFactory(
+            current_stock=1, minimum_stock=10, unit_cost=Decimal("4.50")
+        )
         retired_low = InventoryItemFactory(
-            current_stock=1, minimum_stock=10, is_retired=True, unit_cost=None
+            current_stock=1, minimum_stock=10, is_retired=True, unit_cost=Decimal("4.50")
         )
 
         response = client.post(self.URL, {}, format="json")
@@ -2574,7 +2578,12 @@ class TestReorderQuantityIsModeAware:
         assert self._line_for(response, item)["suggested_quantity"] == 30
 
     def test_optimized_order_recommends_whole_packs_of_the_items_chain(self):
-        """``unit_cost=None`` sidesteps the optimizer's pre-existing Decimal*float bug."""
+        """The pack chain drives the quantity, on a normally PRICED item.
+
+        It previously passed ``unit_cost=None`` to route around the optimizer's
+        ``Decimal * float`` crash; that crash is fixed on this branch, so the
+        item now carries the price a real one would (op-2rsp).
+        """
         client = APIClient()
         user = User.objects.create_user(username="optimized", password="pw")
         client.force_authenticate(user=user)
@@ -2584,7 +2593,7 @@ class TestReorderQuantityIsModeAware:
             minimum_stock=2,
             reorder_quantity=3,
             quantity_per_package=50,
-            unit_cost=None,
+            unit_cost=Decimal("2.25"),
         )
 
         response = client.post(self.OPTIMIZED_URL, {}, format="json")

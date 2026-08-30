@@ -294,14 +294,7 @@ class IndexCardRenderer:
         if item.shelf_position:
             # Get image bottom position (reuse logic from _draw_left_section)
             info_y = current_y - 0.1 * inch
-            info_lines = [
-                self._reorder_at_line(item),
-            ]
-            if item.average_lead_time:
-                info_lines.append(f"Avg Lead: {self._pluralize(item.average_lead_time, 'day')}")
-            longest_lead_time = self._get_longest_lead_time(item)
-            if longest_lead_time and longest_lead_time != item.average_lead_time:
-                info_lines.append(f"Max Lead: {self._pluralize(longest_lead_time, 'day')}")
+            info_lines = self._stock_info_lines(item)
             info_lines_height = len(info_lines) * self._highlight_style.leading
             image_y_start = info_y - info_lines_height - 0.1 * inch
 
@@ -359,19 +352,7 @@ class IndexCardRenderer:
         inner_y: float,
     ) -> None:
         """Draw the left section with stock info and product image."""
-        # Draw Kanban stock info (reorder point and lead times)
-        info_lines = [
-            self._reorder_at_line(item),
-        ]
-
-        # Add average lead time from primary supplier
-        if item.average_lead_time:
-            info_lines.append(f"Avg Lead: {self._pluralize(item.average_lead_time, 'day')}")
-
-        # Add longest lead time across all suppliers
-        longest_lead_time = self._get_longest_lead_time(item)
-        if longest_lead_time and longest_lead_time != item.average_lead_time:
-            info_lines.append(f"Max Lead: {self._pluralize(longest_lead_time, 'day')}")
+        info_lines = self._stock_info_lines(item)
 
         info_y = current_y - 0.1 * inch
         self._draw_info_lines(
@@ -826,6 +807,33 @@ class IndexCardRenderer:
 
         threshold, unit = reorder_threshold(item)
         return f"Reorder at: {self._pluralize(threshold, unit)}"
+
+    def _stock_info_lines(self, item: InventoryItem) -> list[str]:
+        """The card's Kanban stock block: reorder point, then the lead times.
+
+        One helper because two call sites need these lines — the left section
+        draws them and the shelf-arrow path measures their height to place the
+        product image. They were duplicated, so a change to what the card SAYS
+        could silently stop matching how much room it reserved.
+
+        ``Avg Lead`` is ``InventoryItem.average_lead_time``, which reads the
+        supplier this item would actually be bought through
+        (:mod:`inventory.services.supplier_selection`); ``Max Lead`` spans the
+        orderable links. Neither can quote a vendor nobody can buy from — the
+        card outlives the screen it was printed from (op-2rsp).
+        """
+        info_lines = [
+            self._reorder_at_line(item),
+        ]
+
+        if item.average_lead_time:
+            info_lines.append(f"Avg Lead: {self._pluralize(item.average_lead_time, 'day')}")
+
+        longest_lead_time = self._get_longest_lead_time(item)
+        if longest_lead_time and longest_lead_time != item.average_lead_time:
+            info_lines.append(f"Max Lead: {self._pluralize(longest_lead_time, 'day')}")
+
+        return info_lines
 
     def _get_longest_lead_time(self, item: InventoryItem) -> int | None:
         """Longest lead time across the suppliers this item can still be BOUGHT from.

@@ -26,7 +26,8 @@ This module turns that usage history into a demand forecast:
 * ``reorder_point = avg_daily_use * lead_time_days + safety_stock`` — the
   classic reorder trigger. ``lead_time_days`` reuses observed supplier
   performance from :class:`reorder_queue.models.LeadTimeLog` (falling back to
-  the supplier's estimated ``average_lead_time``), and ``safety_stock`` reuses
+  the supplier's estimated ``average_lead_time``) — both restricted to
+  suppliers the item can still be ORDERED from — and ``safety_stock`` reuses
   the item's existing ``minimum_stock`` buffer.
 
 The output feeds the inventory + purchasing overview dashboards.
@@ -76,18 +77,31 @@ def _lead_time_days_by_item(items: list[InventoryItem]) -> dict[Any, Optional[fl
     """Resolve each item's lead time in days, batched to avoid N+1 queries.
 
     Prefers the mean of *observed* lead times recorded in
-    ``reorder_queue.LeadTimeLog`` across the item's suppliers; falls back to the
-    supplier's estimated ``average_lead_time`` (primary supplier preferred);
-    maps to ``None`` when neither is available.
+    ``reorder_queue.LeadTimeLog`` across the item's ORDERABLE suppliers; falls
+    back to the estimated ``average_lead_time`` of the supplier the item would
+    actually be bought through; maps to ``None`` when neither is available.
+
+    **Both branches share one orderability precondition.** Whichever branch
+    answers, the number is a wait some supplier you can still buy from will
+    make you serve — never a vendor who no longer sells the item.
     """
     # Imported lazily so this module has no hard import-time dependency on the
     # reorder_queue app (mirrors how the rest of inventory references it).
     from reorder_queue.models import LeadTimeLog
 
+    # Observed history, restricted to links that can still be ordered through.
+    # Without this filter a discontinued vendor's deliveries kept setting the
+    # forecast — and because ``observed`` takes precedence over ``estimated``,
+    # it did so THROUGH the fallback that had already been fixed to skip dead
+    # links, leaving the orderability rule incomplete at this one site (op-2rsp).
     observed = {
         row["item_supplier__item_id"]: row["avg"]
         for row in (
-            LeadTimeLog.objects.filter(item_supplier__item__in=items)
+            LeadTimeLog.objects.filter(
+                item_supplier__item__in=items,
+                item_supplier__is_active=True,
+                item_supplier__is_discontinued=False,
+            )
             .values("item_supplier__item_id")
             .annotate(avg=Avg("actual_lead_time_days"))
         )

@@ -656,7 +656,6 @@ complete, and it was twice not:
   and `inventory/services/suppliers.py` are byte-identical to base `7c078de`.
   Three earlier rounds did change them and their entries stood here; all of it
   was withdrawn. See the record below.
-
 - Supplier detail price-trend **records** (`GET /api/inventory/suppliers/<id>/`,
   `trends[].price_history[].unit_cost`) — `null` -> `0.0` for a recorded zero,
   which is what the supplier-detail chart plots.
@@ -763,7 +762,6 @@ refusals with their remedy text; the committee-ledger fix in `receiving.py`;
 every frontend consumer fix and corrected wire type; and the ScanTTY contract
 record. The acceptance criteria this branch was opened for are met by those; the
 write path was an escalation that did not pay off.
-
 
 **A reported figure that does NOT move, measured and rejected — the wire-type
 rule cuts BOTH ways.** Review reported that a PO-form freeform line priced at

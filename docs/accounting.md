@@ -153,11 +153,14 @@ job is reopened.
 
 `item.unit_cost` is derived from the supplier the item would actually be bought
 through — never an inactive or discontinued link — so it is `None` both for an
-item with no suppliers and for one whose every supplier link is dead. The
-derivation itself is owned by `inventory/services/supplier_selection.py`. If a
-committee is given but there is **no cost on file** (`total_cost` null or `≤ 0`),
-the committee is still recorded on the `UsageLog` (with `unit_cost = None`) but
-**nothing is posted** to the ledger, and the response carries a `warning`:
+item with no suppliers and for one whose every supplier link is dead. The choice
+of link is owned by `inventory/services/supplier_selection.py`; the price read
+off it by `inventory/services/pricing.py`, where `None` means only "no price is
+recorded" and a link that quotes `0.00` yields a real `Decimal("0.00")`.
+
+If a committee is given but the posting amount is not positive (`total_cost`
+null or `≤ 0`), the committee is still recorded on the `UsageLog` but **nothing
+is posted** to the ledger, and the response carries a `warning`:
 
 > committee recorded, but the item has no unit cost — nothing posted to the ledger
 
@@ -182,12 +185,16 @@ CR 2000 Accounts Payable
 ```
 
 The committee is `item.owning_group` (an `auth.Group`) recorded as the debit
-line's **SIG dimension**. The amount is `quantity × unit_cost`, where
-`unit_cost = po_item.unit_cost_actual or po_item.unit_cost_ordered` — the actual
-charged cost wins over the ordered estimate when known. This is the *purchasing*
-side of a committee's tab: receiving **fills** on-hand supplies (and incurs a
-payable), while consuming later **draws them down** as an expense (the 5100/1300
-chargeback above). Vendor payment (DR 2000 / CR Cash) is a future bead — there is
+line's **SIG dimension**. The amount is `quantity × unit_cost`, where `unit_cost`
+comes from `inventory.services.work_order_purchase_bridge.purchase_line_unit_cost`
+— the one owner of "the real price paid per unit", which prefers the actual
+charged cost over the ordered estimate with `is None` and not `or`, so a line the
+vendor **comped** (`unit_cost_actual = 0.00`) bills the committee nothing instead
+of reverting to the price it was ordered at. A receipt that cost nothing posts
+no entry at all. This is the *purchasing* side of a committee's tab: receiving
+**fills** on-hand supplies (and incurs a payable), while consuming later **draws
+them down** as an expense (the 5100/1300 chargeback above). Vendor payment
+(DR 2000 / CR Cash) is a future bead — there is
 no Cash account in v1.
 
 ### The adapter (`accounting/adapters.py`)

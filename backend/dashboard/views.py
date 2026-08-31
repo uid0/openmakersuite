@@ -236,6 +236,7 @@ def get_inventory_summary(request):
         from django.utils import timezone
 
         from inventory.models import Asset, InventoryItem
+        from inventory.services.pricing import PriceRollup, lowest_unit_price
 
         # Inventory Items Stats
         items_query = InventoryItem.objects.filter(is_active=True)
@@ -254,15 +255,24 @@ def get_inventory_summary(request):
             .count()
         )
 
-        # Total inventory value. total_value -> lowest_unit_cost reads
-        # item_suppliers.all(), so prefetch it for THIS unpaginated sum only
-        # (a fresh clone; the count-only reuses of items_query stay untouched)
-        # to avoid a per-item supplier query — the N+1 the property fix in #882
-        # made cacheable. Value-identical; not a Sum annotate (null-cost /
-        # Decimal("0") / rounding would differ). Issue #890.
-        total_value = sum(
-            item.total_value for item in items_query.prefetch_related("item_suppliers")
-        )
+        # Total inventory value. lowest_unit_price reads item_suppliers.all(),
+        # so prefetch it for THIS unpaginated sum only (a fresh clone; the
+        # count-only reuses of items_query stay untouched) to avoid a per-item
+        # supplier query — the N+1 the property fix in #882 made cacheable. Not
+        # a Sum annotate (null-cost / Decimal("0") / rounding would differ).
+        # Issue #890.
+        #
+        # Summed through PriceRollup rather than over ``item.total_value``
+        # (op-9m2v): that property is ``None`` for an item no supplier prices,
+        # and ``sum()`` over it raises TypeError, which this blanket
+        # ``except`` would have turned into a 500 on a public endpoint. The
+        # NUMBER is byte-identical to base, which contributed Decimal("0") for
+        # those items; ``items_without_price`` beside it is what stops the
+        # total reading as a complete valuation.
+        rollup = PriceRollup()
+        for item in items_query.prefetch_related("item_suppliers"):
+            rollup.add(lowest_unit_price(item), item.current_stock)
+        total_value = rollup.amount
 
         # Recently added items (last 30 days)
         thirty_days_ago = timezone.now() - timedelta(days=30)
@@ -291,6 +301,10 @@ def get_inventory_summary(request):
                     "low_stock_count": low_stock_items,
                     "items_with_pending_reorders": items_with_reorders,
                     "total_value": float(total_value),
+                    # How many active items the total above could NOT value,
+                    # because no supplier records a price for them (op-9m2v).
+                    # The same honesty count the stock-value reports carry.
+                    "items_without_price": rollup.unpriced_count,
                     "recently_added": recent_items,
                     "low_stock_items": list(low_stock_list),
                 },

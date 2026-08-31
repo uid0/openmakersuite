@@ -80,6 +80,22 @@ const formatCostValue = (value: number): string => {
   return String(parseFloat(value.toFixed(6)));
 };
 
+/**
+ * Did the operator actually TYPE a price, and is it a real one?
+ *
+ * `>= 0`, not `> 0` (op-9m2v). A vendor donating an asset states a price of
+ * zero, and the asset guard's `parseFloat(cost) > 0` refused to let that line
+ * onto an order at all — with the button silently disabled and nothing saying
+ * why — while the freeform guard on the same screen already accepted it, and
+ * the server refuses only a MISSING cost. An empty box is still not a price:
+ * this is "a number was entered and it is not negative", never truthiness.
+ */
+const hasTypedPrice = (cost: string | null | undefined): boolean => {
+  if (cost === null || cost === undefined || cost.trim() === '') return false;
+  const amount = parseFloat(cost);
+  return Number.isFinite(amount) && amount >= 0;
+};
+
 const PurchaseOrderFormPage: React.FC = () => {
   const navigate = useNavigate();
 
@@ -358,7 +374,11 @@ const PurchaseOrderFormPage: React.FC = () => {
   const caseCostPlaceholderFor = (item: SelectedItem): string => {
     if (item.package_cost != null && item.package_cost !== '') return item.package_cost;
     const qpp = item.quantity_per_package || 1;
-    const unit = parseFloat(item.unit_cost || '0');
+    // `item.unit_cost` is null when nobody recorded one, and `|| '0'` used to
+    // turn that into a placeholder of "0" — a price suggestion for a price the
+    // system does not have (op-9m2v). No suggestion is the honest placeholder.
+    if (item.unit_cost == null || item.unit_cost === '') return '';
+    const unit = parseFloat(item.unit_cost);
     return Number.isNaN(unit) ? '' : formatCostValue(unit * qpp);
   };
 
@@ -523,14 +543,28 @@ const PurchaseOrderFormPage: React.FC = () => {
         minimum_stock: inventoryItem.minimum_stock || 0,
         reorder_quantity: inventoryItem.reorder_quantity || 0,
         suggested_quantity: qpp,
-        unit_cost: matchingItemSupplier.unit_cost?.toString() || '0',
-        package_cost: matchingItemSupplier.package_cost?.toString() || null,
+        // `?? null`, never `|| '0'`: a link with no price on file is not a
+        // free one, and the server now REFUSES a line it cannot price rather
+        // than storing the zero this used to prefill (op-9m2v). `0` here is a
+        // vendor that charges nothing, so it must survive.
+        unit_cost: matchingItemSupplier.unit_cost?.toString() ?? null,
+        unit_cost_state:
+          matchingItemSupplier.unit_cost == null ? 'not_recorded' : 'known',
+        unit_cost_detail:
+          matchingItemSupplier.unit_cost == null
+            ? `No price is recorded for ${inventoryItem.name} from this supplier. `
+              + 'Enter a unit cost below, or record one on the supplier link.'
+            : null,
+        package_cost: matchingItemSupplier.package_cost?.toString() ?? null,
         quantity_per_package: qpp,
         lead_time_days: matchingItemSupplier.average_lead_time || 7,
         supplier_sku: matchingItemSupplier.supplier_sku || '',
         supplier_url: matchingItemSupplier.supplier_url || '',
         is_primary: matchingItemSupplier.is_primary || false,
-        line_total: (parseFloat(matchingItemSupplier.unit_cost?.toString() || '0') * qpp).toString(),
+        line_total:
+          matchingItemSupplier.unit_cost == null
+            ? null
+            : (parseFloat(matchingItemSupplier.unit_cost.toString()) * qpp).toString(),
         selected: true,
         quantity: qpp,
         cases: 1,
@@ -551,12 +585,32 @@ const PurchaseOrderFormPage: React.FC = () => {
     }
   };
 
-  // Calculate totals
+  // The price a line will actually be ordered at: what the operator typed, or
+  // what the supplier link records, or NOTHING (op-9m2v). `null` is the third
+  // answer and it is not zero — `parseFloat(null)` is NaN and the old total
+  // folded that in as 0, so an unpriced line quietly made the order look
+  // cheaper than it would be. The server refuses such a line outright now, so
+  // the form has to see it too, and say so before the operator submits.
+  const effectiveUnitCost = (line: {
+    unit_cost: string | null;
+    unit_cost_override?: string;
+  }): number | null => {
+    const raw =
+      line.unit_cost_override && line.unit_cost_override.trim() !== ''
+        ? line.unit_cost_override
+        : line.unit_cost;
+    if (raw === null || raw === undefined || raw === '') return null;
+    const parsed = parseFloat(raw);
+    return Number.isNaN(parsed) ? null : parsed;
+  };
+
+  // Calculate totals. Only the lines we can price are summed; the ones we
+  // cannot are COUNTED, so a partial total says so rather than looking whole.
   const itemsTotal = selectedItems
     .filter((item) => item.selected)
     .reduce((sum, item) => {
-      const unitCost = item.unit_cost_override ? parseFloat(item.unit_cost_override) : parseFloat(item.unit_cost);
-      return sum + (isNaN(unitCost) ? 0 : unitCost) * item.quantity;
+      const unitCost = effectiveUnitCost(item);
+      return unitCost === null ? sum : sum + unitCost * item.quantity;
     }, 0);
 
   const assetsTotal = selectedAssets
@@ -570,13 +624,27 @@ const PurchaseOrderFormPage: React.FC = () => {
   const kitsTotal = selectedKits
     .filter((kit) => kit.selected)
     .reduce((sum, kit) => {
-      const unitCost = kit.unit_cost_override
-        ? parseFloat(kit.unit_cost_override)
-        : parseFloat(kit.unit_cost);
-      return sum + (isNaN(unitCost) ? 0 : unitCost) * kit.quantity;
+      const unitCost = effectiveUnitCost(kit);
+      return unitCost === null ? sum : sum + unitCost * kit.quantity;
     }, 0);
 
   const grandTotal = itemsTotal + assetsTotal + freeformTotal + kitsTotal;
+
+  // The lines this order cannot price, and what the operator does about each.
+  // Derived on every render from the same rule the total uses, so the warning
+  // and the number can never disagree.
+  const unpricedLines = [
+    ...selectedItems
+      .filter((item) => item.selected && effectiveUnitCost(item) === null)
+      .map((item) => ({
+        key: `item-${item.item_supplier_id}`,
+        name: item.item_name,
+        detail: item.unit_cost_detail,
+      })),
+    ...selectedKits
+      .filter((kit) => kit.selected && effectiveUnitCost(kit) === null)
+      .map((kit) => ({ key: `kit-${kit.item_supplier_id}`, name: kit.name, detail: null })),
+  ];
 
   const selectedItemCount = selectedItems.filter((item) => item.selected).length;
   const selectedAssetCount = selectedAssets.filter((asset) => asset.selected).length;
@@ -651,12 +719,13 @@ const PurchaseOrderFormPage: React.FC = () => {
     totalLineItems > 0 &&
     !submitting &&
     // Check that all selected assets have unit_cost
-    selectedAssets.filter((a) => a.selected).every((a) => a.unit_cost && parseFloat(a.unit_cost) > 0) &&
+    selectedAssets.filter((a) => a.selected).every((a) => hasTypedPrice(a.unit_cost)) &&
+    // No inventory or kit line may go out at a price nobody has stated. The
+    // server refuses one; refusing here first means the operator is told which
+    // line and what to do about it, instead of a 400 after the fact (op-9m2v).
+    unpricedLines.length === 0 &&
     // Check that all freeform items have description and unit_cost
-    freeformItems.every(
-      (item) =>
-        !item.description || (item.description && item.unit_cost && parseFloat(item.unit_cost) >= 0)
-    );
+    freeformItems.every((item) => !item.description || hasTypedPrice(item.unit_cost));
 
   // Submit order
   const handleSubmit = async (e: React.FormEvent) => {
@@ -776,6 +845,18 @@ const PurchaseOrderFormPage: React.FC = () => {
     }).format(num);
   };
 
+  /**
+   * A line figure, or an em dash where no price is on file.
+   *
+   * Explicit about the absence rather than leaning on `formatCurrency`'s NaN
+   * branch: `parseFloat(null)` happening to be NaN is what these cells relied
+   * on, and it stops being true the moment someone parses the field
+   * differently. `null` is "we do not know", `0` is a vendor that charges
+   * nothing, and the two must not look alike (op-9m2v).
+   */
+  const lineMoney = (amount: number | null): string =>
+    amount === null ? '—' : formatCurrency(amount);
+
   if (loading) {
     return (
       <div className="po-form-page">
@@ -831,8 +912,19 @@ const PurchaseOrderFormPage: React.FC = () => {
                       <span className="stat-label">assets available</span>
                     </div>
                     <div className="stat">
-                      <span className="stat-value">{formatCurrency(supplier.estimated_total)}</span>
-                      <span className="stat-label">estimated total</span>
+                      {/* A "+" marks a total the server could only compute
+                          part of: `unpriced_item_count` lines carry no price
+                          on file, and base summed each of them as $0.00
+                          (op-9m2v). */}
+                      <span className="stat-value">
+                        {formatCurrency(supplier.estimated_total)}
+                        {(supplier.unpriced_item_count ?? 0) > 0 ? ' +' : ''}
+                      </span>
+                      <span className="stat-label">
+                        {(supplier.unpriced_item_count ?? 0) > 0
+                          ? `estimated total (${supplier.unpriced_item_count} unpriced)`
+                          : 'estimated total'}
+                      </span>
                     </div>
                     <div className="stat">
                       <span className="stat-value">{Math.round(supplier.avg_lead_time)} days</span>
@@ -896,10 +988,8 @@ const PurchaseOrderFormPage: React.FC = () => {
                     </thead>
                     <tbody>
                       {selectedKits.map((kit) => {
-                        const unitCost = kit.unit_cost_override
-                          ? parseFloat(kit.unit_cost_override)
-                          : parseFloat(kit.unit_cost);
-                        const lineTotal = (isNaN(unitCost) ? 0 : unitCost) * kit.quantity;
+                        const unitCost = effectiveUnitCost(kit);
+                        const lineTotal = unitCost === null ? null : unitCost * kit.quantity;
                         const units = kit.components.reduce(
                           (sum, component) => sum + component.quantity_per_kit * kit.quantity,
                           0
@@ -950,7 +1040,12 @@ const PurchaseOrderFormPage: React.FC = () => {
                                   type="number"
                                   step="0.01"
                                   min="0"
-                                  value={kit.unit_cost_override ?? kit.unit_cost}
+                                  // `?? ''` after the null: a kit with no
+                                  // price on file gets an EMPTY box the
+                                  // operator must fill, not a "0" they can
+                                  // accept by reflex (op-9m2v).
+                                  value={kit.unit_cost_override ?? kit.unit_cost ?? ''}
+                                  placeholder={kit.unit_cost === null ? 'no price on file' : ''}
                                   onChange={(e) =>
                                     setSelectedKits((prev) =>
                                       prev.map((row) =>
@@ -964,7 +1059,7 @@ const PurchaseOrderFormPage: React.FC = () => {
                                 />
                               </td>
                               <td data-testid={`po-kit-total-${kit.id}`}>
-                                {formatCurrency(lineTotal)}
+                                {lineMoney(lineTotal)}
                               </td>
                               <td>
                                 {/* Expandable, NOT a tooltip: a 5x5 table is
@@ -1174,16 +1269,12 @@ const PurchaseOrderFormPage: React.FC = () => {
                                 >
                                   {item.cases} cases × {item.quantity_per_package} units/case ={' '}
                                   {item.quantity} units @{' '}
-                                  {formatCurrency(
-                                    item.unit_cost_override
-                                      ? parseFloat(item.unit_cost_override)
-                                      : parseFloat(item.unit_cost)
-                                  )}
+                                  {lineMoney(effectiveUnitCost(item))}
                                   /unit ={' '}
-                                  {formatCurrency(
-                                    (item.unit_cost_override
-                                      ? parseFloat(item.unit_cost_override)
-                                      : parseFloat(item.unit_cost)) * item.quantity
+                                  {lineMoney(
+                                    effectiveUnitCost(item) === null
+                                      ? null
+                                      : (effectiveUnitCost(item) as number) * item.quantity
                                   )}
                                 </div>
                               </div>
@@ -1215,7 +1306,7 @@ const PurchaseOrderFormPage: React.FC = () => {
                                     type="number"
                                     min="0"
                                     step="any"
-                                    placeholder={item.unit_cost}
+                                    placeholder={item.unit_cost ?? 'no price on file'}
                                     value={item.unit_cost_override || ''}
                                     onChange={(e) =>
                                       updateItemUnitCost(item.item_supplier_id, e.target.value)
@@ -1249,7 +1340,7 @@ const PurchaseOrderFormPage: React.FC = () => {
                                 type="number"
                                 min="0"
                                 step="0.01"
-                                placeholder={item.unit_cost}
+                                placeholder={item.unit_cost ?? 'no price on file'}
                                 value={item.unit_cost_override || ''}
                                 onChange={(e) => updateItemUnitCost(item.item_supplier_id, e.target.value)}
                                 disabled={!item.selected}
@@ -1271,8 +1362,10 @@ const PurchaseOrderFormPage: React.FC = () => {
                           </td>
                           <td className="col-total">
                             {item.selected
-                              ? formatCurrency(
-                                  (item.unit_cost_override ? parseFloat(item.unit_cost_override) : parseFloat(item.unit_cost)) * item.quantity
+                              ? lineMoney(
+                                  effectiveUnitCost(item) === null
+                                    ? null
+                                    : (effectiveUnitCost(item) as number) * item.quantity
                                 )
                               : '—'}
                           </td>
@@ -1674,8 +1767,27 @@ const PurchaseOrderFormPage: React.FC = () => {
                 </div>
                 <div className="summary-row summary-total">
                   <span>Grand Total ({totalLineItems} line items)</span>
-                  <span>{formatCurrency(grandTotal)}</span>
+                  <span>
+                    {formatCurrency(grandTotal)}
+                    {unpricedLines.length > 0 ? ' +' : ''}
+                  </span>
                 </div>
+                {/* The order cannot be created while a line carries no price,
+                    so the block names each one and what to do about it rather
+                    than leaving a disabled button unexplained (op-9m2v). The
+                    server refuses the same lines; this just gets there first. */}
+                {unpricedLines.length > 0 && (
+                  <div className="summary-row summary-warning" data-testid="po-unpriced-warning">
+                    <span>
+                      {unpricedLines.length} line
+                      {unpricedLines.length === 1 ? '' : 's'} with no price on file
+                    </span>
+                    <span>
+                      {unpricedLines.map((line) => line.name).join(', ')} — enter a unit cost
+                      above, or record one on the supplier link, before creating this order.
+                    </span>
+                  </div>
+                )}
                 {/* What the order will look like the moment it is created
                     (op-uc0o): every new order starts as a draft, and the
                     payment follows the terms above and the running total. */}

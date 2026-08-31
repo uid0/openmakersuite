@@ -500,7 +500,9 @@ const WorkOrderPage: React.FC = () => {
   // list is far longer than a dropdown should ever hold.
   const [itemSearch, setItemSearch] = useState('');
   const [itemOptions, setItemOptions] = useState<{ value: string; label: string }[]>([]);
-  const [itemCosts, setItemCosts] = useState<Record<string, string | null>>({});
+  // Numbers, not decimal strings: `InventoryItem.unit_cost` is property-backed
+  // and arrives as a JSON number (op-9m2v).
+  const [itemCosts, setItemCosts] = useState<Record<string, number | null>>({});
   const resetReceiptRef = useRef<() => void>(null);
   // Estimated cost per unit from the PM template, keyed by MaintenanceMaterial
   // id — the only thing the "actual vs estimated" comparison can be measured
@@ -653,7 +655,7 @@ const WorkOrderPage: React.FC = () => {
         const items = res?.data?.results ?? [];
         setItemOptions(items.map((item) => ({ value: item.id, label: item.name })));
         setItemCosts(
-          items.reduce<Record<string, string | null>>((acc, item) => {
+          items.reduce<Record<string, number | null>>((acc, item) => {
             acc[item.id] = item.unit_cost;
             return acc;
           }, {}),

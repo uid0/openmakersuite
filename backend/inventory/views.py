@@ -133,6 +133,7 @@ from .services.packaging import (
     parse_at_level,
     resolve_base_quantity,
 )
+from .services.pricing import package_price_of, price_float, unit_price_of
 from .services.problem_auto_resolve import resolve_problems_for_work_order
 from .services.work_order_tools import create_work_order_tools
 
@@ -225,13 +226,17 @@ class SupplierViewSet(viewsets.ModelViewSet):
                     {
                         "item_name": ph.item_supplier.item.name,
                         "recorded_at": ph.recorded_at.isoformat(),
-                        "unit_cost": float(ph.unit_cost) if ph.unit_cost else None,
-                        "package_cost": float(ph.package_cost) if ph.package_cost else None,
+                        # ``is_known`` / ``is not None``, never truthiness: a
+                        # snapshot recording 0.00 is a price this supplier
+                        # charged, and a price_change_percentage of exactly 0
+                        # is "no change", not "no data" (op-9m2v).
+                        "unit_cost": price_float(unit_price_of(ph)),
+                        "package_cost": price_float(package_price_of(ph)),
                         "change_type": ph.change_type,
                         "price_change_percentage": (
-                            float(ph.price_change_percentage)
-                            if ph.price_change_percentage
-                            else None
+                            None
+                            if ph.price_change_percentage is None
+                            else float(ph.price_change_percentage)
                         ),
                     }
                     for ph in price_history[:20]
@@ -4234,7 +4239,14 @@ class InventoryReportViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=["get"])
     def stock_by_category(self, request):
-        """Get stock levels aggregated by category."""
+        """Stock levels aggregated by category.
+
+        ``total_value`` is the value of the stock this report CAN price — items
+        no active supplier quotes a price for contribute nothing to it — and
+        ``items_without_price`` is how many of them there were, so the number
+        is read as the lower bound it has always been rather than as a
+        complete valuation (op-9m2v).
+        """
         from django.db.models import Avg, Count, OuterRef, Q, Subquery, Sum, Value
         from django.db.models.functions import Coalesce
 
@@ -4266,6 +4278,14 @@ class InventoryReportViewSet(viewsets.ViewSet):
                     F("current_stock") * Coalesce("unit_cost_value", Value(0)),
                     output_field=models.DecimalField(max_digits=20, decimal_places=2),
                 ),
+                # How many items the total above could NOT value, because no
+                # active supplier records a price for them (op-9m2v). The
+                # ``Coalesce(..., 0)`` is the SQL twin of ``unit_cost or 0``:
+                # an unpriced item contributes nothing and the total reads as
+                # complete. The number is deliberately UNCHANGED — moving it
+                # would be inventing money — and the count beside it is what
+                # makes the claim honest.
+                items_without_price=Count("id", filter=Q(unit_cost_value__isnull=True)),
                 low_stock_count=Count(
                     "id",
                     filter=Q(current_stock__lte=F("minimum_stock")) & Q(is_retired=False),
@@ -4287,6 +4307,7 @@ class InventoryReportViewSet(viewsets.ViewSet):
                     "total_items": item["total_items"],
                     "total_stock": item["total_stock"] or 0,
                     "total_value": float(item["total_value"] or 0),
+                    "items_without_price": item["items_without_price"],
                     "low_stock_count": item["low_stock_count"],
                 }
             )
@@ -4348,7 +4369,13 @@ class InventoryReportViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=["get"])
     def value_by_location(self, request):
-        """Get total inventory value grouped by location."""
+        """Total inventory value grouped by location.
+
+        ``total_value`` / ``items_without_price``: see ``stock_by_category``.
+        The number is the value of the stock this report CAN price and is
+        deliberately unchanged; the count beside it is what stops it reading as
+        a complete valuation (op-9m2v).
+        """
         from django.db.models import Avg, Count, OuterRef, Subquery, Sum, Value
         from django.db.models.functions import Coalesce
 
@@ -4380,6 +4407,9 @@ class InventoryReportViewSet(viewsets.ViewSet):
                     F("current_stock") * Coalesce("unit_cost_value", Value(0)),
                     output_field=models.DecimalField(max_digits=20, decimal_places=2),
                 ),
+                # See ``stock_by_category`` — same SQL twin, same honesty
+                # count, same deliberately-unchanged total.
+                items_without_price=Count("id", filter=Q(unit_cost_value__isnull=True)),
             )
             .order_by("-total_value")
         )
@@ -4397,6 +4427,7 @@ class InventoryReportViewSet(viewsets.ViewSet):
                     "total_items": item["total_items"],
                     "total_stock": item["total_stock"] or 0,
                     "total_value": float(item["total_value"] or 0),
+                    "items_without_price": item["items_without_price"],
                 }
             )
 
@@ -4507,6 +4538,13 @@ class InventoryReportViewSet(viewsets.ViewSet):
                     "total_items",
                     "total_stock",
                     "total_value",
+                    # The count that qualifies the total beside it, carried on
+                    # the CSV as well as on the JSON payload, the UI table and
+                    # the browser-side export in ``csvExport.ts`` (op-9m2v).
+                    # ``total_value`` is ``SUM(stock * COALESCE(unit_cost, 0))``
+                    # and reads as a complete valuation; a spreadsheet is the
+                    # surface most likely to sum it.
+                    "items_without_price",
                     "low_stock_count",
                 ],
             )
@@ -4518,6 +4556,7 @@ class InventoryReportViewSet(viewsets.ViewSet):
                         "total_items": row["total_items"],
                         "total_stock": row["total_stock"],
                         "total_value": f"{row['total_value']:.2f}",
+                        "items_without_price": row["items_without_price"],
                         "low_stock_count": row["low_stock_count"],
                     }
                 )
@@ -4559,7 +4598,15 @@ class InventoryReportViewSet(viewsets.ViewSet):
 
             writer = csv.DictWriter(
                 response_obj,
-                fieldnames=["location_name", "total_items", "total_stock", "total_value"],
+                fieldnames=[
+                    "location_name",
+                    "total_items",
+                    "total_stock",
+                    "total_value",
+                    # See ``stock_by_category`` above — same partial total,
+                    # same honesty count.
+                    "items_without_price",
+                ],
             )
             writer.writeheader()
             for row in data:
@@ -4569,6 +4616,7 @@ class InventoryReportViewSet(viewsets.ViewSet):
                         "total_items": row["total_items"],
                         "total_stock": row["total_stock"],
                         "total_value": f"{row['total_value']:.2f}",
+                        "items_without_price": row["items_without_price"],
                     }
                 )
 

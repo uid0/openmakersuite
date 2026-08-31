@@ -38,44 +38,60 @@ export interface PriceTrendChartProps {
   priceTrends: PriceTrends;
 }
 
-const PriceTrendChart: React.FC<PriceTrendChartProps> = ({ priceTrends }) => {
-  const chartData = useMemo(() => {
-    if (!priceTrends.trends || priceTrends.trends.length === 0) {
-      return [];
-    }
+export type PriceTrendPoint = { date: string; [key: string]: string | number | null };
 
-    // Combine all price history into a single timeline
-    const allDataPoints: Array<{
-      date: string;
-      [key: string]: string | number | null;
-    }> = [];
+/**
+ * The price a snapshot plots: its unit cost, else its package cost, else none.
+ *
+ * `??`, not `||` (op-9m2v). The server sends `0` for a snapshot that records a
+ * price of zero — a supplier that started donating an item — and the falsy
+ * chain fell through it to `null`, so the drop to free, the most notable move
+ * this chart can show, appeared as a gap. Only a genuine absence is a gap.
+ */
+const snapshotPrice = (ph: { unit_cost: number | null; package_cost: number | null }) =>
+  ph.unit_cost ?? ph.package_cost ?? null;
 
-    priceTrends.trends.forEach((trend) => {
-      trend.price_history.forEach((ph) => {
-        const date = ph.recorded_at.split('T')[0];
-        const existingPoint = allDataPoints.find((p) => p.date === date);
+/**
+ * The recharts series rows for a supplier's price history, oldest date first.
+ *
+ * Exported so the null/zero rule above is testable without a chart: recharts
+ * renders nothing measurable under jsdom.
+ */
+export function buildPriceTrendChartData(priceTrends: PriceTrends): PriceTrendPoint[] {
+  if (!priceTrends.trends || priceTrends.trends.length === 0) {
+    return [];
+  }
 
-        if (existingPoint) {
-          // Add this item's price to the existing data point
-          const itemKey = `item_${trend.item_id}`;
-          existingPoint[itemKey] = ph.unit_cost || ph.package_cost || null;
-        } else {
-          // Create new data point
-          const newPoint: { date: string; [key: string]: string | number | null } = {
-            date,
-          };
-          const itemKey = `item_${trend.item_id}`;
-          newPoint[itemKey] = ph.unit_cost || ph.package_cost || null;
-          allDataPoints.push(newPoint);
-        }
-      });
+  // Combine all price history into a single timeline
+  const allDataPoints: PriceTrendPoint[] = [];
+
+  priceTrends.trends.forEach((trend) => {
+    trend.price_history.forEach((ph) => {
+      const date = ph.recorded_at.split('T')[0];
+      const existingPoint = allDataPoints.find((p) => p.date === date);
+      const itemKey = `item_${trend.item_id}`;
+
+      if (existingPoint) {
+        // Add this item's price to the existing data point
+        existingPoint[itemKey] = snapshotPrice(ph);
+      } else {
+        // Create new data point
+        allDataPoints.push({ date, [itemKey]: snapshotPrice(ph) });
+      }
     });
+  });
 
-    // Sort by date
-    return allDataPoints.sort(
-      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-    );
-  }, [priceTrends.trends]);
+  // Sort by date
+  return allDataPoints.sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+  );
+}
+
+const PriceTrendChart: React.FC<PriceTrendChartProps> = ({ priceTrends }) => {
+  const chartData = useMemo(
+    () => buildPriceTrendChartData(priceTrends),
+    [priceTrends]
+  );
 
   const itemNames = useMemo(() => {
     return priceTrends.trends.map((t) => ({

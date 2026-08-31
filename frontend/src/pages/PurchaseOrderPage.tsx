@@ -2789,8 +2789,17 @@ const PurchaseOrderPage: React.FC = () => {
                     )}
                   </td>
                   <td>
-                    {item.unit_cost_actual 
-                      ? formatCurrency(item.unit_cost_actual) 
+                    {/* Truthiness is SAFE here and deliberately kept: DRF
+                        serialises this DecimalField as a STRING, so a comped
+                        line arrives as "0.00" — truthy — and already displays
+                        its own $0.00 with the ordered price beside it. The
+                        falsy-zero trap this branch closes elsewhere (op-9m2v)
+                        does not bite a string, and the tests below pin that it
+                        stays that way if the field is ever parsed to a
+                        number. The BACKEND twin of this expression was a real
+                        defect, because there the value is a Decimal. */}
+                    {item.unit_cost_actual
+                      ? formatCurrency(item.unit_cost_actual)
                       : formatCurrency(item.unit_cost_ordered)}
                     {item.unit_cost_actual && (
                       <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>

@@ -29,6 +29,23 @@ import {
 type SortField = string;
 type SortDirection = 'asc' | 'desc';
 
+/**
+ * The value of the stock a row could price, marked when it is only part of it.
+ *
+ * `total_value` here has always been `SUM(stock * COALESCE(unit_cost, 0))`, so
+ * an item no supplier prices contributed nothing and the column read as a
+ * complete valuation (op-9m2v). The number is unchanged — moving it would be
+ * inventing money — and the "+N unpriced" beside it is what makes the claim
+ * honest.
+ */
+const formatPartialValue = (row: { total_value: number; items_without_price: number }) =>
+  row.items_without_price > 0
+    ? `$${row.total_value.toFixed(2)} +`
+    : `$${row.total_value.toFixed(2)}`;
+
+/** How many items a row could not price — an em dash when it priced them all. */
+const unpricedCell = (count: number) => (count > 0 ? count : '—');
+
 // Default to last 12 months
 const getDefaultDateRange = (): DatesRangeValue => {
   const endDate = new Date();
@@ -207,6 +224,9 @@ const InventoryReportPage: React.FC = () => {
                     <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('total_value')}>
                       Total Value
                     </Table.Th>
+                    <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('items_without_price')}>
+                      Unpriced Items
+                    </Table.Th>
                     <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('low_stock_count')}>
                       Low Stock Count
                     </Table.Th>
@@ -215,13 +235,13 @@ const InventoryReportPage: React.FC = () => {
                 <Table.Tbody>
                   {loading ? (
                     <Table.Tr>
-                      <Table.Td colSpan={5} style={{ textAlign: 'center' }}>
+                      <Table.Td colSpan={6} style={{ textAlign: 'center' }}>
                         <Text>Loading...</Text>
                       </Table.Td>
                     </Table.Tr>
                   ) : sortedStockByCategory.length === 0 ? (
                     <Table.Tr>
-                      <Table.Td colSpan={5} style={{ textAlign: 'center' }}>
+                      <Table.Td colSpan={6} style={{ textAlign: 'center' }}>
                         <Text>No data available</Text>
                       </Table.Td>
                     </Table.Tr>
@@ -231,7 +251,8 @@ const InventoryReportPage: React.FC = () => {
                         <Table.Td>{item.category_name}</Table.Td>
                         <Table.Td>{item.total_items}</Table.Td>
                         <Table.Td>{item.total_stock}</Table.Td>
-                        <Table.Td>${item.total_value.toFixed(2)}</Table.Td>
+                        <Table.Td>{formatPartialValue(item)}</Table.Td>
+                        <Table.Td>{unpricedCell(item.items_without_price)}</Table.Td>
                         <Table.Td>{item.low_stock_count}</Table.Td>
                       </Table.Tr>
                     ))
@@ -324,18 +345,21 @@ const InventoryReportPage: React.FC = () => {
                     <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('total_value')}>
                       Total Value
                     </Table.Th>
+                    <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('items_without_price')}>
+                      Unpriced Items
+                    </Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {loading ? (
                     <Table.Tr>
-                      <Table.Td colSpan={4} style={{ textAlign: 'center' }}>
+                      <Table.Td colSpan={5} style={{ textAlign: 'center' }}>
                         <Text>Loading...</Text>
                       </Table.Td>
                     </Table.Tr>
                   ) : sortedValueByLocation.length === 0 ? (
                     <Table.Tr>
-                      <Table.Td colSpan={4} style={{ textAlign: 'center' }}>
+                      <Table.Td colSpan={5} style={{ textAlign: 'center' }}>
                         <Text>No data available</Text>
                       </Table.Td>
                     </Table.Tr>
@@ -345,7 +369,8 @@ const InventoryReportPage: React.FC = () => {
                         <Table.Td>{item.location_name}</Table.Td>
                         <Table.Td>{item.total_items}</Table.Td>
                         <Table.Td>{item.total_stock}</Table.Td>
-                        <Table.Td>${item.total_value.toFixed(2)}</Table.Td>
+                        <Table.Td>{formatPartialValue(item)}</Table.Td>
+                        <Table.Td>{unpricedCell(item.items_without_price)}</Table.Td>
                       </Table.Tr>
                     ))
                   )}

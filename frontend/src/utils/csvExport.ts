@@ -4,6 +4,17 @@
  */
 import { formatDateOnly } from './dates';
 
+/**
+ * A money column, or a blank cell where the server recorded no price.
+ *
+ * `null` and `0` are different answers (op-9m2v): a supplier that charges
+ * nothing and a price nobody recorded both used to export as "$0.00", so a
+ * spreadsheet summing the column counted the unknowns as free. An empty cell
+ * sums as nothing AND reads as nothing, which is the truth.
+ */
+export const reportMoney = (amount: number | null | undefined) =>
+  amount === null || amount === undefined ? '' : `$${amount.toFixed(2)}`;
+
 export interface CSVExportOptions {
   filename?: string;
   headers?: string[];
@@ -105,7 +116,9 @@ export function exportInventoryItemsToCSV(items: any[]): void {
     'Current Stock': item.current_stock || 0,
     'Minimum Stock': item.minimum_stock || 0,
     'Reorder Quantity': item.reorder_quantity || 0,
-    'Unit Cost': item.unit_cost || '',
+    // A donated item records a real 0, not an absent price; `|| ''` exported it
+    // as a blank cell — the spelling this file uses for "unknown" (op-9m2v).
+    'Unit Cost': item.unit_cost ?? '',
     Supplier: item.supplier_name || '',
     'Needs Reorder': item.needs_reorder ? 'Yes' : 'No',
     'Is Active': item.is_active ? 'Yes' : 'No',
@@ -125,12 +138,20 @@ export function exportInventoryReportToCSV(
   let csvData: any[] = [];
 
   if (reportType === 'stock_by_category') {
-    headers = ['Category', 'Total Items', 'Total Stock', 'Total Value', 'Low Stock Count'];
+    headers = [
+      'Category',
+      'Total Items',
+      'Total Stock',
+      'Total Value',
+      'Unpriced Items',
+      'Low Stock Count',
+    ];
     csvData = data.map((item) => ({
       Category: item.category_name || '',
       'Total Items': item.total_items || 0,
       'Total Stock': item.total_stock || 0,
-      'Total Value': item.total_value ? `$${item.total_value.toFixed(2)}` : '$0.00',
+      'Total Value': reportMoney(item.total_value),
+      'Unpriced Items': item.items_without_price ?? 0,
       'Low Stock Count': item.low_stock_count || 0,
     }));
   } else if (reportType === 'reorder_frequency') {
@@ -142,12 +163,13 @@ export function exportInventoryReportToCSV(
       'Reorder Count': item.reorder_count || 0,
     }));
   } else if (reportType === 'value_by_location') {
-    headers = ['Location', 'Total Items', 'Total Stock', 'Total Value'];
+    headers = ['Location', 'Total Items', 'Total Stock', 'Total Value', 'Unpriced Items'];
     csvData = data.map((item) => ({
       Location: item.location_name || '',
       'Total Items': item.total_items || 0,
       'Total Stock': item.total_stock || 0,
-      'Total Value': item.total_value ? `$${item.total_value.toFixed(2)}` : '$0.00',
+      'Total Value': reportMoney(item.total_value),
+      'Unpriced Items': item.items_without_price ?? 0,
     }));
   }
 
@@ -213,12 +235,13 @@ export function exportPurchasingReportToCSV(
       'Item Name': item.item_name || '',
       Supplier: item.supplier_name || '',
       'Price Changes': item.price_changes || 0,
-      'Min Unit Cost': item.min_unit_cost ? `$${item.min_unit_cost.toFixed(2)}` : '$0.00',
-      'Max Unit Cost': item.max_unit_cost ? `$${item.max_unit_cost.toFixed(2)}` : '$0.00',
-      'Latest Unit Cost': item.latest_unit_cost ? `$${item.latest_unit_cost.toFixed(2)}` : '$0.00',
-      'Price Change %': item.price_change_percentage
-        ? `${item.price_change_percentage > 0 ? '+' : ''}${item.price_change_percentage.toFixed(2)}%`
-        : 'N/A',
+      'Min Unit Cost': reportMoney(item.min_unit_cost),
+      'Max Unit Cost': reportMoney(item.max_unit_cost),
+      'Latest Unit Cost': reportMoney(item.latest_unit_cost),
+      'Price Change %':
+        item.price_change_percentage === null || item.price_change_percentage === undefined
+          ? 'N/A'
+          : `${item.price_change_percentage > 0 ? '+' : ''}${item.price_change_percentage.toFixed(2)}%`,
     }));
   }
 

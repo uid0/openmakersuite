@@ -283,17 +283,16 @@ was already `*int` and reads 0 as `null` now — a cross-project VALUE change,
 named as one. Round 5 shipped this null against untyped consumers and blanked
 two member-facing pages; that is why the consumer set is DERIVED, not recalled.
 
-**Reported, not fixed, and filed separately.** `unit_cost or 0` in
-`reorder_queue/views.py` (`create_optimized_order` lines and totals,
-`reorder_data`), `unit_cost or Decimal("0.00")` in
-`purchase_orders.create_purchase_order`, and `line_entry.default_unit_cost`'s
-`Decimal("0.00")` are the same rule on a different fact: they distort MONEY
-rather than suppressing an alert, so they need their own invariant and their own
-tests. Filed as `oms-falsy-zero-money-guards`. The scoring's own falsy guards
-(`test_supplier_scoring.py`, REPORTED NOT FIXED, retuning reserved to the
-captain) and `get_expected_delivery_date`'s `and self.average_lead_time` — where
-a KNOWN zero-day lead time yields no date — are the same shape and belong with
-them.
+**The MONEY half of the class is now CLOSED too** — `unit_cost or 0` in
+`reorder_queue/views.py`, `unit_cost or Decimal("0.00")` in
+`purchase_orders.create_purchase_order` and `line_entry.default_unit_cost`'s
+`Decimal("0.00")` were the sites this section filed as
+`oms-falsy-zero-money-guards`. See "What a price costs" below. The scoring's own
+falsy guards (`test_supplier_scoring.py`, REPORTED NOT FIXED, retuning reserved
+to the captain) stay open and are named there. `get_expected_delivery_date`'s
+`and self.average_lead_time` — where a KNOWN zero-day lead time yields no date —
+was filed here as "the same shape", and it is: but it moves a DATE, not a money
+figure, so it was outside the money branch's invariant and is STILL OPEN.
 
 Three more, found by this branch's sweeps and deliberately NOT fixed here:
 
@@ -321,6 +320,276 @@ Three more, found by this branch's sweeps and deliberately NOT fixed here:
    named above with the gate's backend-only scope. It sits beside 2 because 2
    is the population it would cover: nothing gates a frontend reader until it
    exists.
+
+### What a price costs, and whether we know: one derivation (op-9m2v)
+
+`inventory.services.pricing` is the ONE answer to "what does one unit, or one
+package, cost from a supplier — and do we know?". The third single-owner
+derivation, after `supplier_selection` and `pack_size`, and the MONEY half of
+the falsy-guard class the section above closed for alerting. The rule, in one
+sentence: **a price the system does not know must never be presented, summed, or
+compared as a real number; a recorded price of zero is a KNOWN price and must be
+treated as one.**
+
+**That module's docstring owns the mechanics — read it before touching any of
+this.** The four states and what each tells an operator; why a recorded `0.00`
+is a price and `or` can never express that; which link each entry point
+consults; `PriceRollup`, and why a total reports what it could not price.
+
+What is worth knowing before you open it:
+
+- **A makerspace really does get things for nothing.** Donated stock, free
+  samples, internal transfers. `unit_cost` of `0.00` is real and not rare, and
+  `or` / `if cost:` cannot tell it from a `NULL`. Every guard spelled that way
+  got one of the two cases wrong — an unpriced supplier costed a purchase-order
+  line at nothing, and a free supplier read as unpriced.
+- **Unlike `PackSize.state`, these states reach the wire.** `reorder_data` and
+  `create_optimized_order` carry `unit_cost_state` / `unit_cost_detail` beside
+  each unpriced line, because a purchaser is owed the cause and the remedy.
+  `pricing.explain` is the one place that sentence is written.
+- **Totals say what they left out.** Every order-shaped payload now carries
+  `unpriced_item_count` and `estimated_total_is_partial` beside its
+  `estimated_total`. A total that was silently wrong becoming visibly
+  incomplete is the point.
+- **`unit_cost_ordered` stays NON-NULLABLE, and the write paths refuse instead.**
+  `create_purchase_order` and `line_entry.add_line_item` raise rather than
+  storing a fabricated `0.00` — the same refusal the asset and freeform branches
+  of `create_purchase_order` already made ("unit_cost is required when
+  purchasing asset X"); the inventory branch was the odd one out. Both messages
+  name the two remedies (send `unit_cost`, or price the supplier link), and the
+  web form blocks first so the operator is told before the 400.
+- **The supplier scoring is deliberately NOT fixed here.**
+  `score_candidate`'s `if link.unit_cost and average_unit_cost` is the same
+  mistake, so a free supplier can never win on price while its `0.00` still
+  drags the yardstick. Repairing it changes which supplier the system picks,
+  which moves money for a reason that is not "base presented an unknown price as
+  a real number". Captain-reserved, filed as `oms-supplier-scoring-weight-flaws`.
+
+`inventory/tests/test_price_single_owner.py` is the build gate, the twin of the
+pack-size one: it walks every non-test module under `backend/` with the AST and
+pins the exact set of direct reads of `unit_cost` / `package_cost`. It adds
+`Coalesce` and the aggregates to the scanned wrappers, because
+`Sum(F("current_stock") * Coalesce("unit_cost_value", Value(0)))` in
+`inventory.views`'s stock-value reports is `unit_cost or 0` written in SQL.
+**Two honest limits:** the walk is `backend/`-only (a frontend price reader is
+not gated, exactly as `quantity_per_package`'s is not), and `unit_cost` is a
+column name on five models here, so the allowlist has to say per entry which
+model a read is on. `inventory/tests/test_price_guards.py` owns the behaviour,
+every test labelled BEFORE/AFTER or CONTROL against the invariant *no money
+figure changes versus base EXCEPT where base was presenting an unknown price as
+a real number.*
+
+**A falsy guard on a price is only a bug where the value is falsy at zero.**
+Backend-side that is easy: the value is a `Decimal` and `Decimal("0.00")` is
+falsy, so `if cost:` in `reorder_queue/services/receiving.py` was a real defect
+— it billed a committee the ORDERED price for a line the vendor had comped.
+
+**Frontend-side, the answer is decided by the SERIALIZER FIELD, not the field
+name — measure it, do not reason about it.** Two rounds of this review recorded
+the wrong answer here, in opposite directions, because both reasoned from the
+attribute name. The rule, once, relied on everywhere below:
+
+| the serializer field | wire type | truthiness guard |
+| --- | --- | --- |
+| a real model `DecimalField` on a `ModelSerializer` | STRING (`"0.00"`) | SAFE — `"0.00"` is truthy |
+| a model PROPERTY named in `Meta.fields` with no explicit declaration | NUMBER (`0`) | BUG |
+| a `SerializerMethodField` returning a `Decimal` | NUMBER (`0`) | BUG |
+
+A property named in `Meta.fields` gets `build_property_field`, which makes a
+`ReadOnlyField`; that hands the raw `Decimal` straight to
+`rest_framework.utils.encoders.JSONEncoder`, which returns `float(obj)`.
+`COERCE_DECIMAL_TO_STRING` only ever applies to an actual `DecimalField`.
+
+So the SAME attribute name has two wire types on this project:
+`ItemSupplier.unit_cost` is a model field and arrives as `"0.00"`, while
+`InventoryItem.unit_cost` is `order_unit_price(self).amount` — a property — and
+arrives as `0`. `Kit` inherits the property kind from `InventoryItemSerializer`;
+`KitSummary.unit_cost` is a method field, so also a number.
+
+A falsy number is worse than a falsy string in JSX specifically: `{0 && <X/>}`
+evaluates to `0`, which React RENDERS, so the guard both drops the row and
+prints a stray "0" where the price belonged. Numbers also need `.toFixed(2)` at
+the render site — `` `${5.1}` `` is `"5.1"`, not `"5.10"` — which a decimal
+string never did.
+
+`PurchaseOrderPage.tsx`'s `unit_cost_actual` is the string kind and its
+truthiness guard is CORRECT; it is pinned as a CONTROL in
+`PurchaseOrderPage.test.tsx` so it fails if the field is ever parsed to a
+number. Every guard on the number kind is fixed, and the declared types in
+`frontend/src/types/index.ts` now say `number | null` so the next reader is not
+misled the way these two rounds were.
+
+"The real price PAID per unit" is a different fact with its own older owner,
+`work_order_purchase_bridge.purchase_line_unit_cost` (actual when recorded, else
+ordered, spelled `is None`). Read it; do not write a second `actual or ordered`.
+
+`reorder_queue/tests/test_estimated_cost_single_owner.py` is the SECOND gate on
+this branch, and it exists because a hand-counted reader list is a claim that
+goes stale. `ReorderRequest.estimated_cost` — the money face of the derivation,
+`Decimal("0.00")` for a free item and `None` only when unpriced — had its reader
+set enumerated by hand TWICE and it was incomplete BOTH times: four readers were
+named here as complete, and review then found three more on the PUBLIC
+`AllowAny` transparency endpoint. **That gate is now the authority on the reader
+set; do not re-hand-count it.** It walks `backend/` with the AST exactly as the
+price gate does, and its allowlist names, per entry, which of the THREE models
+the read is on — `ReorderRequest.estimated_cost` (nullable, this branch's),
+`PurchaseOrderItem.estimated_cost` (non-nullable, so a falsy guard on it was
+always wrong) or `MaintenanceItem.estimated_cost` (a maintenance budget, a
+different fact). Same two honest limits as the price gate: `backend/`-only, and
+the AST cannot tell the three models apart, which is why the reason must.
+
+**Three things the earlier passes got wrong, all about CONSUMERS.** Recorded so
+the next derivation sweeps for the same shapes:
+
+- **A value becoming nullable has backend readers too.** `total_value` going
+  `Decimal("0")` -> `None` was swept across the frontend and ScanTTY but not
+  across `backend/`, and `dashboard.views.get_inventory_summary`'s
+  `sum(item.total_value for ...)` folded the `None` into an int accumulator —
+  a 500 on a public endpoint. It sums through `PriceRollup` now and reports
+  `items_without_price` beside an unchanged total. Sweep BOTH sides.
+- **The "all but one site" shape.** Where a payload gains an honesty count or a
+  guard is respelled, find every twin. The browser-side CSV export got
+  `items_without_price` and the server-side one did not; the price-trend
+  report's cost columns became nullable and its CSV export still formatted them
+  with `:.2f` (a `TypeError`, so a 500); `ReorderRequest.estimated_cost` started
+  returning a real `Decimal("0.00")` and its readers re-collapsed it to
+  "unknown" with the old falsy guard. `requests/by_supplier/` now carries
+  `unpriced_item_count` / `estimated_total_is_partial` like every other
+  order-shaped payload, and the admin dashboard's supplier modal renders them.
+- **When a hand sweep misses TWICE, build the gate instead of sweeping a third
+  time.** That is what `test_estimated_cost_single_owner.py` is. A third
+  enumeration would have been the same move that had already failed twice.
+
+**Every money figure this branch moved is named individually, with the screen or
+payload that shows it, in
+[`docs/oms-falsy-zero-money-guards-record.md`](docs/oms-falsy-zero-money-guards-record.md).**
+That list is the branch's evidence, not standing guidance; do not copy it back
+here.
+
+**Two more deliberate exclusions, on the boundary the gate made visible.** Both
+are the same falsy shape on a value this branch does NOT own, so repairing them
+would move output for a reason that is not "base presented an unknown price as a
+real number":
+
+- `ReorderRequest.actual_cost` and `ReorderRequest.cost_per_unit`, and the
+  truthiness on them in the TRANSPARENCY PAYLOAD specifically — both the
+  `orders` block and the `ledger` block. `actual_cost` is a nullable column an
+  operator types in, not a derived price, and this branch did not change it.
+  `PurchaseOrder.actual_total` in the `purchase_orders` block is the same
+  shape and excluded for the same reason: `null=True` and operator-typed. That
+  is precisely what separates it from `estimated_total` beside it, which is
+  non-nullable-with-default and therefore inside the branch — the nullability
+  of the column, not the name of the field, is what decides.
+  Read that narrowly: it does NOT extend to `PurchaseOrderItem.actual_cost`,
+  which is DERIVED from `unit_cost_actual` and IS inside the branch (the
+  `receiving.py` twin was the real defect), and whose two admin columns are
+  named in the branch record's change list.
+- `MaintenanceItem.estimated_cost` on the work-order PDF
+  (`inventory/utils/work_order_pdf.py`), where `if item.estimated_cost:` omits
+  the "Est. Cost" line for a task budgeted at a recorded `0.00`. A maintenance
+  budget, not a supplier price. REPORTED, NOT FIXED — allowlisted in the gate
+  with that reason. Its sibling `or Decimal("0.00")` sites in
+  `inventory/views.py`, `inventory/services/work_order_reports.py` and
+  `analytics/services/aggregation.py` are INERT rather than excluded: the
+  fallback IS `0.00`, so a recorded zero and a `NULL` produce the same number
+  either way. `PurchaseOrder.effective_estimated_total`'s
+  `self.estimated_total or Decimal("0.00")` is inert on the same argument, and
+  doubly so because that column cannot be `NULL` at all.
+
+**Not an exclusion — a correctness finding, and the distinction matters.** An
+earlier round filed the truthiness on the scan screen's `supplier.unit_cost` as
+a deliberate EXCLUSION, reasoning that a free vendor could never be preselected.
+It was measured wrong and the entry was hollow, so it was deleted rather than
+reworded. Truthiness on a STRING-valued price is not something this branch
+tolerates; it is something the branch has verified is CORRECT, per the wire-type
+table above, and changing it would be churn. Anything in this section is
+excluded because the VALUE is outside the branch, never because a guard on it
+merely looks safe. If you are about to file a frontend price guard either way,
+measure the serializer field first — `type(SomeSerializer().fields["unit_cost"])`
+answers it in one line.
+
+"A price as JSON" has one owner too: `pricing.price_float`. It was written out
+twice, character-for-character, in `inventory/views.py` and
+`inventory/serializers.py` — two spellings of one fact on a branch whose whole
+thesis is that there should be one. Non-functional; no figure moved.
+
+**THE CROSS-PROJECT CONTRACT: two changes ScanTTY must make.** Verified against
+`uid0/scantty` remote main at `385d12ae` — a fresh clone whose SHA was confirmed
+through the GitHub API, not a local checkout — by probing its real Go structs
+with the new payloads. Recorded here because this repo is what BREAKS them, and
+because the defect they cause is the one this branch exists to close, displaced
+one repository along:
+
+- `PurchasingPriceTrend.MinUnitCost` / `MaxUnitCost` / `LatestUnitCost` are
+  plain `float64`. The `null` `reorder_queue/views.py`'s `_as_float` now sends
+  unmarshals to `0` and re-renders as "$0.00" — an unknown price presented as a
+  fact. They should become `*float64`, as `PriceChangePercentage` on the same
+  struct already is.
+- `suggested_unit_cost` is now nullable (`services/line_entry.py`), so
+  ScanTTY's `poAddIsZeroMoney(SuggestedUnitCost.String())` stops matching and
+  its "there is NO price on file" hint disappears. It should become
+  `SuggestedUnitCost.Empty()` — which additionally fixes that hint currently
+  MISFIRING on a genuinely free vendor.
+
+**Verified SAFE, so nobody redoes the work:** every other field this branch
+made nullable is a `DecimalString`, which already handles `null` as `Empty()`;
+the new payload keys (`unit_cost_state`, `unit_cost_detail`,
+`unpriced_item_count`, `estimated_total_is_partial`, `items_without_price`,
+`direction`) are ignored by `encoding/json`; `create_optimized_order` is not
+among the endpoints ScanTTY calls at all; and both new write-path refusals
+reach an operator with the full remedy text.
+
+**FILED, NOT DECIDED HERE — the public inventory-summary valuation.**
+`docs/API_PERMISSION_MATRIX.md` records `dashboard/inventory-summary/` as public
+with "Aggregate counts only; no PII or cost data", but `get_inventory_summary`
+publishes `total_value` — an aggregate dollar valuation of all active stock.
+PRE-EXISTING: `total_value` was already there, and this branch only fixed the
+500 on it and added `items_without_price` beside it. Neither the matrix nor the
+endpoint was touched, because the resolution — correct the matrix, or stop
+publishing the valuation anonymously — is a captain decision. ESCALATED AND
+UNDECIDED: this entry is a filing, not a conclusion.
+
+**FILED, APPROVED, NOT DONE — `log_usage`'s "no unit cost" warning. Recorded so
+the branch's "the derived set AND its deliberate exclusions both reported with
+reasons" criterion is not read as complete: this is a known gap in it.**
+`inventory/views.py` `log_usage` gates the ledger posting at :1275 on
+`total_cost is not None and total_cost > 0` and, when it does not post, returns
+the warning at :1287, "committee recorded, but the item has no unit cost". A
+DONATED item's `unit_cost` is now a real `Decimal("0.00")`, so `total_cost` is
+`0` and the operator is told the price is UNKNOWN when it is known to be
+NOTHING — the second half of the rule sentence, inverted onto a message. NO
+MONEY MOVES and none should: skipping a zero-amount posting is correct, and
+`receiving.py`'s own comment says why (a zero-amount transaction is ledger
+noise, not a record of a payment). The fix is the WORDING only — split the
+`else` on `total_cost is None` (unknown: keep a "no price on file" warning
+naming the remedy) versus `total_cost == 0` (known zero: no price warning at
+all) — plus a BEFORE/AFTER test for the donated case, a CONTROL for the
+genuinely unpriced one, and a change-list entry. Three doc sites follow the
+string and must move with it: the `log_usage` docstring (~:1199),
+`docs/accounting.md` where it is quoted verbatim, and
+`backend/inventory/tests/test_log_usage_charge.py`, which asserts it.
+APPROVED BY THE OPERATOR and deferred only because the phase that found it
+could not make functional changes — NOT declined.
+
+### oms-supplier-terms-write-path — filed, and the lesson from a withdrawn attempt
+
+A single owner for the supplier-terms WRITE path was built, gated and then
+REVERTED IN FULL on this branch: `KitSerializer._apply_supplier_terms`,
+`ItemSupplierSerializer` / `ItemSupplierViewSet` and
+`inventory/services/suppliers.py` are byte-identical to base `7c078de`. The path
+is filed as `oms-supplier-terms-write-path`, carrying six base defects that were
+verified against base and left unfixed. **The full record — root cause, the
+three caller rules tried and what each reopened, the kept/dropped boundary and
+those six defects — is in
+[`docs/oms-falsy-zero-money-guards-record.md`](docs/oms-falsy-zero-money-guards-record.md);
+read it before reopening the bead.**
+
+The durable lesson: `ItemSupplier.save()` derives `unit_cost` and `package_cost`
+FROM EACH OTHER, so any partial write to that path fights the derivation, and
+which cost the operator meant cannot be recovered from the submitted values
+alone. Three different rules at the callers each fixed one case by reopening
+another. **The next attempt should address the derivation in `save()` itself
+rather than the callers, and must not be retried one narrow rule at a time.**
 
 ### The pre-send boundary: when a PO is still the shop's own document
 

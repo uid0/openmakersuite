@@ -88,6 +88,7 @@ from inventory.models import InventoryItem, ItemSupplier
 from inventory.services.kits import build_kit_snapshot
 from inventory.services.pack_size import declares_a_case
 from inventory.services.packaging import base_reorder_quantity, counts_in_packs
+from inventory.services.pricing import unit_price_of
 
 from ..models import PurchaseOrder, PurchaseOrderItem
 from .purchase_orders import (
@@ -612,18 +613,29 @@ def repeat_quantity(item_supplier):
 
 
 def default_unit_cost(item_supplier):
-    """Unit cost a freshly added line should land on.
+    """Unit cost a freshly added line should land on, or ``None`` if unknown.
 
     The supplier relationship's own ``unit_cost`` first — that is the price this
-    vendor quotes and what ``create_purchase_order`` writes. When the
-    relationship carries no price, fall back to what this item last actually
+    vendor quotes and what ``create_purchase_order`` writes — read through the
+    ONE price derivation (:mod:`inventory.services.pricing`), so a relationship
+    that quotes ``0.00`` lands a free line at ``0.00`` rather than falling
+    through to purchase history for a price it does not charge. When the
+    relationship records NO price, fall back to what this item last actually
     cost on a purchase order from this supplier, mirroring the
     ``last_po_unit_cost`` derivation in ``inventory.services.item_metrics``
-    (newest ``PurchaseOrderItem`` first). Only a brand-new relationship with no
-    price and no purchase history lands at zero.
+    (newest ``PurchaseOrderItem`` first).
+
+    **``None`` when nothing is on file at all** (op-9m2v). This used to return
+    ``Decimal("0.00")``, and a brand-new relationship with no price and no
+    purchase history therefore added a line priced at nothing — a figure the
+    order's stored ``estimated_total`` then summed as if someone had quoted it.
+    ``None`` is not a price and callers must not spend it: ``add_line_item``
+    refuses rather than writing it, and ``serialize_candidate`` sends ``null``
+    rather than a ``"0.00"`` for a prompt to accept by reflex.
     """
-    if item_supplier.unit_cost is not None:
-        return Decimal(item_supplier.unit_cost)
+    price = unit_price_of(item_supplier)
+    if price.is_known:
+        return Decimal(price.amount)
 
     last = (
         PurchaseOrderItem.objects.filter(item_supplier=item_supplier)
@@ -638,7 +650,7 @@ def default_unit_cost(item_supplier):
         if ordered is not None:
             return Decimal(ordered)
 
-    return Decimal("0.00")
+    return None
 
 
 def _coerce_quantity(quantity):
@@ -1049,6 +1061,12 @@ def add_line_item(
     Defaults for a *new* line come from the supplier relationship and purchase
     history — see :func:`default_quantity` / :func:`default_unit_cost` — so a
     line never lands at zero just because the operator only scanned a barcode.
+    When neither has a price, the add is **refused** (``no_unit_cost``) instead
+    of landing the line at a fabricated ``0.00`` (op-9m2v): ``unit_cost_ordered``
+    is permanent and non-nullable, so a zero written there is indistinguishable
+    ever after from a vendor who genuinely charges nothing, and the order's
+    stored total quietly absorbs it. The remedy is in the message and the caller
+    has it — send ``unit_cost``, or price the supplier link.
 
     The caller owns the draft guard (:func:`assert_addable`) and the audit
     event; both are applied at the view boundary alongside the other PO
@@ -1073,6 +1091,15 @@ def add_line_item(
     new_quantity = (
         default_quantity(item_supplier) if explicit_quantity is None else explicit_quantity
     )
+    new_cost = explicit_cost if explicit_cost is not None else default_unit_cost(item_supplier)
+    if new_cost is None:
+        raise LineEntryError(
+            f"No price is on file for {item_supplier.item.name} from "
+            f"{item_supplier.supplier.name}, and this item has never been bought "
+            "from them. Enter a unit cost with the line, or record one on the "
+            "supplier link.",
+            "no_unit_cost",
+        )
     try:
         # Nested so a losing race rolls back only the failed INSERT: an
         # IntegrityError would otherwise poison the whole transaction and there
@@ -1082,9 +1109,7 @@ def add_line_item(
                 purchase_order=purchase_order,
                 item_supplier=item_supplier,
                 quantity_ordered=new_quantity,
-                unit_cost_ordered=(
-                    explicit_cost if explicit_cost is not None else default_unit_cost(item_supplier)
-                ),
+                unit_cost_ordered=new_cost,
                 order_in_packages=order_packages_for_line(item_supplier, new_quantity),
                 notes=notes or "",
                 work_order=work_order,
@@ -1346,10 +1371,19 @@ def serialize_candidate(candidate):
     The cost suggestion costs one extra query per candidate whose supplier
     relationship carries no price (see :func:`default_unit_cost`); the candidate
     list is capped at :data:`DEFAULT_CANDIDATE_LIMIT`, which bounds that.
+
+    ``suggested_unit_cost`` is **null** when nothing is on file — neither a
+    price on the relationship nor a past purchase from this supplier (op-9m2v).
+    It used to be the string ``"0.00"``, which a prompt could show and an
+    operator accept as a quote; the add would then be a zero-priced line. A
+    ``"0.00"`` reaching a client now means the vendor genuinely charges nothing.
+    Adding such a candidate without sending a ``unit_cost`` is refused, so a
+    client that renders the null as a blank box is showing the truth.
     """
     item_supplier = candidate.item_supplier
     item = item_supplier.item
     existing = candidate.existing_line
+    suggested_cost = default_unit_cost(item_supplier)
     return {
         "item_supplier": item_supplier.pk,
         "match_kind": candidate.match_kind,
@@ -1368,7 +1402,7 @@ def serialize_candidate(candidate):
         "unit_upc": item_supplier.unit_upc,
         "quantity_per_package": item_supplier.quantity_per_package,
         "suggested_quantity": default_quantity(item_supplier),
-        "suggested_unit_cost": str(default_unit_cost(item_supplier)),
+        "suggested_unit_cost": (None if suggested_cost is None else str(suggested_cost)),
         "already_on_order": (
             None if existing is None else _serialize_existing_line(item_supplier, existing)
         ),

@@ -83,6 +83,33 @@ const TransparencyPage: React.FC = () => {
     fetchTransparencyData();
   }, []);
 
+  /**
+   * Is there a figure to show at all?
+   *
+   * `!= null`, never truthiness (op-9m2v). A recorded `0.00` is a KNOWN cost —
+   * the server publishes `estimated_cost: 0.0` for a donated order — and in JSX
+   * a numeric `0` does not merely fail to render the row, it RENDERS: `{0 &&
+   * <div/>}` prints a bare "0" into the card and drops the figure beside it.
+   */
+  const isReported = (amount: number | null | undefined): amount is number =>
+    amount !== null && amount !== undefined;
+
+  /**
+   * Which of the THREE things a variance can say — over, under, or exactly on.
+   *
+   * Landing exactly on estimate is its own fact, not a favourable one (op-9m2v).
+   * The zero case only became reachable when the truthiness guard above was
+   * replaced: `{0 && <div/>}` used to drop the row, so `> 0 ? over : under`
+   * never had to answer for it and called a $0.00 variance "under budget".
+   * Named and rendered in words as well as colour, because colour alone is not
+   * a distinction a reader can act on.
+   */
+  const varianceTone = (variance: number) => {
+    if (variance > 0) return { className: 'over-budget', sign: '+', note: ' over budget' };
+    if (variance < 0) return { className: 'under-budget', sign: '', note: ' under budget' };
+    return { className: 'on-budget', sign: '', note: ' on budget' };
+  };
+
   const formatCurrency = (amount: number | null) => {
     if (amount === null) return 'N/A';
     return new Intl.NumberFormat('en-US', {
@@ -308,7 +335,7 @@ const TransparencyPage: React.FC = () => {
               </div>
 
               <div className="financial-info">
-                {order.estimated_cost && (
+                {isReported(order.estimated_cost) && (
                   <div className="detail-row">
                     <span className="label">Estimated Cost:</span>
                     <span className="value">{formatCurrency(order.estimated_cost)}</span>
@@ -326,11 +353,13 @@ const TransparencyPage: React.FC = () => {
                     <span className="value">{formatCurrency(order.cost_per_unit)}</span>
                   </div>
                 )}
-                {order.cost_variance && (
+                {isReported(order.cost_variance) && (
                   <div className="detail-row">
                     <span className="label">Cost Variance:</span>
-                    <span className={`value ${order.cost_variance > 0 ? 'over-budget' : 'under-budget'}`}>
-                      {order.cost_variance > 0 ? '+' : ''}{formatCurrency(order.cost_variance)}
+                    <span className={`value ${varianceTone(order.cost_variance).className}`}>
+                      {varianceTone(order.cost_variance).sign}
+                      {formatCurrency(order.cost_variance)}
+                      {varianceTone(order.cost_variance).note}
                     </span>
                   </div>
                 )}

@@ -45,7 +45,8 @@ describe('InventoryListPage', () => {
       current_stock: 10,
       minimum_stock: 5,
       reorder_quantity: 20,
-      unit_cost: '15.99',
+      // A NUMBER on the wire — a property-backed `ReadOnlyField` (op-9m2v).
+      unit_cost: 15.99,
       supplier_name: 'Test Supplier',
       needs_reorder: false,
       has_pending_reorder: false,
@@ -94,7 +95,7 @@ describe('InventoryListPage', () => {
       current_stock: 2,
       minimum_stock: 5,
       reorder_quantity: 20,
-      unit_cost: '10.99',
+      unit_cost: 10.99,
       supplier_name: 'Test Supplier',
       needs_reorder: true,
       has_pending_reorder: false,
@@ -566,5 +567,46 @@ describe('InventoryListPage', () => {
     expect(consumePendingReturnTo()).toBe('/inventory/items');
     // The list survived the interruption.
     expect(screen.getByText('Test Item 1')).toBeInTheDocument();
+  });
+
+  /**
+   * The table's Cost column (op-9m2v). `item.unit_cost ? ... : '-'` read the
+   * number `0` a donated item sends as "no price recorded" and printed the
+   * dash this table reserves for a genuinely absent one.
+   */
+  describe('the Cost column', () => {
+    const renderPriced = async (unitCost: number | null) => {
+      (api.inventoryAPI.listItems as jest.Mock).mockResolvedValue(
+        fullPage([{ ...mockItems[0], unit_cost: unitCost }] as typeof mockItems)
+      );
+      renderPage();
+      await screen.findByText('Test Item 1');
+    };
+
+    const costCell = () =>
+      screen.getByText('Test Item 1').closest('tr')?.querySelectorAll('td')[
+        Array.from(
+          screen.getByText('Test Item 1').closest('tr')!.querySelectorAll('td')
+        ).findIndex((td) => /^\$|^-$/.test(td.textContent ?? ''))
+      ] as HTMLElement;
+
+    it('BEFORE/AFTER: prices a donated item at $0.00 rather than dashing it', async () => {
+      await renderPriced(0);
+
+      expect(costCell()).toHaveTextContent('$0.00');
+    });
+
+    it('CONTROL: an item nobody priced still shows the dash', async () => {
+      await renderPriced(null);
+
+      expect(costCell()).toHaveTextContent('-');
+      expect(costCell()).not.toHaveTextContent('$');
+    });
+
+    it('CONTROL: an ordinary price is unchanged', async () => {
+      await renderPriced(15.99);
+
+      expect(costCell()).toHaveTextContent('$15.99');
+    });
   });
 });

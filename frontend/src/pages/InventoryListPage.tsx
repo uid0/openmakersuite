@@ -534,7 +534,7 @@ const InventoryListPage: React.FC = () => {
                     )}
                   </Table.Td>
                   <Table.Td>
-                    {item.unit_cost ? `$${parseFloat(item.unit_cost).toFixed(2)}` : '-'}
+                    {item.unit_cost != null ? `$${item.unit_cost.toFixed(2)}` : '-'}
                   </Table.Td>
                   <Table.Td>
                     <Group gap="xs">

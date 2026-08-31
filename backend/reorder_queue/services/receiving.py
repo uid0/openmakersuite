@@ -442,7 +442,25 @@ def receive_delivery(
                 # ordinary receives behave exactly as before. Local import avoids
                 # a reorder_queue <-> accounting import cycle.
                 if inventory_item.owning_group_id:
-                    unit_cost = po_item.unit_cost_actual or po_item.unit_cost_ordered
+                    # "The real price paid per unit" already has ONE owner —
+                    # ``purchase_line_unit_cost``, which the work-order bridge
+                    # reads and whose docstring says why it is ``is None`` and
+                    # not ``actual or ordered``. This site had its own second
+                    # spelling with the ``or``, so a line the vendor COMPED
+                    # (actual 0.00) skipped that zero and booked the ORDERED
+                    # price against the committee — money charged to a
+                    # committee that nobody spent (op-9m2v). The two now quote
+                    # the same price for the same line, by construction.
+                    #
+                    # The ``if unit_cost`` below is a DIFFERENT question and
+                    # stays truthiness on purpose: a receipt that cost nothing
+                    # has nothing to book, so a zero-amount transaction would
+                    # be ledger noise rather than a record of a payment.
+                    from inventory.services.work_order_purchase_bridge import (
+                        purchase_line_unit_cost,
+                    )
+
+                    unit_cost = purchase_line_unit_cost(po_item)
                     if unit_cost:
                         from accounting.adapters import post_po_receipt
 

@@ -76,7 +76,9 @@ const baseItem = {
   current_stock: 10,
   minimum_stock: 5,
   reorder_quantity: 20,
-  unit_cost: '15.99',
+  // A NUMBER on the wire; the ItemSupplier rows above are real
+  // `DecimalField`s and stay strings (op-9m2v).
+  unit_cost: 15.99,
   // Legacy primary-supplier accessor. Present on every payload; must NOT be
   // what the page shows.
   supplier_name: 'Legacy Accessor Co.',

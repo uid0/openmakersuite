@@ -30,7 +30,7 @@ const ITEM = {
   current_stock: 1,
   minimum_stock: 5,
   reorder_quantity: 5,
-  unit_cost: '15.99',
+  unit_cost: 15.99,
   supplier_name: 'Eufy Direct',
   needs_reorder: true,
   has_pending_reorder: false,
@@ -79,7 +79,10 @@ const KITS = [
     quantity_in_kit: 1,
     supplier_name: 'Eufy Direct',
     supplier_sku: 'T3200',
-    unit_cost: '89.99',
+    // A NUMBER: `get_unit_cost` is a SerializerMethodField returning a Decimal,
+    // which DRF renders as a JSON number, not the decimal string every other
+    // price on this page arrives as (op-9m2v).
+    unit_cost: 89.99,
     component_count: 5,
   },
 ];
@@ -151,6 +154,60 @@ describe('AC-45 — Supplied by kits card', () => {
     );
     expect(screen.getByText(/1 per kit/i)).toBeInTheDocument();
     expect(screen.getByText('$89.99')).toBeInTheDocument();
+  });
+
+  it('BEFORE/AFTER: shows a donated kit as costing $0.00 rather than hiding it', async () => {
+    // `{kit.unit_cost && <Text/>}` is falsy at a numeric 0, so a kit the
+    // supplier gives away showed no price at all — indistinguishable from one
+    // nobody has priced — and printed a stray "0" beside it, because in JSX
+    // `0 && <Text/>` evaluates to the number itself (op-9m2v).
+    (api.inventoryAPI.getItemKits as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [{ ...KITS[0], unit_cost: 0 }],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('supplied-by-kits-card')).toBeInTheDocument();
+    });
+    const card = screen.getByTestId('supplied-by-kits-card');
+    expect(card).toHaveTextContent('$0.00');
+    expect(card).not.toHaveTextContent(/no price on file/i);
+  });
+
+  it('writes a trailing zero cent in full, not as "$5.1"', async () => {
+    // The card used to interpolate the string DRF would have sent for a
+    // `DecimalField` (`"5.10"`). It is a NUMBER, so `${kit.unit_cost}` renders
+    // JavaScript's shortest form and drops the trailing zero — a price that
+    // reads as five dollars ten rather than five dollars and ten cents
+    // (op-9m2v). `.toFixed(2)` is what holds the cent column.
+    (api.inventoryAPI.getItemKits as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [{ ...KITS[0], unit_cost: 5.1 }],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('supplied-by-kits-card')).toBeInTheDocument();
+    });
+    const card = screen.getByTestId('supplied-by-kits-card');
+    expect(card).toHaveTextContent('$5.10');
+    expect(card).not.toHaveTextContent('$5.1 ');
+  });
+
+  it('says so when nobody has priced the kit', async () => {
+    (api.inventoryAPI.getItemKits as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [{ ...KITS[0], unit_cost: null }],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('supplied-by-kits-card')).toBeInTheDocument();
+    });
+    const card = screen.getByTestId('supplied-by-kits-card');
+    expect(card).toHaveTextContent(/no price on file/i);
+    expect(card).not.toHaveTextContent('$');
   });
 
   it('omits the card when the item belongs to no kits', async () => {

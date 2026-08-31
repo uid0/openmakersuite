@@ -229,7 +229,21 @@ export interface InventoryItem {
   supplier_name: string | null;
   supplier_sku: string | null;
   supplier_url: string | null;
-  unit_cost: string | null;
+  /**
+   * A NUMBER, not a decimal string (op-9m2v).
+   *
+   * The rule, once, for every price in this file: a price that is a real model
+   * `DecimalField` on a `ModelSerializer` (`ItemSupplier.unit_cost`) is
+   * serialised by DRF as a decimal STRING, so `"0.00"` is truthy and a
+   * truthiness guard on it is safe. A price that is a model PROPERTY named in
+   * `Meta.fields` with no explicit declaration becomes a `ReadOnlyField`, which
+   * hands the raw `Decimal` to DRF's `JSONEncoder` and arrives as a JSON
+   * NUMBER — as does a `SerializerMethodField`. `InventoryItem.unit_cost` is
+   * the property kind (`order_unit_price(self).amount`), so a donated item
+   * sends `0`, which is falsy AND which React renders as a stray "0".
+   * Same attribute name, two wire types, decided by the serializer field.
+   */
+  unit_cost: number | null;
   average_lead_time: number | null;
   qr_code: string | null;
   is_active: boolean;
@@ -245,7 +259,10 @@ export interface InventoryItem {
   reorder_alerts_enabled: boolean;
   notes: string;
   needs_reorder: boolean;
-  total_value: string;
+  // `null` when no supplier records a price, so the stock cannot be valued
+  // (op-9m2v). The server used to send "0.00", which claims the shelf is worth
+  // nothing. Render the absence, never a $0.00.
+  total_value: string | null;
   created_at: string;
   updated_at: string;
   // Ownership fields
@@ -350,7 +367,9 @@ export interface CommittedBreakdownEntry {
 
 // Computed stock + cost metrics for the item-detail metrics row (issue-5).
 // Served by GET /api/inventory/items/<id>/metrics/. Quantities are numbers;
-// money fields arrive as decimal strings (matching InventoryItem.unit_cost).
+// money fields arrive as decimal strings — `unit_cost` here is an explicit
+// `DecimalField` on the serializer, like `ItemSupplier.unit_cost` and unlike
+// the property-backed `InventoryItem.unit_cost`, which is a number.
 export interface InventoryItemMetrics {
   current_stock: number; // QOH — on hand
   quantity_on_order: number; // QOO — open PO units
@@ -371,7 +390,7 @@ export interface InventoryItemMetrics {
 // GET /api/inventory/items/<id>/purchase_history/. Both lists are flat, oldest
 // first, and carry the PO pk (`purchase_order`) alongside `po_number` because
 // po_number is nullable and so is not a safe grouping key. Money fields arrive
-// as decimal strings (DRF DecimalField), like InventoryItem.unit_cost.
+// as decimal strings (DRF DecimalField), like ItemSupplier.unit_cost.
 
 // One purchase-order line: what this item cost on that order.
 export interface ItemOrderCost {
@@ -1596,7 +1615,11 @@ export interface InventoryStockByCategory {
   category_name: string;
   total_items: number;
   total_stock: number;
+  // The value of the stock this report CAN price. `items_without_price` is how
+  // many items it could not — a total that omits them is a lower bound, not a
+  // valuation (op-9m2v).
   total_value: number;
+  items_without_price: number;
   low_stock_count: number;
 }
 
@@ -1613,7 +1636,9 @@ export interface InventoryValueByLocation {
   location_name: string;
   total_items: number;
   total_stock: number;
+  // See InventoryStockByCategory — same partial total, same honesty count.
   total_value: number;
+  items_without_price: number;
 }
 
 export interface PurchasingSpendBySupplier {
@@ -1648,9 +1673,13 @@ export interface PurchasingPriceTrends {
   item_name: string;
   supplier_name: string;
   price_changes: number;
-  min_unit_cost: number;
-  max_unit_cost: number;
-  latest_unit_cost: number;
+  // `null` where nothing is recorded (op-9m2v). These used to be `0` for a
+  // price nobody recorded, for a supplier that charges nothing, AND — on
+  // `latest_unit_cost` — for an item with no price history at all. A `0` here
+  // now means the supplier is free.
+  min_unit_cost: number | null;
+  max_unit_cost: number | null;
+  latest_unit_cost: number | null;
   price_change_percentage: number | null;
 }
 
@@ -2495,7 +2524,16 @@ export interface KitSummary {
   quantity_in_kit: number | null;
   supplier_name: string | null;
   supplier_sku: string | null;
-  unit_cost: string | null;
+  /**
+   * A NUMBER, unlike every other price in this file (op-9m2v).
+   *
+   * `KitSummarySerializer.get_unit_cost` is a `SerializerMethodField` returning
+   * a `Decimal`, which DRF's `JSONEncoder` renders as a JSON number rather than
+   * the decimal string a plain `ModelSerializer` field would send. Declaring it
+   * `string | null` is what made `{kit.unit_cost && ...}` read as safe here
+   * while being genuinely safe on the string-valued twins.
+   */
+  unit_cost: number | null;
   component_count: number;
 }
 

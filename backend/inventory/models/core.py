@@ -766,29 +766,43 @@ class InventoryItem(OwnableModel):
 
     @property
     def lowest_unit_cost(self) -> Optional[Decimal]:
-        """Get the lowest unit cost from all suppliers.
+        """The lowest unit cost any supplier records for this item, or ``None``.
 
-        Reads from ``item_suppliers.all()`` and filters the nulls out in Python
-        so a caller that prefetched ``item_suppliers`` (e.g. the list endpoint,
-        which serialises ``total_value``) hits the prefetch cache instead of
-        firing a per-row ``filter(unit_cost__isnull=False)`` query — the same
-        N+1 fix applied to :meth:`primary_item_supplier` (issue #882). The value
-        is unchanged: the minimum non-null unit cost across all suppliers.
+        The amount half of :func:`inventory.services.pricing.lowest_unit_price`,
+        which is the ONE reading of ``ItemSupplier.unit_cost`` (op-9m2v) and
+        which keeps "no link records a price" apart from "there are no links".
+        Callers that must explain themselves to an operator should ask that
+        function and read the state; this property is the number alone, and
+        ``None`` here means only "we do not know".
+
+        Both go through ``item_suppliers.all()``, so a caller that prefetched
+        (e.g. the list endpoint, which serialises ``total_value``) hits the
+        prefetch cache instead of firing a per-row
+        ``filter(unit_cost__isnull=False)`` query — the N+1 fix applied to
+        :meth:`primary_item_supplier` (issue #882).
         """
-        costs = [
-            item_supplier.unit_cost
-            for item_supplier in self.item_suppliers.all()
-            if item_supplier.unit_cost is not None
-        ]
-        return min(costs) if costs else None
+        from inventory.services.pricing import lowest_unit_price
+
+        return lowest_unit_price(self).amount
 
     @property
-    def total_value(self) -> Decimal:
-        """Calculate total value of current stock using lowest unit cost."""
-        cost = self.lowest_unit_cost
-        if cost:
-            return self.current_stock * cost
-        return Decimal("0")
+    def total_value(self) -> Optional[Decimal]:
+        """What the stock on hand is worth at the cheapest price on file.
+
+        ``None`` when no supplier records a price for this item — the value is
+        genuinely unknown, and base's ``Decimal("0")`` said the shelf was worth
+        nothing, which is a claim about money nobody made (op-9m2v). A supplier
+        that charges ``0.00`` still yields ``0.00``: free stock IS worth
+        nothing, and that is a fact rather than a gap.
+
+        Valued across EVERY link, orderable or not: the box on the shelf was
+        bought from somebody, possibly somebody we can no longer buy from, and
+        their price is still what it cost. See
+        :func:`inventory.services.pricing.lowest_unit_price`.
+        """
+        from inventory.services.pricing import extended, lowest_unit_price
+
+        return extended(lowest_unit_price(self), self.current_stock)
 
     def average_unit_cost(self) -> Optional[Decimal]:
         """Arithmetic mean of unit_cost across all active, non-null suppliers."""
@@ -799,11 +813,18 @@ class InventoryItem(OwnableModel):
         )
         return agg["avg"]
 
-    def average_total_value(self) -> Decimal:
-        """Total stock value using the average supplier unit cost."""
+    def average_total_value(self) -> Optional[Decimal]:
+        """Total stock value at the average ACTIVE supplier unit cost, or ``None``.
+
+        ``None`` when no active supplier records a price, for the reason
+        :attr:`total_value` gives: base returned ``Decimal("0")``, which states
+        that the shelf is worth nothing rather than that we cannot value it.
+        No surface reads this today — it is a public model API and the next
+        caller would have inherited the same fabricated zero.
+        """
         avg = self.average_unit_cost()
         if avg is None:
-            return Decimal("0")
+            return None
         return Decimal(self.current_stock) * avg
 
     @property
@@ -893,10 +914,17 @@ class InventoryItem(OwnableModel):
 
     @property
     def unit_cost(self) -> Optional[Decimal]:
-        """Provide the primary supplier's unit cost when available."""
+        """The unit cost of the supplier we would BUY through, or ``None``.
 
-        link = self.primary_item_supplier
-        return link.unit_cost if link else None
+        The amount half of :func:`inventory.services.pricing.order_unit_price`,
+        the ONE reading of the column (op-9m2v). ``None`` means "we do not
+        know"; a link recording ``0.00`` returns ``Decimal("0.00")``, which is
+        a price. A caller that has to tell an operator WHY there is no number
+        asks ``order_unit_price`` and reads its state.
+        """
+        from inventory.services.pricing import order_unit_price
+
+        return order_unit_price(self).amount
 
     @property
     def average_lead_time(self) -> Optional[int]:
@@ -907,10 +935,14 @@ class InventoryItem(OwnableModel):
 
     @property
     def package_cost(self) -> Optional[Decimal]:
-        """Expose the primary supplier's package cost when available."""
+        """The package cost of the supplier we would BUY through, or ``None``.
 
-        link = self.primary_item_supplier
-        return link.package_cost if link else None
+        The package twin of :attr:`unit_cost`, through
+        :func:`inventory.services.pricing.order_package_price`.
+        """
+        from inventory.services.pricing import order_package_price
+
+        return order_package_price(self).amount
 
     @property
     def quantity_per_package(self) -> Optional[int]:
@@ -1563,16 +1595,37 @@ class PriceHistory(models.Model):
         non-byte-identical tie edge. Prefer small/paginated result sets, or add
         the annotation deliberately if a tie-behaviour change is acceptable.
         """
+        from inventory.services.pricing import unit_price_of
+
         previous = PriceHistory.objects.filter(
             item_supplier=self.item_supplier, recorded_at__lt=self.recorded_at
         ).first()
 
-        if previous and previous.unit_cost and self.unit_cost:
-            old_cost = previous.unit_cost
-            new_cost = self.unit_cost
-            change = ((new_cost - old_cost) / old_cost) * 100
-            return round(change, 2)
-        return None
+        if previous is None:
+            return None
+
+        old_price = unit_price_of(previous)
+        new_price = unit_price_of(self)
+        if not old_price.is_known or not new_price.is_known:
+            # One of the two snapshots records no price at all, so there is no
+            # change to express. Read through the ONE price derivation (op-9m2v)
+            # rather than ``if previous.unit_cost and self.unit_cost``, which
+            # this used to be: that guard also swallowed a drop TO 0.00, so a
+            # supplier that started donating the item reported no price change
+            # on the item detail's trend and on the purchasing price-trend
+            # report. A recorded 0.00 is a price.
+            return None
+
+        old_cost = old_price.amount
+        if old_cost == 0:
+            # Percentage change FROM nothing is undefined, not zero — there is
+            # no base to divide by. The only unknown-price case that survives
+            # into this branch, and it is arithmetic rather than a data gap:
+            # both snapshots are known, the question simply has no answer.
+            return None
+
+        change = ((new_price.amount - old_cost) / old_cost) * 100
+        return round(change, 2)
 
 
 class UsageLog(models.Model):

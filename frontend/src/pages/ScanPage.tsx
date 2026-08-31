@@ -37,6 +37,45 @@ const packSizeRefusal = (supplier: ItemSupplier): string =>
   'reorder can be sized from it. Correct "Quantity per Package" on this supplier ' +
   'relationship, or choose a different supplier that records one.';
 
+/** The page's one phrasing for a price this vendor has not recorded. */
+const PRICE_UNKNOWN = '— (no price on file)';
+
+/**
+ * What this row charges, or null when it records nothing we can multiply by.
+ *
+ * The web face of `inventory.services.pricing` (op-9m2v): a recorded `"0.00"` is
+ * a KNOWN price — a makerspace runs on donated stock — and only a genuine
+ * absence is null. `parseFloat(cost || '0')` cannot tell the two apart and
+ * turned "nobody priced this" into a confident $0.00 on a member-facing screen.
+ *
+ * Takes numbers as well as strings because this page reads both wire types:
+ * `supplier.unit_cost` is a `DecimalField` and arrives as `"0.00"`, while
+ * `item.unit_cost` is a property-backed `ReadOnlyField` and arrives as `0`.
+ */
+const priceOf = (cost: string | number | null | undefined): number | null => {
+  if (cost === null || cost === undefined) return null;
+  const amount = typeof cost === 'number' ? cost : parseFloat(cost);
+  return Number.isFinite(amount) ? amount : null;
+};
+
+/** A price as money, or the page's phrasing for its absence. */
+const money = (cost: string | number | null | undefined): string => {
+  const amount = priceOf(cost);
+  return amount === null ? PRICE_UNKNOWN : `$${amount.toFixed(2)}`;
+};
+
+/**
+ * What the member can do about a price nobody recorded.
+ *
+ * Informational, NOT a refusal: an unpriced request is still a legitimate
+ * request — unlike an unknown pack size, which cannot be sized at all. But a
+ * blank the reader cannot act on is not a fix either, so it says who to ask.
+ */
+const priceUnknownNote = (supplier: ItemSupplier): string =>
+  `${supplier.supplier_name} has no package cost on file, so this request cannot ` +
+  'be costed. It can still be submitted — add a package cost to that supplier ' +
+  'relationship if you need an estimate first.';
+
 const ScanPage: React.FC = () => {
   const { itemId } = useParams<{ itemId: string }>();
   const navigate = useNavigate();
@@ -61,7 +100,7 @@ const ScanPage: React.FC = () => {
   const [selectedSupplier, setSelectedSupplier] = useState<ItemSupplier | null>(null);
   const [packageQuantity, setPackageQuantity] = useState<number>(1);
   const [totalUnits, setTotalUnits] = useState<number>(0);
-  const [estimatedCost, setEstimatedCost] = useState<number>(0);
+  const [estimatedCost, setEstimatedCost] = useState<number | null>(0);
   const [estimatedLeadTime, setEstimatedLeadTime] = useState<number>(0);
 
   // Update calculations when supplier or quantity changes
@@ -70,7 +109,8 @@ const ScanPage: React.FC = () => {
     // all, and the form refuses rather than reporting one.
     const packSize = packSizeOf(supplier);
     const units = packSize === null ? 0 : packages * packSize;
-    const cost = packages * parseFloat(supplier.package_cost || '0');
+    const packagePrice = priceOf(supplier.package_cost);
+    const cost = packagePrice === null ? null : packages * packagePrice;
 
     setTotalUnits(units);
     setEstimatedCost(cost);
@@ -437,12 +477,10 @@ const ScanPage: React.FC = () => {
               </div>
             )}
 
-            {item.unit_cost && (
-              <div className="info-item">
-                <span className="label">Unit Cost:</span>
-                <span className="value">${item.unit_cost}</span>
-              </div>
-            )}
+            <div className="info-item">
+              <span className="label">Unit Cost:</span>
+              <span className="value">{money(item.unit_cost)}</span>
+            </div>
           </div>
 
           {item.needs_reorder && (
@@ -500,7 +538,7 @@ const ScanPage: React.FC = () => {
                       .sort((a, b) => parseFloat(a.unit_cost || '999') - parseFloat(b.unit_cost || '999'))
                       .map(supplier => (
                         <option key={supplier.id} value={supplier.id}>
-                          {supplier.supplier_name} - ${supplier.unit_cost}/unit
+                          {supplier.supplier_name} - {money(supplier.unit_cost)}/unit
                           {packSizeOf(supplier) === null
                             ? ` ${PACK_SIZE_UNKNOWN}`
                             : ` (${packSizeOf(supplier)} per package)`}
@@ -522,10 +560,10 @@ const ScanPage: React.FC = () => {
                         {selectedPackSize === null ? PACK_SIZE_UNKNOWN : selectedPackSize}
                       </div>
                       <div>
-                        <strong>Package cost:</strong> ${selectedSupplier.package_cost}
+                        <strong>Package cost:</strong> {money(selectedSupplier.package_cost)}
                       </div>
                       <div>
-                        <strong>Unit cost:</strong> ${selectedSupplier.unit_cost}
+                        <strong>Unit cost:</strong> {money(selectedSupplier.unit_cost)}
                       </div>
                       <div>
                         <strong>Lead time:</strong> {selectedSupplier.average_lead_time} days
@@ -544,6 +582,12 @@ const ScanPage: React.FC = () => {
                     </div>
                   )}
 
+                  {estimatedCost === null && (
+                    <div className="alert alert-info" role="status">
+                      {priceUnknownNote(selectedSupplier)}
+                    </div>
+                  )}
+
                   <div className="form-group">
                     <label htmlFor="packageQuantity">Number of Packages</label>
                     <input
@@ -555,8 +599,11 @@ const ScanPage: React.FC = () => {
                       required
                     />
                     <small className="form-help">
-                      = {packSizeUnknown ? PACK_SIZE_UNKNOWN : `${totalUnits} total units`} ($
-                      {estimatedCost.toFixed(2)} estimated cost)
+                      = {packSizeUnknown ? PACK_SIZE_UNKNOWN : `${totalUnits} total units`} (
+                      {estimatedCost === null
+                        ? `${PRICE_UNKNOWN} — estimated cost unknown`
+                        : `$${estimatedCost.toFixed(2)} estimated cost`}
+                      )
                     </small>
                   </div>
 
@@ -568,7 +615,13 @@ const ScanPage: React.FC = () => {
                     </div>
                     <div className="summary-item">
                       <span>Estimated Cost:</span>
-                      <span><strong>${estimatedCost.toFixed(2)}</strong></span>
+                      <span>
+                        <strong>
+                          {estimatedCost === null
+                            ? PRICE_UNKNOWN
+                            : `$${estimatedCost.toFixed(2)}`}
+                        </strong>
+                      </span>
                     </div>
                     <div className="summary-item">
                       <span>Estimated Lead Time:</span>

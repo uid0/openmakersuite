@@ -28,7 +28,9 @@ describe('ScanPage', () => {
     minimum_stock: 10,
     average_lead_time: 7,
     supplier_name: 'Test Supplier',
-    unit_cost: '15.99',
+    // A NUMBER: `InventoryItem.unit_cost` is a property-backed `ReadOnlyField`,
+    // not the `DecimalField` string `ItemSupplier.unit_cost` sends (op-9m2v).
+    unit_cost: 15.99,
     needs_reorder: false,
     category_name: 'Tools',
     image: null,
@@ -495,6 +497,83 @@ describe('ScanPage', () => {
     });
   });
 
+  // --- A price nobody recorded is not $0.00 (op-9m2v) ---------------------
+  // `parseFloat(supplier.package_cost || '0')` turned a NULL package cost into
+  // a confident 0, so this member-facing screen quoted "$0.00 estimated cost"
+  // for a link nobody had priced — while telling the truth about the pack size
+  // three lines above.
+
+  const unpricedSupplier = {
+    id: 9,
+    supplier_name: 'Silent Vendor',
+    unit_cost: null,
+    package_cost: null,
+    quantity_per_package: 12,
+    is_active: true,
+    average_lead_time: 7,
+  };
+
+  /**
+   * The auto-selection at load only considers suppliers with a truthy
+   * `unit_cost`. That is SAFE for a FREE link — DRF sends that nullable
+   * DecimalField as the string `"0.00"`, which is truthy, so a free vendor is
+   * kept and `parseFloat("0.00") = 0` sorts it first. Only a genuinely UNPRICED
+   * link (`null`) is skipped, which is right: it cannot be ranked on price.
+   * These tests select by hand because that is the only way to reach an
+   * unpriced link, which is the case under test.
+   */
+  const selectSupplier = (supplier: Record<string, unknown>) =>
+    fireEvent.change(screen.getByLabelText(/^supplier$/i), {
+      target: { value: String(supplier.id) },
+    });
+
+  const packageDetails = () => document.querySelector('.supplier-details')!;
+  const estimatedCostRow = () =>
+    Array.from(document.querySelectorAll('.order-summary .summary-item')).find((row) =>
+      /estimated cost/i.test(row.textContent || '')
+    )!;
+
+  test('BEFORE/AFTER: an unrecorded price is shown as unknown, never as $0.00', async () => {
+    await renderWithSupplier(unpricedSupplier);
+    selectSupplier(unpricedSupplier);
+
+    expect(screen.queryByText(/\$0\.00/)).not.toBeInTheDocument();
+    // Both cost cells, which used to render a bare "$" for the same null.
+    expect(packageDetails().textContent).toContain('Package cost: — (no price on file)');
+    expect(packageDetails().textContent).toContain('Unit cost: — (no price on file)');
+    expect(estimatedCostRow().textContent).toContain('— (no price on file)');
+  });
+
+  test('the unknown price names what is missing and does not block the request', async () => {
+    await renderWithSupplier(unpricedSupplier);
+    selectSupplier(unpricedSupplier);
+
+    // Informational, not a refusal: an unpriced request is still legitimate.
+    const note = screen.getByRole('status');
+    expect(note).toHaveTextContent(/no package cost on file/i);
+    expect(note).toHaveTextContent(/can still be submitted/i);
+    expect(screen.getByRole('button', { name: /request \d+ units/i })).not.toBeDisabled();
+  });
+
+  test('CONTROL: a vendor that genuinely charges nothing still reads $0.00', async () => {
+    const free = { ...unpricedSupplier, unit_cost: '0.00', package_cost: '0.00' };
+    await renderWithSupplier(free);
+    selectSupplier(free);
+
+    expect(screen.queryByText(/no price on file/i)).not.toBeInTheDocument();
+    expect(estimatedCostRow().textContent).toContain('$0.00');
+  });
+
+  test('CONTROL: an ordinary price is unchanged — the branch invariant', async () => {
+    await renderWithSupplier({ ...unpricedSupplier, unit_cost: '1.25', package_cost: '15.00' });
+
+    const packagesInput = screen.getByLabelText(/number of packages/i);
+    fireEvent.change(packagesInput, { target: { value: '3' } });
+
+    expect(screen.queryByText(/no price on file/i)).not.toBeInTheDocument();
+    expect(estimatedCostRow().textContent).toContain('$45.00');
+  });
+
   test('AC-15: an existing pending reorder is not duplicated and shows a clear final state', async () => {
     const pendingItem = {
       ...mockItem,
@@ -512,5 +591,58 @@ describe('ScanPage', () => {
 
     await screen.findByText(/reorder already requested/i);
     expect(api.reorderAPI.createRequest).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The item's own Unit Cost row (op-9m2v).
+   *
+   * `item.unit_cost` is a model PROPERTY on `InventoryItemSerializer`, so DRF
+   * builds a `ReadOnlyField` and it arrives as a JSON NUMBER. The guard here
+   * was `{item.unit_cost && ...}`, which on a donated item is `{0 && ...}` —
+   * React renders the `0` itself, so the member saw a bare "0" where a price
+   * belonged. The supplier rows beside it are `DecimalField` strings and stay
+   * as they are.
+   */
+  const renderItemPriced = async (unitCost: number | null) => {
+    localStorage.setItem('token', 'test-token');
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, unit_cost: unitCost },
+    });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+    await renderWithRouter();
+    await screen.findByText('Test Widget');
+  };
+
+  const unitCostRow = () => screen.getByText('Unit Cost:').parentElement as HTMLElement;
+
+  test('BEFORE/AFTER: a donated item is priced $0.00, not dropped or shown as "0"', async () => {
+    await renderItemPriced(0);
+
+    expect(unitCostRow()).toHaveTextContent('$0.00');
+    expect(unitCostRow()).not.toHaveTextContent(/no price on file/i);
+    // The falsy guard printed the number 0 into the row instead of a price.
+    expect(unitCostRow().textContent).not.toMatch(/Unit Cost:\s*0\s*$/);
+  });
+
+  test('an item nobody has priced says so rather than showing nothing', async () => {
+    await renderItemPriced(null);
+
+    expect(unitCostRow()).toHaveTextContent(/no price on file/i);
+    expect(unitCostRow()).not.toHaveTextContent('$');
+  });
+
+  test('CONTROL: an ordinary item price is unchanged', async () => {
+    await renderItemPriced(15.99);
+
+    expect(unitCostRow()).toHaveTextContent('$15.99');
+  });
+
+  test('a price with a trailing zero cent is written in full', async () => {
+    await renderItemPriced(5.1);
+
+    // The row rendered `${item.unit_cost}` raw, so 5.1 read as "$5.1".
+    expect(unitCostRow()).toHaveTextContent('$5.10');
   });
 });

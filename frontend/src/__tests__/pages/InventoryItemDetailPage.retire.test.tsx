@@ -47,7 +47,7 @@ const makeItem = (overrides: Record<string, unknown> = {}) => ({
   current_stock: 10,
   minimum_stock: 5,
   reorder_quantity: 20,
-  unit_cost: '15.99',
+  unit_cost: 15.99,
   supplier_name: 'Test Supplier',
   needs_reorder: false,
   has_pending_reorder: false,

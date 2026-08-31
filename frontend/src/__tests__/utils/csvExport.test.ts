@@ -1,7 +1,11 @@
 /**
  * Tests for CSV export utilities
  */
-import { exportAssetsToCSV, exportInventoryItemsToCSV } from '../../utils/csvExport';
+import {
+  exportAssetsToCSV,
+  exportInventoryItemsToCSV,
+  reportMoney,
+} from '../../utils/csvExport';
 
 // Mock URL.createObjectURL and Blob for test environment
 global.URL.createObjectURL = jest.fn(() => 'mock-url');
@@ -31,6 +35,20 @@ beforeEach(() => {
 describe('CSV Export Utilities', () => {
 
   describe('exportInventoryItemsToCSV', () => {
+    const baseItem = {
+      name: 'Test Item',
+      sku: 'SKU001',
+      category_name: 'Electronics',
+      location: 'Workshop A',
+      current_stock: 10,
+      minimum_stock: 5,
+      reorder_quantity: 20,
+      unit_cost: 10,
+      supplier_name: 'Supplier 1',
+      needs_reorder: false,
+      is_active: true,
+    };
+
     it('exports inventory items with correct headers', () => {
       const items = [
         {
@@ -41,7 +59,7 @@ describe('CSV Export Utilities', () => {
           current_stock: 10,
           minimum_stock: 5,
           reorder_quantity: 20,
-          unit_cost: '10.00',
+          unit_cost: 10,
           supplier_name: 'Supplier 1',
           needs_reorder: false,
           is_active: true,
@@ -53,6 +71,39 @@ describe('CSV Export Utilities', () => {
       expect(document.createElement).toHaveBeenCalledWith('a');
       expect(mockLink.download).toBe('inventory-export.csv');
       expect(mockClick).toHaveBeenCalled();
+    });
+
+    /**
+     * `InventoryItem.unit_cost` is a property-backed `ReadOnlyField`, so a
+     * donated item sends the NUMBER 0 (op-9m2v). `item.unit_cost || ''`
+     * exported that as a blank cell — the spelling this file uses for a price
+     * nobody recorded — so a real $0.00 and an unknown price were the same
+     * cell in the operator's spreadsheet.
+     */
+    const csvText = () =>
+      ((global.Blob as unknown as jest.Mock).mock.calls[0][0] as string[]).join('');
+
+    it('BEFORE/AFTER: exports a donated item as 0, not as a blank cell', () => {
+      exportInventoryItemsToCSV([
+        { ...baseItem, name: 'Donated Filament', unit_cost: 0 },
+      ]);
+
+      expect(csvText()).toContain('Donated Filament');
+      expect(csvText()).toMatch(/Donated Filament[^\n]*,0,/);
+    });
+
+    it('CONTROL: an item nobody priced still exports a blank cell', () => {
+      exportInventoryItemsToCSV([
+        { ...baseItem, name: 'Unpriced Filament', unit_cost: null },
+      ]);
+
+      expect(csvText()).toMatch(/Unpriced Filament[^\n]*,,/);
+    });
+
+    it('CONTROL: an ordinary price is unchanged', () => {
+      exportInventoryItemsToCSV([{ ...baseItem, name: 'Priced', unit_cost: 10 }]);
+
+      expect(csvText()).toMatch(/Priced[^\n]*,10,/);
     });
   });
 
@@ -169,5 +220,25 @@ describe('CSV Export Utilities', () => {
       const lines = content.split('\n');
       expect(lines.length).toBeGreaterThanOrEqual(4);
     });
+  });
+});
+
+/**
+ * A price the server did not record must not export as "$0.00" (op-9m2v).
+ *
+ * A CSV is summed by whoever opens it. "$0.00" for a price nobody recorded
+ * counted the unknowns as free in whatever total the operator built on top;
+ * a blank cell sums as nothing AND reads as nothing, which is the truth. A
+ * genuinely free supplier still exports "$0.00", because that is a price.
+ */
+describe('reportMoney', () => {
+  test('renders a real price, zero included', () => {
+    expect(reportMoney(4.5)).toBe('$4.50');
+    expect(reportMoney(0)).toBe('$0.00');
+  });
+
+  test('renders an absence as a blank cell, never as $0.00', () => {
+    expect(reportMoney(null)).toBe('');
+    expect(reportMoney(undefined)).toBe('');
   });
 });

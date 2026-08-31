@@ -352,6 +352,10 @@
   color: #10b981 !important;
 }
 
+.on-budget {
+  color: #94a3b8 !important;
+}
+
 /* Timeline */
 .timeline-item {
   display: flex;

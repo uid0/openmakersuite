@@ -115,14 +115,23 @@ class ReorderRequest(models.Model):
 
     @property
     def estimated_cost(self) -> Optional[Decimal]:
-        """Calculate estimated cost based on item unit cost."""
-        # Read the item's primary unit cost once: ``item.unit_cost`` resolves the
-        # primary supplier, so reading it twice used to double the (now cached,
-        # prefetch-friendly) lookup on every row of a reorder list (issue #882).
-        unit_cost = self.item.unit_cost
-        if unit_cost:
-            return self.quantity * unit_cost
-        return None
+        """What this request would cost at the orderable supplier's price.
+
+        ``None`` when no price is known — and ``Decimal("0.00")`` when the
+        supplier's price is a recorded ZERO, which base reported as ``None``
+        too (op-9m2v). ``if unit_cost:`` cannot tell "nobody priced this" from
+        "this is free", and a makerspace really does receive donated stock and
+        free samples, so a genuinely free request read as an unpriceable one on
+        the reorder list.
+
+        Read once through the ONE price derivation: ``order_unit_price``
+        resolves the primary supplier, so asking twice used to double the (now
+        cached, prefetch-friendly) lookup on every row of a reorder list
+        (issue #882).
+        """
+        from inventory.services.pricing import extended, order_unit_price
+
+        return extended(order_unit_price(self.item), self.quantity)
 
     @property
     def days_pending(self) -> int:

@@ -290,7 +290,8 @@ const CycleCountModal: React.FC<CycleCountModalProps> = ({
 interface LogUsageModalProps {
   itemId: string;
   itemName: string;
-  unitCost: string | null;
+  /** A NUMBER — see `InventoryItem.unit_cost` in types/index.ts (op-9m2v). */
+  unitCost: number | null;
   /** op-lkxl: enter + post usage in whole packs when the item is counted that way. */
   packCounted: boolean;
   countUnit: string;
@@ -350,7 +351,7 @@ const LogUsageModal: React.FC<LogUsageModalProps> = ({
   // "no unit cost" hint. unit_cost is per BASE unit, so a pack entry is priced
   // through the pack's size — the same conversion the server does.
   const projectedCharge =
-    unitCost != null ? (parseFloat(unitCost) * qty * packBaseUnits).toFixed(2) : null;
+    unitCost != null ? (unitCost * qty * packBaseUnits).toFixed(2) : null;
 
   const handleSubmit = async () => {
     if (quantity === '' || quantity < 1) {
@@ -924,14 +925,18 @@ const InventoryItemDetailPage: React.FC = () => {
                       </Text>
                     )}
                   </Group>
-                  {item.unit_cost && (
-                    <Group justify="space-between">
-                      <Text size="sm">Unit Cost:</Text>
-                      <Text size="sm" fw={600}>
-                        ${parseFloat(item.unit_cost).toFixed(2)}
+                  <Group justify="space-between">
+                    <Text size="sm">Unit Cost:</Text>
+                    {item.unit_cost === null ? (
+                      <Text size="sm" c="dimmed">
+                        no price on file
                       </Text>
-                    </Group>
-                  )}
+                    ) : (
+                      <Text size="sm" fw={600}>
+                        ${item.unit_cost.toFixed(2)}
+                      </Text>
+                    )}
+                  </Group>
                 </Stack>
               </Card>
             </Group>
@@ -1198,9 +1203,13 @@ const InventoryItemDetailPage: React.FC = () => {
                               {kit.quantity_in_kit} per kit
                             </Text>
                           )}
-                          {kit.unit_cost && (
+                          {kit.unit_cost === null ? (
+                            <Text size="sm" c="dimmed">
+                              no price on file
+                            </Text>
+                          ) : (
                             <Text size="sm" fw={600}>
-                              ${kit.unit_cost}
+                              ${kit.unit_cost.toFixed(2)}
                             </Text>
                           )}
                         </Group>

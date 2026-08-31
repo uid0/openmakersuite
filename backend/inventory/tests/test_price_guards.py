@@ -2406,3 +2406,150 @@ def test_an_unknown_kit_supplier_is_refused_with_the_id(api):
     assert response.status_code == 400, response.data
     assert "999999" in str(response.data)
     assert not ItemSupplier.objects.filter(supplier_id=999999).exists()
+
+
+def test_a_restated_price_beside_a_new_pack_size_is_honoured(api):
+    """BEFORE/AFTER. The twin-clear fires on key presence, not on a cent.
+
+    Deciding it by value comparison meant restating `unit_cost` as its stored
+    5.00 beside a new pack size left the stale package price to overwrite it —
+    the operator sent 5.00 and the row stored 10.00 — while `5.01` in the same
+    request was honoured. Behaviour must never turn on whether a restated value
+    happens to match.
+    """
+    item = _item("Widget")
+    supplier = Supplier.objects.create(name="Acme")
+    link = ItemSupplier.objects.create(
+        item=item,
+        supplier=supplier,
+        supplier_sku="T-RESTATE",
+        package_cost=Decimal("20.00"),
+        quantity_per_package=4,
+    )
+    link.refresh_from_db()
+    assert (link.unit_cost, link.package_cost) == (Decimal("5.00"), Decimal("20.00"))
+
+    response = api.patch(
+        f"/api/inventory/item-suppliers/{link.pk}/",
+        {"unit_cost": "5.00", "quantity_per_package": 2},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
+    link.refresh_from_db()
+    assert link.unit_cost == Decimal("5.00")
+    assert link.package_cost == Decimal("10.00")
+    assert link.quantity_per_package == 2
+
+
+def test_a_one_cent_difference_behaves_the_same_in_kind(api):
+    """CONTROL. The neighbouring value takes the same path, not a different one."""
+    item = _item("Widget")
+    supplier = Supplier.objects.create(name="Acme")
+    link = ItemSupplier.objects.create(
+        item=item,
+        supplier=supplier,
+        supplier_sku="T-CENT",
+        package_cost=Decimal("20.00"),
+        quantity_per_package=4,
+    )
+    link.refresh_from_db()
+
+    response = api.patch(
+        f"/api/inventory/item-suppliers/{link.pk}/",
+        {"unit_cost": "5.01", "quantity_per_package": 2},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
+    link.refresh_from_db()
+    assert link.unit_cost == Decimal("5.01")
+    assert link.package_cost == Decimal("10.02")
+
+
+def test_a_malformed_kit_supplier_id_is_refused_not_a_500(api):
+    """Every shape the pass-through DictField admits is a 400, never a 500."""
+    component = _item("Cyan")
+    for index, bad in enumerate(["abc", "1.5", [1], {"a": 1}]):
+        response = api.post(
+            "/api/inventory/kits/",
+            {
+                "name": f"Bad id kit {index}",
+                "description": "x",
+                "sku": f"KIT-BADID-{index}",
+                "minimum_stock": 0,
+                "reorder_quantity": 1,
+                "components": [{"component": component.pk, "quantity": 1}],
+                "supplier_terms": {"supplier": bad, "unit_cost": "4.00"},
+            },
+            format="json",
+        )
+
+        assert response.status_code == 400, (bad, response.status_code, response.data)
+        assert "supplier" in str(response.data)
+
+
+def test_a_malformed_kit_lead_time_is_refused_not_a_500(api):
+    """The sibling integer on the same unvalidated boundary, derived not recalled."""
+    component = _item("Cyan")
+    supplier = Supplier.objects.create(name="Acme")
+
+    response = api.post(
+        "/api/inventory/kits/",
+        {
+            "name": "Bad lead time kit",
+            "description": "x",
+            "sku": "KIT-BADLT",
+            "minimum_stock": 0,
+            "reorder_quantity": 1,
+            "components": [{"component": component.pk, "quantity": 1}],
+            "supplier_terms": {
+                "supplier": supplier.pk,
+                "unit_cost": "4.00",
+                "average_lead_time": "soon",
+            },
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400, response.data
+    assert "average_lead_time" in str(response.data)
+
+
+def test_an_echoed_patch_does_not_touch_the_row(api):
+    """CONTROL. A request whose every supplied field matches writes nothing.
+
+    On the row-addressed endpoint a persisted link is always self-consistent —
+    `save()` re-derives one cost from the other — so a redundant write would
+    leave the same numbers behind. What it would NOT leave alone is the row
+    itself, so `updated_at` is what holds the short-circuit here. The kit form's
+    pair path has its own CONTROL, where the echo is observable in the figures.
+    """
+    item = _item("Widget")
+    supplier = Supplier.objects.create(name="Acme")
+    link = ItemSupplier.objects.create(
+        item=item,
+        supplier=supplier,
+        supplier_sku="T-ECHOED",
+        package_cost=Decimal("30.00"),
+        quantity_per_package=6,
+    )
+    link.refresh_from_db()
+    before = (link.unit_cost, link.package_cost, link.quantity_per_package, link.updated_at)
+    history_before = PriceHistory.objects.filter(item_supplier=link).count()
+
+    response = api.patch(
+        f"/api/inventory/item-suppliers/{link.pk}/",
+        {"unit_cost": "5.00", "quantity_per_package": 6},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
+    link.refresh_from_db()
+    assert (
+        link.unit_cost,
+        link.package_cost,
+        link.quantity_per_package,
+        link.updated_at,
+    ) == before
+    assert PriceHistory.objects.filter(item_supplier=link).count() == history_before

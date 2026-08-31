@@ -1284,9 +1284,13 @@ class KitSerializer(InventoryItemSerializer):
 
         ``supplier_terms`` is a ``DictField`` with the pass-through
         ``_UnvalidatedField`` child, so nothing inside it is validated for us —
-        including the supplier reference. It is checked here so an unknown id is
-        refused with the id in the message, rather than reaching the INSERT as a
-        foreign-key violation and surfacing as a 500.
+        including the supplier reference. The id is COERCED as well as looked
+        up, because a non-numeric one reaches ``filter(pk=...)`` as a
+        ``ValueError`` (a list or dict as a ``TypeError``) before the lookup can
+        answer False, and the project's exception handler translates neither —
+        so a malformed reference 500'd where an unknown numeric one gave a
+        clean 400. The costs and the lead time are coerced one layer down, by
+        the owner, for the same reason.
         """
         from inventory.services.suppliers import write_supplier_terms
 
@@ -1296,6 +1300,16 @@ class KitSerializer(InventoryItemSerializer):
         if supplier_id is None:
             raise serializers.ValidationError(
                 {"supplier_terms": {"supplier": "This field is required."}}
+            )
+        if isinstance(supplier_id, bool) or not isinstance(supplier_id, (int, str)):
+            raise serializers.ValidationError(
+                {"supplier_terms": {"supplier": f"Supplier {supplier_id!r} is not a valid id."}}
+            )
+        try:
+            supplier_id = int(supplier_id)
+        except (TypeError, ValueError):
+            raise serializers.ValidationError(
+                {"supplier_terms": {"supplier": f"Supplier {supplier_id!r} is not a valid id."}}
             )
         if not Supplier.objects.filter(pk=supplier_id).exists():
             raise serializers.ValidationError(

@@ -179,6 +179,30 @@ def _coerce_pack_size(value):
     return size
 
 
+def _coerce_lead_time(value):
+    """A lead time as a whole number of days, or NULL for "not known".
+
+    Coerced here for the same reason the costs and the pack size are: the kit
+    form's ``supplier_terms`` is a pass-through ``DictField``, so an integer
+    column can be handed a string and only fail at the INSERT, as a 500.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise DjangoValidationError(
+            {"average_lead_time": f"Must be a whole number of days, got {value!r}."}
+        )
+    try:
+        days = int(value)
+    except (ValueError, TypeError):
+        raise DjangoValidationError(
+            {"average_lead_time": f"Must be a whole number of days, got {value!r}."}
+        )
+    if days < 0:
+        raise DjangoValidationError({"average_lead_time": "Cannot be negative."})
+    return days
+
+
 def _coerce_terms(terms):
     """Coerce every value that reaches the model's cost derivation."""
     coerced = dict(terms)
@@ -187,6 +211,8 @@ def _coerce_terms(terms):
             coerced[field] = _coerce_cost(coerced[field], field)
     if coerced.get("quantity_per_package", UNCHANGED) is not UNCHANGED:
         coerced["quantity_per_package"] = _coerce_pack_size(coerced["quantity_per_package"])
+    if coerced.get("average_lead_time", UNCHANGED) is not UNCHANGED:
+        coerced["average_lead_time"] = _coerce_lead_time(coerced["average_lead_time"])
     return coerced
 
 
@@ -201,24 +227,26 @@ def _apply(link, terms):
 
     "The caller did not mention ``package_cost``" and "the caller SENT
     ``package_cost`` with its current value" are TWO DIFFERENT FACTS and must
-    not be collapsed. Intent comes from KEY PRESENCE only — a key in ``terms``
-    means the caller supplied it, absent means leave it alone. Value equality
-    decides one thing and one thing only: whether a write is actually needed.
+    not be collapsed. Intent is KEY PRESENCE and key presence ALONE: a key in
+    ``terms`` means the caller supplied it, absent means leave it alone.
 
-    So the twin-clear fires when the caller supplied EXACTLY ONE of the pair AND
-    that one differs from what is stored:
-
-    * supplied one, and it changed — "this is the price now", so the unnamed
-      twin is cleared and ``save()`` re-derives it from the new value.
-    * supplied one, unchanged — the kit form echoes its seeded box back on every
-      save, so this is a no-op: nothing moves and no price history is written.
+    * supplied exactly ONE of the pair — "this is the price now", so the other
+      is cleared and ``save()`` re-derives it from the value the caller gave.
+      Whether that value happens to EQUAL what is stored is irrelevant: an
+      operator restating the price they meant is still naming it.
     * supplied BOTH — the item form always sends both boxes, so they are the
       caller's own values and neither is cleared. Where the two disagree
       ``save()``'s derivation decides, exactly as it did before this owner
       existed; that derivation is not this module's to second-guess.
+
+    Value equality decides something else entirely, one step out in
+    :func:`_is_echo`: whether the request as a WHOLE is a no-op. Deciding the
+    twin-clear on it as well made behaviour turn on a single cent — restating
+    ``unit_cost`` as ``5.00`` beside a new pack size left the stale package
+    price to overwrite it, while ``5.01`` in the same request was honoured.
     """
     supplied = [name for name in _DERIVED_COSTS if terms.get(name, UNCHANGED) is not UNCHANGED]
-    if len(supplied) == 1 and terms[supplied[0]] != getattr(link, supplied[0]):
+    if len(supplied) == 1:
         stale = _DERIVED_COSTS[0] if supplied[0] == _DERIVED_COSTS[1] else _DERIVED_COSTS[1]
         terms = {**terms, stale: None}
 
@@ -227,6 +255,19 @@ def _apply(link, terms):
         if value is not UNCHANGED:
             setattr(link, name, value)
     return link
+
+
+def _is_echo(link, terms):
+    """True when EVERY supplied term already equals what the row stores.
+
+    The whole request, not one field: if anything the derivation depends on is
+    moving — a cost, a pack size, a flag — the request is not an echo and the
+    write proceeds. The kit form seeds its cost box from the stored price and
+    sends it back on every save, which is the case this exists to make free.
+    """
+    return all(
+        value == getattr(link, name) for name, value in terms.items() if value is not UNCHANGED
+    )
 
 
 def _dependents_of(link):
@@ -309,6 +350,9 @@ def update_supplier_terms(link, *, item=UNCHANGED, supplier_id=UNCHANGED, **term
         locked = ItemSupplier.objects.select_for_update().get(pk=link.pk)
         if item is not UNCHANGED and item.pk != locked.item_id:
             _refuse_item_move(locked, item)
+        moving_supplier = supplier_id is not UNCHANGED and supplier_id != locked.supplier_id
+        if not moving_supplier and _is_echo(locked, terms):
+            return locked
         if supplier_id is not UNCHANGED:
             locked.supplier_id = supplier_id
         _apply(locked, terms).save()
@@ -369,6 +413,8 @@ def write_supplier_terms(*, item, supplier=None, supplier_id=None, **terms):
             .first()
         )
         if link is not None:
+            if _is_echo(link, terms):
+                return link
             _apply(link, terms).save()
             return link
 

@@ -671,9 +671,10 @@ complete, and it was twice not:
   comprehension puts it in `defaults` — measured, not assumed.
   **That limit is now CLOSED** — the round that recorded it as unfixable was
   wrong about the cost. See the supplier-terms owner below: clearing a recorded
-  price now sticks, because naming one cost clears its twin — but ONLY when the
-  named value actually differs from what is stored, so an echoed price is a
-  no-op. See the owner entry below for why that qualifier is load-bearing. The CONTROL that pinned the limitation is
+  price now sticks, because naming one cost clears its twin — on KEY PRESENCE
+  alone, while a request whose every supplied field already equals what is
+  stored short-circuits as an echo. See the owner entry below for why those are
+  two separate questions. The CONTROL that pinned the limitation is
   rewritten as a BEFORE/AFTER that pins the fix.
   NOTE the seeding path, checked on every route in: `applyKit` seeds
   `supplier_sku` and `unit_cost` but NOT `supplierId`, and the payload only
@@ -844,10 +845,45 @@ complete, and it was twice not:
     change — visible on the scan page's "Package cost" and "Estimated Cost",
     which read `order_package_price`. A money figure moving on a save that
     changed nothing is an outright breach of the branch invariant.
-    **REGRESSION of this branch**, same window as above. An incoming value equal
-    to the stored one is now a no-op: nothing moves and no history is written.
-    Compared as `Decimal`, so `"5"`, `"5.00"` and `Decimal("5.00")` are one
-    value.
+    **REGRESSION of this branch**, same window as above.
+    **Corrected once more, and this is the shape that ships:** conditioning the
+    TWIN-CLEAR on the value changing put two different questions on one
+    comparison, and behaviour then turned on a single cent. Measured: a link at
+    `unit_cost 5.00 / package_cost 20.00 / pack 4`, sent
+    `PATCH {unit_cost: "5.00", quantity_per_package: 2}` — the restated 5.00
+    equalled what was stored, so the twin was NOT cleared, the stale 20.00
+    survived, and `save()` recomputed `20.00 / 2` to store **10.00**: the
+    operator sent 5.00 and got 10.00, silently. Sending `"5.01"` in the same
+    request cleared the twin and stored the typed price. Two questions, now
+    separated:
+    **INTENT is key presence, alone.** Supplying exactly one of the cost pair
+    clears the other and re-derives it, whether or not the supplied value
+    matches — restating the price you meant is still naming it. Supplying both
+    honours both.
+    **VALUE EQUALITY decides only whether the request is a no-op, and it reads
+    the WHOLE request.** The write short-circuits only when EVERY supplied term
+    already equals what is stored, so nothing the derivation depends on is
+    moving. Any supplied field differing — a cost, a pack size, a flag — and it
+    is not an echo. Compared as `Decimal`, so `"5"`, `"5.00"` and
+    `Decimal("5.00")` are one value. The kit form's seeded-and-echoed cost box,
+    which this exists for, is unaffected and keeps its CONTROL.
+    Figure moved by the correction: on that link, `unit_cost` **10.00 → 5.00**
+    and `package_cost` **20.00 → 10.00**, shown on the item form's supplier
+    editor and the scan page's "Package cost" / "Estimated Cost". Versus BASE
+    both spellings stored `(10.00, 20.00)`, so this is the discarded-input fix
+    reaching the spelling it previously missed, not a new direction.
+  - **The pass-through `DictField` is coerced field by field, and the set is
+    derived rather than remembered.** The kit form's `supplier_terms` validates
+    nothing inside it, so every value it carries can reach a typed column raw.
+    The costs and the pack size were already coerced; checking the keys the
+    serializer actually consults surfaced two more that still 500'd —
+    `supplier`, where a non-numeric id raises `ValueError` (a list or dict a
+    `TypeError`) inside `filter(pk=...)` before the lookup can answer False, and
+    `average_lead_time`, where `"soon"` fails at the INSERT. Neither is
+    translated by the project's exception handler. Both are refused with a 400
+    naming the offending value now. **PRE-EXISTING**: base 500'd on the same
+    input at its own INSERT. No figure moves; what changes is which error an
+    operator sees.
   - **`pricing_changed` compares at the column's precision.** Surfaced by the
     no-op CONTROL above and PRE-EXISTING, not this branch's: `save()`'s
     derivation DIVIDES, so `package_cost 10.00` over a pack of 3 yields

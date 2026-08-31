@@ -461,10 +461,29 @@ complete, and it was twice not:
   auth) — `estimated_cost` on both the `orders` and the `ledger` block:
   `null` -> `0.0` for a donated item, so the community feed no longer says "we
   do not know what this cost" about a cost that is known to be nothing. And
-  `cost_variance`: `null` -> the real difference when the estimate is a known
+  `cost_variance`: `null` -> the real difference when the ESTIMATE is a known
   `0.00`, which is the one number that says the estimate was wrong.
+  `cost_variance` is gated on the same predicate `actual_cost` is, so where the
+  ACTUAL cost is a recorded `0.00` it stays `null` exactly as base had it: that
+  column is a ratified exclusion (below), and a variance published beside an
+  `actual_cost: null` would be a number that can only be true if the actual
+  cost were known. The exclusion boundary must not run through one arithmetic
+  expression. The `ledger` block needs no such pairing — it carries no derived
+  figure, only the two independent fields.
+- Public transparency PAGE (`/transparency`, the only consumer of that feed) —
+  the "Estimated Cost" and "Cost Variance" rows: hidden, with a stray `0`
+  printed into the card, -> `$0.00`. `{order.estimated_cost && <div/>}` fails
+  twice over on a numeric `0` in JSX: the row disappears AND React renders the
+  `0` itself. Pinned in `TransparencyUnknownCosts.test.tsx`.
 - Outbound reorder webhook (Discord/Slack) and three admin `Est. Cost` columns
   — `null` / `—` -> `$0.00` for a free line.
+- Two admin **Actual Cost** columns — `reorder_queue/admin.py`'s
+  `actual_cost_display` on the PurchaseOrderItem inline and on the
+  PurchaseOrderItem changelist: `—` -> `$0.00` for a line receipted at
+  `unit_cost_actual = 0.00` with `quantity_received > 0`, where
+  `PurchaseOrderItem.actual_cost` returns a real `Decimal("0.00")`. This is the
+  DERIVED property, whose `unit_cost_actual` twin in `receiving.py` was the
+  branch's own defect — not `ReorderRequest.actual_cost`, which is excluded.
 - Supplier detail price-trend **records** (`GET /api/inventory/suppliers/<id>/`,
   `trends[].price_history[].unit_cost`) — `null` -> `0.0` for a recorded zero,
   which is what the supplier-detail chart plots.
@@ -481,11 +500,14 @@ are the same falsy shape on a value this branch does NOT own, so repairing them
 would move output for a reason that is not "base presented an unknown price as a
 real number":
 
-- The transparency payload's own `actual_cost` and `cost_per_unit` truthiness,
-  and `ReorderRequest.cost_per_unit`. `actual_cost` is a nullable column an
+- `ReorderRequest.actual_cost` and `ReorderRequest.cost_per_unit`, and the
+  truthiness on them in the TRANSPARENCY PAYLOAD specifically — both the
+  `orders` block and the `ledger` block. `actual_cost` is a nullable column an
   operator types in, not a derived price, and this branch did not change it.
-  (`cost_variance` IS fixed, because it reads `estimated_cost` and so is inside
-  the derived set.)
+  Read that narrowly: it does NOT extend to `PurchaseOrderItem.actual_cost`,
+  which is DERIVED from `unit_cost_actual` and IS inside the branch (the
+  `receiving.py` twin was the real defect), and whose two admin columns are
+  named in the moved-figures list above.
 - `MaintenanceItem.estimated_cost` on the work-order PDF
   (`inventory/utils/work_order_pdf.py`), where `if item.estimated_cost:` omits
   the "Est. Cost" line for a task budgeted at a recorded `0.00`. A maintenance
@@ -495,6 +517,11 @@ real number":
   `analytics/services/aggregation.py` are INERT rather than excluded: the
   fallback IS `0.00`, so a recorded zero and a `NULL` produce the same number
   either way.
+
+"A price as JSON" has one owner too: `pricing.price_float`. It was written out
+twice, character-for-character, in `inventory/views.py` and
+`inventory/serializers.py` — two spellings of one fact on a branch whose whole
+thesis is that there should be one. Non-functional; no figure moved.
 
 ### The pre-send boundary: when a PO is still the shop's own document
 

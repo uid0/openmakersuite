@@ -187,6 +187,18 @@ NO_SUPPLIER_LINK = Price()
 NO_ORDERABLE_LINK = Price(state=PRICE_NO_ORDERABLE_LINK)
 
 
+def price_float(price: Price) -> Optional[float]:
+    """A :class:`Price` as a JSON number, or ``None`` when it is not known.
+
+    The one rendering of a price onto a payload, so "a price as JSON" has an
+    owner like every other fact here. ``None`` only where the price is
+    genuinely unknown; a recorded ``0.00`` comes through as ``0.0``, which is
+    what the supplier charges — the distinction ``float(x) if x else None``
+    could not make (op-9m2v).
+    """
+    return None if not price.is_known else float(price.amount)
+
+
 def _price_of(link: Optional[PricedRow], column: str) -> Price:
     """Interpret ONE priced row's price column.
 

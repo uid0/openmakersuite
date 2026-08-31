@@ -3515,7 +3515,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     "cost_per_unit": (float(order.cost_per_unit) if order.cost_per_unit else None),
                     "cost_variance": (
                         float(order.actual_cost - order.estimated_cost)
-                        if (order.actual_cost is not None and order.estimated_cost is not None)
+                        if (order.actual_cost and order.estimated_cost is not None)
                         else None
                     ),
                     # Document links

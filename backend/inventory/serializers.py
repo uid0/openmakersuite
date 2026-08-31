@@ -63,15 +63,6 @@ from .models import (
 )
 
 
-def _price_float(price):
-    """A :class:`~inventory.services.pricing.Price` as a JSON number, or ``None``.
-
-    ``None`` only where the price is genuinely unknown; a recorded ``0.00``
-    comes through as ``0.0`` (op-9m2v).
-    """
-    return None if not price.is_known else float(price.amount)
-
-
 class SupplierSerializer(serializers.ModelSerializer):
     """Basic serializer for supplier list views."""
 
@@ -413,7 +404,11 @@ class SupplierDetailSerializer(SupplierSerializer):
 
             from django.utils import timezone
 
-            from inventory.services.pricing import package_price_of, unit_price_of
+            from inventory.services.pricing import (
+                package_price_of,
+                price_float,
+                unit_price_of,
+            )
 
             # Get price history for items from this supplier
             price_history = PriceHistory.objects.filter(item_supplier__supplier=obj).order_by(
@@ -461,8 +456,8 @@ class SupplierDetailSerializer(SupplierSerializer):
                                     # supplier charged, and a 0% change is "no
                                     # change" rather than "no data" — neither
                                     # survives a truthiness guard (op-9m2v).
-                                    "unit_cost": _price_float(unit_price_of(ph)),
-                                    "package_cost": _price_float(package_price_of(ph)),
+                                    "unit_cost": price_float(unit_price_of(ph)),
+                                    "package_cost": price_float(package_price_of(ph)),
                                     "change_type": ph.change_type,
                                     "price_change_percentage": (
                                         None

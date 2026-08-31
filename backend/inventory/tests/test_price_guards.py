@@ -906,6 +906,25 @@ def test_the_supplier_price_trend_records_a_free_snapshot_as_zero(api):
     assert [ph["unit_cost"] for ph in trend["price_history"]] == [4.0, 0.0]
 
 
+def test_the_supplier_analytics_feed_records_a_free_snapshot_as_zero(api):
+    """CONTROL. The SECOND consumer of the one "a Price as JSON" rendering.
+
+    ``pricing.price_float`` was written out twice, character-for-character, in
+    ``inventory/views.py`` and ``inventory/serializers.py``. Now that both
+    import the one owner, this pins the view's own payload — the supplier
+    analytics feed — so a future edit to that owner cannot regress one caller
+    while the other stays green.
+    """
+    item = _item("Donated")
+    link = _link(item, "Charity", unit_cost="0.00")
+    _history(link, ["4.00", "0.00"])
+
+    response = api.get(f"/api/inventory/suppliers/{link.supplier.id}/analytics/")
+    assert response.status_code == 200
+    changes = response.data["price_trends"]["recent_changes"]
+    assert [c["unit_cost"] for c in changes] == [0.0, 4.0]
+
+
 def test_the_supplier_price_summary_ignores_a_snapshot_with_no_price(api):
     """CONTROL. An unrecorded price is still not a data point."""
     item = _item("Mystery")
@@ -1306,6 +1325,34 @@ def test_the_public_transparency_ledger_carries_the_free_estimate_too(api):
     response = api.get(TRANSPARENCY_URL)
     entry = next(e for e in response.data["ledger"] if e["id"] == req.id)
     assert entry["estimated_cost"] == 0.0
+
+
+def test_the_public_transparency_feed_reports_no_variance_it_cannot_stand_behind(api):
+    """CONTROL restored to base. The two halves of the payload must agree.
+
+    ``ReorderRequest.actual_cost`` is an operator-typed nullable column this
+    branch deliberately does NOT own, so a recorded ``0.00`` there still
+    publishes ``actual_cost: null``. A variance computed against it would be a
+    number that can only be true if the actual cost is a known ``0.00`` —
+    published beside a field saying it is unknown. ``cost_variance`` is gated on
+    the SAME predicate ``actual_cost`` is, so the exclusion boundary does not
+    run through one arithmetic expression.
+    """
+    from reorder_queue.models import ReorderRequest
+
+    item = _item("Priced")
+    _link(item, "Acme", unit_cost="2.00", is_primary=True)
+    req = ReorderRequest.objects.create(
+        item=_fresh(item),
+        quantity=5,
+        order_number="PO-COMPED-1",
+        actual_cost=Decimal("0.00"),
+    )
+
+    row = _transparency_row(api, req.id)
+    assert row["estimated_cost"] == 10.0
+    assert row["actual_cost"] is None
+    assert row["cost_variance"] is None
 
 
 def test_the_public_transparency_feed_is_unchanged_for_a_priced_order(api):

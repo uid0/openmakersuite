@@ -133,19 +133,9 @@ from .services.packaging import (
     parse_at_level,
     resolve_base_quantity,
 )
-from .services.pricing import package_price_of, unit_price_of
+from .services.pricing import package_price_of, price_float, unit_price_of
 from .services.problem_auto_resolve import resolve_problems_for_work_order
 from .services.work_order_tools import create_work_order_tools
-
-
-def _price_float(price):
-    """A :class:`~inventory.services.pricing.Price` as a JSON number, or ``None``.
-
-    ``None`` only where the price is genuinely unknown. A recorded ``0.00``
-    comes through as ``0.0``, which is what the supplier charges — the
-    distinction ``float(x) if x else None`` could not make (op-9m2v).
-    """
-    return None if not price.is_known else float(price.amount)
 
 
 class SupplierViewSet(viewsets.ModelViewSet):
@@ -240,8 +230,8 @@ class SupplierViewSet(viewsets.ModelViewSet):
                         # snapshot recording 0.00 is a price this supplier
                         # charged, and a price_change_percentage of exactly 0
                         # is "no change", not "no data" (op-9m2v).
-                        "unit_cost": _price_float(unit_price_of(ph)),
-                        "package_cost": _price_float(package_price_of(ph)),
+                        "unit_cost": price_float(unit_price_of(ph)),
+                        "package_cost": price_float(package_price_of(ph)),
                         "change_type": ph.change_type,
                         "price_change_percentage": (
                             None

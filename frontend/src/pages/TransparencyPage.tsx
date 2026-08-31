@@ -83,6 +83,17 @@ const TransparencyPage: React.FC = () => {
     fetchTransparencyData();
   }, []);
 
+  /**
+   * Is there a figure to show at all?
+   *
+   * `!= null`, never truthiness (op-9m2v). A recorded `0.00` is a KNOWN cost —
+   * the server publishes `estimated_cost: 0.0` for a donated order — and in JSX
+   * a numeric `0` does not merely fail to render the row, it RENDERS: `{0 &&
+   * <div/>}` prints a bare "0" into the card and drops the figure beside it.
+   */
+  const isReported = (amount: number | null | undefined): amount is number =>
+    amount !== null && amount !== undefined;
+
   const formatCurrency = (amount: number | null) => {
     if (amount === null) return 'N/A';
     return new Intl.NumberFormat('en-US', {
@@ -308,7 +319,7 @@ const TransparencyPage: React.FC = () => {
               </div>
 
               <div className="financial-info">
-                {order.estimated_cost && (
+                {isReported(order.estimated_cost) && (
                   <div className="detail-row">
                     <span className="label">Estimated Cost:</span>
                     <span className="value">{formatCurrency(order.estimated_cost)}</span>
@@ -326,7 +337,7 @@ const TransparencyPage: React.FC = () => {
                     <span className="value">{formatCurrency(order.cost_per_unit)}</span>
                   </div>
                 )}
-                {order.cost_variance && (
+                {isReported(order.cost_variance) && (
                   <div className="detail-row">
                     <span className="label">Cost Variance:</span>
                     <span className={`value ${order.cost_variance > 0 ? 'over-budget' : 'under-budget'}`}>

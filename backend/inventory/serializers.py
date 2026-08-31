@@ -1000,8 +1000,16 @@ class InventoryItemDetailSerializer(InventoryItemSerializer):
         return stock_split_for_item(obj)
 
     def get_price_trend_summary(self, obj):
-        """Get price trend summary for the primary supplier."""
-        from inventory.services.pricing import unit_price_of
+        """Get price trend summary for the primary supplier.
+
+        ``trend`` is one of ``insufficient_data`` (fewer than two snapshots),
+        ``no_data`` (a snapshot records no price at all), ``no_baseline`` (both
+        prices known, but the earlier one is ``0.00`` so no percentage exists),
+        ``increasing`` / ``decreasing`` / ``stable``. ``direction`` is present
+        ONLY on ``no_baseline``, where it is the fact the percentage cannot
+        express; everywhere else ``trend`` already carries it.
+        """
+        from inventory.services.pricing import direction_between, unit_price_of
 
         primary_supplier = obj.primary_item_supplier
         if not primary_supplier:
@@ -1018,19 +1026,36 @@ class InventoryItemDetailSerializer(InventoryItemSerializer):
         # ``is_known``, not truthiness: a supplier that dropped to 0.00 has a
         # price and a trend, and ``if latest.unit_cost and previous.unit_cost``
         # reported "no_data" for it (op-9m2v).
-        if unit_price_of(latest).is_known and unit_price_of(previous).is_known:
+        latest_price = unit_price_of(latest)
+        previous_price = unit_price_of(previous)
+        if latest_price.is_known and previous_price.is_known:
             change_percentage = latest.price_change_percentage
             if change_percentage is None:
-                # No percentage CAN be computed — the prior snapshot is 0.00,
-                # so there is no base to divide by (or the two share a
-                # ``recorded_at`` and there is no prior row). That is not the
-                # same claim as "the price did not move", which arrives here as
-                # a real ``Decimal("0")`` and lands on ``stable`` below. Base
-                # answered ``{"trend": "no_change", "change_percentage": 0}``
-                # and presented an undefined number as a confident zero — the
-                # rule this branch enforces everywhere else, and the answer the
-                # purchasing price-trend endpoint already gives (op-9m2v).
-                return {"trend": "no_data", "change_percentage": None}
+                # BOTH prices are known and only the PERCENTAGE is undefined:
+                # the earlier snapshot is 0.00, so there is no baseline to
+                # divide by (or the pair shares a ``recorded_at`` and no prior
+                # row was found). Three different facts, kept apart (op-9m2v):
+                #
+                # * ``no_data`` below means a snapshot records NO PRICE AT ALL.
+                #   Reusing it here would report "we have no price data" about a
+                #   rise from free to $4.00 and throw away the two prices we do
+                #   have.
+                # * ``stable`` means the price did not move, and arrives as a
+                #   real ``Decimal("0")`` percentage.
+                # * ``no_baseline`` is this case, and it is the only trend that
+                #   carries ``direction``: the percentage has no answer but the
+                #   DIRECTION does, and an operator is owed it.
+                #
+                # Base answered ``{"trend": "no_change", "change_percentage":
+                # 0}`` — an undefined number presented as a confident zero.
+                return {
+                    "trend": "no_baseline",
+                    "direction": direction_between(previous_price, latest_price),
+                    "change_percentage": None,
+                    "latest_cost": latest.unit_cost,
+                    "previous_cost": previous.unit_cost,
+                    "last_updated": latest.recorded_at,
+                }
             elif change_percentage > 0:
                 trend = "increasing"
             elif change_percentage < 0:

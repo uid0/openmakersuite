@@ -107,10 +107,14 @@ ALLOWED: dict[str, tuple[int, str]] = {
         "correctly. A snapshot of what was recorded, not a reading of it.",
     ),
     "inventory/serializers.py": (
-        2,
-        "``latest_cost`` / ``previous_cost`` on the price-trend summary: "
-        "verbatim copies of two PriceHistory snapshots, emitted only after "
-        "``unit_price_of(...).is_known`` has gated the pair.",
+        4,
+        "``latest_cost`` / ``previous_cost`` on the price-trend summary, on "
+        "BOTH of its known-price branches: the one that computed a percentage "
+        "and the ``no_baseline`` one that could not. Verbatim copies of two "
+        "PriceHistory snapshots, emitted only after "
+        "``unit_price_of(...).is_known`` has gated the pair — which is why the "
+        "``no_baseline`` payload can keep the two prices it does know instead "
+        "of dropping them.",
     ),
     "inventory/views.py": (
         7,

@@ -62,6 +62,7 @@ INVENTORY_EXPORT_URL = "/api/inventory/reports/inventory/export/"
 PURCHASING_EXPORT_URL = "/api/reorders/reports/purchasing/export/"
 BY_SUPPLIER_URL = "/api/reorders/requests/by_supplier/"
 DASHBOARD_SUMMARY_URL = "/api/dashboard/inventory-summary/"
+TRANSPARENCY_URL = "/api/reorders/analytics/transparency/"
 
 
 def _item(name="Widget", **kwargs):
@@ -1111,27 +1112,6 @@ def test_the_by_supplier_total_counts_a_free_request_as_priced(api):
     assert group["estimated_total_is_partial"] is False
 
 
-def test_a_price_rise_from_free_is_not_reported_as_no_change(api):
-    """BEFORE/AFTER. The serializer mapped an UNDEFINED percentage onto ``0``.
-
-    Screen: the item detail's ``price_trend_summary``. A supplier that stops
-    donating an item leaves the percentage undefined — there is no base to
-    divide by — and the payload said ``{"trend": "no_change",
-    "change_percentage": 0}``: a confident real number for arithmetic that has
-    no answer. The purchasing price-trend endpoint already answers ``null`` for
-    the same pair.
-    """
-    item = _item("Donated")
-    link = _link(item, "Charity", unit_cost="4.00", is_primary=True)
-    _history(link, ["0.00", "4.00"])
-
-    response = api.get(f"/api/inventory/items/{item.id}/")
-    assert response.status_code == 200
-    summary = response.data["price_trend_summary"]
-    assert summary["change_percentage"] is None
-    assert summary["trend"] == "no_data"
-
-
 def test_a_price_that_did_not_move_is_still_reported_as_stable(api):
     """CONTROL. A REAL 0% change is a fact and must keep its number."""
     item = _item("Priced")
@@ -1249,3 +1229,169 @@ def test_the_admin_renders_a_comped_order_line_as_a_real_zero():
 
     admin = PurchaseOrderItemAdmin(PurchaseOrderItem, AdminSite())
     assert admin.estimated_cost_display(line) == "$0.00"
+
+
+# ── Round 3: the public transparency payload, and a label of its own ─────────
+
+
+def _free_transparency_request(actual_cost=None):
+    """A pending request for a DONATED item that the transparency feed shows.
+
+    ``order_number`` is one of the six OR'd conditions the transparency
+    queryset selects on, so setting it is what puts the row on the public feed.
+    """
+    from reorder_queue.models import ReorderRequest
+
+    item = _item("Donated")
+    _link(item, "Charity", unit_cost="0.00", is_primary=True)
+    return ReorderRequest.objects.create(
+        item=_fresh(item),
+        quantity=6,
+        order_number="PO-FREE-1",
+        actual_cost=actual_cost,
+    )
+
+
+def _transparency_row(api, request_id):
+    response = api.get(TRANSPARENCY_URL)
+    assert response.status_code == 200
+    return next(r for r in response.data["orders"] if r["id"] == request_id)
+
+
+def test_the_public_transparency_feed_publishes_a_free_order_as_costing_zero(api):
+    """BEFORE/AFTER on the CLAIM. Payload: the public AllowAny transparency feed.
+
+    ``float(order.estimated_cost) if order.estimated_cost else None`` re-collapsed
+    the real ``Decimal("0.00")`` the derivation now returns, so the community
+    feed published ``estimated_cost: null`` — "we do not know what this cost" —
+    for a request whose cost is a known $0.00.
+    """
+    req = _free_transparency_request()
+
+    assert _transparency_row(api, req.id)["estimated_cost"] == 0.0
+
+
+def test_the_public_transparency_feed_still_publishes_null_for_an_unpriced_order(api):
+    """CONTROL. ``null`` keeps meaning "no price is on file"."""
+    from reorder_queue.models import ReorderRequest
+
+    item = _item("Unpriced")
+    _link(item, "Acme", unit_cost=None, is_primary=True)
+    req = ReorderRequest.objects.create(item=_fresh(item), quantity=6, order_number="PO-UNPRICED-1")
+
+    assert _transparency_row(api, req.id)["estimated_cost"] is None
+
+
+def test_the_public_transparency_feed_computes_a_variance_against_a_free_estimate(api):
+    """BEFORE/AFTER on the CLAIM. Same payload, the ``cost_variance`` column.
+
+    ``if (order.actual_cost and order.estimated_cost)`` refused to subtract from
+    a known ``0.00`` estimate, so a donated item that ended up being invoiced
+    published no variance at all — the one number that says the estimate was
+    wrong.
+    """
+    req = _free_transparency_request(actual_cost=Decimal("12.00"))
+
+    assert _transparency_row(api, req.id)["cost_variance"] == 12.0
+
+
+def test_the_public_transparency_ledger_carries_the_free_estimate_too(api):
+    """BEFORE/AFTER on the CLAIM. The ledger block is a SECOND copy of the read.
+
+    Two spellings of the same collapse in one response body is exactly the
+    "all but one site" shape the gate exists to stop.
+    """
+    req = _free_transparency_request()
+
+    response = api.get(TRANSPARENCY_URL)
+    entry = next(e for e in response.data["ledger"] if e["id"] == req.id)
+    assert entry["estimated_cost"] == 0.0
+
+
+def test_the_public_transparency_feed_is_unchanged_for_a_priced_order(api):
+    """CONTROL. The invariant, on the public payload."""
+    from reorder_queue.models import ReorderRequest
+
+    item = _item("Priced")
+    _link(item, "Acme", unit_cost="2.00", is_primary=True)
+    req = ReorderRequest.objects.create(
+        item=_fresh(item),
+        quantity=5,
+        order_number="PO-PRICED-1",
+        actual_cost=Decimal("12.00"),
+    )
+
+    row = _transparency_row(api, req.id)
+    assert row["estimated_cost"] == 10.0
+    assert row["actual_cost"] == 12.0
+    assert row["cost_variance"] == 2.0
+
+
+def test_a_rise_from_free_is_reported_under_its_own_label(api):
+    """BEFORE/AFTER. Screen: the item detail's ``price_trend_summary``.
+
+    Base said ``{"trend": "no_change", "change_percentage": 0}`` — an undefined
+    percentage as a confident zero. The first fix said ``no_data``, which is the
+    label for "a snapshot records NO PRICE AT ALL" and threw away the two prices
+    that ARE known. ``no_baseline`` is neither: the percentage has no answer, the
+    direction does, and both costs stay on the payload.
+    """
+    item = _item("Donated")
+    link = _link(item, "Charity", unit_cost="4.00", is_primary=True)
+    _history(link, ["0.00", "4.00"])
+
+    response = api.get(f"/api/inventory/items/{item.id}/")
+    assert response.status_code == 200
+    summary = response.data["price_trend_summary"]
+    assert summary["trend"] == "no_baseline"
+    assert summary["direction"] == "increasing"
+    assert summary["change_percentage"] is None
+    assert summary["previous_cost"] == Decimal("0.00")
+    assert summary["latest_cost"] == Decimal("4.00")
+    assert summary["last_updated"] is not None
+
+
+def test_a_snapshot_with_no_price_at_all_keeps_the_no_data_label(api):
+    """CONTROL. The two labels must not collapse back into one.
+
+    ``no_data`` is a genuine absence — there is no price to show and no
+    direction to give — and it is a DIFFERENT fact from ``no_baseline``.
+    """
+    item = _item("Mystery")
+    link = _link(item, "Acme", unit_cost="4.00", is_primary=True)
+    _history(link, ["4.00", None])
+
+    response = api.get(f"/api/inventory/items/{item.id}/")
+    summary = response.data["price_trend_summary"]
+    assert summary["trend"] == "no_data"
+    assert summary["change_percentage"] is None
+    assert "direction" not in summary
+
+
+def test_a_drop_to_free_is_a_measurable_minus_one_hundred_percent(api):
+    """CONTROL. A zero on the LATEST side has a percentage and keeps ``trend``.
+
+    Only a zero BASELINE is undefined, so this must not be swept into
+    ``no_baseline`` along with it.
+    """
+    item = _item("Donated")
+    link = _link(item, "Charity", unit_cost="0.00", is_primary=True)
+    _history(link, ["5.00", "0.00"])
+
+    response = api.get(f"/api/inventory/items/{item.id}/")
+    summary = response.data["price_trend_summary"]
+    assert summary["trend"] == "decreasing"
+    assert summary["change_percentage"] == Decimal("-100.00")
+
+
+def test_two_free_snapshots_have_no_baseline_and_no_direction_either(api):
+    """CONTROL on the direction. 0.00 -> 0.00 has no percentage and no movement."""
+    item = _item("Donated")
+    link = _link(item, "Charity", unit_cost="0.00", is_primary=True)
+    _history(link, ["0.00", "0.00"])
+
+    response = api.get(f"/api/inventory/items/{item.id}/")
+    summary = response.data["price_trend_summary"]
+    assert summary["trend"] == "no_baseline"
+    assert summary["direction"] == "stable"
+    assert summary["change_percentage"] is None

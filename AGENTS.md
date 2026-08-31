@@ -393,8 +393,23 @@ if the field is ever parsed to a number.
 `work_order_purchase_bridge.purchase_line_unit_cost` (actual when recorded, else
 ordered, spelled `is None`). Read it; do not write a second `actual or ordered`.
 
-**Two things the first pass got wrong, both about CONSUMERS.** Recorded so the
-next derivation sweeps for the same shapes:
+`reorder_queue/tests/test_estimated_cost_single_owner.py` is the SECOND gate on
+this branch, and it exists because a hand-counted reader list is a claim that
+goes stale. `ReorderRequest.estimated_cost` — the money face of the derivation,
+`Decimal("0.00")` for a free item and `None` only when unpriced — had its reader
+set enumerated by hand TWICE and it was incomplete BOTH times: four readers were
+named here as complete, and review then found three more on the PUBLIC
+`AllowAny` transparency endpoint. **That gate is now the authority on the reader
+set; do not re-hand-count it.** It walks `backend/` with the AST exactly as the
+price gate does, and its allowlist names, per entry, which of the THREE models
+the read is on — `ReorderRequest.estimated_cost` (nullable, this branch's),
+`PurchaseOrderItem.estimated_cost` (non-nullable, so a falsy guard on it was
+always wrong) or `MaintenanceItem.estimated_cost` (a maintenance budget, a
+different fact). Same two honest limits as the price gate: `backend/`-only, and
+the AST cannot tell the three models apart, which is why the reason must.
+
+**Three things the earlier passes got wrong, all about CONSUMERS.** Recorded so
+the next derivation sweeps for the same shapes:
 
 - **A value becoming nullable has backend readers too.** `total_value` going
   `Decimal("0")` -> `None` was swept across the frontend and ScanTTY but not
@@ -407,19 +422,79 @@ next derivation sweeps for the same shapes:
   `items_without_price` and the server-side one did not; the price-trend
   report's cost columns became nullable and its CSV export still formatted them
   with `:.2f` (a `TypeError`, so a 500); `ReorderRequest.estimated_cost` started
-  returning a real `Decimal("0.00")` and four readers — the outbound reorder
-  webhook and three admin displays — re-collapsed it to "unknown" with the old
-  falsy guard. `requests/by_supplier/` now carries `unpriced_item_count` /
-  `estimated_total_is_partial` like every other order-shaped payload, and the
-  admin dashboard's supplier modal renders them.
+  returning a real `Decimal("0.00")` and its readers re-collapsed it to
+  "unknown" with the old falsy guard. `requests/by_supplier/` now carries
+  `unpriced_item_count` / `estimated_total_is_partial` like every other
+  order-shaped payload, and the admin dashboard's supplier modal renders them.
+- **When a hand sweep misses TWICE, build the gate instead of sweeping a third
+  time.** That is what `test_estimated_cost_single_owner.py` is. A third
+  enumeration would have been the same move that had already failed twice.
+
+**MONEY FIGURES AND PAYLOAD CLAIMS MOVED BY THE REVIEW ROUNDS**, each with the
+screen or payload that shows it. The branch invariant requires this list to be
+complete, and it was twice not:
+
+- Purchasing price-trends **CSV export** (`GET /api/reorders/reports/purchasing/
+  export/?type=price_trends`) — the three cost cells: `TypeError` (an unhandled
+  500) -> an EMPTY cell for an unknown price, `0.00` for a recorded zero.
+  And `price_change_percentage`: `""` -> `"0.00%"` for a price that genuinely
+  did not move, because the falsy guard exported a real 0% change as the same
+  blank an INCOMPUTABLE percentage gets.
+- Inventory stock-value **CSV exports** (`?type=stock_by_category` and
+  `?type=value_by_location`) — gained `items_without_price`; the `total_value`
+  number is deliberately unchanged.
+- Public dashboard tile (`GET /api/dashboard/inventory-summary/`) —
+  `total_value`: a 500 -> base's exact number, plus a new
+  `items_without_price` beside it.
+- Admin dashboard "Requests by Supplier" modal (`GET
+  /api/reorders/requests/by_supplier/`) — gained `unpriced_item_count` /
+  `estimated_total_is_partial`; the total itself is unchanged.
+- Item detail `price_trend_summary` (`GET /api/inventory/items/<id>/`) —
+  `{"trend": "no_change", "change_percentage": 0}` -> `{"trend":
+  "no_baseline", "direction": "increasing", "change_percentage": null,
+  latest_cost, previous_cost, last_updated}` when both prices are known but the
+  earlier one is `0.00`. Base presented an undefined percentage as a confident
+  zero. `no_baseline` is deliberately NOT `no_data`, which means a snapshot
+  records no price at all: three facts, three labels, and `direction` is the
+  one thing two known prices still establish when the percentage cannot.
+- Public transparency feed (`GET /api/reorders/analytics/transparency/`, no
+  auth) — `estimated_cost` on both the `orders` and the `ledger` block:
+  `null` -> `0.0` for a donated item, so the community feed no longer says "we
+  do not know what this cost" about a cost that is known to be nothing. And
+  `cost_variance`: `null` -> the real difference when the estimate is a known
+  `0.00`, which is the one number that says the estimate was wrong.
+- Outbound reorder webhook (Discord/Slack) and three admin `Est. Cost` columns
+  — `null` / `—` -> `$0.00` for a free line.
+- Supplier detail price-trend **records** (`GET /api/inventory/suppliers/<id>/`,
+  `trends[].price_history[].unit_cost`) — `null` -> `0.0` for a recorded zero,
+  which is what the supplier-detail chart plots.
 
 One figure the change list over-claimed, corrected: the supplier detail's
 price-trend **summary** (`average_unit_cost` / `min_unit_cost` /
 `max_unit_cost`) is byte-identical to base, which already spelled that filter
-`if ph.unit_cost is not None`. Only the per-record `unit_cost` / `package_cost`
-inside `trends` moved (`null` -> `0.0` for a recorded zero), which is what the
-supplier-detail chart plots. Both are pinned in `test_price_guards.py`, the
-summary as a CONTROL and the records as the BEFORE/AFTER.
+`if ph.unit_cost is not None`. Nothing moved there. Both are pinned in
+`test_price_guards.py`, the summary as a CONTROL and the records as the
+BEFORE/AFTER.
+
+**Two more deliberate exclusions, on the boundary the gate made visible.** Both
+are the same falsy shape on a value this branch does NOT own, so repairing them
+would move output for a reason that is not "base presented an unknown price as a
+real number":
+
+- The transparency payload's own `actual_cost` and `cost_per_unit` truthiness,
+  and `ReorderRequest.cost_per_unit`. `actual_cost` is a nullable column an
+  operator types in, not a derived price, and this branch did not change it.
+  (`cost_variance` IS fixed, because it reads `estimated_cost` and so is inside
+  the derived set.)
+- `MaintenanceItem.estimated_cost` on the work-order PDF
+  (`inventory/utils/work_order_pdf.py`), where `if item.estimated_cost:` omits
+  the "Est. Cost" line for a task budgeted at a recorded `0.00`. A maintenance
+  budget, not a supplier price. REPORTED, NOT FIXED — allowlisted in the gate
+  with that reason. Its sibling `or Decimal("0.00")` sites in
+  `inventory/views.py`, `inventory/services/work_order_reports.py` and
+  `analytics/services/aggregation.py` are INERT rather than excluded: the
+  fallback IS `0.00`, so a recorded zero and a `NULL` produce the same number
+  either way.
 
 ### The pre-send boundary: when a PO is still the shop's own document
 

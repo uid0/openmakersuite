@@ -3509,13 +3509,13 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     ),
                     # Financial transparency
                     "estimated_cost": (
-                        float(order.estimated_cost) if order.estimated_cost else None
+                        None if order.estimated_cost is None else float(order.estimated_cost)
                     ),
                     "actual_cost": (float(order.actual_cost) if order.actual_cost else None),
                     "cost_per_unit": (float(order.cost_per_unit) if order.cost_per_unit else None),
                     "cost_variance": (
                         float(order.actual_cost - order.estimated_cost)
-                        if (order.actual_cost and order.estimated_cost)
+                        if (order.actual_cost is not None and order.estimated_cost is not None)
                         else None
                     ),
                     # Document links
@@ -3547,7 +3547,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
                         ),
                         "actual_cost": (float(order.actual_cost) if order.actual_cost else None),
                         "estimated_cost": (
-                            float(order.estimated_cost) if order.estimated_cost else None
+                            None if order.estimated_cost is None else float(order.estimated_cost)
                         ),
                         "status": order.status,
                         "order_number": order.order_number,

@@ -222,6 +222,41 @@ def package_price_of(link: Optional[PricedRow]) -> Price:
     return _price_of(link, "package_cost")
 
 
+#: ``latest`` costs MORE than ``previous``.
+PRICE_INCREASING = "increasing"
+
+#: ``latest`` costs LESS than ``previous``.
+PRICE_DECREASING = "decreasing"
+
+#: The two prices are the same number — including two recorded ``0.00``s.
+PRICE_STABLE = "stable"
+
+
+def direction_between(previous: Price, latest: Price) -> Optional[str]:
+    """Which way two KNOWN prices moved, or ``None`` if either is unknown.
+
+    A different question from "by what percentage?", and it still has an answer
+    when that one does not: a rise from a recorded ``0.00`` has no percentage —
+    there is no baseline to divide by — but it is unambiguously an INCREASE,
+    and an operator looking at the item detail is owed that rather than a blank.
+    :meth:`~inventory.serializers.InventoryItemDetailSerializer.get_price_trend_summary`
+    is the caller, and reports it beside ``change_percentage: null``.
+
+    Deliberately NOT used to re-derive the ordinary ``trend``, which is the sign
+    of the ROUNDED percentage: the two agree on every realistic input but not on
+    a change small enough to round to ``0.00``, and merging them would move a
+    label for a reason that is not "base presented an unknown price as a real
+    number".
+    """
+    if previous.amount is None or latest.amount is None:
+        return None
+    if latest.amount > previous.amount:
+        return PRICE_INCREASING
+    if latest.amount < previous.amount:
+        return PRICE_DECREASING
+    return PRICE_STABLE
+
+
 def extended(price: Price, quantity) -> Optional[Decimal]:
     """``price × quantity``, or ``None`` when the price is unknown.
 

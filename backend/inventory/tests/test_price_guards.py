@@ -32,7 +32,13 @@ from django.contrib.auth import get_user_model
 import pytest
 from rest_framework.test import APIClient
 
-from inventory.models import InventoryItem, ItemSupplier, PriceHistory, Supplier
+from inventory.models import (
+    InventoryItem,
+    ItemSupplier,
+    KitComponent,
+    PriceHistory,
+    Supplier,
+)
 from inventory.services.pricing import (
     PRICE_KNOWN,
     PRICE_NO_ORDERABLE_LINK,
@@ -1635,9 +1641,9 @@ def test_clearing_a_kit_cost_on_an_existing_link_does_not_stick(api):
     pinned so the next reader does not believe clearing works.
     """
     item = _item("Cartridge")
-    link = _link(item, "Acme", unit_cost="5.00", is_primary=True)
+    link = _link(item, "Acme", unit_cost="5.00", pack=6, is_primary=True)
     link.refresh_from_db()
-    assert link.package_cost == Decimal("5.00")
+    assert link.package_cost == Decimal("30.00")
 
     ItemSupplier.objects.update_or_create(
         item=item,
@@ -1647,4 +1653,78 @@ def test_clearing_a_kit_cost_on_an_existing_link_does_not_stick(api):
 
     link.refresh_from_db()
     assert link.unit_cost == Decimal("5.00")
+    assert link.quantity_per_package == 6
     assert order_unit_price(item).state == PRICE_KNOWN
+
+
+def test_saving_kit_terms_leaves_an_untouched_pack_size_and_its_price_alone(api):
+    """BEFORE/AFTER. Re-saving a kit's supplier must not re-derive its price.
+
+    ``_apply_supplier_terms`` forced ``quantity_per_package = 1`` into every
+    ``update_or_create``, and ``ItemSupplier.save`` re-derives
+    ``unit_cost = package_cost / quantity_per_package``. So an operator who
+    opened a kit, picked its supplier and saved -- touching no cost field --
+    turned a 6-pack at 5.00 into a 1-pack at 30.00 on the kit list and the
+    item-detail "Supplied by kits" card.
+    """
+    component = _item("Cyan")
+    supplier = Supplier.objects.create(name="Acme")
+    kit = _item("Ink kit", is_kit=True)
+    KitComponent.objects.create(kit=kit, component=component, quantity=1)
+    link = ItemSupplier.objects.create(
+        item=kit,
+        supplier=supplier,
+        supplier_sku="T-6PK",
+        unit_cost=Decimal("5.00"),
+        quantity_per_package=6,
+        is_primary=True,
+    )
+    link.refresh_from_db()
+    assert link.package_cost == Decimal("30.00")
+
+    response = api.patch(
+        f"/api/inventory/kits/{kit.pk}/",
+        {
+            "supplier_terms": {
+                "supplier": supplier.pk,
+                "supplier_sku": "T-6PK",
+            }
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
+    link.refresh_from_db()
+    assert link.quantity_per_package == 6
+    assert link.unit_cost == Decimal("5.00")
+    assert Decimal(str(response.data["unit_cost"])) == Decimal("5.00")
+
+
+def test_a_new_kit_link_still_defaults_to_a_pack_of_one(api):
+    """CONTROL. Dropping the forced default must not change what a CREATE stores."""
+    component = _item("Magenta")
+    supplier = Supplier.objects.create(name="Charity")
+
+    response = api.post(
+        "/api/inventory/kits/",
+        {
+            "name": "Fresh kit",
+            "description": "x",
+            "sku": "KIT-FRESH",
+            "minimum_stock": 0,
+            "reorder_quantity": 1,
+            "components": [{"component": component.pk, "quantity": 1}],
+            "supplier_terms": {
+                "supplier": supplier.pk,
+                "supplier_sku": "T-NEW",
+                "unit_cost": "4.00",
+            },
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201, response.data
+    kit = InventoryItem.objects.get(pk=response.data["id"])
+    link = ItemSupplier.objects.get(item=kit, supplier=supplier)
+    assert link.quantity_per_package == 1
+    assert link.unit_cost == Decimal("4.00")

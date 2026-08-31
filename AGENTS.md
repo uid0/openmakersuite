@@ -684,20 +684,50 @@ complete, and it was twice not:
   does not retype the supplier id sends no terms at all and cannot erase a
   price; the blank box is only ever read when the operator is actively
   entering terms. Pinned as a CONTROL.
-- **Sibling fields in `_apply_supplier_terms`, REPORTED NOT FIXED** — checked
-  because the same function writes them, and named here rather than changed.
-  `package_cost` has the identical shape (`null=True`, so NULL is a real
-  answer) but the kit form never sends it, so nothing fabricates it today.
-  `quantity_per_package` is DIFFERENT and worse: it is
-  `PositiveIntegerField(default=1, MinValueValidator(1))`, so NULL is not a
-  legal value, and `defaults.setdefault("quantity_per_package", 1)` therefore
-  writes a `1` into `update_or_create` whenever the caller omits it — which
-  RESETS a recorded pack size on an edit. That is the pack-size branch's class
-  (`op-c1ke`), not this branch's money class, and fixing it would move a
-  non-money figure outside this branch's invariant. Left for that owner.
+- Kit **purchase terms re-save** (`PATCH /api/inventory/kits/<id>/`, shown on
+  the kit list's Unit cost column and the item-detail "Supplied by kits" card)
+  — `_apply_supplier_terms` forced `quantity_per_package = 1` into every
+  `update_or_create`, and this WAS a money figure, which the previous round
+  recorded wrongly. `ItemSupplier.save` re-derives
+  `unit_cost = package_cost / quantity_per_package` whenever `package_cost is
+  not None`, so the reset carried the price with it. Worked path: a link
+  records `unit_cost 5.00`, `package_cost 30.00`, `quantity_per_package 6`; the
+  operator opens the kit, picks the supplier from the dropdown (required for
+  `supplier_terms` to be sent at all) and saves, touching no cost field ->
+  `defaults` carried `quantity_per_package: 1` -> `save()` recomputed
+  `unit_cost = 30.00 / 1` -> a 6-pack at $5.00 became a 1-pack at **$30.00** on
+  both screens. FIXED, and contained: the `setdefault` line is simply removed.
+  `ItemSupplier.quantity_per_package` is already
+  `PositiveIntegerField(default=1)`, so a CREATE still stores 1 from the model
+  default while an UPDATE now leaves the recorded pack size — and therefore the
+  derived price — alone. Nothing in `inventory.services.pack_size` or its gate
+  is touched; the pack-size derivation itself is untouched and still owned
+  there. The previous round's sentence calling this "a non-money figure" was
+  false and is replaced by this entry.
+- **`package_cost` in `_apply_supplier_terms`, REPORTED NOT FIXED** — the same
+  `null=True` shape as `unit_cost`, so NULL is a real answer for it, but the
+  kit form never sends the key at all, so nothing fabricates it today.
 - Supplier detail price-trend **records** (`GET /api/inventory/suppliers/<id>/`,
   `trends[].price_history[].unit_cost`) — `null` -> `0.0` for a recorded zero,
   which is what the supplier-detail chart plots.
+
+**A reported figure that does NOT move, measured and rejected — the wire-type
+rule cuts BOTH ways.** Review reported that a PO-form freeform line priced at
+`0` passes `canSubmit` and is then silently dropped by
+`.filter((item) => item.description && item.unit_cost)` and three sibling
+readers, calling it operator input silently discarded. It is not, and the
+reasoning inverted the very rule recorded above: `"0"` is a truthy STRING in
+JavaScript — `Boolean("0") === true`, and only `""` is falsy. The form's
+`unit_cost` is component state assigned straight from `e.target.value`, so it
+is always a string; the falsy-at-zero trap needs a NUMBER, which is why it
+bites the property-backed `InventoryItem.unit_cost` and not a text input.
+Measured end to end: with a freeform line at `0`, the submitted `items` carry
+`{description, quantity, unit_cost: 0}`, the Line Total cell reads `$0.00`
+rather than the page's `—`, and the Additional Items subtotal counts it. No
+guard was changed. The COVERAGE gap the report named was real, though — nothing
+asserted the submitted payload — so `PurchaseOrderFormUnpricedLines.test.tsx`
+gained CONTROLs for the freeform and asset halves that pin exactly this, and a
+blank cost box still blocking submit.
 
 One figure the change list over-claimed, corrected: the supplier detail's
 price-trend **summary** (`average_unit_cost` / `min_unit_cost` /

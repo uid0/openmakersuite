@@ -245,3 +245,122 @@ describe('an asset line the vendor is donating', () => {
     );
   });
 });
+
+/**
+ * CONTROLs. A freeform line priced at $0.00 is on the order and stays there.
+ *
+ * These pin behaviour that does NOT move, and they exist because review read
+ * `.filter((item) => item.description && item.unit_cost)` as dropping such a
+ * line. It does not: `unit_cost` here is form state straight off
+ * `e.target.value`, so it is the STRING `"0"`, and `Boolean("0")` is TRUE —
+ * only `""` is falsy. The falsy-at-zero trap this branch closes needs a
+ * NUMBER, which is why it bites `InventoryItem.unit_cost` (a property-backed
+ * `ReadOnlyField`) and not a text input. The coverage gap was real even though
+ * the defect was not: nothing here asserted the submitted payload before.
+ */
+describe('a freeform line the operator prices at zero', () => {
+  const addFreeform = async (description: string, cost: string) => {
+    await renderWith(baseItem);
+    fireEvent.click(screen.getByRole('button', { name: /add item/i }));
+    const row = screen.getByPlaceholderText(/item description/i).closest('tr')!;
+    fireEvent.change(row.querySelector('.input-description') as HTMLInputElement, {
+      target: { value: description },
+    });
+    fireEvent.change(row.querySelector('.col-cost input') as HTMLInputElement, {
+      target: { value: cost },
+    });
+    return row;
+  };
+
+  const submittedItems = async () => {
+    fireEvent.click(screen.getByRole('button', { name: /create purchase order/i }));
+    await waitFor(() => expect(api.purchaseOrderAPI.createOrder).toHaveBeenCalled());
+    return (api.purchaseOrderAPI.createOrder as jest.Mock).mock.calls[0][0].items;
+  };
+
+  test('CONTROL: the $0.00 line reaches the created order', async () => {
+    await addFreeform('Donated bracket', '0');
+
+    const items = await submittedItems();
+    expect(items).toContainEqual(
+      expect.objectContaining({ description: 'Donated bracket', unit_cost: 0 })
+    );
+  });
+
+  test('CONTROL: it prices at $0.00 rather than the dash for unknown', async () => {
+    const row = await addFreeform('Donated bracket', '0');
+
+    expect(row.querySelector('.col-total')!.textContent).toContain('$0.00');
+    expect(row.querySelector('.col-total')!.textContent).not.toContain('—');
+  });
+
+  test('CONTROL: it counts toward the Additional Items subtotal', async () => {
+    await addFreeform('Donated bracket', '0');
+
+    expect(screen.getByText(/Additional Items Subtotal \(1 items\)/)).toBeInTheDocument();
+  });
+
+  test('CONTROL: a blank cost still blocks submit and is never sent', async () => {
+    await addFreeform('Unpriced bracket', '');
+
+    expect(screen.getByRole('button', { name: /create purchase order/i })).toBeDisabled();
+    expect(api.purchaseOrderAPI.createOrder).not.toHaveBeenCalled();
+  });
+
+  test('CONTROL: an ordinary freeform price is unchanged', async () => {
+    const row = await addFreeform('Bracket', '12.50');
+
+    expect(row.querySelector('.col-total')!.textContent).toContain('$12.50');
+    const items = await submittedItems();
+    expect(items).toContainEqual(
+      expect.objectContaining({ description: 'Bracket', unit_cost: 12.5 })
+    );
+  });
+});
+
+/**
+ * CONTROLs on the asset half, for the same reason and with the same result:
+ * a typed `"0"` is a truthy string, so the cell prices it and the error box
+ * stays off. An empty box is the only falsy one, and it is still flagged.
+ */
+describe('an asset line priced at zero renders as priced', () => {
+  const asset = {
+    id: 'asset-2',
+    name: 'Comped Mill',
+    asset_tag: 'A-002',
+    serial_number: 'SN-2',
+    product_url: '',
+  };
+
+  test('CONTROL: its Line Total reads $0.00, not the dash for unknown', async () => {
+    await renderWith(baseItem, { assets: [asset] });
+    const row = screen.getByText('Comped Mill').closest('tr')!;
+    fireEvent.click(row.querySelector('input')!);
+    fireEvent.change(row.querySelector('.col-cost input') as HTMLInputElement, {
+      target: { value: '0' },
+    });
+
+    expect(row.querySelector('.col-total')!.textContent).toContain('$0.00');
+    expect(row.querySelector('.col-total')!.textContent).not.toContain('—');
+  });
+
+  test('CONTROL: a typed 0 is not flagged as an input error', async () => {
+    await renderWith(baseItem, { assets: [asset] });
+    const row = screen.getByText('Comped Mill').closest('tr')!;
+    fireEvent.click(row.querySelector('input')!);
+    const cost = row.querySelector('.col-cost input') as HTMLInputElement;
+    fireEvent.change(cost, { target: { value: '0' } });
+
+    expect(cost.className).not.toContain('input-error');
+  });
+
+  test('CONTROL: an empty asset cost is still flagged', async () => {
+    await renderWith(baseItem, { assets: [asset] });
+    const row = screen.getByText('Comped Mill').closest('tr')!;
+    fireEvent.click(row.querySelector('input')!);
+    const cost = row.querySelector('.col-cost input') as HTMLInputElement;
+    fireEvent.change(cost, { target: { value: '' } });
+
+    expect(cost.className).toContain('input-error');
+  });
+});

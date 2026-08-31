@@ -2165,7 +2165,7 @@ export const kitAPI = {
   getKit: (id: string) => api.get<Kit>(`/inventory/kits/${id}/`),
 
   createKit: (
-    payload: Partial<Kit> & {
+    payload: Omit<Partial<Kit>, 'components'> & {
       components: Array<{ component: string; quantity: number; notes?: string }>;
       supplier_terms?: KitSupplierTerms;
     }
@@ -2173,7 +2173,7 @@ export const kitAPI = {
 
   updateKit: (
     id: string,
-    payload: Partial<Kit> & {
+    payload: Omit<Partial<Kit>, 'components'> & {
       components?: Array<{ component: string; quantity: number; notes?: string }>;
       supplier_terms?: KitSupplierTerms;
     }

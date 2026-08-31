@@ -1252,7 +1252,6 @@ class KitSerializer(InventoryItemSerializer):
             for key in ("supplier_sku", "supplier_url", "unit_cost", "average_lead_time")
             if key in terms
         }
-        defaults.setdefault("quantity_per_package", 1)
         defaults["is_primary"] = True
         ItemSupplier.objects.update_or_create(
             item=instance,

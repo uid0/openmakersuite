@@ -48,10 +48,12 @@ from inventory.services.pricing import (
     explain,
     extended,
     lowest_unit_price,
+    order_package_price,
     order_unit_price,
     package_price_of,
     unit_price_of,
 )
+from inventory.services.suppliers import write_supplier_terms
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
 from reorder_queue.services import line_entry
 
@@ -1631,30 +1633,34 @@ def test_kit_supplier_terms_store_a_typed_zero_as_a_real_price(api):
     assert Decimal(str(response.data["unit_cost"])) == Decimal("0.00")
 
 
-def test_clearing_a_kit_cost_on_an_existing_link_does_not_stick(api):
-    """CONTROL on the LIMIT of the write-path fix, measured rather than assumed.
+def test_clearing_a_kit_cost_on_an_existing_link_now_sticks(api):
+    """BEFORE/AFTER. Clearing a recorded price makes the link unpriced again.
 
-    Sending `null` gives a NEW link a NULL price, but it cannot clear one that
-    already has a price: ``ItemSupplier.save`` back-fills ``package_cost`` from
-    ``unit_cost`` on the first save, and thereafter re-derives ``unit_cost``
-    from that ``package_cost``. Pre-existing model behaviour, not this branch's;
-    pinned so the next reader does not believe clearing works.
+    The previous round recorded this as a LIMIT that could not be fixed without
+    touching the derivation: sending ``None`` set ``unit_cost`` to NULL, and
+    ``save()`` then recomputed it straight back from the stale ``package_cost``
+    it had itself back-filled. Routing the write through
+    ``write_supplier_terms`` closes it — naming one cost clears its twin, so the
+    derivation has nothing stale to restore.
     """
     item = _item("Cartridge")
     link = _link(item, "Acme", unit_cost="5.00", pack=6, is_primary=True)
     link.refresh_from_db()
     assert link.package_cost == Decimal("30.00")
 
-    ItemSupplier.objects.update_or_create(
+    write_supplier_terms(
         item=item,
         supplier_id=link.supplier_id,
-        defaults={"supplier_sku": "A", "unit_cost": None, "is_primary": True},
+        supplier_sku="A",
+        unit_cost=None,
+        is_primary=True,
     )
 
     link.refresh_from_db()
-    assert link.unit_cost == Decimal("5.00")
+    assert link.unit_cost is None
+    assert link.package_cost is None
     assert link.quantity_per_package == 6
-    assert order_unit_price(item).state == PRICE_KNOWN
+    assert order_unit_price(item).state == PRICE_NOT_RECORDED
 
 
 def test_saving_kit_terms_leaves_an_untouched_pack_size_and_its_price_alone(api):
@@ -1728,3 +1734,73 @@ def test_a_new_kit_link_still_defaults_to_a_pack_of_one(api):
     link = ItemSupplier.objects.get(item=kit, supplier=supplier)
     assert link.quantity_per_package == 1
     assert link.unit_cost == Decimal("4.00")
+
+
+def test_a_typed_kit_price_replaces_the_one_already_on_the_link(api):
+    """BEFORE/AFTER. The operator's typed unit cost is what lands.
+
+    A link with a recorded ``package_cost`` used to win against the typed
+    ``unit_cost``: ``save()`` prefers the package price, so it recomputed the OLD
+    price over the new one and the kit list still showed $5.00 after the operator
+    typed 7.00. Operator input silently discarded.
+    """
+    component = _item("Cyan")
+    supplier = Supplier.objects.create(name="Acme")
+    kit = _item("Ink kit", is_kit=True)
+    KitComponent.objects.create(kit=kit, component=component, quantity=1)
+    link = ItemSupplier.objects.create(
+        item=kit,
+        supplier=supplier,
+        supplier_sku="T-1",
+        unit_cost=Decimal("5.00"),
+        quantity_per_package=1,
+        is_primary=True,
+    )
+    link.refresh_from_db()
+    assert link.package_cost == Decimal("5.00")
+
+    response = api.patch(
+        f"/api/inventory/kits/{kit.pk}/",
+        {"supplier_terms": {"supplier": supplier.pk, "supplier_sku": "T-1", "unit_cost": "7.00"}},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
+    link.refresh_from_db()
+    assert link.unit_cost == Decimal("7.00")
+    assert Decimal(str(response.data["unit_cost"])) == Decimal("7.00")
+
+
+def test_a_first_price_on_an_unpriced_kit_link_stores_both_costs(api):
+    """BEFORE/AFTER. The derived package cost is persisted, not dropped.
+
+    ``update_or_create`` restricted ``update_fields`` to the keys it was given,
+    so the ``package_cost`` that ``save()`` derived never reached the database
+    and the scan page reported "no price on file" for a package it could cost.
+    """
+    component = _item("Magenta")
+    supplier = Supplier.objects.create(name="Charity")
+    kit = _item("Blank kit", is_kit=True)
+    KitComponent.objects.create(kit=kit, component=component, quantity=1)
+    link = ItemSupplier.objects.create(
+        item=kit,
+        supplier=supplier,
+        supplier_sku="T-2",
+        unit_cost=None,
+        quantity_per_package=1,
+        is_primary=True,
+    )
+    link.refresh_from_db()
+    assert link.unit_cost is None and link.package_cost is None
+
+    response = api.patch(
+        f"/api/inventory/kits/{kit.pk}/",
+        {"supplier_terms": {"supplier": supplier.pk, "supplier_sku": "T-2", "unit_cost": "4.00"}},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
+    link.refresh_from_db()
+    assert link.unit_cost == Decimal("4.00")
+    assert link.package_cost == Decimal("4.00")
+    assert order_package_price(kit).state == PRICE_KNOWN

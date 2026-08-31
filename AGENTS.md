@@ -669,15 +669,11 @@ complete, and it was twice not:
   whose default `_UnvalidatedField` child has `allow_null = True`, so the
   `None` reaches `_apply_supplier_terms` intact and its `if key in terms`
   comprehension puts it in `defaults` — measured, not assumed.
-  **The fix reaches a NEW link only, and that limit is measured.** Sending
-  `null` for a link that ALREADY has a price does not clear it:
-  `ItemSupplier.save` back-fills `package_cost` from `unit_cost` on the first
-  save, and from then on `if self.package_cost is not None` re-derives
-  `unit_cost` from that `package_cost`, so the `None` is overwritten before it
-  reaches the database. Pre-existing model behaviour, not this branch's, and
-  repairing it would re-derive prices on every link in the system — far outside
-  the invariant. REPORTED, NOT FIXED, and pinned as a CONTROL so the next
-  reader does not assume clearing works.
+  **That limit is now CLOSED** — the round that recorded it as unfixable was
+  wrong about the cost. See the supplier-terms owner below: clearing a recorded
+  price now sticks, because naming one cost clears its twin so the derivation
+  has nothing stale to restore. The CONTROL that pinned the limitation is
+  rewritten as a BEFORE/AFTER that pins the fix.
   NOTE the seeding path, checked on every route in: `applyKit` seeds
   `supplier_sku` and `unit_cost` but NOT `supplierId`, and the payload only
   carries `supplier_terms` when `supplierId && supplierSku`. So an edit that
@@ -707,6 +703,56 @@ complete, and it was twice not:
 - **`package_cost` in `_apply_supplier_terms`, REPORTED NOT FIXED** — the same
   `null=True` shape as `unit_cost`, so NULL is a real answer for it, but the
   kit form never sends the key at all, so nothing fabricates it today.
+- **The kit / item supplier-terms WRITE path now has ONE owner**,
+  `inventory.services.suppliers.write_supplier_terms`, and three separate
+  defects collapse into it. Every caller used to hand-roll
+  `ItemSupplier.objects.update_or_create(defaults=<partial dict>)` against a
+  model whose `save()` DERIVES `unit_cost` and `package_cost` from each other,
+  and a partial write always loses that fight in one of two directions — the
+  stale sibling column overwrites what the operator typed, or a column `save()`
+  just derived is dropped by `update_or_create`'s `update_fields` restriction.
+  The owner takes intent explicitly via the `UNCHANGED` sentinel (the same
+  convention `reorder_queue.services.purchase_orders.confirm_order` uses, so
+  "not supplied" stays distinct from "explicitly cleared"), treats the two costs
+  as ONE fact, saves in full rather than with a restricted `update_fields`, and
+  never defaults `quantity_per_package` on an update. The derivation itself is
+  UNTOUCHED and still lives in `save()`; the owner only stops callers fighting
+  it. Figures that move, each on the kit list's Unit cost column and the
+  item-detail "Supplied by kits" card:
+  - A typed unit cost on a link that already had a package cost: the old price
+    stayed. A link at `unit_cost 5.00 / package_cost 5.00 / pack 1`, operator
+    types `7.00` -> stored **5.00** before, **7.00** now.
+  - A first price on a link created with a blank cost box: the derived package
+    price was dropped. Typing `4.00` stored `unit_cost 4.00 / package_cost
+    NULL` before and stores `4.00 / 4.00` now, so the scan page stops saying
+    "Package cost: — (no price on file)" for a package it can cost.
+  - Clearing a recorded price: `null` was overwritten by the re-derivation and
+    the price stayed. It now stores NULL and the item reads as unpriced.
+  `inventory/tests/test_supplier_terms_single_owner.py` is the build gate, the
+  write-side twin of the price gate. It surfaced four writers no hand sweep had
+  named — all four turned out to write FLAGS rather than costs
+  (`update_lead_times`, `mark_discontinued`, `void_line_item`,
+  `enforce_single_primary`) and are allowlisted with that reason.
+- **WHAT WAS ALREADY BROKEN, verified against base `7c078de` rather than
+  assumed** — the captain asked for this explicitly, so each kit-form defect is
+  labelled:
+  - Blank cost box stored as `Decimal("0")` instead of NULL: **PRE-EXISTING.**
+    Base's `KitDetailPage.handleSave` carries the identical
+    `unitCost === '' ? '0'`. What this branch changed is VISIBILITY — the kit
+    list and the "Supplied by kits" card used to render an em dash, so the
+    fabrication was indistinguishable from "unpriced"; once they rendered
+    `$0.00` it became a confident figure on screen.
+  - `setdefault("quantity_per_package", 1)` resetting a recorded pack size and,
+    through the derivation, the PRICE with it: **PRE-EXISTING.** Base carries
+    that line verbatim.
+  - A typed `unit_cost` inert on a link that already has a `package_cost`:
+    **PRE-EXISTING.** Base carries the same partial `defaults` dict, and the
+    re-derivation in `save()` predates the branch.
+  - The derived `package_cost` dropped by `update_fields` on update:
+    **PRE-EXISTING MECHANISM, NEWLY REACHABLE.** `update_or_create`'s
+    restriction predates the branch, but the state that reaches it — a link with
+    both costs NULL — is created by this branch's own blank-box fix, so the
+    branch is what makes it occur.
 - Supplier detail price-trend **records** (`GET /api/inventory/suppliers/<id>/`,
   `trends[].price_history[].unit_cost`) — `null` -> `0.0` for a recorded zero,
   which is what the supplier-detail chart plots.

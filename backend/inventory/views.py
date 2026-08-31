@@ -1708,22 +1708,22 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
 
     def _create_supplier_relationship(self, item, supplier, data, cost_data, lead_time, quantity):
         """Create or update the ItemSupplier relationship."""
+        from inventory.services.suppliers import write_supplier_terms
+
         package_cost_value, unit_cost_value = cost_data
 
-        ItemSupplier.objects.update_or_create(
+        write_supplier_terms(
             item=item,
             supplier=supplier,
-            defaults={
-                "supplier_sku": data.get("supplier_sku") or item.sku or str(item.id),
-                "supplier_url": data.get("supplier_url", ""),
-                "unit_cost": unit_cost_value,
-                "package_cost": package_cost_value,
-                "average_lead_time": lead_time,
-                "quantity_per_package": quantity,
-                "package_upc": data.get("package_upc", ""),
-                "unit_upc": data.get("unit_upc", ""),
-                "is_primary": True,
-            },
+            supplier_sku=data.get("supplier_sku") or item.sku or str(item.id),
+            supplier_url=data.get("supplier_url", ""),
+            unit_cost=unit_cost_value,
+            package_cost=package_cost_value,
+            average_lead_time=lead_time,
+            quantity_per_package=quantity,
+            package_upc=data.get("package_upc", ""),
+            unit_upc=data.get("unit_upc", ""),
+            is_primary=True,
         )
 
 

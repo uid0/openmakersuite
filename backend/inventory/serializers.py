@@ -1240,6 +1240,8 @@ class KitSerializer(InventoryItemSerializer):
         kit" a single request; the generic ``/item-suppliers/`` endpoint still
         works for editing them afterwards.
         """
+        from inventory.services.suppliers import write_supplier_terms
+
         if not terms:
             return
         supplier_id = terms.get("supplier")
@@ -1247,16 +1249,16 @@ class KitSerializer(InventoryItemSerializer):
             raise serializers.ValidationError(
                 {"supplier_terms": {"supplier": "This field is required."}}
             )
-        defaults = {
+        named = {
             key: terms[key]
             for key in ("supplier_sku", "supplier_url", "unit_cost", "average_lead_time")
             if key in terms
         }
-        defaults["is_primary"] = True
-        ItemSupplier.objects.update_or_create(
+        write_supplier_terms(
             item=instance,
             supplier_id=supplier_id,
-            defaults=defaults,
+            is_primary=True,
+            **named,
         )
 
     def create(self, validated_data):

@@ -368,8 +368,15 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
 
     @admin.display(description="Est. Total")
     def estimated_total_display(self, obj):
-        """Display estimated total with currency formatting."""
-        if obj.estimated_total:
+        """Display estimated total with currency formatting.
+
+        ``is not None``, matching the ``Est. Cost`` columns in this file: the
+        column is ``default=Decimal("0.00")`` with no ``null=True``, so ``None``
+        is never one of its answers and the falsy branch could only ever
+        mislabel a real zero as "we cannot cost this" (op-9m2v). An order whose
+        every line is donated costs a known $0.00.
+        """
+        if obj.estimated_total is not None:
             return f"${obj.estimated_total:,.2f}"
         return "-"
 

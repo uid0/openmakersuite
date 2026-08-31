@@ -1390,6 +1390,60 @@ def test_the_public_transparency_feed_prices_a_free_purchase_order_at_zero(api):
     assert row["actual_total"] is None
 
 
+def _po_with_lines_at(unit_cost, user_name, status=None):
+    """A purchase order whose one line is priced at ``unit_cost``, total rolled."""
+    from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
+
+    item = _item(f"Item-{user_name}")
+    link = _link(item, f"Supplier-{user_name}", unit_cost=unit_cost, is_primary=True)
+    user = User.objects.create_user(username=user_name, password="pw")
+    order = PurchaseOrder.objects.create(
+        supplier=link.supplier,
+        status=status or PurchaseOrder.Status.SENT,
+        created_by=user,
+    )
+    PurchaseOrderItem.objects.create(
+        purchase_order=order,
+        item_supplier=link,
+        quantity_ordered=4,
+        unit_cost_ordered=Decimal(unit_cost).quantize(Decimal("0.0001")),
+        order_in_packages=1,
+    )
+    order.estimated_total = order.calculate_estimated_total()
+    order.save(update_fields=["estimated_total"])
+    return order
+
+
+def _po_admin():
+    from django.contrib.admin.sites import AdminSite
+
+    from reorder_queue.admin import PurchaseOrderAdmin
+    from reorder_queue.models import PurchaseOrder
+
+    return PurchaseOrderAdmin(PurchaseOrder, AdminSite())
+
+
+def test_the_admin_shows_a_free_purchase_order_as_costing_zero():
+    """BEFORE/AFTER on the CLAIM. Screen: the PurchaseOrder changelist's Est. Total.
+
+    The SCREEN twin of the transparency payload's ``estimated_total``, on the
+    same non-nullable-with-default column: ``None`` is never one of its
+    answers, so the falsy guard could only ever render a known $0.00 as the em
+    dash that means "we cannot cost this" everywhere else in that file
+    (op-9m2v).
+    """
+    order = _po_with_lines_at("0.00", "po-admin-free")
+
+    assert _po_admin().estimated_total_display(order) == "$0.00"
+
+
+def test_the_admin_is_unchanged_for_a_priced_purchase_order():
+    """CONTROL. The invariant, on the same column."""
+    order = _po_with_lines_at("2.00", "po-admin-priced")
+
+    assert _po_admin().estimated_total_display(order) == "$8.00"
+
+
 def test_the_public_transparency_feed_is_unchanged_for_a_priced_purchase_order(api):
     """CONTROL. The invariant, on the purchase-order block."""
     from reorder_queue.models import PurchaseOrder, PurchaseOrderItem

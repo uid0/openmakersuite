@@ -486,14 +486,25 @@ complete, and it was twice not:
   `$0.00` for a donated purchase. The cell itself did not change; it moved
   because the feed beneath it did, which is exactly why a consumer sweep has to
   reach every cell and not just the ones whose code changed.
-- Same page, the "Cost Variance" row's TONE — an order that landed exactly on
-  estimate was styled `under-budget` and now reads `$0.00 on budget` in a
-  neutral `on-budget` class. Newly reachable code: the truthiness guard used to
-  drop the row entirely, so `> 0 ? over : under` never had to answer for the
-  zero case. Three states, three labels — the same rule that keeps
-  `no_baseline` apart from `no_data`.
+- Same page, the "Cost Variance" row's TONE and WORDING — all three cases, not
+  only the new one. An order that landed exactly on estimate was styled
+  `under-budget` and now reads `$0.00 on budget` in a neutral `on-budget`
+  class; an overrun read `+$2.00` and now reads `+$2.00 over budget`; a saving
+  read `-$2.00` and now reads `-$2.00 under budget`. The zero case is newly
+  reachable code — the truthiness guard used to drop the row entirely, so
+  `> 0 ? over : under` never had to answer for it — and naming the tone in
+  words rather than colour alone is what makes the third state readable at all.
+  Three states, three labels, the same rule that keeps `no_baseline` apart from
+  `no_data`. All three strings are pinned in `TransparencyUnknownCosts.test.tsx`.
 - Outbound reorder webhook (Discord/Slack) and three admin `Est. Cost` columns
   — `null` / `—` -> `$0.00` for a free line.
+- Admin PurchaseOrder changelist, the **Est. Total** column
+  (`reorder_queue/admin.py`'s `estimated_total_display`) — `—` -> `$0.00` for
+  an order whose every line is donated. The payload twin of this same field was
+  fixed one commit earlier; this is the screen that reads it. Same reasoning:
+  `PurchaseOrder.estimated_total` is non-nullable-with-default, so the em dash
+  — which means "we cannot cost this" everywhere else in that file — could
+  only ever be wrong there.
 - Two admin **Actual Cost** columns — `reorder_queue/admin.py`'s
   `actual_cost_display` on the PurchaseOrderItem inline and on the
   PurchaseOrderItem changelist: `—` -> `$0.00` for a line receipted at
@@ -538,7 +549,9 @@ real number":
   `inventory/views.py`, `inventory/services/work_order_reports.py` and
   `analytics/services/aggregation.py` are INERT rather than excluded: the
   fallback IS `0.00`, so a recorded zero and a `NULL` produce the same number
-  either way.
+  either way. `PurchaseOrder.effective_estimated_total`'s
+  `self.estimated_total or Decimal("0.00")` is inert on the same argument, and
+  doubly so because that column cannot be `NULL` at all.
 
 "A price as JSON" has one owner too: `pricing.price_float`. It was written out
 twice, character-for-character, in `inventory/views.py` and

@@ -513,9 +513,12 @@ describe('ScanPage', () => {
 
   /**
    * The auto-selection at load only considers suppliers with a truthy
-   * `unit_cost`, so an unpriced (or free) link is never PRE-selected — that
-   * site is a recorded exclusion, since it changes which supplier is chosen.
-   * A member selects it by hand, which is the path these tests take.
+   * `unit_cost`. That is SAFE for a FREE link — DRF sends that nullable
+   * DecimalField as the string `"0.00"`, which is truthy, so a free vendor is
+   * kept and `parseFloat("0.00") = 0` sorts it first. Only a genuinely UNPRICED
+   * link (`null`) is skipped, which is right: it cannot be ranked on price.
+   * These tests select by hand because that is the only way to reach an
+   * unpriced link, which is the case under test.
    */
   const selectSupplier = (supplier: Record<string, unknown>) =>
     fireEvent.change(screen.getByLabelText(/^supplier$/i), {

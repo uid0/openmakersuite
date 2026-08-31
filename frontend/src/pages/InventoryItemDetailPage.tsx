@@ -1198,9 +1198,13 @@ const InventoryItemDetailPage: React.FC = () => {
                               {kit.quantity_in_kit} per kit
                             </Text>
                           )}
-                          {kit.unit_cost && (
+                          {kit.unit_cost === null ? (
+                            <Text size="sm" c="dimmed">
+                              no price on file
+                            </Text>
+                          ) : (
                             <Text size="sm" fw={600}>
-                              ${kit.unit_cost}
+                              ${kit.unit_cost.toFixed(2)}
                             </Text>
                           )}
                         </Group>

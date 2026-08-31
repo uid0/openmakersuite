@@ -499,8 +499,9 @@ complete, and it was twice not:
 - Outbound reorder webhook (Discord/Slack) and three admin `Est. Cost` columns
   — `null` / `—` -> `$0.00` for a free line.
 - Member-facing scan / reorder-request screen (`/scan/<item>`) — the "Package
-  cost", "Unit cost", "estimated cost" help text and the Order Summary's
-  "Estimated Cost" row: `$0.00` (and a bare `$` on the two detail cells) ->
+  cost" and "Unit cost" detail cells, the supplier DROPDOWN option's
+  `.../unit` label, the "estimated cost" help text and the Order Summary's
+  "Estimated Cost" row: `$0.00` (and a bare `$` on the three label sites) ->
   `— (no price on file)` where the selected supplier link records no cost.
   `parseFloat(supplier.package_cost || '0')` was the last frontend site turning
   an unknown price into a confident zero. A recorded `0.00` still reads
@@ -508,6 +509,27 @@ complete, and it was twice not:
   the sibling branch, so it was reporting how many units honestly and what they
   cost dishonestly; the two now match. An unpriced request is still SUBMITTABLE
   — unlike an unsized one — with a note naming what to add.
+  NOTE the boundary, measured rather than assumed: only `package_cost` is
+  collapsed here, because only it is fed through `parseFloat(x || '0')` into
+  arithmetic. The `unit_cost` truthiness on this screen — the auto-selection
+  filter and the `|| '999'` sort key — is SAFE for the same reason
+  `PurchaseOrderPage.tsx`'s is, recorded above: DRF serialises that nullable
+  DecimalField as a STRING, so a free link arrives as `"0.00"`, survives the
+  filter, sorts first via `parseFloat("0.00") = 0` and IS preselected. Only a
+  genuine `null` is dropped or sorted last, which is the behaviour we want.
+- Item detail, the "Supplied by kits" card (`GET /api/inventory/items/<id>/
+  kits/`) — a kit whose primary supplier charges nothing: the price was OMITTED
+  entirely (and, because `{0 && <Text/>}` evaluates to `0`, a stray "0" was
+  printed into the row) -> `$0.00`, with an unpriced kit now saying so instead
+  of looking identical. `KitSummarySerializer.get_unit_cost` is a
+  `SerializerMethodField` returning a `Decimal`, which DRF's `JSONEncoder`
+  renders as a JSON NUMBER — so unlike every string-valued price beside it on
+  that page, truthiness here IS falsy at zero. The wire format is UNCHANGED
+  (base returned a `Decimal` from the same method field): what was wrong was
+  `frontend/src/types/index.ts` declaring it `string | null`, which is what
+  made the guard read as safe. The type is corrected to `number | null` rather
+  than the serializer being switched to a string — the format this branch never
+  moved stays put, so no new cross-project contract change needs verifying.
 - PO create form, the asset lines — an asset a vendor is DONATING can now go on
   an order. `canSubmit` required `parseFloat(a.unit_cost) > 0`, so a typed `0`
   left the button disabled with nothing saying why, while the freeform half of
@@ -557,18 +579,6 @@ real number":
   which is DERIVED from `unit_cost_actual` and IS inside the branch (the
   `receiving.py` twin was the real defect), and whose two admin columns are
   named in the moved-figures list above.
-- `ScanPage`'s auto-selection of a default supplier at load,
-  `supplierList.filter(s => s.is_active && s.unit_cost)`. This is the same
-  falsy-zero shape — a vendor that charges NOTHING, the cheapest price there
-  is, can never be the preselected "most cost-effective supplier" — but
-  repairing it changes WHICH supplier a member sees chosen for them, which is
-  the captain-reserved class `score_candidate` is reserved under, and it moves
-  a figure for a reason that is not "base presented an unknown price as a real
-  number". REPORTED, NOT FIXED, and named here so it is not mistaken for an
-  oversight. What the same screen DOES now do honestly is render the price
-  once a supplier is selected, by hand or otherwise — see the moved-figures
-  list above. The `|| '999'` sort key beside it is the same shape and the same
-  reservation.
 - `MaintenanceItem.estimated_cost` on the work-order PDF
   (`inventory/utils/work_order_pdf.py`), where `if item.estimated_cost:` omits
   the "Est. Cost" line for a task budgeted at a recorded `0.00`. A maintenance

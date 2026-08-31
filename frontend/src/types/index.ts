@@ -2508,7 +2508,16 @@ export interface KitSummary {
   quantity_in_kit: number | null;
   supplier_name: string | null;
   supplier_sku: string | null;
-  unit_cost: string | null;
+  /**
+   * A NUMBER, unlike every other price in this file (op-9m2v).
+   *
+   * `KitSummarySerializer.get_unit_cost` is a `SerializerMethodField` returning
+   * a `Decimal`, which DRF's `JSONEncoder` renders as a JSON number rather than
+   * the decimal string a plain `ModelSerializer` field would send. Declaring it
+   * `string | null` is what made `{kit.unit_cost && ...}` read as safe here
+   * while being genuinely safe on the string-valued twins.
+   */
+  unit_cost: number | null;
   component_count: number;
 }
 

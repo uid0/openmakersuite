@@ -553,8 +553,11 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     )
     active_reorder_request = serializers.SerializerMethodField()
 
-    # Case-based reordering fields
-    current_cases = serializers.FloatField(read_only=True)
+    # Case-based reordering fields. ``current_cases`` is NULLABLE (op-2rsp):
+    # null means the pack size is unknown, so the count cannot be computed —
+    # deliberately not a number, because the old fallback reported raw base
+    # units as a case count. ScanTTY reads this field.
+    current_cases = serializers.FloatField(read_only=True, allow_null=True)
 
     # Hazmat writable fields. These moved off InventoryItem onto the 1:1
     # InventorySafetyProfile (#885), so they are declared explicitly here (they

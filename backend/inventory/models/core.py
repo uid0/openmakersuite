@@ -557,45 +557,52 @@ class InventoryItem(OwnableModel):
             )
 
     @cached_property
-    def _case_pack_size(self) -> Optional[int]:
-        """Units per package for case counting, or ``None`` if nothing says.
+    def case_pack_size(self) -> Optional[int]:
+        """Units per package for case counting, or ``None`` when nothing says.
+
+        THE one predicate for "can this item's stock be expressed in cases at
+        all". :attr:`current_cases` divides by it and
+        ``bridge_case_reorder_to_packaging`` refuses to migrate without it, so
+        the command's refusal and the item's own inability to report a case
+        count cannot contradict each other.
+
+        Reads the orderability-filtered :attr:`primary_item_supplier`, agreeing
+        with the other three readers of "how many units are in a box"
+        (:attr:`quantity_per_package`, ``item_metrics``'s ``case_size``, and
+        that command). One named helper shared by all four — the way "which
+        supplier" got one — is known, deliberately deferred, and filed as its
+        own work; this only ends the disagreement.
 
         Memoised, so the readers that chain — ``reorder_display`` asks for
         ``current_cases`` and then ``needs_reorder``, which asks again — cost
-        one query per instance rather than one per read, the protection
-        ``current_cases`` used to inherit from ``primary_item_supplier`` being
-        a ``cached_property``. Where the pack size should be READ FROM is a
-        separate question from how often it is read, so this cache holds
-        whichever answer :attr:`current_cases` documents.
+        one query per instance rather than one per read.
         """
-        for link in self.item_suppliers.all():
-            if link.quantity_per_package and link.quantity_per_package > 0:
-                return link.quantity_per_package
-        return None
+        link = self.primary_item_supplier
+        if link is None or not link.quantity_per_package or link.quantity_per_package <= 0:
+            return None
+        return link.quantity_per_package
 
     @property
-    def current_cases(self) -> float:
-        """Current number of cases/packages in stock.
+    def current_cases(self) -> Optional[float]:
+        """Cases/packages in stock, ``None`` when the pack size is unknown.
 
-        Reads ``quantity_per_package`` from ANY supplier link — orderable or
-        not — because this asks how many units are in a box already sitting on
-        the shelf, which has nothing to do with who we would buy the next one
-        from. It deliberately does NOT go through
-        :attr:`primary_item_supplier` / the ``supplier_selection`` derivation
-        (op-2rsp): that helper answers "which supplier", and routing this
-        through it made a case-based item STOP being flagged low the moment its
-        last supplier was discontinued — ``None`` there does not degrade to a
-        null here, it silently divides by 1 and inverts ``needs_reorder``.
+        ``0`` for an item that is not case-based — a different, correct answer.
 
-        The pack size comes from :attr:`_case_pack_size`; the 1-unit fallback
-        is now reached only by an item with no usable pack size on any link.
+        ``None`` means UNCOMPUTABLE, and is never a number. The previous
+        fallback returned ``current_stock`` raw, silently reinterpreting base
+        units as a case count: "10 cases on hand" for 10 loose units, printed
+        on a physical kanban card. That was always wrong, and the orderability
+        filter only made it reachable far more often. An uncomputable count is
+        reported as unknown rather than resolved into a confident one, and
+        :attr:`needs_reorder` flags the item instead of quietly reading it as
+        well stocked.
         """
         if not self.use_case_based_reorder:
             return 0
 
-        pack_size = self._case_pack_size
+        pack_size = self.case_pack_size
         if pack_size is None:
-            return self.current_stock
+            return None
         return self.current_stock / pack_size
 
     @property
@@ -644,8 +651,13 @@ class InventoryItem(OwnableModel):
             # Counted in whole packs: minimum_stock is the threshold in those packs.
             return count_at_level(self) <= self.minimum_stock
         if self.use_case_based_reorder:
-            # For case-based reordering, calculate current cases and compare to minimum cases
+            # An uncomputable case count is NOT "fine". Returning False here
+            # because the pack size is unknown would drop the item whose last
+            # supplier just died off every low-stock surface — the one that
+            # most needs to stay on them (op-2rsp).
             current_cases = self.current_cases
+            if current_cases is None:
+                return True
             return current_cases <= self.minimum_cases
         else:
             # Traditional individual unit reordering

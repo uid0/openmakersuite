@@ -28,10 +28,13 @@ This module turns that usage history into a demand forecast:
   would actually be bought through — observed performance from
   :class:`reorder_queue.models.LeadTimeLog` for THAT supplier, falling back to
   THAT supplier's estimated ``average_lead_time`` — and ``safety_stock`` reuses
-  the item's existing ``minimum_stock`` buffer. An item with NO supplier it can
-  be ordered from has no horizon to compute, so it is flagged
-  ``needs_reorder`` outright rather than given the zero-day one that an unknown
-  lead time would otherwise imply; ``no_orderable_supplier`` says so on the row.
+  the item's existing ``minimum_stock`` buffer. An unknown lead time yields
+  ``reorder_point: null``, never a point computed at a zero-day wait. An item
+  whose every supplier link is dead is flagged ``needs_reorder`` outright,
+  because it has no horizon at all and is the hardest thing to buy;
+  ``no_orderable_supplier`` says so on the row so the flag is actionable. An
+  item that simply never had a supplier recorded is NOT flagged — that is a
+  data gap, not an unbuyable item.
 
 The output feeds the inventory + purchasing overview dashboards.
 """
@@ -47,7 +50,6 @@ from django.utils import timezone
 
 from inventory.models import ComponentUsageEvent, InventoryItem, SerializedComponent
 from inventory.services.supplier_selection import (
-    NO_SUPPLIERS,
     NONE_ORDERABLE,
     primary_suppliers_for,
     select_suppliers_for,
@@ -283,25 +285,33 @@ def build_component_forecast(
             days_until_stockout = None
             projected_stockout_date = None
 
-        lead_time_days = lead_time_by_item.get(item.id)
         safety_stock = item.minimum_stock or 0
-        lead_component = avg_daily_use * (lead_time_days or 0)
-        reorder_point = int(math.ceil(lead_component + safety_stock))
+        lead_time_days = lead_time_by_item.get(item.id)
+        # An unknown lead time yields no reorder point at all. ``or 0`` here
+        # read "we cannot tell you how long it takes" as a confident zero-day
+        # wait — the most optimistic assumption available — and printed the
+        # resulting number beside a flag it contradicted.
+        if lead_time_days is None:
+            reorder_point = None
+        else:
+            reorder_point = int(math.ceil(avg_daily_use * lead_time_days + safety_stock))
 
-        # An item nobody can order needs attention UNCONDITIONALLY. Its lead
-        # time is honestly ``None``, and ``or 0`` above would otherwise read
-        # that as a zero-day wait — the most optimistic assumption available —
-        # giving the item that is hardest to buy the SHORTEST horizon and
-        # dropping it off the low-stock report as well stocked. The condition
-        # comes from the shared derivation, not from the null lead time: "we
-        # cannot tell you how long it takes" and "you cannot buy this at all"
-        # are different facts (op-2rsp, RULE 4).
+        # An item nobody can order needs attention UNCONDITIONALLY: it has no
+        # horizon to be measured against, and it is the hardest thing in the
+        # building to buy. Only NONE_ORDERABLE — every link dead — counts.
+        # NO_SUPPLIERS is a data-completeness gap, not an unbuyable item;
+        # flagging that whole population permanently regardless of stock would
+        # flood the low-stock surface with false alarms, and a surface people
+        # learn to ignore suppresses alerts as surely as a missing one. Those
+        # are different facts and RULE 4 exists to keep them apart (op-2rsp).
         choice = choice_by_item.get(item.id)
-        no_orderable_supplier = choice is not None and choice.reason in (
-            NO_SUPPLIERS,
-            NONE_ORDERABLE,
-        )
-        needs_reorder = no_orderable_supplier or available <= reorder_point
+        no_orderable_supplier = choice is not None and choice.reason == NONE_ORDERABLE
+        if no_orderable_supplier:
+            needs_reorder = True
+        elif reorder_point is None:
+            needs_reorder = False
+        else:
+            needs_reorder = available <= reorder_point
 
         if low_stock_only and not needs_reorder:
             continue

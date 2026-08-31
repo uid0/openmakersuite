@@ -159,22 +159,50 @@ call site's readability. It has no rule of its own.
 Aggregates that value stock rather than choose a vendor (`lowest_unit_cost`,
 `total_value`, the report averages) deliberately still read every link.
 
-`InventoryItem.current_cases` is likewise EXCLUDED from this supplier
-derivation. Deriving from the READERS OF A SYMBOL is not the same as deriving
-from the QUESTION BEING ASKED: it reads the helper but asks a different
-question — how many units are in a box on the shelf — which has nothing to do
-with who we buy from. Routing it through the orderability rule cost a low-stock
-alert, because a `None` supplier there does not degrade to a null, it divides by
-1 and inverts `needs_reorder` on exactly the item whose last supplier just died.
-(Which links it should read its pack size from is a separate question, still
-under review — but not this rule's to answer.)
+`InventoryItem.current_cases` is EXCLUDED from this supplier derivation.
+Deriving from the READERS OF A SYMBOL is not the same as deriving from the
+QUESTION BEING ASKED: it reads the helper but asks a different question — how
+many units are in a box on the shelf — which has nothing to do with who we buy
+from. That distinction is the point; where it happens to read from is not.
 
-Watch for that shape generally: an honest `None` collapsed by downstream
-arithmetic or a fallback into a confident, OPTIMISTIC answer. The forecast's
-`reorder_point` had the same bug via `lead_time_days or 0`; it now flags an item
-with no orderable supplier outright instead of computing a zero-day horizon for
-it. When you make a value nullable here, follow it into the arithmetic that
-consumes it — asserting the honest null and stopping there is how both survived.
+Where it reads from is now DECIDED: `InventoryItem.case_pack_size` wraps the
+orderability-filtered `primary_item_supplier`, agreeing with the other three
+readers of "how many units are in a box" — `quantity_per_package`,
+`item_metrics`'s `case_size`, and `bridge_case_reorder_to_packaging`, whose
+skip predicate is now that same helper so its refusal and the item's own
+inability to report a count cannot contradict each other. **Deferred and filed:
+one named derivation for pack size shared by all four readers, the way "which
+supplier" got one.** Ending a contradiction was the right size for that round;
+building a second derivation inside it was not. Do that work rather than
+rediscovering the split.
+
+### The alert-suppression class: an honest `None` must not become a confident zero
+
+A value made honestly `None` gets collapsed by downstream arithmetic or a
+fallback into a confident, OPTIMISTIC answer — which inverts a boolean and
+suppresses an alert on exactly the item that most needs one. THREE instances,
+all on the op-2rsp branch, all made reachable by its own orderability filter:
+
+1. `current_cases` — a `None` supplier fell through to "1 unit per package", so
+   raw base units read as a case count and a case-based item stopped being
+   flagged low.
+2. `component_forecast`'s `reorder_point` — `lead_time_days or 0` computed a
+   horizon at a zero-day wait.
+3. `demand_forecast_engine.forecast_item_by_interval` — the same collapse
+   emptied the demand-forecast report and the nightly reorder digest.
+
+One remedy at all three: an unknown value is REPORTED as unknown (`None`, not a
+number) AND the item is flagged, never silently resolved into a confident
+optimistic number. Flag on `NONE_ORDERABLE` only — an item that never had a
+supplier recorded is a data gap, not an unbuyable item, and flagging that whole
+population floods the surface until people ignore it.
+
+Each instance was found late, and by the same mistake each time: COUNTING WHAT
+HAD BEEN SEEN INSTEAD OF DERIVING THE SET OF CONSUMERS. When you make a value
+nullable, derive its consumers and follow the null into the arithmetic that
+consumes it — asserting the honest null and stopping there is how all three
+survived. The same root shows up in the scoring's falsy guards, where a missing
+or zero value reads as "absent" or "bad" rather than "unknown".
 
 ### The pre-send boundary: when a PO is still the shop's own document
 

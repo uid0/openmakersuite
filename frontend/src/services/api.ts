@@ -1012,8 +1012,16 @@ export interface SerializedForecastRow {
   projected_stockout_date: string | null;
   lead_time_days: number | null;
   safety_stock: number;
-  reorder_point: number;
+  // Null when the lead time is unknown: there is no horizon to compute one
+  // from, and a point computed at a zero-day wait would be the most optimistic
+  // possible claim rather than a measurement.
+  reorder_point: number | null;
   needs_reorder: boolean;
+  // Why this row is flagged: every supplier link is inactive or discontinued,
+  // so the item cannot be bought at all regardless of how much is on the
+  // shelf. The remedy is a supplier, not a purchase order. An item that simply
+  // never had a supplier recorded is NOT flagged — that is a data gap.
+  no_orderable_supplier: boolean;
 }
 
 // How a demand forecast was produced. `restock_interval` means the item had

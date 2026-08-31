@@ -90,7 +90,7 @@ class Command(BaseCommand):
                     self.stdout.write(f"  skip ({reason}): {item.name}")
                     continue
 
-                case_size = item.primary_item_supplier.quantity_per_package
+                case_size = item.case_pack_size
                 before = item.needs_reorder
                 # What the trigger will say once bridged, computed without
                 # writing: WHOLE cases against minimum_cases, which is the
@@ -130,13 +130,18 @@ class Command(BaseCommand):
             self.stdout.write("Dry run — nothing written. Re-run with --apply to commit.")
 
     def _skip_reason(self, item: InventoryItem) -> str | None:
-        """Why ``item`` cannot be bridged, or ``None`` when it can."""
+        """Why ``item`` cannot be bridged, or ``None`` when it can.
+
+        The case-size half reads ``InventoryItem.case_pack_size`` — the SAME
+        predicate ``current_cases`` divides by — so this command's refusal to
+        migrate an item and that item's own inability to report a case count
+        can never contradict each other (op-2rsp).
+        """
         if item.packaging_levels.all():
             return "already has packaging levels"
-        link = item.primary_item_supplier
-        if link is None:
+        if item.case_pack_size is None:
             return "no supplier to take a case size from"
-        if not link.quantity_per_package or link.quantity_per_package <= 1:
+        if item.case_pack_size <= 1:
             return "supplier quantity_per_package is not more than 1"
         return None
 

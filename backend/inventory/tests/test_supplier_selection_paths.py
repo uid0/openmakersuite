@@ -540,29 +540,89 @@ def _case_based_item_with_a_dead_supplier():
     return InventoryItem.objects.get(pk=item.pk)
 
 
-def test_a_case_based_item_stays_flagged_low_when_its_last_supplier_dies():
-    """0.2 of a case on hand, reorder at 1 — still low, however dead the vendor is.
+def _case_based_item_with_a_live_supplier():
+    """The unaffected control: same numbers, a supplier you can still buy from."""
+    item = _item(
+        "Thinner",
+        current_stock=10,
+        minimum_stock=10,
+        use_case_based_reorder=True,
+        minimum_cases=1,
+        reorder_cases=2,
+    )
+    ItemSupplier.objects.create(
+        item=item,
+        supplier=Supplier.objects.create(
+            name="StillHere", supplier_type=Supplier.SupplierType.LOCAL
+        ),
+        supplier_sku="StillHere-sku",
+        unit_cost=Decimal("1.00"),
+        quantity_per_package=50,
+        average_lead_time=7,
+    )
+    return InventoryItem.objects.get(pk=item.pk)
 
-    While ``current_cases`` read the orderability-filtered helper this returned
-    the raw 10 and ``10 <= 1`` was False, silently suppressing the alert.
-    """
-    item = _case_based_item_with_a_dead_supplier()
+
+def test_a_case_based_item_with_a_live_supplier_is_completely_unaffected():
+    """A real count, a normal flag, a normal display — no unknown anywhere."""
+    from inventory.services.packaging import reorder_display
+
+    item = _case_based_item_with_a_live_supplier()
+    display = reorder_display(item)
 
     assert item.current_cases == pytest.approx(0.2)
     assert item.needs_reorder is True
+    assert display["current"] == pytest.approx(0.2)
+    assert "unknown" not in display["text"]
 
 
-def test_the_kanban_card_counts_a_dead_vendors_cases_not_loose_units():
-    """ "10 cases on hand" for 10 loose units is a wrong number on a printed card."""
+def test_a_case_based_item_stays_flagged_low_when_its_last_supplier_dies():
+    """Uncomputable is not "fine" — the alert stays up.
+
+    This is the alert that was silently suppressed: ``current_cases`` returned
+    the raw 10, ``10 <= 1`` was False, and the item whose last supplier just
+    died dropped off every low-stock surface. The count is now reported as
+    UNKNOWN rather than fabricated, and unknown flags rather than clears.
+    """
+    item = _case_based_item_with_a_dead_supplier()
+
+    assert item.current_cases is None
+    assert item.needs_reorder is True
+
+
+def test_the_kanban_card_says_unknown_rather_than_counting_loose_units_as_cases():
+    """ "10 cases on hand" for 10 loose units is a wrong number on a printed card.
+
+    The card gets stuck on a shelf and outlives the screen it came from, so a
+    fabricated count is worse there than an honest "we cannot tell you".
+    """
     from inventory.services.packaging import reorder_display
 
     item = _case_based_item_with_a_dead_supplier()
     display = reorder_display(item)
 
     assert display["unit"] == "case"
-    assert display["current"] == pytest.approx(0.2)
+    assert display["current"] is None
     assert display["needs_reorder"] is True
     assert "10 cases on hand" not in display["text"]
+    assert "unknown" in display["text"]
+
+
+def test_the_bridge_command_refuses_exactly_when_the_case_count_is_uncomputable():
+    """One predicate, so a refusal to migrate and an unknown count cannot drift.
+
+    Asserted together on purpose: these were two separate reads of "how many
+    units are in a box", and they disagreed.
+    """
+    from inventory.management.commands.bridge_case_reorder_to_packaging import Command
+
+    dead = _case_based_item_with_a_dead_supplier()
+    assert dead.current_cases is None
+    assert Command()._skip_reason(dead) == "no supplier to take a case size from"
+
+    live = _case_based_item_with_a_live_supplier()
+    assert live.current_cases == pytest.approx(0.2)
+    assert Command()._skip_reason(live) is None
 
 
 def test_needs_reorder_and_the_low_stock_query_agree_for_that_shape():
@@ -607,9 +667,33 @@ def test_an_item_nobody_can_order_is_flagged_however_much_stock_it_has():
     assert row["lead_time_days"] is None
     assert row["needs_reorder"] is True
     assert row["no_orderable_supplier"] is True
+    # And no reorder point beside the flag to contradict it: "40 available /
+    # reorder point 10 / Reorder" is three statements that cannot all be true.
+    assert row["reorder_point"] is None
 
     low_stock = _forecast_row(item, window_days=1, low_stock_only=True)
     assert low_stock["item_id"] == str(item.id)
+
+
+def test_an_item_that_never_had_a_supplier_is_not_flagged_when_stock_is_healthy():
+    """A data gap is not an unbuyable item, and RULE 4 keeps them apart.
+
+    Flagging every item nobody ever recorded a supplier for — permanently,
+    regardless of stock — would bury the real alerts under a population that is
+    not short of anything. A surface people learn to ignore suppresses alerts
+    as surely as a missing one.
+    """
+    item = _serialized_item("Ferrite")
+    item.minimum_stock = 10
+    item.save(update_fields=["minimum_stock"])
+    _stock_and_daily_use(item, in_stock=100, consumed_today=2)
+
+    row = _forecast_row(item, window_days=1)
+
+    assert row["lead_time_days"] is None
+    assert row["reorder_point"] is None
+    assert row["no_orderable_supplier"] is False
+    assert row["needs_reorder"] is False
 
 
 def test_a_live_supplier_still_drives_an_ordinary_horizon():

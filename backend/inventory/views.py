@@ -4413,10 +4413,17 @@ class InventoryReportViewSet(viewsets.ViewSet):
         inventory + purchasing overview dashboards can surface what is running
         low and what to reorder.
 
+        ``reorder_point`` is ``null`` when the lead time is unknown — never a
+        point computed at a zero-day wait — and ``no_orderable_supplier`` marks
+        a row flagged because every supplier link is dead rather than because
+        stock is low, so the caller can say the remedy is a supplier and not a
+        purchase order (op-2rsp).
+
         Query params:
             ``window_days`` — trailing window for the depletion rate (default
-            90). ``low_stock_only`` — when truthy, only items at/below their
-            reorder point are returned.
+            90). ``low_stock_only`` — when truthy, only rows flagged
+            ``needs_reorder`` are returned: stock at or below the reorder
+            point, OR no supplier the item can be ordered from at all.
         """
         from inventory.services.component_forecast import (
             DEFAULT_WINDOW_DAYS,

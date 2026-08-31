@@ -40,6 +40,7 @@ const buildRow = (overrides: Partial<SerializedForecastRow> = {}): SerializedFor
   safety_stock: 2,
   reorder_point: 3,
   needs_reorder: true,
+  no_orderable_supplier: false,
   ...overrides,
 });
 
@@ -131,6 +132,42 @@ describe('SerializedForecastPanel', () => {
     expect(within(row).getByText('9')).toBeInTheDocument();
     // A legend spells out that reorder follows available, not on-hand.
     expect(screen.getByTestId('serialized-forecast-legend')).toBeInTheDocument();
+  });
+
+  it('says "No supplier" with the remedy, not a Reorder badge, when nothing is orderable', async () => {
+    // A refusal has to be actionable where the OPERATOR sees it. This row is
+    // flagged despite healthy stock, so an orange "Reorder" beside "40
+    // available" would contradict the numbers next to it and name no remedy.
+    mockReports.getSerializedForecast.mockResolvedValue({
+      data: [
+        buildRow({
+          available: 40,
+          needs_reorder: true,
+          no_orderable_supplier: true,
+          lead_time_days: null,
+          reorder_point: null,
+        }),
+      ],
+    } as never);
+    renderPanel();
+
+    const row = await screen.findByTestId('serialized-forecast-row-item-1');
+    expect(within(row).getByText('No supplier')).toBeInTheDocument();
+    expect(within(row).queryByText('Reorder')).not.toBeInTheDocument();
+    expect(within(row).getByText(/add or reactivate a supplier link/i)).toBeInTheDocument();
+    // And no fabricated reorder point beside the flag to contradict it.
+    expect(within(row).queryByText('0')).not.toBeInTheDocument();
+  });
+
+  it('still shows Reorder for an ordinary low-stock row', async () => {
+    mockReports.getSerializedForecast.mockResolvedValue({
+      data: [buildRow({ needs_reorder: true, no_orderable_supplier: false })],
+    } as never);
+    renderPanel();
+
+    const row = await screen.findByTestId('serialized-forecast-row-item-1');
+    expect(within(row).getByText('Reorder')).toBeInTheDocument();
+    expect(within(row).queryByText('No supplier')).not.toBeInTheDocument();
   });
 
   it('invokes onSelectItem when a row is clicked', async () => {

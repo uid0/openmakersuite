@@ -151,6 +151,7 @@ def forecast_item_by_interval(
     now=None,
     lead_time_days: Optional[float] = None,
     available: Optional[int] = None,
+    no_orderable_supplier: bool = False,
 ) -> ForecastResult:
     """Average the gaps between ``events`` and project the next purchase.
 
@@ -170,7 +171,18 @@ def forecast_item_by_interval(
         now: reference time for ``days_until_due`` (defaults to
             ``timezone.now``).
         lead_time_days: resolved supplier lead time; the flag threshold.
+            ``None`` means UNKNOWN, and is never treated as a zero-day wait —
+            that read the most optimistic assumption available off a missing
+            value and dropped the item from the report and the nightly digest.
         available: on-hand stock snapshot (defaults to ``item.current_stock``).
+        no_orderable_supplier: every supplier link is dead, so the item cannot
+            be bought at all. Flags unconditionally: there is no threshold to
+            compare against, and it is the hardest thing in the building to
+            buy. Comes from the shared ``supplier_selection`` derivation, NOT
+            inferred from a null lead time — "we cannot tell you how long it
+            takes" and "you cannot buy this" are different facts (op-2rsp,
+            RULE 4). An item that never had a supplier recorded is a data gap,
+            not an unbuyable item, and is deliberately excluded.
 
     Returns:
         A :class:`ForecastResult` ready to persist.
@@ -198,7 +210,7 @@ def forecast_item_by_interval(
             last_restock_date=last_restock_date,
             predicted_next_reorder_date=None,
             days_until_due=None,
-            needs_reorder=False,
+            needs_reorder=no_orderable_supplier,
             available_at_generation=available,
             lead_time_days=stored_lead,
         )
@@ -209,7 +221,15 @@ def forecast_item_by_interval(
     # drops the fractional part, which would bias every prediction early.
     predicted_next_reorder_date = last_restock_date + timedelta(days=round(avg_interval_days))
     days_until_due = float((predicted_next_reorder_date - now.date()).days)
-    needs_reorder = days_until_due <= (lead_time_days or 0)
+    if no_orderable_supplier:
+        needs_reorder = True
+    elif lead_time_days is None:
+        # No threshold to compare against. The one thing still knowable is
+        # whether the due date has ALREADY passed — stated as that, rather than
+        # as a zero-day lead time the code does not know to be true.
+        needs_reorder = days_until_due <= 0
+    else:
+        needs_reorder = days_until_due <= lead_time_days
 
     return ForecastResult(
         method=METHOD_RESTOCK_INTERVAL,

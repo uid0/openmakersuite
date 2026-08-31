@@ -224,3 +224,62 @@ def test_task_isolates_per_item_failure(mocker):
     assert not DemandForecast.objects.filter(item=bad).exists()
     assert "1 created" in result
     assert "1 failed" in result
+
+
+# ── An honest null must not become a confident zero, on THIS path too ────────
+#
+# The third instance of that class, and the one no earlier round inspected:
+# ``_lead_time_days_by_item`` correctly returns ``None`` for an item whose only
+# supplier is discontinued, and ``lead_time_days or 0`` collapsed that into a
+# zero-day threshold — emptying both the report and the nightly digest of
+# exactly the items that are hardest to buy.
+
+
+def _item_whose_only_supplier_died(user, **kwargs):
+    """Bought every 60 days, last bought 40 days ago -> due in 20. Vendor gone."""
+    item = InventoryItemFactory(average_lead_time=30, **kwargs)
+    _bought_on(item, 100, user=user)
+    _bought_on(item, 40, user=user)
+    ItemSupplier.objects.filter(item=item).update(is_discontinued=True)
+    return item
+
+
+def test_an_unbuyable_item_stays_in_the_demand_forecast_and_the_digest():
+    """Due in 20 days, threshold unknown — and it must not read as fine.
+
+    ``20 <= 0`` dropped it from ``low_stock_only`` and from the digest until its
+    due date had already passed. The condition now comes from the shared
+    derivation, not from the null lead time.
+    """
+    from inventory.services.demand_forecast import (
+        latest_demand_forecasts,
+        reorder_alert_forecasts,
+    )
+
+    user = _buyer()
+    item = _item_whose_only_supplier_died(user, reorder_alerts_enabled=True)
+
+    generate_demand_forecasts()
+
+    row = DemandForecast.objects.get(item=item)
+    assert row.days_until_due == 20.0
+    assert row.lead_time_days is None
+    assert row.needs_reorder is True
+    assert item.id in {f.item_id for f in latest_demand_forecasts(low_stock_only=True)}
+    assert item.id in {f.item_id for f in reorder_alert_forecasts()}
+
+
+def test_an_item_that_never_had_a_supplier_is_not_flagged_by_the_digest():
+    """A data gap is not an unbuyable item — flagging it would flood the digest."""
+    from inventory.services.demand_forecast import latest_demand_forecasts
+
+    user = _buyer()
+    item = _not_due_item(user, reorder_alerts_enabled=True)
+    ItemSupplier.objects.filter(item=item).delete()
+
+    generate_demand_forecasts()
+
+    row = DemandForecast.objects.get(item=item)
+    assert row.lead_time_days is None
+    assert row.needs_reorder is False
+    assert item.id not in {f.item_id for f in latest_demand_forecasts(low_stock_only=True)}

@@ -354,10 +354,15 @@ def reorder_display(item: "InventoryItem") -> dict:
     — every quantity expressed in ``unit``, so a caller can render
     "1 case on hand · reorder at 2 cases" without knowing which columns the
     item's ``count_mode`` gives meaning to.
+
+    ``current`` is ``None`` when a case-based item's pack size is unknown, and
+    the text SAYS so rather than printing a fabricated case count: "10 cases on
+    hand" for 10 loose units is a wrong number on a card that gets printed and
+    stuck on a shelf (op-2rsp).
     """
     threshold, unit = reorder_threshold(item)
     if counts_in_packs(item):
-        current: float = count_at_level(item)
+        current: Optional[float] = count_at_level(item)
         quantity = item.reorder_quantity
     elif item.use_case_based_reorder:
         current = item.current_cases
@@ -369,6 +374,17 @@ def reorder_display(item: "InventoryItem") -> dict:
     def _plural(count) -> str:
         return unit if count == 1 else f"{unit}s"
 
+    if current is None:
+        text = (
+            f"{unit} size unknown — no supplier says how many per {unit} · "
+            f"reorder at {threshold} {_plural(threshold)}"
+        )
+    else:
+        text = (
+            f"{current} {_plural(current)} on hand · "
+            f"reorder at {threshold} {_plural(threshold)}"
+        )
+
     return {
         "mode": item.count_mode,
         "unit": unit,
@@ -376,10 +392,7 @@ def reorder_display(item: "InventoryItem") -> dict:
         "current": current,
         "reorder_quantity": quantity,
         "needs_reorder": item.needs_reorder,
-        "text": (
-            f"{current} {_plural(current)} on hand · "
-            f"reorder at {threshold} {_plural(threshold)}"
-        ),
+        "text": text,
     }
 
 

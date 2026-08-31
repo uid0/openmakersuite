@@ -135,7 +135,7 @@ const KitDetailPage: React.FC = () => {
             supplier_terms: {
               supplier: Number(supplierId),
               supplier_sku: supplierSku,
-              unit_cost: unitCost === '' ? '0' : String(unitCost),
+              unit_cost: unitCost === '' ? null : String(unitCost),
             },
           }
         : {}),

@@ -470,6 +470,39 @@ complete, and it was twice not:
   And `price_change_percentage`: `""` -> `"0.00%"` for a price that genuinely
   did not move, because the falsy guard exported a real 0% change as the same
   blank an INCOMPUTABLE percentage gets.
+- Purchasing price-trends **SCREEN** (`/reports/purchasing`) — the SERVER CSV
+  above is only one of three surfaces and for four rounds it was the only one
+  named. The Min / Max / Latest Unit Cost table cells:
+  `$${item.min_unit_cost.toFixed(2)}` -> `money(...)`, so an unknown price now
+  reads `—` where base read `$0.00` (base's server sent a literal `0`). A
+  supplier that genuinely charges nothing still reads `$0.00`.
+- Same screen, the SORT ORDER of those three columns — not a figure, but a
+  user-visible reordering. `sortData`'s `a < b` let JavaScript coerce `null` to
+  `0`, so a price nobody recorded sorted in among the cheapest. Unknowns now
+  sort LAST in both directions; a real `0` still sorts as the cheapest real
+  price. Base ordered them the same way only because the values were literally
+  `0`, so nothing regressed — this is the one place on that screen where `null`
+  and `0` still behaved alike.
+- Purchasing price-trends **BROWSER export** (`csvExport.ts`, the client-side
+  download from that screen) — the twin of the server CSV named above, and it
+  moved the same way: the three cost cells `'$0.00'` -> `''` for a null, and
+  `'Price Change %'` `'N/A'` -> `'0.00%'` for a price that genuinely did not
+  move. Identical move, different file; naming only the server one is exactly
+  the "all but one site" shape recorded above.
+- Inventory stock-value **SCREEN** (`/reports/inventory`) — the Total Value
+  cell gains a trailing `+` (`$120.00 +`) when the category or location holds
+  items nobody has priced, and a new sortable "Unpriced Items" column reports
+  how many. The NUMBER is deliberately unchanged; what moved is that a partial
+  total now says it is partial.
+- Inventory stock-value **BROWSER export** (`csvExport.ts`) — the `Total Value`
+  cell `'$0.00'` -> `''` where the server sends no total at all, matching the
+  server CSV; and both branches gained the `Unpriced Items` column.
+- Supplier detail **price-trend chart** (`PriceTrendChart.tsx`, the only
+  consumer of `trends[].price_history[]`) — a snapshot recorded at `0.00` was
+  plotted as a GAP in the line and is now plotted as a `$0.00` point.
+  `ph.unit_cost || ph.package_cost || null` fell through both real zeros to
+  `null`, so the drop to free — the most notable move such a chart can show —
+  was the one move invisible on it.
 - Inventory stock-value **CSV exports** (`?type=stock_by_category` and
   `?type=value_by_location`) — gained `items_without_price`; the `total_value`
   number is deliberately unchanged.
@@ -617,6 +650,51 @@ complete, and it was twice not:
   a decimal string already carried its cent column, a JS number does not. Held
   by a trailing-zero-cent fixture in `InventoryItemSuppliedByKits.test.tsx`;
   the round-8 tests used `89.99`, which cannot fail under the mutation.
+- Kit form **WRITE path** (`/inventory/kits/new` and `/inventory/kits/<id>`) —
+  `handleSave` sent `unit_cost: unitCost === '' ? '0' : String(unitCost)`, so
+  leaving the "Unit cost" box empty STORED `Decimal("0")` on the
+  `ItemSupplier`. `order_unit_price` then correctly reported `PRICE_KNOWN`
+  about a price nobody had given, and the two rows fixed the round before —
+  the kit list's Unit cost column and the item detail "Supplied by kits" card
+  — stated as fact that the vendor gives the kit away. The branch's own rule
+  inverted at a write path: "a recorded price of zero is a KNOWN price" is
+  only true if a blank box never becomes one. Now sends an explicit `null`,
+  and the link stores NULL. No displayed figure moved for any kit that already
+  had a price; what moved is that a kit saved with a blank cost reads as
+  unpriced instead of free. This is the money twin of the
+  `SupplierRelationshipForm.tsx` pack-size write-path collapse, and it takes
+  the same side as `unit_cost_ordered`'s write, which REFUSES rather than
+  fabricating — here NULL is a legal answer, so storing it is enough.
+  `null` needs no serializer change: `supplier_terms` is a plain `DictField`,
+  whose default `_UnvalidatedField` child has `allow_null = True`, so the
+  `None` reaches `_apply_supplier_terms` intact and its `if key in terms`
+  comprehension puts it in `defaults` — measured, not assumed.
+  **The fix reaches a NEW link only, and that limit is measured.** Sending
+  `null` for a link that ALREADY has a price does not clear it:
+  `ItemSupplier.save` back-fills `package_cost` from `unit_cost` on the first
+  save, and from then on `if self.package_cost is not None` re-derives
+  `unit_cost` from that `package_cost`, so the `None` is overwritten before it
+  reaches the database. Pre-existing model behaviour, not this branch's, and
+  repairing it would re-derive prices on every link in the system — far outside
+  the invariant. REPORTED, NOT FIXED, and pinned as a CONTROL so the next
+  reader does not assume clearing works.
+  NOTE the seeding path, checked on every route in: `applyKit` seeds
+  `supplier_sku` and `unit_cost` but NOT `supplierId`, and the payload only
+  carries `supplier_terms` when `supplierId && supplierSku`. So an edit that
+  does not retype the supplier id sends no terms at all and cannot erase a
+  price; the blank box is only ever read when the operator is actively
+  entering terms. Pinned as a CONTROL.
+- **Sibling fields in `_apply_supplier_terms`, REPORTED NOT FIXED** — checked
+  because the same function writes them, and named here rather than changed.
+  `package_cost` has the identical shape (`null=True`, so NULL is a real
+  answer) but the kit form never sends it, so nothing fabricates it today.
+  `quantity_per_package` is DIFFERENT and worse: it is
+  `PositiveIntegerField(default=1, MinValueValidator(1))`, so NULL is not a
+  legal value, and `defaults.setdefault("quantity_per_package", 1)` therefore
+  writes a `1` into `update_or_create` whenever the caller omits it — which
+  RESETS a recorded pack size on an edit. That is the pack-size branch's class
+  (`op-c1ke`), not this branch's money class, and fixing it would move a
+  non-money figure outside this branch's invariant. Left for that owner.
 - Supplier detail price-trend **records** (`GET /api/inventory/suppliers/<id>/`,
   `trends[].price_history[].unit_cost`) — `null` -> `0.0` for a recorded zero,
   which is what the supplier-detail chart plots.

@@ -1556,3 +1556,95 @@ def test_two_free_snapshots_have_no_baseline_and_no_direction_either(api):
     assert summary["trend"] == "no_baseline"
     assert summary["direction"] == "stable"
     assert summary["change_percentage"] is None
+
+
+def test_kit_supplier_terms_store_a_blank_cost_as_unknown(api):
+    """BEFORE/AFTER. A kit saved with no cost must not be priced at zero.
+
+    The kit form used to send the string ``"0"`` for an empty cost box, so a
+    link nobody had priced was stored at ``Decimal("0")`` and then reported
+    ``PRICE_KNOWN`` — the branch's own rule inverted at a write path.
+    """
+    component = _item("Cyan")
+    supplier = Supplier.objects.create(name="Acme")
+
+    response = api.post(
+        "/api/inventory/kits/",
+        {
+            "name": "Blank-cost kit",
+            "description": "x",
+            "sku": "KIT-BLANK",
+            "minimum_stock": 0,
+            "reorder_quantity": 1,
+            "components": [{"component": component.pk, "quantity": 1}],
+            "supplier_terms": {
+                "supplier": supplier.pk,
+                "supplier_sku": "T-BLANK",
+                "unit_cost": None,
+            },
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201, response.data
+    kit = InventoryItem.objects.get(pk=response.data["id"])
+    link = ItemSupplier.objects.get(item=kit, supplier=supplier)
+    assert link.unit_cost is None
+    assert order_unit_price(kit).state == PRICE_NOT_RECORDED
+    assert response.data["unit_cost"] is None
+
+
+def test_kit_supplier_terms_store_a_typed_zero_as_a_real_price(api):
+    """CONTROL. A cost the operator actually typed as 0 is a KNOWN price."""
+    component = _item("Magenta")
+    supplier = Supplier.objects.create(name="Charity")
+
+    response = api.post(
+        "/api/inventory/kits/",
+        {
+            "name": "Donated kit",
+            "description": "x",
+            "sku": "KIT-FREE",
+            "minimum_stock": 0,
+            "reorder_quantity": 1,
+            "components": [{"component": component.pk, "quantity": 1}],
+            "supplier_terms": {
+                "supplier": supplier.pk,
+                "supplier_sku": "T-FREE",
+                "unit_cost": "0",
+            },
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201, response.data
+    kit = InventoryItem.objects.get(pk=response.data["id"])
+    link = ItemSupplier.objects.get(item=kit, supplier=supplier)
+    assert link.unit_cost == Decimal("0.00")
+    assert order_unit_price(kit).state == PRICE_KNOWN
+    assert Decimal(str(response.data["unit_cost"])) == Decimal("0.00")
+
+
+def test_clearing_a_kit_cost_on_an_existing_link_does_not_stick(api):
+    """CONTROL on the LIMIT of the write-path fix, measured rather than assumed.
+
+    Sending `null` gives a NEW link a NULL price, but it cannot clear one that
+    already has a price: ``ItemSupplier.save`` back-fills ``package_cost`` from
+    ``unit_cost`` on the first save, and thereafter re-derives ``unit_cost``
+    from that ``package_cost``. Pre-existing model behaviour, not this branch's;
+    pinned so the next reader does not believe clearing works.
+    """
+    item = _item("Cartridge")
+    link = _link(item, "Acme", unit_cost="5.00", is_primary=True)
+    link.refresh_from_db()
+    assert link.package_cost == Decimal("5.00")
+
+    ItemSupplier.objects.update_or_create(
+        item=item,
+        supplier_id=link.supplier_id,
+        defaults={"supplier_sku": "A", "unit_cost": None, "is_primary": True},
+    )
+
+    link.refresh_from_db()
+    assert link.unit_cost == Decimal("5.00")
+    assert order_unit_price(item).state == PRICE_KNOWN

@@ -549,6 +549,28 @@ endpoint was touched, because the resolution — correct the matrix, or stop
 publishing the valuation anonymously — is a captain decision. ESCALATED AND
 UNDECIDED: this entry is a filing, not a conclusion.
 
+**FILED, APPROVED, NOT DONE — `log_usage`'s "no unit cost" warning. Recorded so
+the branch's "the derived set AND its deliberate exclusions both reported with
+reasons" criterion is not read as complete: this is a known gap in it.**
+`inventory/views.py` `log_usage` gates the ledger posting at :1275 on
+`total_cost is not None and total_cost > 0` and, when it does not post, returns
+the warning at :1287, "committee recorded, but the item has no unit cost". A
+DONATED item's `unit_cost` is now a real `Decimal("0.00")`, so `total_cost` is
+`0` and the operator is told the price is UNKNOWN when it is known to be
+NOTHING — the second half of the rule sentence, inverted onto a message. NO
+MONEY MOVES and none should: skipping a zero-amount posting is correct, and
+`receiving.py`'s own comment says why (a zero-amount transaction is ledger
+noise, not a record of a payment). The fix is the WORDING only — split the
+`else` on `total_cost is None` (unknown: keep a "no price on file" warning
+naming the remedy) versus `total_cost == 0` (known zero: no price warning at
+all) — plus a BEFORE/AFTER test for the donated case, a CONTROL for the
+genuinely unpriced one, and a change-list entry. Three doc sites follow the
+string and must move with it: the `log_usage` docstring (~:1199),
+`docs/accounting.md` where it is quoted verbatim, and
+`backend/inventory/tests/test_log_usage_charge.py`, which asserts it.
+APPROVED BY THE OPERATOR and deferred only because the phase that found it
+could not make functional changes — NOT declined.
+
 ### oms-supplier-terms-write-path — filed, and the lesson from a withdrawn attempt
 
 A single owner for the supplier-terms WRITE path was built, gated and then

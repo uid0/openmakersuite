@@ -212,49 +212,7 @@ class PriceHistorySerializer(serializers.ModelSerializer):
 
 
 class ItemSupplierSerializer(serializers.ModelSerializer):
-    """Serializer for item-supplier relationships with pricing and dimensional data.
-
-    Writes route through :mod:`inventory.services.suppliers` rather than DRF's
-    default ``setattr`` + ``save()``. That default is a PARTIAL write against a
-    model whose ``save()`` derives ``unit_cost`` and ``package_cost`` from each
-    other, so ``PATCH {"unit_cost": "7.00"}`` on a link that already had a
-    package price recomputed the OLD price straight back over the operator's
-    typed one (op-9m2v).
-
-    ``update`` takes the ROW-ADDRESSED owner, because this endpoint names its
-    row in the URL: a PATCH that changes ``supplier`` must MOVE that row rather
-    than resolve a different (item, supplier) pair and orphan the addressed one.
-    ``create`` takes the pair owner, because creating is what it means there.
-
-    ``_terms`` strips the two identity fields, so BOTH are handed to the owner
-    explicitly. Passing only one of them is how a writable ``item`` came to be
-    accepted and then dropped on the floor.
-    """
-
-    def _terms(self, validated_data):
-        return {
-            key: value for key, value in validated_data.items() if key not in ("item", "supplier")
-        }
-
-    def create(self, validated_data):
-        from inventory.services.suppliers import write_supplier_terms
-
-        return write_supplier_terms(
-            item=validated_data["item"],
-            supplier_id=validated_data["supplier"].pk,
-            **self._terms(validated_data),
-        )
-
-    def update(self, instance, validated_data):
-        from inventory.services.suppliers import UNCHANGED, update_supplier_terms
-
-        supplier = validated_data.get("supplier")
-        return update_supplier_terms(
-            instance,
-            item=validated_data.get("item", UNCHANGED),
-            supplier_id=instance.supplier_id if supplier is None else supplier.pk,
-            **self._terms(validated_data),
-        )
+    """Serializer for item-supplier relationships with pricing and dimensional data."""
 
     supplier_name = serializers.CharField(source="supplier.name", read_only=True)
     item_name = serializers.CharField(source="item.name", read_only=True)
@@ -1281,19 +1239,7 @@ class KitSerializer(InventoryItemSerializer):
         than the item. Folding the terms into the kit create keeps "define a
         kit" a single request; the generic ``/item-suppliers/`` endpoint still
         works for editing them afterwards.
-
-        ``supplier_terms`` is a ``DictField`` with the pass-through
-        ``_UnvalidatedField`` child, so nothing inside it is validated for us —
-        including the supplier reference. The id is COERCED as well as looked
-        up, because a non-numeric one reaches ``filter(pk=...)`` as a
-        ``ValueError`` (a list or dict as a ``TypeError``) before the lookup can
-        answer False, and the project's exception handler translates neither —
-        so a malformed reference 500'd where an unknown numeric one gave a
-        clean 400. The costs and the lead time are coerced one layer down, by
-        the owner, for the same reason.
         """
-        from inventory.services.suppliers import write_supplier_terms
-
         if not terms:
             return
         supplier_id = terms.get("supplier")
@@ -1301,30 +1247,16 @@ class KitSerializer(InventoryItemSerializer):
             raise serializers.ValidationError(
                 {"supplier_terms": {"supplier": "This field is required."}}
             )
-        if isinstance(supplier_id, bool) or not isinstance(supplier_id, (int, str)):
-            raise serializers.ValidationError(
-                {"supplier_terms": {"supplier": f"Supplier {supplier_id!r} is not a valid id."}}
-            )
-        try:
-            supplier_id = int(supplier_id)
-        except (TypeError, ValueError):
-            raise serializers.ValidationError(
-                {"supplier_terms": {"supplier": f"Supplier {supplier_id!r} is not a valid id."}}
-            )
-        if not Supplier.objects.filter(pk=supplier_id).exists():
-            raise serializers.ValidationError(
-                {"supplier_terms": {"supplier": f"Supplier {supplier_id} does not exist."}}
-            )
-        named = {
+        defaults = {
             key: terms[key]
             for key in ("supplier_sku", "supplier_url", "unit_cost", "average_lead_time")
             if key in terms
         }
-        write_supplier_terms(
+        defaults["is_primary"] = True
+        ItemSupplier.objects.update_or_create(
             item=instance,
             supplier_id=supplier_id,
-            is_primary=True,
-            **named,
+            defaults=defaults,
         )
 
     def create(self, validated_data):

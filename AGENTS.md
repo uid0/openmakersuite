@@ -669,13 +669,15 @@ complete, and it was twice not:
   whose default `_UnvalidatedField` child has `allow_null = True`, so the
   `None` reaches `_apply_supplier_terms` intact and its `if key in terms`
   comprehension puts it in `defaults` — measured, not assumed.
-  **That limit is now CLOSED** — the round that recorded it as unfixable was
-  wrong about the cost. See the supplier-terms owner below: clearing a recorded
-  price now sticks, because naming one cost clears its twin — on KEY PRESENCE
-  alone, while a request whose every supplied field already equals what is
-  stored short-circuits as an echo. See the owner entry below for why those are
-  two separate questions. The CONTROL that pinned the limitation is
-  rewritten as a BEFORE/AFTER that pins the fix.
+  **The fix reaches a NEW link only, and that limit is measured.** Sending
+  `null` for a link that ALREADY has a price does not clear it:
+  `ItemSupplier.save` back-fills `package_cost` from `unit_cost` on the first
+  save, and from then on `if self.package_cost is not None` re-derives
+  `unit_cost` from that `package_cost`, so the `None` is overwritten before it
+  reaches the database. Pre-existing model behaviour, not this branch's, and
+  repairing it would re-derive prices on every link in the system — far outside
+  the invariant. REPORTED, NOT FIXED, and pinned as a CONTROL so the next
+  reader does not assume clearing works.
   NOTE the seeding path, checked on every route in: `applyKit` seeds
   `supplier_sku` and `unit_cost` but NOT `supplierId`, and the payload only
   carries `supplier_terms` when `supplierId && supplierSku`. So an edit that
@@ -705,269 +707,64 @@ complete, and it was twice not:
 - **`package_cost` in `_apply_supplier_terms`, REPORTED NOT FIXED** — the same
   `null=True` shape as `unit_cost`, so NULL is a real answer for it, but the
   kit form never sends the key at all, so nothing fabricates it today.
-- **The kit / item supplier-terms WRITE path now has ONE owner**,
-  `inventory.services.suppliers.write_supplier_terms`, and three separate
-  defects collapse into it. Every caller used to hand-roll
-  `ItemSupplier.objects.update_or_create(defaults=<partial dict>)` against a
-  model whose `save()` DERIVES `unit_cost` and `package_cost` from each other,
-  and a partial write always loses that fight in one of two directions — the
-  stale sibling column overwrites what the operator typed, or a column `save()`
-  just derived is dropped by `update_or_create`'s `update_fields` restriction.
-  The owner takes intent explicitly via the `UNCHANGED` sentinel (the same
-  convention `reorder_queue.services.purchase_orders.confirm_order` uses, so
-  "not supplied" stays distinct from "explicitly cleared"), treats the two costs
-  as ONE fact, saves in full rather than with a restricted `update_fields`, and
-  never defaults `quantity_per_package` on an update. The derivation itself is
-  UNTOUCHED and still lives in `save()`; the owner only stops callers fighting
-  it. Figures that move, each on the kit list's Unit cost column and the
-  item-detail "Supplied by kits" card:
-  - A typed unit cost on a link that already had a package cost: the old price
-    stayed. A link at `unit_cost 5.00 / package_cost 5.00 / pack 1`, operator
-    types `7.00` -> stored **5.00** before, **7.00** now.
-  - A first price on a link created with a blank cost box: the derived package
-    price was dropped. Typing `4.00` stored `unit_cost 4.00 / package_cost
-    NULL` before and stores `4.00 / 4.00` now, so the scan page stops saying
-    "Package cost: — (no price on file)" for a package it can cost.
-  - Clearing a recorded price: `null` was overwritten by the re-derivation and
-    the price stayed. It now stores NULL and the item reads as unpriced.
-  `inventory/tests/test_supplier_terms_single_owner.py` is the build gate, the
-  write-side twin of the price gate. It surfaced four writers no hand sweep had
-  named — all four turned out to write FLAGS rather than costs
-  (`update_lead_times`, `mark_discontinued`, `void_line_item`,
-  `enforce_single_primary`) and are allowlisted with that reason.
-- **Both halves of a link's identity are now explicit parameters on the
-  row-addressed owner, and one of them is refused out loud.** Routing the
-  `/item-suppliers/<pk>/` endpoint through the owner passed `supplier` and left
-  `item` behind — `_terms()` strips both, and only one was handed back. So
-  `PATCH {"item": <other>}` returned **HTTP 200 with the row untouched**, and
-  the response echoed the OLD item: operator input accepted and discarded
-  behind a success. **REGRESSION of this branch**, introduced by the identity
-  split and live only between that round and this fix; base's
-  `ModelSerializer.update` applied it. Derived rather than recalled: the
-  serializer's writable fields are exactly `_TERM_FIELDS` plus `item` and
-  `supplier`, so `item` was the only one dropped, and a test now asserts that
-  set equality so a field cannot go missing again the next time this write path
-  moves.
-  Applying the move is the part that needed measuring, and it is **destructive**:
-  none of the three tables pointing at an `ItemSupplier` — `PriceHistory`,
-  `PurchaseOrderItem`, `LeadTimeLog` — carries its own item; all three reach it
-  THROUGH the link. Moving the link therefore does not strand them, it silently
-  re-attributes them. Measured: a purchase order line recording what was
-  actually bought from Alpha reports Beta afterwards, and Alpha's price history
-  becomes Beta's. So a changed `item` is **refused with a 400 naming the rows
-  that record the link and telling the operator to create a new link on the
-  target item**. Only a CHANGED item is refused, so a form that echoes the
-  current one back still saves.
-  The refusal is UNCONDITIONAL, and that is a correction to the first cut of
-  this fix: it originally refused only when something already pointed at the
-  link, until measurement showed `record_price_history` writes a row on every
-  link's first save whether or not it carries a price — so every link has
-  history from birth and the "safe move" branch was unreachable. A conditional
-  refusal would have read as though some moves are allowed while refusing every
-  one of them. NAMED EXCLUSION, with that reason: moving a supplier link
-  between items is not supported.
-  No money figure moves. The web form sends `item` on CREATE only, so this
-  reaches API clients alone, and the previously-accepted move was never applied
-  anyway — the 200 was empty.
-- **The owner now has TWO named entry points, because inferring identity was
-  itself a defect.** `update_supplier_terms(link, ...)` writes a row the caller
-  already holds and never creates; `write_supplier_terms(item=, supplier=)`
-  resolves an (item, supplier) pair and get-or-creates under the lock. Routing
-  the `/item-suppliers/<pk>/` endpoint through the PAIR resolver made a PATCH
-  that changes `supplier` write a DIFFERENT row: no (item, new supplier) link
-  existed, so a second one was created and the row the URL named was left
-  behind, still pointing at the old supplier with its old SKU and costs. The
-  item carried two links where the operator moved one, and every price
-  derivation downstream — `lowest_unit_price`, `primary_item_supplier`, the
-  supplier scoring, the reorder pad — saw the phantom. Nothing reported it: the
-  response body was the NEW row, so its `id` no longer matched the URL and the
-  item form wrote it over its local copy of the row it had addressed. That is a
-  designed-for edit, not a corner: the supplier dropdown stays enabled on saved
-  rows and `relationshipChanged` lists a changed supplier as a reason to write.
-  **REGRESSION of this branch**, introduced when the endpoint was routed and
-  live only between that round and this fix. Now the addressed row MOVES, and
-  its pk, SKU and costs come with it.
-- **Intent comes from KEY PRESENCE, never from value comparison** — the
-  branch's own rule, which the owner had broken in its own image. "The caller
-  did not mention `package_cost`" and "the caller SENT `package_cost` with its
-  current value" are two different facts; the twin-clear was deciding "named" by
-  comparing values, so it collapsed them. The item form always sends BOTH cost
-  boxes, so an operator who edited Unit Cost and left Package Cost showing
-  `$30.00` had that submitted value treated as unnamed, cleared, and re-derived:
-  a link at `unit_cost 5.00 / package_cost 30.00 / pack 6` stored **$42.00**,
-  moving a price the operator could see in the adjacent box and had submitted
-  unchanged. Visible on the scan page's "Package cost" and "Estimated Cost",
-  which read `order_package_price`. **REGRESSION of this branch**, same window.
-  The twin-clear now fires only when the caller supplied EXACTLY ONE of the pair
-  and it differs from what is stored; value equality still decides whether a
-  write is needed (the echo no-op), never whether a field was named.
-  **A consequence, named because the invariant requires it:** when both boxes
-  are submitted and disagree, neither is cleared and `save()`'s derivation
-  decides — the package price wins and the unit edit is re-derived away, exactly
-  as base behaved. That half is PRE-EXISTING and unchanged; the fix is that the
-  package price the operator submitted no longer moves.
-- **The writer gate can see the Django admin now.** Its limit 4 named DRF's
-  `ModelSerializer` as the framework-writer blind spot it had closed, while the
-  other framework writer in the tree went unnamed: `ItemSupplierInline` binds
-  the model at CLASS level and `@admin.register(ItemSupplier)` binds it by
-  decorator, neither of which is a `class Meta`. The scan now counts all three
-  shapes. Both admin sites are allowlisted as SAFE rather than routed, and the
-  reason is measured: `unit_cost` is in `ItemSupplierAdmin.readonly_fields` and
-  the inline shows the read-only `unit_cost_display`, so only `package_cost` and
-  `quantity_per_package` are editable — the direction `save()` prefers anyway.
-  An admin that made `unit_cost` editable would need routing. No figure moves;
-  what changes is that the gate's stated blind spots are now true.
-- **The owner's own first cut had three defects; all are fixed and named here,
-  because the round that introduced them is on this branch.**
-  - **It COERCES at its boundary now.** `supplier_terms` is a plain `DictField`
-    whose `_UnvalidatedField` child passes JSON through untouched, so the kit
-    form's `String(unitCost)` arrived as the STRING `"5.00"`. Clearing the twin
-    then fed that raw `str` into `save()`'s back-fill, where `"5.00" * 6` is
-    string REPETITION: a kit whose supplier link records a pack size above 1
-    could not be saved at all, rejected with
-    `"5.005.005.005.005.005.00" value must be a decimal number`. **REGRESSION of
-    this branch**, introduced by the owner and live only between it and this
-    fix; before the owner, `package_cost` was non-NULL so `save()` replaced the
-    string with a `Decimal` before any multiplication. (The reviewer called this
-    an unhandled 500; measured, it is a **400** — this project's handler does
-    convert Django's `ValidationError` — but the operator still cannot save the
-    kit, and the message is unusable.) Costs now coerce to `Decimal` and the
-    pack size to `int` at the boundary, the same shape as
-    `line_entry._coerce_unit_cost`, with a field-named 400 for a non-numeric or
-    negative value. An explicit `null` still means "no price", never
-    `Decimal("0")`.
-  - **The twin-clear is conditional on the value actually changing.** "Naming
-    either cost clears its twin" was too blunt: `applyKit` seeds the cost box
-    from the stored unit price, so an ordinary re-save echoes it back, and
-    clearing unconditionally re-derived it. A link at `package_cost 10.00` over
-    a pack of 3 stores `unit_cost 3.33`; echoing that back moved the package
-    price to **$9.99** and wrote a `PriceHistory` row calling it a real price
-    change — visible on the scan page's "Package cost" and "Estimated Cost",
-    which read `order_package_price`. A money figure moving on a save that
-    changed nothing is an outright breach of the branch invariant.
-    **REGRESSION of this branch**, same window as above.
-    **Corrected once more, and this is the shape that ships:** conditioning the
-    TWIN-CLEAR on the value changing put two different questions on one
-    comparison, and behaviour then turned on a single cent. Measured: a link at
-    `unit_cost 5.00 / package_cost 20.00 / pack 4`, sent
-    `PATCH {unit_cost: "5.00", quantity_per_package: 2}` — the restated 5.00
-    equalled what was stored, so the twin was NOT cleared, the stale 20.00
-    survived, and `save()` recomputed `20.00 / 2` to store **10.00**: the
-    operator sent 5.00 and got 10.00, silently. Sending `"5.01"` in the same
-    request cleared the twin and stored the typed price. Two questions, now
-    separated:
-    **INTENT is key presence, alone.** Supplying exactly one of the cost pair
-    clears the other and re-derives it, whether or not the supplied value
-    matches — restating the price you meant is still naming it. Supplying both
-    honours both.
-    **VALUE EQUALITY decides only whether the request is a no-op, and it reads
-    the WHOLE request.** The write short-circuits only when EVERY supplied term
-    already equals what is stored, so nothing the derivation depends on is
-    moving. Any supplied field differing — a cost, a pack size, a flag — and it
-    is not an echo. Compared as `Decimal`, so `"5"`, `"5.00"` and
-    `Decimal("5.00")` are one value. The kit form's seeded-and-echoed cost box,
-    which this exists for, is unaffected and keeps its CONTROL.
-    Figure moved by the correction: on that link, `unit_cost` **10.00 → 5.00**
-    and `package_cost` **20.00 → 10.00**, shown on the item form's supplier
-    editor and the scan page's "Package cost" / "Estimated Cost". Versus BASE
-    both spellings stored `(10.00, 20.00)`, so this is the discarded-input fix
-    reaching the spelling it previously missed, not a new direction.
-  - **The pass-through `DictField` is coerced field by field, and the set is
-    derived rather than remembered.** The kit form's `supplier_terms` validates
-    nothing inside it, so every value it carries can reach a typed column raw.
-    The costs and the pack size were already coerced; checking the keys the
-    serializer actually consults surfaced two more that still 500'd —
-    `supplier`, where a non-numeric id raises `ValueError` (a list or dict a
-    `TypeError`) inside `filter(pk=...)` before the lookup can answer False, and
-    `average_lead_time`, where `"soon"` fails at the INSERT. Neither is
-    translated by the project's exception handler. Both are refused with a 400
-    naming the offending value now. **PRE-EXISTING**: base 500'd on the same
-    input at its own INSERT. No figure moves; what changes is which error an
-    operator sees.
-  - **`pricing_changed` compares at the column's precision.** Surfaced by the
-    no-op CONTROL above and PRE-EXISTING, not this branch's: `save()`'s
-    derivation DIVIDES, so `package_cost 10.00` over a pack of 3 yields
-    `3.3333…` in memory while the `numeric(10,2)` column holds `3.33`.
-    Comparing the two raw made `pricing_changed` answer True on EVERY save of
-    such a link, writing a phantom "Price Update" into the supplier
-    price-trend chart and the `price_trend_summary` this same branch reworked.
-    It now rounds both sides through Django's own write-path `format_number`,
-    so the comparison cannot drift from what the database keeps. No stored
-    figure moves; what stops is the fabricated history row.
-  - **It is no weaker than the `update_or_create` it replaced.** `filter().first()`
-    plus `save()` dropped the row lock and the losing-create retry that manager
-    method provided. The read-modify-write now runs under `select_for_update()`
-    inside `transaction.atomic()`, and a concurrent create that loses the
-    `unique_together` race is caught and retried as an update rather than
-    surfacing as a 500. The retry is NARROWED to that race: it re-fetches and
-    re-raises the original `IntegrityError` when no row appeared, rather than
-    re-fetching unconditionally and turning a different constraint violation
-    into a misleading `DoesNotExist` with the real cause gone from the
-    traceback. **A correction to the review that prompted this**, measured
-    rather than argued: the foreign-key case it named cannot reach that branch,
-    because Django creates the FK `DEFERRABLE INITIALLY DEFERRED`, so an unknown
-    supplier id surfaces at COMMIT (`base.py:_commit`) and never enters the
-    `except` at all. The narrowing is therefore precision for an IMMEDIATE
-    constraint that is not the unique race, and no reachable caller produces one
-    today — so it is defence in depth with no test pinning that branch, which is
-    said here rather than left implied. The unknown supplier id is still worth
-    closing at its source and is: the kit form's `supplier_terms` is a
-    pass-through `DictField` that validates nothing inside it, so a bad id used
-    to reach the database and fail at commit, and is now refused with a 400
-    naming the id. No figure moves; what changes is which error an operator
-    sees. The kit row itself still survives that 400 — `KitSerializer.create` is
-    not wrapped in a transaction — which is PRE-EXISTING and shared with the
-    sibling "supplier is required" branch beside it, left as-is rather than
-    widened into transaction management nobody asked for.
-- **The generic `/item-suppliers/` endpoint is routed through the owner too**,
-  and it is the writer the first derivation missed. `ItemSupplierViewSet` is a
-  full `ModelViewSet`, so DRF's `ModelSerializer.update` did the partial write
-  itself — `PATCH {"unit_cost": "7.00"}` on a link with a stored package price
-  recomputed the OLD price back over it and echoed **5.00** in the response,
-  discarding what the operator typed. **PRE-EXISTING**: that endpoint and
-  serializer predate this branch and base behaved identically. Now `$7.00`.
-  **That PATCH moves a SECOND figure, by construction rather than by a separate
-  decision.** The two costs are one fact, so honouring the typed unit price
-  re-derives its twin: on a link at `unit_cost 5.00 / package_cost 30.00 / pack
-  6`, base stored `(5.00, 30.00)` — it discarded the unit edit and left the
-  package price alone — and the endpoint now stores `(7.00, 42.00)`, because
-  7.00 a unit over a pack of 6 IS 42.00 a package. Measured against base
-  `7c078de`, not assumed. Screens that show the moved package price: the item
-  form's supplier editor (`SupplierRelationshipForm`'s Package Cost box), and
-  the scan page's "Package cost" and "Estimated Cost" rows, which read
-  `order_package_price`. The same path is reachable from the kit form, whose
-  `_apply_supplier_terms` sends `unit_cost` alone. This is a consequence of
-  fixing discarded operator input, NOT an independent change: base's stored
-  package price was only "correct" because base was refusing to record the
-  price the operator had actually typed. Pinned by
-  `test_naming_only_the_unit_cost_still_rederives_the_package_price`, labelled
-  BEFORE/AFTER rather than CONTROL for exactly this reason.
-  `_TERM_FIELDS` widened to every writable column so the dimensional and
-  bookkeeping fields the same request carries are not split back out of the
-  owner. The gate could not see this shape at all — a `ModelSerializer` is a
-  writer with no write CALL in it — so it now counts `class Meta: model =
-  ItemSupplier` as a write site, and its docstring states that as limit 4 along
-  with what the scan still cannot see.
-- **WHAT WAS ALREADY BROKEN, verified against base `7c078de` rather than
-  assumed** — the captain asked for this explicitly, so each kit-form defect is
-  labelled:
-  - Blank cost box stored as `Decimal("0")` instead of NULL: **PRE-EXISTING.**
-    Base's `KitDetailPage.handleSave` carries the identical
-    `unitCost === '' ? '0'`. What this branch changed is VISIBILITY — the kit
-    list and the "Supplied by kits" card used to render an em dash, so the
-    fabrication was indistinguishable from "unpriced"; once they rendered
-    `$0.00` it became a confident figure on screen.
-  - `setdefault("quantity_per_package", 1)` resetting a recorded pack size and,
-    through the derivation, the PRICE with it: **PRE-EXISTING.** Base carries
-    that line verbatim.
-  - A typed `unit_cost` inert on a link that already has a `package_cost`:
-    **PRE-EXISTING.** Base carries the same partial `defaults` dict, and the
-    re-derivation in `save()` predates the branch.
-  - The derived `package_cost` dropped by `update_fields` on update:
-    **PRE-EXISTING MECHANISM, NEWLY REACHABLE.** `update_or_create`'s
-    restriction predates the branch, but the state that reaches it — a link with
-    both costs NULL — is created by this branch's own blank-box fix, so the
-    branch is what makes it occur.
+
+### oms-supplier-terms-write-path — an attempt that was made, and withdrawn
+
+**A single owner for the supplier-terms WRITE path was built, gated, and then
+reverted in full.** It is recorded here rather than quietly dropped, so the next
+session does not retry it one narrow rule at a time. Nothing below changed any
+money figure: the whole attempt came out, and the tree's write path is what it
+was before it.
+
+**ROOT CAUSE, one sentence.** `ItemSupplier.save()` derives `unit_cost` and
+`package_cost` from EACH OTHER, so any partial write fights that derivation, and
+which cost the operator meant cannot be recovered from the submitted values
+alone.
+
+**Three rules were tried at the caller, and each fixed one case by reopening
+another:**
+1. **Value equality** — a cost clears its twin only when it differs from what is
+   stored. Made behaviour turn on a single cent: restating `unit_cost` as
+   `5.00` beside a new pack size left the stale package price to overwrite it,
+   while `5.01` in the same request was honoured.
+2. **Key presence, with a value check** — a cost clears its twin when supplied
+   AND different. Discarded a cost the caller had explicitly submitted
+   unchanged: the item form sends both boxes, so editing one silently re-derived
+   the other.
+3. **Key presence alone** — supplying exactly one cost always clears its twin.
+   Reopened rule 1's defect from the other side: a link at
+   `unit_cost 3.33 / package_cost 10.00 / pack 3` whose SKU was edited had its
+   package price re-derived to `9.99` from the rounded unit price, on a save
+   that touched no price at all.
+
+**The owner was not the problem, and neither was any single rule.** It was
+built as one named module, routed from every writer the derivation reached, and
+gated with an AST build-gate in the manner of the pack-size and price gates —
+and it still produced 17 review findings across 6 rounds, 15 of them artefacts
+of its own changes rather than of the original defect. **So the next attempt
+should not open by writing a fourth rule at the callers.** The place to look is
+the mutual derivation in `ItemSupplier.save()` itself: while one column is
+computed from the other on every save, callers cannot express "this is the price
+now" without also implying something about its twin.
+
+**Defects that remain OPEN after the revert. Every one of them is
+PRE-EXISTING — present in base `7c078de`, not introduced by this branch —
+and they are named here so they are not rediscovered one at a time:**
+- The kit form's typed **unit cost is inert** on a link that already records a
+  package cost: `save()` re-derives `unit_cost` from the stored `package_cost`
+  and overwrites what the operator typed.
+- The **derived `package_cost` is not persisted** on the kit-form UPDATE path,
+  because `update_or_create` restricts `update_fields` to the `defaults` keys.
+  Reachable because a blank cost box now correctly stores NULL — that fix stays.
+- `PATCH /api/inventory/item-suppliers/<pk>/ {"unit_cost": ...}` **echoes back
+  the old price**: DRF's `ModelSerializer.update` does the same partial write
+  against the same derivation.
+- A **non-numeric `supplier` id** inside `supplier_terms` reaches the ORM and
+  **500s** rather than returning a 400, because that field is a pass-through
+  `DictField` that validates nothing inside itself. The same is true of a
+  malformed `average_lead_time` and of a cost that overflows the column's
+  `max_digits`.
+
 - Supplier detail price-trend **records** (`GET /api/inventory/suppliers/<id>/`,
   `trends[].price_history[].unit_cost`) — `null` -> `0.0` for a recorded zero,
   which is what the supplier-detail chart plots.

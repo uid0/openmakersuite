@@ -16,6 +16,7 @@ from inventory.services.suppliers import (
     enforce_single_primary,
     pricing_changed,
     record_price_history,
+    write_supplier_terms,
 )
 from inventory.tests.factories import (
     InventoryItemFactory,
@@ -164,3 +165,24 @@ class TestPriceHistoryService:
         assert row is not None
         assert row.change_type == PriceHistory.ChangeType.UPDATED
         assert PriceHistory.objects.filter(item_supplier=link).count() == before + 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_create_that_is_not_the_race_reports_its_own_error():
+    """An unknown supplier fails loudly out of the owner, as an IntegrityError.
+
+    What this holds is the failure MODE, not the retry branch: measured, Django
+    creates the foreign key `DEFERRABLE INITIALLY DEFERRED`, so the violation
+    surfaces at COMMIT rather than at the INSERT and never enters the
+    losing-create `except` at all. The retry's narrowing is precision for an
+    IMMEDIATE constraint that is not the unique-together race; no reachable
+    caller produces one today, so nothing here pins that branch.
+    """
+    from django.db import IntegrityError
+
+    item = InventoryItemFactory()
+
+    with pytest.raises(IntegrityError):
+        write_supplier_terms(item=item, supplier_id=999999, unit_cost=Decimal("4.00"))
+
+    assert not ItemSupplier.objects.filter(supplier_id=999999).exists()

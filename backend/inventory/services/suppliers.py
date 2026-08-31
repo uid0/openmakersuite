@@ -345,6 +345,13 @@ def write_supplier_terms(*, item, supplier=None, supplier_id=None, **terms):
     Saves with a full ``save()`` rather than a restricted ``update_fields``, so
     the single-primary enforcement and the :class:`PriceHistory` snapshot that
     ``save()`` already performs are preserved exactly.
+
+    The losing-create retry is narrowed to the race it was written for: it
+    re-fetches, and re-raises the ORIGINAL ``IntegrityError`` when no row
+    appeared. Retrying unconditionally turned every other constraint violation
+    — an unknown supplier id reaching the insert as a foreign-key error, say —
+    into a misleading ``DoesNotExist`` with the real cause gone from the
+    traceback, which is what the manager method this replaced avoided.
     """
     from inventory.models.core import ItemSupplier
 
@@ -371,12 +378,12 @@ def write_supplier_terms(*, item, supplier=None, supplier_id=None, **terms):
                 link.save()
                 return link
         except IntegrityError:
-            pass
-
-        link = (
-            ItemSupplier.objects.select_for_update()
-            .filter(item=item, supplier_id=supplier_id)
-            .get()
-        )
-        _apply(link, terms).save()
-        return link
+            link = (
+                ItemSupplier.objects.select_for_update()
+                .filter(item=item, supplier_id=supplier_id)
+                .first()
+            )
+            if link is None:
+                raise
+            _apply(link, terms).save()
+            return link

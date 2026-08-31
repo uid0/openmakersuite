@@ -1281,6 +1281,12 @@ class KitSerializer(InventoryItemSerializer):
         than the item. Folding the terms into the kit create keeps "define a
         kit" a single request; the generic ``/item-suppliers/`` endpoint still
         works for editing them afterwards.
+
+        ``supplier_terms`` is a ``DictField`` with the pass-through
+        ``_UnvalidatedField`` child, so nothing inside it is validated for us —
+        including the supplier reference. It is checked here so an unknown id is
+        refused with the id in the message, rather than reaching the INSERT as a
+        foreign-key violation and surfacing as a 500.
         """
         from inventory.services.suppliers import write_supplier_terms
 
@@ -1290,6 +1296,10 @@ class KitSerializer(InventoryItemSerializer):
         if supplier_id is None:
             raise serializers.ValidationError(
                 {"supplier_terms": {"supplier": "This field is required."}}
+            )
+        if not Supplier.objects.filter(pk=supplier_id).exists():
+            raise serializers.ValidationError(
+                {"supplier_terms": {"supplier": f"Supplier {supplier_id} does not exist."}}
             )
         named = {
             key: terms[key]

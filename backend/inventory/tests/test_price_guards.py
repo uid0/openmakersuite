@@ -2123,7 +2123,13 @@ def test_submitting_both_cost_boxes_keeps_the_package_price_given(api):
 
 
 def test_naming_only_the_unit_cost_still_rederives_the_package_price(api):
-    """CONTROL. Supplying ONE cost is still "this is the price now"."""
+    """BEFORE/AFTER. Supplying ONE cost is "this is the price now" — for BOTH.
+
+    Labelled BEFORE/AFTER, not CONTROL: the package price it pins is a figure
+    that MOVED. Base's `setattr` + full `save()` recomputed the typed unit price
+    away and left `package_cost` at 30.00; honouring the typed 7.00 re-derives
+    the package price from it, so 30.00 becomes 42.00.
+    """
     item = _item("Widget")
     supplier = Supplier.objects.create(name="Acme")
     link = ItemSupplier.objects.create(
@@ -2267,6 +2273,13 @@ def test_every_writable_supplier_field_reaches_the_link(api):
     dropped when the write path was rerouted and nothing noticed. `item` is the
     one field deliberately not applied; it is refused out loud instead, and the
     two tests above pin that.
+
+    The two COST columns are asserted here but are HELD by the two tests below,
+    because a request carrying both cannot hold either: `save()` derives each
+    from the other, so dropping `package_cost` would let the back-fill rebuild
+    the sent 8.00 from the sent 2.00, and dropping `unit_cost` would let the
+    division rebuild the sent 2.00 from the sent 8.00. A fixture whose value the
+    model can re-derive is not holding anything.
     """
     item = _item("Cartridge")
     supplier = Supplier.objects.create(name="Acme")
@@ -2313,9 +2326,83 @@ def test_every_writable_supplier_field_reaches_the_link(api):
     assert link.package_width == Decimal("2.50")
     assert link.package_length == Decimal("3.50")
     assert link.package_weight == Decimal("4.500")
+    assert link.unit_cost == Decimal("2.00")
     assert link.package_cost == Decimal("8.00")
     assert link.average_lead_time == 9
     assert link.is_primary is True
     assert link.is_active is False
     assert link.is_discontinued is True
     assert link.notes == "moved wholesale"
+
+
+def test_a_unit_cost_sent_alone_lands_on_the_link(api):
+    """Holds `unit_cost` where the derivation cannot rebuild it.
+
+    The link records no package price, so nothing exists to divide: if the owner
+    stopped applying `unit_cost` the column would stay NULL rather than
+    reappearing at the sent value.
+    """
+    item = _item("Widget")
+    supplier = Supplier.objects.create(name="Acme")
+    link = ItemSupplier.objects.create(
+        item=item, supplier=supplier, supplier_sku="T-UNIT", quantity_per_package=3
+    )
+    link.refresh_from_db()
+    assert link.unit_cost is None and link.package_cost is None
+
+    response = api.patch(
+        f"/api/inventory/item-suppliers/{link.pk}/", {"unit_cost": "7.00"}, format="json"
+    )
+
+    assert response.status_code == 200, response.data
+    link.refresh_from_db()
+    assert link.unit_cost == Decimal("7.00")
+    assert link.package_cost == Decimal("21.00")
+
+
+def test_a_package_cost_sent_alone_lands_on_the_link(api):
+    """The twin of the test above, holding `package_cost` the same way."""
+    item = _item("Widget")
+    supplier = Supplier.objects.create(name="Acme")
+    link = ItemSupplier.objects.create(
+        item=item, supplier=supplier, supplier_sku="T-PKG", quantity_per_package=4
+    )
+    link.refresh_from_db()
+    assert link.unit_cost is None and link.package_cost is None
+
+    response = api.patch(
+        f"/api/inventory/item-suppliers/{link.pk}/", {"package_cost": "9.00"}, format="json"
+    )
+
+    assert response.status_code == 200, response.data
+    link.refresh_from_db()
+    assert link.package_cost == Decimal("9.00")
+    assert link.unit_cost == Decimal("2.25")
+
+
+def test_an_unknown_kit_supplier_is_refused_with_the_id(api):
+    """An unknown supplier id is a 400 naming it, not a 500 from the INSERT.
+
+    Scoped to the refusal. The kit row itself survives the 400 because
+    `KitSerializer.create` is not wrapped in a transaction — pre-existing, and
+    shared with the sibling "supplier is required" branch beside it.
+    """
+    component = _item("Cyan")
+
+    response = api.post(
+        "/api/inventory/kits/",
+        {
+            "name": "Bad supplier kit",
+            "description": "x",
+            "sku": "KIT-BADSUP",
+            "minimum_stock": 0,
+            "reorder_quantity": 1,
+            "components": [{"component": component.pk, "quantity": 1}],
+            "supplier_terms": {"supplier": 999999, "unit_cost": "4.00"},
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400, response.data
+    assert "999999" in str(response.data)
+    assert not ItemSupplier.objects.filter(supplier_id=999999).exists()

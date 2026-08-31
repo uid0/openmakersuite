@@ -863,7 +863,26 @@ complete, and it was twice not:
     method provided. The read-modify-write now runs under `select_for_update()`
     inside `transaction.atomic()`, and a concurrent create that loses the
     `unique_together` race is caught and retried as an update rather than
-    surfacing as a 500.
+    surfacing as a 500. The retry is NARROWED to that race: it re-fetches and
+    re-raises the original `IntegrityError` when no row appeared, rather than
+    re-fetching unconditionally and turning a different constraint violation
+    into a misleading `DoesNotExist` with the real cause gone from the
+    traceback. **A correction to the review that prompted this**, measured
+    rather than argued: the foreign-key case it named cannot reach that branch,
+    because Django creates the FK `DEFERRABLE INITIALLY DEFERRED`, so an unknown
+    supplier id surfaces at COMMIT (`base.py:_commit`) and never enters the
+    `except` at all. The narrowing is therefore precision for an IMMEDIATE
+    constraint that is not the unique race, and no reachable caller produces one
+    today — so it is defence in depth with no test pinning that branch, which is
+    said here rather than left implied. The unknown supplier id is still worth
+    closing at its source and is: the kit form's `supplier_terms` is a
+    pass-through `DictField` that validates nothing inside it, so a bad id used
+    to reach the database and fail at commit, and is now refused with a 400
+    naming the id. No figure moves; what changes is which error an operator
+    sees. The kit row itself still survives that 400 — `KitSerializer.create` is
+    not wrapped in a transaction — which is PRE-EXISTING and shared with the
+    sibling "supplier is required" branch beside it, left as-is rather than
+    widened into transaction management nobody asked for.
 - **The generic `/item-suppliers/` endpoint is routed through the owner too**,
   and it is the writer the first derivation missed. `ItemSupplierViewSet` is a
   full `ModelViewSet`, so DRF's `ModelSerializer.update` did the partial write
@@ -871,6 +890,22 @@ complete, and it was twice not:
   recomputed the OLD price back over it and echoed **5.00** in the response,
   discarding what the operator typed. **PRE-EXISTING**: that endpoint and
   serializer predate this branch and base behaved identically. Now `$7.00`.
+  **That PATCH moves a SECOND figure, by construction rather than by a separate
+  decision.** The two costs are one fact, so honouring the typed unit price
+  re-derives its twin: on a link at `unit_cost 5.00 / package_cost 30.00 / pack
+  6`, base stored `(5.00, 30.00)` — it discarded the unit edit and left the
+  package price alone — and the endpoint now stores `(7.00, 42.00)`, because
+  7.00 a unit over a pack of 6 IS 42.00 a package. Measured against base
+  `7c078de`, not assumed. Screens that show the moved package price: the item
+  form's supplier editor (`SupplierRelationshipForm`'s Package Cost box), and
+  the scan page's "Package cost" and "Estimated Cost" rows, which read
+  `order_package_price`. The same path is reachable from the kit form, whose
+  `_apply_supplier_terms` sends `unit_cost` alone. This is a consequence of
+  fixing discarded operator input, NOT an independent change: base's stored
+  package price was only "correct" because base was refusing to record the
+  price the operator had actually typed. Pinned by
+  `test_naming_only_the_unit_cost_still_rederives_the_package_price`, labelled
+  BEFORE/AFTER rather than CONTROL for exactly this reason.
   `_TERM_FIELDS` widened to every writable column so the dimensional and
   bookkeeping fields the same request carries are not split back out of the
   owner. The gate could not see this shape at all — a `ModelSerializer` is a

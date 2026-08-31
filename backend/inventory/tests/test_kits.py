@@ -469,7 +469,7 @@ class TestKitTasks:
 
         seen = {}
 
-        def fake_lead_times(items, selected=None):
+        def fake_lead_times(items):
             seen["items"] = list(items)
             return {}
 

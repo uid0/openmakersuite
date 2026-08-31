@@ -203,7 +203,6 @@ def generate_demand_forecasts():
     # LeadTimeLog mean, else the primary supplier's estimate) to avoid N+1.
     from .services.component_forecast import _lead_time_days_by_item
     from .services.demand_forecast_engine import build_restock_events, forecast_item_by_interval
-    from .services.supplier_selection import NONE_ORDERABLE, select_suppliers_for
 
     InventoryItem = apps.get_model("inventory", "InventoryItem")
     DemandForecast = apps.get_model("inventory", "DemandForecast")
@@ -220,18 +219,7 @@ def generate_demand_forecasts():
             is_active=True, is_retired=False, is_serialized=False, is_kit=False
         )
     )
-    # Resolved once and used for two different questions: which supplier sets
-    # the lead time, and whether there IS one to buy through at all. A null
-    # lead time and an unbuyable item are different facts.
-    choice_by_item = select_suppliers_for(items) if items else {}
-    lead_by_item = (
-        _lead_time_days_by_item(
-            items,
-            {item_id: choice.item_supplier for item_id, choice in choice_by_item.items()},
-        )
-        if items
-        else {}
-    )
+    lead_by_item = _lead_time_days_by_item(items) if items else {}
 
     created = 0
     failed = 0
@@ -239,14 +227,7 @@ def generate_demand_forecasts():
         try:
             events = build_restock_events(item, end=end)
             lead = lead_by_item.get(item.id)
-            choice = choice_by_item.get(item.id)
-            result = forecast_item_by_interval(
-                item,
-                events,
-                now=now,
-                lead_time_days=lead,
-                no_orderable_supplier=(choice is not None and choice.reason == NONE_ORDERABLE),
-            )
+            result = forecast_item_by_interval(item, events, now=now, lead_time_days=lead)
             DemandForecast.objects.create(
                 item=item,
                 generated_at=now,

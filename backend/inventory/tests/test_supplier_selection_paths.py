@@ -17,11 +17,9 @@ last two surfaces that could name different suppliers for one item agree; see
 could not be written while the two rules disagreed AND the second one crashed.
 """
 
-from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.utils import timezone
 
 import pytest
 from rest_framework.test import APIClient
@@ -266,151 +264,6 @@ def test_reorder_data_offers_no_supplier_group_for_a_discontinued_only_item(api)
     assert response.data["items_without_orderable_supplier"] == []
 
 
-# ── Lead-time forecasting reads the same supplier as everything else ─────────
-
-
-def _serialized_item(name):
-    return _item(name, is_serialized=True)
-
-
-def _forecast_row(item, **kwargs):
-    from inventory.services.component_forecast import build_component_forecast
-
-    rows = [row for row in build_component_forecast(**kwargs) if row["item_id"] == str(item.id)]
-    assert rows, "item missing from forecast"
-    return rows[0]
-
-
-def _stock_and_daily_use(item, *, in_stock, consumed_today):
-    """``in_stock`` available units, and ``consumed_today`` depletions in a 1-day window.
-
-    With ``window_days=1`` the depletion rate is exactly ``consumed_today`` per
-    day, which keeps the reorder-point arithmetic legible.
-    """
-    from inventory.models import ComponentUsageEvent, SerializedComponent
-
-    for i in range(in_stock):
-        SerializedComponent.objects.create(
-            item=item,
-            serial_number=f"{item.sku}-stock-{i}",
-            status=SerializedComponent.Status.IN_STOCK,
-        )
-    for i in range(consumed_today):
-        component = SerializedComponent.objects.create(
-            item=item,
-            serial_number=f"{item.sku}-used-{i}",
-            status=SerializedComponent.Status.CONSUMED,
-        )
-        ComponentUsageEvent.objects.create(
-            component=component,
-            action=SerializedComponent.Action.CONSUME,
-            at=timezone.now() - timedelta(hours=1),
-        )
-
-
-def _observed_delivery(link, days):
-    """Record an actual delivery of ``days`` against ``link``.
-
-    The forecast prefers OBSERVED history over the supplier's estimate, so a
-    test that creates no ``LeadTimeLog`` never reaches that branch at all.
-    """
-    from reorder_queue.models import LeadTimeLog, PurchaseOrder
-
-    user = get_user_model().objects.filter(username="forecast").first() or (
-        get_user_model().objects.create_user(username="forecast", password="pw")
-    )
-    po = PurchaseOrder.objects.create(supplier=link.supplier, created_by=user)
-    return LeadTimeLog.objects.create(
-        item_supplier=link,
-        purchase_order=po,
-        order_date=timezone.now() - timedelta(days=days + 5),
-        expected_delivery_date=(timezone.now() - timedelta(days=5)).date(),
-        actual_delivery_date=timezone.now().date(),
-        estimated_lead_time_days=days,
-        actual_lead_time_days=days,
-        quantity_ordered=1,
-        quantity_received=1,
-    )
-
-
-def test_forecast_lead_time_uses_the_orderable_supplier():
-    item = _serialized_item("Fuse")
-    _cheap_dead_dear_live(item)
-
-    assert _forecast_row(item)["lead_time_days"] == 20.0
-
-
-def test_forecast_lead_time_is_unknown_when_nothing_is_orderable():
-    """``None`` is "we cannot tell you", which is the truth — not a dead vendor's 1 day.
-
-    The dead link carries DELIVERY HISTORY, so this drives the observed branch —
-    the one that takes precedence. Without those logs the test passed for the
-    wrong reason: it exercised only the estimated fallback, which is how the
-    observed branch went on reading dead links unnoticed.
-    """
-    item = _serialized_item("Relay")
-    dead = _link(item, "DeadOnly", unit_cost="1.00", lead=1, is_discontinued=True)
-    _observed_delivery(dead, 45)
-
-    assert _forecast_row(item)["lead_time_days"] is None
-
-
-def test_a_dead_vendors_delivery_history_does_not_contaminate_the_forecast():
-    """45 days of history from a vendor who no longer sells it, 7 from one who does.
-
-    Averaging both would forecast a 26-day wait that nobody will ever make you
-    serve, and would inflate the reorder point of every item a lapsed vendor
-    was ever slow on.
-    """
-    item = _serialized_item("Contactor")
-    dead = _link(item, "DeadSlow", unit_cost="1.00", lead=1, is_discontinued=True)
-    live = _link(item, "LiveQuick", unit_cost="9.00", lead=30)
-    _observed_delivery(dead, 45)
-    _observed_delivery(live, 7)
-
-    assert _forecast_row(item)["lead_time_days"] == 7.0
-
-
-def test_forecast_lead_time_follows_the_flagged_primary_not_a_faster_rival():
-    """History against a vendor we will NOT buy from must not set the reorder point.
-
-    The operator flagged SlowVendor primary, so the gate makes it binding on
-    every other surface. Delivery history exists only against a live FastVendor
-    link averaging 7 days. Averaging across every orderable link answered 7 for
-    an item that will in fact take 30 days to arrive — a reorder point roughly
-    four times too low, which is running out of stock while the numbers look
-    fine.
-    """
-    item = _serialized_item("Solenoid")
-    _link(item, "SlowVendor", unit_cost="9.00", lead=30, is_primary=True)
-    fast = _link(item, "FastVendor", unit_cost="1.00", lead=3)
-    _observed_delivery(fast, 7)
-
-    assert _forecast_row(item)["lead_time_days"] == 30.0
-
-
-def test_observed_history_still_beats_the_estimate_for_the_chosen_supplier():
-    """Scoping to the chosen supplier must not demote history where it applies.
-
-    What that supplier ACTUALLY delivered in beats what it claims it will.
-    """
-    item = _serialized_item("Rectifier")
-    chosen = _link(item, "OnlyVendor", unit_cost="4.00", lead=30)
-    _observed_delivery(chosen, 12)
-
-    assert _forecast_row(item)["lead_time_days"] == 12.0
-
-
-def test_forecast_lead_time_matches_the_item_property_it_claims_to_mirror():
-    """It previously ordered by ``-is_primary`` alone and could pick another row."""
-    item = _serialized_item("Diode")
-    _link(item, "Dear", unit_cost="9.00", lead=30)
-    _link(item, "Cheap", unit_cost="1.00", lead=3)
-
-    fresh = InventoryItem.objects.get(pk=item.pk)
-    assert _forecast_row(item)["lead_time_days"] == float(fresh.average_lead_time)
-
-
 # ── Printed kanban card ──────────────────────────────────────────────────────
 
 
@@ -508,12 +361,15 @@ def test_a_flagged_primary_gates_every_surface_alike(api):
 # ── Case counting is NOT a "which supplier" question ─────────────────────────
 #
 # Deriving from the READERS OF A SYMBOL is not the same as deriving from the
-# QUESTION BEING ASKED. ``current_cases`` reads ``primary_item_supplier`` but
-# asks a different question — how many units are in a box on the shelf — which
-# has nothing to do with who we buy from. Routing it through the orderability
-# rule made a ``None`` invert a boolean rather than degrade to a null: the item
-# whose last supplier just died is exactly the one that most needs a low-stock
-# alert, and it stopped getting one.
+# QUESTION BEING ASKED. ``current_cases`` reads the supplier helper but asks a
+# different question — how many units are in a box on the shelf — which has
+# nothing to do with who we buy from. Routing it through the orderability rule
+# suppressed a low-stock alert on exactly the item that most needs one, so it
+# reads ``quantity_per_package`` from ANY link instead.
+#
+# These pin BASE behaviour: this branch changes which SUPPLIER is chosen, and
+# must change no reorder flag anywhere. A dead vendor's recorded pack size
+# still describes the box already sitting on the shelf.
 
 
 def _case_based_item_with_a_dead_supplier():
@@ -577,52 +433,30 @@ def test_a_case_based_item_with_a_live_supplier_is_completely_unaffected():
 
 
 def test_a_case_based_item_stays_flagged_low_when_its_last_supplier_dies():
-    """Uncomputable is not "fine" — the alert stays up.
+    """The alert this branch must not suppress — identical to base.
 
-    This is the alert that was silently suppressed: ``current_cases`` returned
-    the raw 10, ``10 <= 1`` was False, and the item whose last supplier just
-    died dropped off every low-stock surface. The count is now reported as
-    UNKNOWN rather than fabricated, and unknown flags rather than clears.
+    Routing the pack size through the orderability-filtered helper made
+    ``current_cases`` return the raw 10, so ``10 <= 1`` was False and the item
+    whose last supplier just died dropped off every low-stock surface. The pack
+    size comes from any link, so the count and the flag are what they were.
     """
     item = _case_based_item_with_a_dead_supplier()
 
-    assert item.current_cases is None
+    assert item.current_cases == pytest.approx(0.2)
     assert item.needs_reorder is True
 
 
-def test_the_kanban_card_says_unknown_rather_than_counting_loose_units_as_cases():
-    """ "10 cases on hand" for 10 loose units is a wrong number on a printed card.
-
-    The card gets stuck on a shelf and outlives the screen it came from, so a
-    fabricated count is worse there than an honest "we cannot tell you".
-    """
+def test_the_kanban_card_counts_a_dead_vendors_cases_not_loose_units():
+    """ "10 cases on hand" for 10 loose units is a wrong number on a printed card."""
     from inventory.services.packaging import reorder_display
 
     item = _case_based_item_with_a_dead_supplier()
     display = reorder_display(item)
 
     assert display["unit"] == "case"
-    assert display["current"] is None
+    assert display["current"] == pytest.approx(0.2)
     assert display["needs_reorder"] is True
     assert "10 cases on hand" not in display["text"]
-    assert "unknown" in display["text"]
-
-
-def test_the_bridge_command_refuses_exactly_when_the_case_count_is_uncomputable():
-    """One predicate, so a refusal to migrate and an unknown count cannot drift.
-
-    Asserted together on purpose: these were two separate reads of "how many
-    units are in a box", and they disagreed.
-    """
-    from inventory.management.commands.bridge_case_reorder_to_packaging import Command
-
-    dead = _case_based_item_with_a_dead_supplier()
-    assert dead.current_cases is None
-    assert Command()._skip_reason(dead) == "no supplier to take a case size from"
-
-    live = _case_based_item_with_a_live_supplier()
-    assert live.current_cases == pytest.approx(0.2)
-    assert Command()._skip_reason(live) is None
 
 
 def test_needs_reorder_and_the_low_stock_query_agree_for_that_shape():
@@ -634,84 +468,3 @@ def test_needs_reorder_and_the_low_stock_query_agree_for_that_shape():
 
     assert item.needs_reorder is True
     assert matched is True
-
-
-# ── An honest null must not become a confident zero ──────────────────────────
-#
-# The class both of this branch's fix-review regressions belong to: a value made
-# honestly ``None`` gets collapsed by downstream arithmetic into a confident,
-# OPTIMISTIC answer, inverting a boolean and suppressing an alert on exactly the
-# item that most needs one. Asserting the honest null and stopping there is what
-# let it through — these follow the null into the arithmetic that consumes it.
-
-
-def test_an_item_nobody_can_order_is_flagged_however_much_stock_it_has():
-    """40 on hand, burning 2/day, and the only vendor is gone.
-
-    ``lead_time_days`` is honestly ``None``; ``reorder_point`` used to read that
-    as a ZERO-day wait — the most optimistic assumption available — giving the
-    hardest item to buy the shortest horizon and dropping it off the low-stock
-    report as well stocked. The remedy here is a supplier, not a purchase order,
-    so the row says which.
-    """
-    item = _serialized_item("Thermistor")
-    item.minimum_stock = 10
-    item.save(update_fields=["minimum_stock"])
-    _link(item, "GoneAway", unit_cost="1.00", lead=30, is_discontinued=True)
-    _stock_and_daily_use(item, in_stock=40, consumed_today=2)
-
-    row = _forecast_row(item, window_days=1)
-
-    assert row["available"] == 40
-    assert row["avg_daily_use"] == 2.0
-    assert row["lead_time_days"] is None
-    assert row["needs_reorder"] is True
-    assert row["no_orderable_supplier"] is True
-    # And no reorder point beside the flag to contradict it: "40 available /
-    # reorder point 10 / Reorder" is three statements that cannot all be true.
-    assert row["reorder_point"] is None
-
-    low_stock = _forecast_row(item, window_days=1, low_stock_only=True)
-    assert low_stock["item_id"] == str(item.id)
-
-
-def test_an_item_that_never_had_a_supplier_is_not_flagged_when_stock_is_healthy():
-    """A data gap is not an unbuyable item, and RULE 4 keeps them apart.
-
-    Flagging every item nobody ever recorded a supplier for — permanently,
-    regardless of stock — would bury the real alerts under a population that is
-    not short of anything. A surface people learn to ignore suppresses alerts
-    as surely as a missing one.
-    """
-    item = _serialized_item("Ferrite")
-    item.minimum_stock = 10
-    item.save(update_fields=["minimum_stock"])
-    _stock_and_daily_use(item, in_stock=100, consumed_today=2)
-
-    row = _forecast_row(item, window_days=1)
-
-    assert row["lead_time_days"] is None
-    assert row["reorder_point"] is None
-    assert row["no_orderable_supplier"] is False
-    assert row["needs_reorder"] is False
-
-
-def test_a_live_supplier_still_drives_an_ordinary_horizon():
-    """The unconditional flag must not swallow the normal path.
-
-    Same burn rate and buffer, a live 30-day vendor and no delivery history:
-    the ESTIMATE sets the reorder point (2/day x 30 + 10 = 70), and 100 on hand
-    is comfortably above it, so this item is not flagged.
-    """
-    item = _serialized_item("Capacitor")
-    item.minimum_stock = 10
-    item.save(update_fields=["minimum_stock"])
-    _link(item, "StillSelling", unit_cost="1.00", lead=30)
-    _stock_and_daily_use(item, in_stock=100, consumed_today=2)
-
-    row = _forecast_row(item, window_days=1)
-
-    assert row["lead_time_days"] == 30.0
-    assert row["reorder_point"] == 70
-    assert row["needs_reorder"] is False
-    assert row["no_orderable_supplier"] is False

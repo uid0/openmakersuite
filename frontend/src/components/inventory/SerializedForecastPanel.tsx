@@ -147,11 +147,9 @@ const SerializedForecastPanel: React.FC<Props> = ({
                   onClick={onSelectItem ? () => onSelectItem(row.item_id) : undefined}
                   style={{
                     cursor: onSelectItem ? 'pointer' : undefined,
-                    background: row.no_orderable_supplier
-                      ? 'var(--mantine-color-red-0)'
-                      : row.needs_reorder
-                        ? 'var(--mantine-color-orange-0)'
-                        : undefined,
+                    background: row.needs_reorder
+                      ? 'var(--mantine-color-orange-0)'
+                      : undefined,
                   }}
                 >
                   <Table.Td>
@@ -171,20 +169,9 @@ const SerializedForecastPanel: React.FC<Props> = ({
                   </Table.Td>
                   <Table.Td ta="right">{row.avg_daily_use}</Table.Td>
                   <Table.Td ta="right">{fmtDays(row.days_until_stockout)}</Table.Td>
-                  <Table.Td ta="right">
-                    {row.reorder_point === null ? '—' : row.reorder_point}
-                  </Table.Td>
+                  <Table.Td ta="right">{row.reorder_point}</Table.Td>
                   <Table.Td>
-                    {row.no_orderable_supplier ? (
-                      <>
-                        <Badge color="red" variant="filled">
-                          No supplier
-                        </Badge>
-                        <Text size="xs" c="dimmed">
-                          Add or reactivate a supplier link
-                        </Text>
-                      </>
-                    ) : row.needs_reorder ? (
+                    {row.needs_reorder ? (
                       <Badge color="orange" variant="filled">
                         Reorder
                       </Badge>

@@ -114,9 +114,14 @@ is stated in `ReorderRequestViewSet.mark_ordered`'s docstring and pinned by
 `inventory.services.supplier_selection` is the ONE answer to "which supplier for
 this item". Everything else reads it — `InventoryItem.primary_item_supplier` and
 the seven flat compat properties, `item_metrics` (the pinned ScanTTY contract),
-`component_forecast`, the order pad and the PO-building screens. Do not re-derive
-it: three copies of `ORDER BY -is_primary, unit_cost` had already drifted apart
-before op-2rsp collapsed them.
+the order pad and the PO-building screens. Do not re-derive it: three copies of
+`ORDER BY -is_primary, unit_cost` had already drifted apart before op-2rsp
+collapsed them.
+
+The forecasts (`component_forecast`, `demand_forecast_engine`) still resolve
+their own lead time and are NOT on this derivation. That is deliberate for now:
+routing them through it moves a reorder point and therefore a flag, and op-2rsp
+ships no flag change. They belong to the deferred piece below.
 
 The rule is three things, in this order:
 
@@ -163,46 +168,53 @@ Aggregates that value stock rather than choose a vendor (`lowest_unit_cost`,
 Deriving from the READERS OF A SYMBOL is not the same as deriving from the
 QUESTION BEING ASKED: it reads the helper but asks a different question — how
 many units are in a box on the shelf — which has nothing to do with who we buy
-from. That distinction is the point; where it happens to read from is not.
+from. It resolves its pack size from ANY link, orderable or not, because a dead
+vendor's recorded pack size still describes the box already on the shelf, and
+routing it through the orderability filter suppressed a low-stock alert.
 
-Where it reads from is now DECIDED: `InventoryItem.case_pack_size` wraps the
-orderability-filtered `primary_item_supplier`, agreeing with the other three
-readers of "how many units are in a box" — `quantity_per_package`,
-`item_metrics`'s `case_size`, and `bridge_case_reorder_to_packaging`, whose
-skip predicate is now that same helper so its refusal and the item's own
-inability to report a count cannot contradict each other. **Deferred and filed:
-one named derivation for pack size shared by all four readers, the way "which
-supplier" got one.** Ending a contradiction was the right size for that round;
-building a second derivation inside it was not. Do that work rather than
+**Deferred and filed: one named derivation for pack size, the way "which
+supplier" got one.** It still has several readers with no single owner —
+`current_cases` (any link) versus `quantity_per_package`, `item_metrics`'s
+`case_size` and `bridge_case_reorder_to_packaging` (the supplier helper) — so
+they can disagree on an item whose links differ. Do that work rather than
 rediscovering the split.
 
-### The alert-suppression class: an honest `None` must not become a confident zero
+### The alert-suppression class: IDENTIFIED, not fixed
 
 A value made honestly `None` gets collapsed by downstream arithmetic or a
 fallback into a confident, OPTIMISTIC answer — which inverts a boolean and
-suppresses an alert on exactly the item that most needs one. THREE instances,
-all on the op-2rsp branch, all made reachable by its own orderability filter:
+suppresses an alert on exactly the item that most needs one. THREE derived
+instances, all made reachable by op-2rsp's orderability filter:
 
-1. `current_cases` — a `None` supplier fell through to "1 unit per package", so
-   raw base units read as a case count and a case-based item stopped being
-   flagged low.
-2. `component_forecast`'s `reorder_point` — `lead_time_days or 0` computed a
+1. `InventoryItem.current_cases` — a `None` supplier falls through to "1 unit
+   per package", so raw base units read as a case count.
+2. `component_forecast`'s `reorder_point` — `lead_time_days or 0` computes a
    horizon at a zero-day wait.
-3. `demand_forecast_engine.forecast_item_by_interval` — the same collapse
-   emptied the demand-forecast report and the nightly reorder digest.
+3. `demand_forecast_engine.forecast_item_by_interval` — the same collapse in
+   the demand-forecast report and the nightly reorder digest.
 
-One remedy at all three: an unknown value is REPORTED as unknown (`None`, not a
-number) AND the item is flagged, never silently resolved into a confident
-optimistic number. Flag on `NONE_ORDERABLE` only — an item that never had a
-supplier recorded is a data gap, not an unbuyable item, and flagging that whole
-population floods the surface until people ignore it.
+**The fix was attempted across four review rounds and REVERTED wholesale.** Do
+not simply retry it. Each round's fix opened a new site: making these values
+null reached untyped frontend consumers (`current_cases.toFixed(1)` on the scan
+and item-detail pages), removed a low-stock alert that worked before, and
+re-collapsed `NO_SUPPLIERS` with `NONE_ORDERABLE` at one site while narrowing
+them at another. The blast radius of making a previously-total value nullable —
+across untyped consumers and boolean comparisons — is larger than the
+inconsistency it removes. op-2rsp therefore ships the supplier derivation ONLY,
+and changes no reorder flag anywhere.
+
+The redo is one coherent piece, not three patches: derive and retype EVERY
+consumer first, then represent unknown pack size / lead time / reorder point
+honestly, keeping `NO_SUPPLIERS` (a data gap) and `NONE_ORDERABLE` (unbuyable)
+distinct throughout — flagging the data-gap population regardless of stock
+floods the surface until people ignore it, which suppresses alerts too.
 
 Each instance was found late, and by the same mistake each time: COUNTING WHAT
-HAD BEEN SEEN INSTEAD OF DERIVING THE SET OF CONSUMERS. When you make a value
-nullable, derive its consumers and follow the null into the arithmetic that
-consumes it — asserting the honest null and stopping there is how all three
-survived. The same root shows up in the scoring's falsy guards, where a missing
-or zero value reads as "absent" or "bad" rather than "unknown".
+HAD BEEN SEEN INSTEAD OF DERIVING THE SET OF CONSUMERS — in the very task that
+exists to end that failure, and a derivation done because the count was
+challenged is still a derivation done late. The same root shows up in the
+scoring's falsy guards, where a missing or zero value reads as "absent" or
+"bad" rather than "unknown", and in `reorder_queue/views.py`'s `unit_cost or 0`.
 
 ### The pre-send boundary: when a PO is still the shop's own document
 

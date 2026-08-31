@@ -118,10 +118,13 @@ the order pad and the PO-building screens. Do not re-derive it: three copies of
 `ORDER BY -is_primary, unit_cost` had already drifted apart before op-2rsp
 collapsed them.
 
-The forecasts (`component_forecast`, `demand_forecast_engine`) still resolve
-their own lead time and are NOT on this derivation. That is deliberate for now:
-routing them through it moves a reorder point and therefore a flag, and op-2rsp
-ships no flag change. They belong to the deferred piece below.
+The forecasts (`component_forecast`, `demand_forecast_engine`) resolve their own
+lead time and are NOT on this derivation, permanently. Both read EVERY link,
+inactive and discontinued included, because "how long does a replacement take to
+arrive" is answered by whoever last shipped one — and routing them through the
+orderability filter drops a dead-vendor item off the demand-forecast report and
+the nightly digest entirely. op-c1ke pins that with a mutation test; see "The
+alert-suppression class" below.
 
 The rule is three things, in this order:
 
@@ -164,64 +167,121 @@ call site's readability. It has no rule of its own.
 Aggregates that value stock rather than choose a vendor (`lowest_unit_cost`,
 `total_value`, the report averages) deliberately still read every link.
 
-`InventoryItem.current_cases` is EXCLUDED from this supplier derivation.
-Deriving from the READERS OF A SYMBOL is not the same as deriving from the
-QUESTION BEING ASKED: it reads the helper but asks a different question — how
-many units are in a box on the shelf — which has nothing to do with who we buy
-from. It resolves its pack size from the FIRST link in `Meta.ordering`,
-orderable or not, because a dead vendor's recorded pack size still describes the
-box already on the shelf, and routing it through the orderability filter
-suppressed a low-stock alert.
+`InventoryItem.current_cases` is EXCLUDED from this supplier derivation, and
+still is. Deriving from the READERS OF A SYMBOL is not the same as deriving from
+the QUESTION BEING ASKED: it asks how many units are in a box on the shelf,
+which has nothing to do with who we buy from. See the pack-size derivation
+below, which now owns that answer.
 
-**Deferred and filed: one named derivation for pack size, the way "which
-supplier" got one.** It still has several readers with no single owner —
-`current_cases` (the first link, orderable or not) versus
-`quantity_per_package`, `item_metrics`'s `case_size` and
-`bridge_case_reorder_to_packaging` (all three the supplier helper) — so they can
-disagree on an item whose links differ. Do that work rather than rediscovering
-the split.
+### How many units are in a box: one derivation, three states (op-c1ke)
 
-### The alert-suppression class: IDENTIFIED, not fixed
+`inventory.services.pack_size` is the ONE answer to "how many base units are in
+one package of this item". It is the sibling of `supplier_selection` and the
+same discipline: one module, one interpretation of the column, entry points that
+differ only in WHICH row they ask.
+
+`pack_size_of(link)` is the only place `ItemSupplier.quantity_per_package` is
+turned into an answer, and it returns a `PackSize` carrying one of THREE states
+that must never collapse:
+
+* `PACK_SIZE_KNOWN` — a link records a usable size. **A recorded 1 is KNOWN.**
+  The column defaults to 1, so reading 1 as "missing" would make every
+  unconfigured link unknown — a flood, which suppresses alerts of its own. "Did
+  this vendor declare a CASE?" is a different question with its own answer,
+  `declares_a_case`, which is the op-ev14 ordering ladder's entry condition.
+* `PACK_SIZE_NOT_RECORDED` — no link records one. A data gap; the operator adds
+  a supplier.
+* `PACK_SIZE_RECORDED_ZERO` — a link records `0`, a box holding no units.
+  `PositiveIntegerField` permits it and `MinValueValidator(1)` only bites under
+  `full_clean()`, so `InventoryItemViewSet._sync_primary_supplier` — an
+  `update_or_create` — persists a posted `0`. The operator fixes that row.
+
+Two questions, and collapsing them is a bug in either direction:
+
+* `shelf_pack_size(item)` — the box ALREADY ON THE SHELF: the FIRST link in
+  `Meta.ordering`, orderable or not. Stock on hand was bought from somebody,
+  possibly somebody we can no longer buy from, and their recorded pack size
+  still describes the box. Filtering for orderability here is what suppressed a
+  low-stock alert in op-2rsp round 1. Only the first row is consulted, and a
+  zero there is UNKNOWN rather than a reason to scan on — which vendor's box is
+  on the shelf is unknowable, so a later row is another guess, not a better
+  answer. Read by `current_cases`.
+* `order_pack_size(item)` — the box THE NEXT ORDER SHIPS IN, through
+  `InventoryItem.primary_item_supplier` (read via the model accessor, which is
+  memoised and prefetch-riding; calling the service again costs a second query
+  and `test_reading_all_flat_fields_is_one_query_unprefetched_and_cached` says
+  so). Read by `InventoryItem.quantity_per_package`, `item_metrics`'s
+  `case_size` and `bridge_case_reorder_to_packaging`.
+
+`inventory/tests/test_pack_size_single_owner.py` is the build gate: it walks
+every non-test module under `backend/` with the AST and pins the exact set of
+direct reads of the column. A new one anywhere fails until it goes through the
+derivation or is added to that allowlist with a reason. The allowlist holds only
+the column's own definition, verbatim copies (`PriceHistory`, the payload
+fields) and the write path — never a derivation.
+
+### The alert-suppression class: CLOSED (op-c1ke)
 
 A value made honestly `None` gets collapsed by downstream arithmetic or a
 fallback into a confident, OPTIMISTIC answer — which inverts a boolean and
-suppresses an alert on exactly the item that most needs one. THREE derived
-instances, ALL PREDATING op-2rsp and all still live:
+suppresses an alert on exactly the item that most needs one. The rule, in one
+sentence: **a value the system does not know must never be presented, computed
+with, or compared against as though it were a known number — and must never
+make an item look adequately stocked.**
 
-1. `InventoryItem.current_cases` — no usable pack size on the first supplier
-   link falls through to "1 unit per package", so raw base units read as a case
-   count. Reachable for an item with no links at all, and for one whose first
-   link records `quantity_per_package` of 0.
-2. `component_forecast`'s `reorder_point` — `lead_time_days or 0` computes a
-   horizon at a zero-day wait.
-3. `demand_forecast_engine.forecast_item_by_interval` — the same collapse in
-   the demand-forecast report and the nightly reorder digest.
+`inventory/tests/test_alert_suppression.py` is where this class lives. Every
+test there is labelled BEFORE/AFTER (a flag that moved) or CONTROL (one that
+must not), against the invariant that let it ship: *no item's alerting or
+flagging behaviour changes versus base EXCEPT where base was suppressing an
+alert because a value was unknown.*
 
-Do not read these as consequences of the orderability filter. op-2rsp briefly
-WIDENED their reachability by routing each through the filtered helper, then
-tried to represent the resulting unknowns honestly; both halves were reverted,
-so every site is back to base and the class is exactly as reachable as it has
-always been. Reverting the supplier derivation would not close any of it.
+What moved, and what deliberately did not:
 
-**The fix was attempted across four review rounds and REVERTED wholesale.** Do
-not simply retry it. Each round's fix opened a new site: making these values
-null reached untyped frontend consumers (`current_cases.toFixed(1)` on the scan
-and item-detail pages), removed a low-stock alert that worked before, and
-re-collapsed `NO_SUPPLIERS` with `NONE_ORDERABLE` at one site while narrowing
-them at another. The blast radius of making a previously-total value nullable —
-across untyped consumers and boolean comparisons — is larger than the
-inconsistency it removes. op-2rsp therefore ships the supplier derivation ONLY,
-and changes no reorder flag anywhere.
+1. **`current_cases` — FIXED, flags moved.** No usable pack size fell through to
+   "1 unit per package", so raw base units read as a case count. It is now
+   `None`, and `needs_reorder` judges such an item in the unit that CAN be
+   counted: `current_stock <= minimum_stock` — the predicate `low_stock_q` has
+   always applied to these items in SQL, so the property and its database twin
+   now agree on the shape where they visibly disagreed — OR base's own
+   comparison, kept so an unknown may ADD a flag but can never REMOVE one.
+2. **`component_forecast`'s `reorder_point` — expression fixed, NO flag change.**
+   The row now says `lead_time_known: false` and the number is a stated LOWER
+   BOUND (safety stock alone) rather than a horizon at a fabricated zero-day
+   wait.
+3. **`demand_forecast_engine` — expression fixed, NO flag change.** The
+   threshold falls back to the due date itself.
 
-The redo is one coherent piece, not three patches: derive and retype EVERY
-consumer first, then represent unknown pack size / lead time / reorder point
-honestly, keeping `NO_SUPPLIERS` (a data gap) and `NONE_ORDERABLE` (unbuyable)
-distinct throughout — flagging the data-gap population regardless of stock
-floods the surface until people ignore it, which suppresses alerts too.
+Why 2 and 3 change no flag, and this is the load-bearing part: `average_lead_time`
+is non-nullable with a default, so ANY link supplies an estimate — **a
+discontinued one included**. The entire population reaching "no lead time known"
+is therefore items with NO supplier link at all. Flagging that population
+regardless of what a lead time would have said turns a DATA GAP into a permanent
+alert, which is exactly op-2rsp round 4's failure: flooding the surface until
+people ignore it suppresses alerts too. `NO_SUPPLIERS` (a data gap) and
+`NONE_ORDERABLE` (unbuyable) point in OPPOSITE directions and must stay apart
+everywhere. Do NOT route `_lead_time_days_by_item` through the supplier
+derivation — a mutation test pins that; it is what dropped a dead-vendor item
+off the demand-forecast report and the nightly digest in round 5.
 
-The same falsy-guard root shows up elsewhere and is worth recognising on sight:
-in the scoring's guards, where a missing or zero value reads as "absent" or
-"bad" rather than "unknown", and in `reorder_queue/views.py`'s `unit_cost or 0`.
+`current_cases` is nullable on the wire. Every consumer moved in the same commit:
+`InventoryItemSerializer` (`allow_null`), the three web sites that called
+`.toFixed(1)` (`InventoryList`, item detail, scan page) and `types/index.ts`.
+ScanTTY's `CurrentCases` was already a nil-checked `*float64`; its `case_size`
+was already `*int` and reads 0 as `null` now — a cross-project VALUE change,
+named as one. Round 5 shipped this null against untyped consumers and blanked
+two member-facing pages; that is why the consumer set is DERIVED, not recalled.
+
+**Reported, not fixed, and filed separately.** `unit_cost or 0` in
+`reorder_queue/views.py` (`create_optimized_order` lines and totals,
+`reorder_data`), `unit_cost or Decimal("0.00")` in
+`purchase_orders.create_purchase_order`, and `line_entry.default_unit_cost`'s
+`Decimal("0.00")` are the same rule on a different fact: they distort MONEY
+rather than suppressing an alert, so they need their own invariant and their own
+tests. Filed as `oms-falsy-zero-money-guards`. The scoring's own falsy guards
+(`test_supplier_scoring.py`, REPORTED NOT FIXED, retuning reserved to the
+captain) and `get_expected_delivery_date`'s `and self.average_lead_time` — where
+a KNOWN zero-day lead time yields no date — are the same shape and belong with
+them.
 
 ### The pre-send boundary: when a PO is still the shop's own document
 

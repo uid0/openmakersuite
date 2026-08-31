@@ -166,6 +166,50 @@ describe('InventoryItemDetailPage', () => {
     expect(screen.getByText(/Stock Information/i)).toBeInTheDocument();
   });
 
+  // op-c1ke: `current_cases` is null when nothing records how many units a case
+  // holds. Round 5 of PR #1035 shipped that null against a frontend that still
+  // declared it a number and called `.toFixed(1)`, which threw and blanked this
+  // page for an item whose only supplier had been discontinued.
+  it('renders a case-based item whose case size is not recorded', async () => {
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockItem,
+        use_case_based_reorder: true,
+        minimum_cases: 1,
+        reorder_cases: 2,
+        current_cases: null,
+        needs_reorder: true,
+      },
+    });
+
+    renderPage();
+
+    // The page still renders — the item name proves it did not blank.
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/case size not recorded/i)).toBeInTheDocument();
+  });
+
+  it('renders a case-based item whose case size IS recorded', async () => {
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockItem,
+        use_case_based_reorder: true,
+        minimum_cases: 1,
+        reorder_cases: 2,
+        current_cases: 2.5,
+      },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/2\.5 cases/)).toBeInTheDocument();
+  });
+
   it('displays stock history chart', async () => {
     renderPage();
 

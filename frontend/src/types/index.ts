@@ -220,7 +220,11 @@ export interface InventoryItem {
   use_case_based_reorder: boolean;
   minimum_cases: number;
   reorder_cases: number;
-  current_cases: number;
+  // `null` when nothing records how many units a case holds — no supplier link,
+  // or one recording a pack size of 0 (op-c1ke). NOT zero and NOT the base-unit
+  // count: the server used to send raw units here, so "10 cases" meant ten
+  // loose units and a low item stopped being flagged. Render it as unknown.
+  current_cases: number | null;
   supplier: number | null;
   supplier_name: string | null;
   supplier_sku: string | null;

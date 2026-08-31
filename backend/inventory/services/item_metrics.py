@@ -19,6 +19,7 @@ The ``payload`` dict shape is the pinned contract consumed by
 from django.db.models import Q, Sum
 
 from inventory.models import MaintenanceMaterial, WorkOrder, WorkOrderMaterialUsage
+from inventory.services.pack_size import pack_size_of
 from inventory.services.supplier_selection import primary_suppliers_for
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
 
@@ -279,7 +280,17 @@ def compute_item_metrics_batch(items):
         unit_cost = supplier.unit_cost if supplier else None
         package_cost = supplier.package_cost if supplier else None
         lead_time_days = supplier.average_lead_time if supplier else None
-        case_size = supplier.quantity_per_package if supplier else None
+        # ``case_size`` — units per case from that same link, read through the
+        # ONE pack-size derivation (op-c1ke) rather than off the column. Fed the
+        # row ``primary_suppliers_for`` already resolved, so the query budget
+        # above is unchanged. It was already ``None`` for an item with no
+        # orderable supplier; it is now ``None`` for a link recording
+        # ``quantity_per_package`` of 0 as well, because a box holding no units
+        # is not a case size we know. ⚠️ ``case_size`` is the pinned ScanTTY
+        # contract — the field is ``*int`` and null-tolerant there and nothing
+        # reads the value — but this is a cross-project VALUE change and is
+        # named as one in the PR.
+        case_size = pack_size_of(supplier).units
 
         committed = quantity_committed.get(item.id, 0.0)
         # Cost shown on the row: the case cost for case-based items (what you

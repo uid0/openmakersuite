@@ -10,7 +10,7 @@ from django.conf import settings
 from django.test import TestCase, override_settings
 
 from index_cards.services import IndexCardRenderer
-from inventory.models import InventoryItem
+from inventory.models import InventoryItem, ItemSupplier, Supplier
 
 
 class IndexCardRendererTests(TestCase):
@@ -277,6 +277,18 @@ class ReorderAtLineTests(TestCase):
         }
         return InventoryItem.objects.create(**{**defaults, **kwargs})
 
+    def _pack(self, item: InventoryItem, quantity_per_package: int) -> ItemSupplier:
+        """Give ``item`` a supplier link recording ``quantity_per_package``."""
+        return ItemSupplier.objects.create(
+            item=item,
+            supplier=Supplier.objects.create(
+                name=f"Vendor-{item.pk}-{quantity_per_package}",
+                supplier_type=Supplier.SupplierType.ONLINE,
+            ),
+            supplier_sku="sku",
+            quantity_per_package=quantity_per_package,
+        )
+
     def test_plain_item_reads_in_base_units(self) -> None:
         item = self._item(minimum_stock=3)
 
@@ -284,8 +296,30 @@ class ReorderAtLineTests(TestCase):
 
     def test_case_based_item_still_reads_in_cases(self) -> None:
         item = self._item(use_case_based_reorder=True, minimum_cases=1)
+        self._pack(item, 12)
 
         self.assertEqual(self.renderer._reorder_at_line(item), "Reorder at: 1 case")
+
+    def test_case_based_item_with_no_recorded_case_size_reads_in_base_units(self) -> None:
+        """A card cannot say "reorder at 1 case" when nothing records a case (op-c1ke).
+
+        The printed card outlives the screen it came from, so a threshold in a
+        unit the system cannot evaluate is worse here than anywhere else. It
+        names base units — which is exactly what ``needs_reorder`` judges such
+        an item on.
+        """
+        item = self._item(use_case_based_reorder=True, minimum_cases=1, minimum_stock=3)
+
+        self.assertEqual(self.renderer._reorder_at_line(item), "Reorder at: 3 units")
+
+    def test_case_based_item_whose_only_link_records_a_zero_case_reads_in_base_units(
+        self,
+    ) -> None:
+        """A box holding no units is not a case size, and must not print as one."""
+        item = self._item(use_case_based_reorder=True, minimum_cases=1, minimum_stock=3)
+        self._pack(item, 0)
+
+        self.assertEqual(self.renderer._reorder_at_line(item), "Reorder at: 3 units")
 
     def test_pack_counting_item_reads_in_its_own_packs(self) -> None:
         from inventory.models import PackagingLevel

@@ -29,6 +29,13 @@ This module turns that usage history into a demand forecast:
   the supplier's estimated ``average_lead_time``), and ``safety_stock`` reuses
   the item's existing ``minimum_stock`` buffer.
 
+  When NO lead time is known — which, because ``average_lead_time`` is a
+  non-nullable column with a default, means only an item carrying no supplier
+  link at all — that formula cannot be evaluated. The row then reports
+  ``lead_time_days: null``, ``lead_time_known: false`` and a ``reorder_point``
+  that is the safety stock ALONE: a lower bound, stated as one, rather than a
+  horizon computed at a fabricated zero-day wait (op-c1ke).
+
 The output feeds the inventory + purchasing overview dashboards.
 """
 
@@ -272,7 +279,24 @@ def build_component_forecast(
 
         lead_time_days = lead_time_by_item.get(item.id)
         safety_stock = item.minimum_stock or 0
-        lead_component = avg_daily_use * (lead_time_days or 0)
+        # An UNKNOWN lead time is not a zero-day one (op-c1ke). Spelled
+        # ``is None`` rather than ``or 0`` so a genuine zero-day wait — a local
+        # vendor you collect from the same afternoon — takes the arithmetic
+        # branch instead of the "we were never told" one. The two produce the
+        # same lead component today; they are different facts, and a guard
+        # written with ``or`` cannot keep them apart.
+        lead_time_known = lead_time_days is not None
+        lead_component = avg_daily_use * lead_time_days if lead_time_known else 0.0
+        # With no lead time the reorder point is a LOWER BOUND — the operator's
+        # own safety stock, with the lead component missing rather than
+        # fabricated at zero. ``lead_time_known`` says so on the row so no
+        # consumer reads the number as complete. The flag is deliberately NOT
+        # widened here: the whole population reaching this branch is items with
+        # no supplier link at all, and flagging that population regardless of
+        # what a lead time would have said turns a DATA GAP into a permanent
+        # alert — the failure mode AGENTS.md records from op-2rsp round 4. The
+        # actionable fact for those items is the missing supplier, and
+        # ``lead_time_days: null`` is what says it.
         reorder_point = int(math.ceil(lead_component + safety_stock))
         needs_reorder = available <= reorder_point
 
@@ -301,7 +325,12 @@ def build_component_forecast(
                 "projected_stockout_date": (
                     projected_stockout_date.isoformat() if projected_stockout_date else None
                 ),
-                "lead_time_days": round(lead_time_days, 1) if lead_time_days is not None else None,
+                "lead_time_days": round(lead_time_days, 1) if lead_time_known else None,
+                # Whether ``reorder_point`` includes a lead component at all.
+                # ``False`` means the number below is the safety stock alone —
+                # a lower bound, not the classic reorder point this module's
+                # docstring describes (op-c1ke).
+                "lead_time_known": lead_time_known,
                 "safety_stock": safety_stock,
                 "reorder_point": reorder_point,
                 "needs_reorder": needs_reorder,

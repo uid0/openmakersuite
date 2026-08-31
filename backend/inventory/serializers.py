@@ -553,8 +553,13 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     )
     active_reorder_request = serializers.SerializerMethodField()
 
-    # Case-based reordering fields
-    current_cases = serializers.FloatField(read_only=True)
+    # Case-based reordering fields. ``current_cases`` is NULL when nothing
+    # records how many units a case holds — see ``InventoryItem.current_cases``
+    # (op-c1ke). Base sent the raw base-unit count there, so "10 cases" meant
+    # ten loose units. Every consumer is null-aware: the three web pages that
+    # render it show an em dash, and ScanTTY's ``CurrentCases`` was already a
+    # nil-checked ``*float64``.
+    current_cases = serializers.FloatField(read_only=True, allow_null=True)
 
     # Hazmat writable fields. These moved off InventoryItem onto the 1:1
     # InventorySafetyProfile (#885), so they are declared explicitly here (they

@@ -86,6 +86,7 @@ from django.db.models import Q
 
 from inventory.models import InventoryItem, ItemSupplier
 from inventory.services.kits import build_kit_snapshot
+from inventory.services.pack_size import declares_a_case
 from inventory.services.packaging import base_reorder_quantity, counts_in_packs
 
 from ..models import PurchaseOrder, PurchaseOrderItem
@@ -575,8 +576,14 @@ def default_quantity(item_supplier):
     quantity = base_reorder_quantity(item)
 
     if not counts_in_packs(item):
-        case_size = item_supplier.quantity_per_package or 1
-        if case_size > 1:
+        # "Does this vendor declare a case?" through the ONE pack-size
+        # derivation (op-c1ke) — the same question :func:`repeat_quantity` asks
+        # via ``order_package_size``, so the two cannot drift into disagreeing
+        # about what a package is. Identical rounding for every recorded value;
+        # what changes is that a recorded 0 is no longer indistinguishable from
+        # a vendor that genuinely sells singles.
+        case_size = declares_a_case(item_supplier)
+        if case_size is not None:
             quantity = -(-quantity // case_size) * case_size
 
     return max(1, quantity)

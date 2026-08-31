@@ -99,6 +99,58 @@ describe('ScanPage', () => {
     expect(screen.getByText(/average lead time:/i)).toBeInTheDocument();
   });
 
+  // op-c1ke: `current_cases` is null when nothing records how many units a case
+  // holds. Round 5 of PR #1035 shipped that null against a frontend that still
+  // declared it a number and called `.toFixed(1)`, which threw and blanked this
+  // whole page for a scanned item whose supplier had died.
+  test('renders a case-based item whose case size is not recorded', async () => {
+    localStorage.setItem('token', 'test-token');
+
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockItem,
+        use_case_based_reorder: true,
+        minimum_cases: 1,
+        reorder_cases: 2,
+        current_cases: null,
+        needs_reorder: true,
+      },
+    });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+
+    await renderWithRouter();
+
+    // The page still renders — the item name proves it did not blank.
+    await screen.findByText('Test Widget');
+    expect(screen.getByText(/case size not recorded/i)).toBeInTheDocument();
+    expect(screen.queryByText(/50\.0 cases/)).toBeNull();
+  });
+
+  test('renders a case-based item whose case size IS recorded', async () => {
+    localStorage.setItem('token', 'test-token');
+
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockItem,
+        use_case_based_reorder: true,
+        minimum_cases: 1,
+        reorder_cases: 2,
+        current_cases: 2.5,
+        needs_reorder: false,
+      },
+    });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+
+    await renderWithRouter();
+
+    await screen.findByText('Test Widget');
+    expect(screen.getByText(/2\.5 cases/)).toBeInTheDocument();
+  });
+
   test('displays low stock warning when needed', async () => {
     // Set logged in state to avoid auto-submit
     localStorage.setItem('token', 'test-token');

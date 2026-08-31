@@ -44,6 +44,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from inventory.models import InventoryItem, PackagingLevel
+from inventory.services.pack_size import declares_a_case, order_pack_size
 from inventory.services.packaging import validate_packaging_chain
 
 CASE_LEVEL_NAME = "case"
@@ -90,7 +91,7 @@ class Command(BaseCommand):
                     self.stdout.write(f"  skip ({reason}): {item.name}")
                     continue
 
-                case_size = item.primary_item_supplier.quantity_per_package
+                case_size = order_pack_size(item).units
                 before = item.needs_reorder
                 # What the trigger will say once bridged, computed without
                 # writing: WHOLE cases against minimum_cases, which is the
@@ -130,13 +131,24 @@ class Command(BaseCommand):
             self.stdout.write("Dry run — nothing written. Re-run with --apply to commit.")
 
     def _skip_reason(self, item: InventoryItem) -> str | None:
-        """Why ``item`` cannot be bridged, or ``None`` when it can."""
+        """Why ``item`` cannot be bridged, or ``None`` when it can.
+
+        The case size is read through the ONE pack-size derivation (op-c1ke),
+        which reports "no link records one" and "a link records 0" separately
+        rather than collapsing both into a falsy guard. The eligibility rule is
+        unchanged: only a vendor that declares a CASE (more than one unit per
+        package) gives a rung worth writing, so a pack size of 1 — genuine
+        singles — and an unknown one are both skipped, each with its own reason.
+        """
         if item.packaging_levels.all():
             return "already has packaging levels"
         link = item.primary_item_supplier
         if link is None:
             return "no supplier to take a case size from"
-        if not link.quantity_per_package or link.quantity_per_package <= 1:
+        pack = order_pack_size(item)
+        if not pack.is_known:
+            return f"supplier records no usable quantity_per_package ({pack.state})"
+        if declares_a_case(link) is None:
             return "supplier quantity_per_package is not more than 1"
         return None
 

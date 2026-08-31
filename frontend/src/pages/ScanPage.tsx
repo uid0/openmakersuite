@@ -352,7 +352,9 @@ const ScanPage: React.FC = () => {
                 <div className="info-item">
                   <span className="label">Current Cases:</span>
                   <span className={`value ${item.needs_reorder ? 'low-stock' : ''}`}>
-                    {item.current_cases.toFixed(1)} cases
+                    {item.current_cases === null
+                      ? '— (case size not recorded)'
+                      : `${item.current_cases.toFixed(1)} cases`}
                   </span>
                 </div>
                 <div className="info-item">

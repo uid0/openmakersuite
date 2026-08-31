@@ -891,7 +891,9 @@ const InventoryItemDetailPage: React.FC = () => {
                     <Group justify="space-between">
                       <Text size="sm">Current Cases:</Text>
                       <Text size="sm" fw={600}>
-                        {item.current_cases.toFixed(1)} cases
+                        {item.current_cases === null
+                          ? '— (case size not recorded)'
+                          : `${item.current_cases.toFixed(1)} cases`}
                       </Text>
                     </Group>
                   )}

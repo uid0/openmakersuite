@@ -58,7 +58,9 @@ const InventoryCard: React.FC<InventoryCardProps> = ({
                 <span
                   className={`stock-value ${item.needs_reorder ? 'low' : 'good'}`}
                 >
-                  {item.current_cases.toFixed(1)}
+                  {item.current_cases === null
+                    ? '—'
+                    : item.current_cases.toFixed(1)}
                 </span>
               </div>
               <div className="stock-row">

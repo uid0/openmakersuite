@@ -315,10 +315,16 @@ def reorder_threshold(item: "InventoryItem") -> tuple[int, str]:
     legacy ``use_case_based_reorder`` items keep their ``minimum_cases``/"case"
     wording; everything else is ``minimum_stock`` base units. Callers own
     pluralisation.
+
+    A case-based item whose case size is NOT KNOWN is named in base units
+    instead (op-c1ke). "Reorder at: 1 case" is a threshold nothing can evaluate
+    when nobody has recorded how many units a case holds, and this line is
+    printed on the kanban card that outlives the screen it came from. It is the
+    same threshold ``needs_reorder`` actually judges such an item on.
     """
     if counts_in_packs(item):
         return item.minimum_stock, item.count_level.name
-    if item.use_case_based_reorder:
+    if item.use_case_based_reorder and item.current_cases is not None:
         return item.minimum_cases, "case"
     return item.minimum_stock, item.base_unit or "unit"
 
@@ -356,13 +362,18 @@ def reorder_display(item: "InventoryItem") -> dict:
     item's ``count_mode`` gives meaning to.
     """
     threshold, unit = reorder_threshold(item)
+    current_cases = None if counts_in_packs(item) else item.current_cases
     if counts_in_packs(item):
         current: float = count_at_level(item)
         quantity = item.reorder_quantity
-    elif item.use_case_based_reorder:
-        current = item.current_cases
+    elif item.use_case_based_reorder and current_cases is not None:
+        current = current_cases
         quantity = item.reorder_cases
     else:
+        # Either a plain base-unit item, or a case-based one whose case size is
+        # not known (op-c1ke) — ``reorder_threshold`` has already named this
+        # pair in base units, and "10 cases on hand" for ten loose units is a
+        # wrong number on a printed card.
         current = item.current_stock
         quantity = item.reorder_quantity
 
@@ -391,7 +402,10 @@ def low_stock_q() -> Q:
     ``current_stock <= minimum_stock`` — including ``use_case_based_reorder``
     ones, whose SQL filter has always been that base-unit comparison even though
     the property compares cases (a pre-existing divergence this deliberately
-    preserves). Pack-counting items compare WHOLE packs instead::
+    preserves *where the case size is known*; where it is NOT, ``needs_reorder``
+    now falls back to this same comparison, so the two agree on the shape where
+    they used to disagree visibly — op-c1ke). Pack-counting items compare WHOLE
+    packs instead::
 
         floor(current_stock / base_units) <= minimum_stock
         ⟺ current_stock < (minimum_stock + 1) × base_units

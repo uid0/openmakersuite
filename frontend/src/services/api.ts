@@ -1011,6 +1011,12 @@ export interface SerializedForecastRow {
   days_until_stockout: number | null;
   projected_stockout_date: string | null;
   lead_time_days: number | null;
+  // Whether `reorder_point` includes a lead-time component at all (op-c1ke).
+  // `false` — only for an item carrying no supplier link — means the number
+  // below is the safety stock ALONE, a lower bound rather than the classic
+  // `avg_daily_use × lead_time + safety_stock` reorder point. Label it as
+  // incomplete rather than quoting it as a horizon.
+  lead_time_known: boolean;
   safety_stock: number;
   reorder_point: number;
   needs_reorder: boolean;

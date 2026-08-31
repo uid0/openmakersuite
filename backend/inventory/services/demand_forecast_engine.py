@@ -162,6 +162,11 @@ def forecast_item_by_interval(
     ``insufficient_history`` and flags nothing (guessing a cadence from a single
     purchase would be noise, and a false alert costs more than a missing one).
 
+    ``lead_time_days`` of ``None`` means no lead time is known, and the flag
+    threshold falls back to the due date itself rather than to a fabricated
+    zero-day wait — see the comment at the comparison for why that population
+    is deliberately not flagged earlier.
+
     Args:
         item: the inventory item; only read for ``current_stock`` when
             ``available`` is not given, so pure tests may pass ``None``.
@@ -209,7 +214,22 @@ def forecast_item_by_interval(
     # drops the fractional part, which would bias every prediction early.
     predicted_next_reorder_date = last_restock_date + timedelta(days=round(avg_interval_days))
     days_until_due = float((predicted_next_reorder_date - now.date()).days)
-    needs_reorder = days_until_due <= (lead_time_days or 0)
+    # The flag threshold. An UNKNOWN lead time is not a zero-day one (op-c1ke):
+    # spelled ``is None`` rather than ``or 0`` so a genuine zero-day wait keeps
+    # its own branch and cannot be silently re-collapsed by a later edit.
+    #
+    # With no lead time the only thing this engine can still say is WHEN the
+    # item is due, so the threshold is 0 — flagged once it is due, never
+    # earlier, and the row records ``lead_time_days: None`` so nobody reads a
+    # horizon into it. That is deliberately not widened into "flag it anyway":
+    # the entire population reaching this branch is items with no supplier link
+    # at all (``average_lead_time`` is non-nullable with a default, so any link
+    # supplies an estimate — a DISCONTINUED link included, which is why an item
+    # whose last vendor died keeps its full lead-time threshold here). Flagging
+    # the no-supplier population regardless of cadence would turn a data gap
+    # into a permanent alert.
+    flag_threshold = lead_time_days if lead_time_days is not None else 0.0
+    needs_reorder = days_until_due <= flag_threshold
 
     return ForecastResult(
         method=METHOD_RESTOCK_INTERVAL,

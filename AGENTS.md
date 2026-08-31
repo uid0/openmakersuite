@@ -185,52 +185,24 @@ same discipline: one module, one interpretation of the column, entry points that
 differ only in WHICH row they ask.
 
 `pack_size_of(link)` is the only place `ItemSupplier.quantity_per_package` is
-turned into an answer, and it returns a `PackSize` carrying one of THREE states
-that must never collapse. They are an INTERNAL distinction: `PackSize.state`
-does not reach the wire, and both web surfaces say only "case size unknown" for
-every one of them. They earn their keep by stopping `order_pack_size` collapsing
-`NO_SUPPLIERS` with `NONE_ORDERABLE`, and by keeping each unknown's CAUSE
-available to the surface that will word it — which is filed as separate
-follow-up. Read the operator actions below as what the state MEANS, not as
-something a screen says today:
+turned into an answer; `shelf_pack_size` and `order_pack_size` are the two
+item-level entry points, and they ask genuinely different questions.
 
-* `PACK_SIZE_KNOWN` — a link records a usable size. **A recorded 1 is KNOWN.**
-  The column defaults to 1, so reading 1 as "missing" would make every
-  unconfigured link unknown — a flood, which suppresses alerts of its own. "Did
-  this vendor declare a CASE?" is a different question with its own answer,
-  `declares_a_case`, which is the op-ev14 ordering ladder's entry condition.
-* `PACK_SIZE_NOT_RECORDED` — no link records one, which at item level means no
-  links at all. A data gap; the operator adds a supplier.
-* `PACK_SIZE_RECORDED_ZERO` — a link records `0`, a box holding no units.
-  `PositiveIntegerField` permits it and `MinValueValidator(1)` only bites under
-  `full_clean()`, so `InventoryItemViewSet._sync_primary_supplier` — an
-  `update_or_create` — persists a posted `0`. The operator fixes that row.
-* `PACK_SIZE_NO_ORDERABLE_LINK` — `order_pack_size` only: rows exist, one may
-  even record a good size, but every vendor is dead, so nothing we can BUY sizes
-  the next order. The operator revives or replaces a vendor, which is a
-  different action from "add a supplier". Reusing `PACK_SIZE_NOT_RECORDED` here
-  would be the
-  `NO_SUPPLIERS`/`NONE_ORDERABLE` collapse at the state level, so which of the
-  two it is comes from `select_supplier`'s own reason rather than a second count
-  of the rows. All three unknowns keep `units` `None` and `is_known` `False`, so
-  no flag moves on any of them.
+**That module's docstring owns the mechanics — read it before touching any of
+this.** The three states plus `order_pack_size`'s fourth and what each one tells
+an operator; the judgement that **a recorded 1 is KNOWN** and why
+`declares_a_case` is the separate question; which link each entry point consults
+and why filtering `shelf_pack_size` for orderability is what suppressed a
+low-stock alert in op-2rsp round 1; and the query budget `order_pack_size` rides
+by reading the memoised `InventoryItem.primary_item_supplier`. All of it lives
+there. Do not restate it here — fix it there.
 
-Two questions, and collapsing them is a bug in either direction:
-
-* `shelf_pack_size(item)` — the box ALREADY ON THE SHELF: the FIRST link in
-  `Meta.ordering`, orderable or not. Stock on hand was bought from somebody,
-  possibly somebody we can no longer buy from, and their recorded pack size
-  still describes the box. Filtering for orderability here is what suppressed a
-  low-stock alert in op-2rsp round 1. Only the first row is consulted, and a
-  zero there is UNKNOWN rather than a reason to scan on — which vendor's box is
-  on the shelf is unknowable, so a later row is another guess, not a better
-  answer. Read by `current_cases`.
-* `order_pack_size(item)` — the box THE NEXT ORDER SHIPS IN, through
-  `InventoryItem.primary_item_supplier` (read via the model accessor, which is
-  memoised and prefetch-riding; calling the service again costs a second query
-  and `test_reading_all_flat_fields_is_one_query_unprefetched_and_cached` says
-  so). Read by `InventoryItem.quantity_per_package`, `item_metrics`'s
-  `case_size` and `bridge_case_reorder_to_packaging`.
+What is worth knowing before you open it: the states are an INTERNAL
+distinction. `PackSize.state` does not reach the wire, and both web surfaces say
+only "case size unknown" for every one of them. They earn their keep by stopping
+`order_pack_size` collapsing `NO_SUPPLIERS` with `NONE_ORDERABLE`, and by
+keeping each unknown's CAUSE available to the surface that will word it — filed
+as separate follow-up. No flag moves between them.
 
 `inventory/tests/test_pack_size_single_owner.py` is the build gate: it walks
 every non-test module under `backend/` with the AST and pins the exact set of
@@ -268,19 +240,19 @@ What moved, and what deliberately did not:
 1. **`current_cases` — FIXED, flags moved.** No usable pack size fell through to
    "1 unit per package", so raw base units read as a case count. It is now
    `None`, and `needs_reorder` judges such an item in the unit that CAN be
-   counted: `current_stock <= minimum_stock` — the predicate `low_stock_q` has
-   always applied to these items in SQL — OR base's own comparison, kept so an
-   unknown may ADD a flag but can never REMOVE one. Be precise about how far
-   that closes the split brain: the property and the query agree exactly where
+   counted OR by base's own comparison, kept so an unknown may ADD a flag but
+   can never REMOVE one. Be precise about how far that closes the split brain:
+   the property and the query agree exactly where
    `minimum_cases <= minimum_stock`, which is the shape where they visibly
    disagreed. Where `minimum_cases > minimum_stock` the property still flags an
-   item `low_stock_q` does not match, via the second disjunct — the PRE-EXISTING
-   divergence direction, preserved deliberately because closing it the other way
-   would delete an alert base raised. `reorder_threshold` reports
-   `max(minimum_stock, minimum_cases)` for this shape so the badge and the
-   threshold line printed beside it name the same boundary; reporting the bare
-   `minimum_stock` had one payload calling an item LOW while its own kanban card
-   said "reorder at 0 units".
+   item `low_stock_q` does not match — the PRE-EXISTING divergence direction,
+   preserved deliberately because closing it the other way would delete an alert
+   base raised — and `reorder_threshold` names `max(minimum_stock,
+   minimum_cases)` for this shape so a badge and the threshold line beside it
+   name the same boundary. The disjunction, and why each of those holds, is
+   spelled out where it lives: the comment at that branch of
+   `InventoryItem.needs_reorder` and the docstrings on
+   `packaging.reorder_threshold` and `packaging.low_stock_q`.
 2. **`component_forecast`'s `reorder_point` — expression fixed, NO flag change.**
    The row now says `lead_time_known: false` and the number is a stated LOWER
    BOUND (safety stock alone) rather than a horizon at a fabricated zero-day
@@ -300,8 +272,8 @@ everywhere. Do NOT route `_lead_time_days_by_item` through the supplier
 derivation — `test_the_serialized_forecast_keeps_a_dead_vendors_lead_time` and
 `test_an_item_whose_only_supplier_died_reaches_the_report_and_the_digest` in
 `inventory/tests/test_alert_suppression.py` pin that, and both fail if the
-filter comes back; it is what dropped a dead-vendor item off the
-demand-forecast report and the nightly digest in round 5.
+filter comes back. That function's own docstring carries the rest of the
+reasoning; read it before changing anything there.
 
 `current_cases` is nullable on the wire. Every consumer moved in the same commit:
 `InventoryItemSerializer` (`allow_null`), the three web sites that called
@@ -334,12 +306,17 @@ Three more, found by this branch's sweeps and deliberately NOT fixed here:
 2. **Frontend readers of `quantity_per_package` outside `ScanPage`** — the same
    falsy-zero pack-size class, all pre-existing, none touched here.
    `PurchaseOrderFormPage.tsx` has eight `item.quantity_per_package || 1` sites
-   (lines 182, 300, 312, 327, 345, 360, 516, 682) plus its `> 1` display
-   branches (1058, 1143, 1175, 1204); `SupplierRelationshipForm.tsx:201`
-   coerces a typed 0 to 1 on the WRITE path (`Number(e.target.value) || 1`),
-   silently changing what an operator typed. These are FRONTEND sites and the
-   pack-size build gate walks `backend/` only, which is why none of them fails
-   a build today.
+   — in `loadReorderData`, `updateItemQuantity`, `updateItemCases`,
+   `updateItemUnitCost`, `updateItemCaseCost`, `caseCostPlaceholderFor`,
+   `handleProductSearch` and `handleSubmit` — plus four unguarded reads in its
+   selected-items table (three `quantity_per_package > 1` branches and the
+   "N cases × N units/case" summary line beside them);
+   `SupplierRelationshipForm.tsx` coerces a typed 0 to 1 on the WRITE path, in
+   the pack-size input's `onChange`
+   (`quantity_per_package: Number(e.target.value) || 1`), silently changing what
+   an operator typed. Those counts are as of this branch — grep the expressions,
+   do not trust the numbers. These are FRONTEND sites and the pack-size build
+   gate walks `backend/` only, which is why none of them fails a build today.
 3. **Extending the pack-size build gate to frontend sources**, the follow-up
    named above with the gate's backend-only scope. It sits beside 2 because 2
    is the population it would cover: nothing gates a frontend reader until it

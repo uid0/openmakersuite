@@ -650,71 +650,22 @@ complete, and it was twice not:
   a decimal string already carried its cent column, a JS number does not. Held
   by a trailing-zero-cent fixture in `InventoryItemSuppliedByKits.test.tsx`;
   the round-8 tests used `89.99`, which cannot fail under the mutation.
-- Kit form **WRITE path** (`/inventory/kits/new` and `/inventory/kits/<id>`) —
-  `handleSave` sent `unit_cost: unitCost === '' ? '0' : String(unitCost)`, so
-  leaving the "Unit cost" box empty STORED `Decimal("0")` on the
-  `ItemSupplier`. `order_unit_price` then correctly reported `PRICE_KNOWN`
-  about a price nobody had given, and the two rows fixed the round before —
-  the kit list's Unit cost column and the item detail "Supplied by kits" card
-  — stated as fact that the vendor gives the kit away. The branch's own rule
-  inverted at a write path: "a recorded price of zero is a KNOWN price" is
-  only true if a blank box never becomes one. Now sends an explicit `null`,
-  and the link stores NULL. No displayed figure moved for any kit that already
-  had a price; what moved is that a kit saved with a blank cost reads as
-  unpriced instead of free. This is the money twin of the
-  `SupplierRelationshipForm.tsx` pack-size write-path collapse, and it takes
-  the same side as `unit_cost_ordered`'s write, which REFUSES rather than
-  fabricating — here NULL is a legal answer, so storing it is enough.
-  `null` needs no serializer change: `supplier_terms` is a plain `DictField`,
-  whose default `_UnvalidatedField` child has `allow_null = True`, so the
-  `None` reaches `_apply_supplier_terms` intact and its `if key in terms`
-  comprehension puts it in `defaults` — measured, not assumed.
-  **The fix reaches a NEW link only, and that limit is measured.** Sending
-  `null` for a link that ALREADY has a price does not clear it:
-  `ItemSupplier.save` back-fills `package_cost` from `unit_cost` on the first
-  save, and from then on `if self.package_cost is not None` re-derives
-  `unit_cost` from that `package_cost`, so the `None` is overwritten before it
-  reaches the database. Pre-existing model behaviour, not this branch's, and
-  repairing it would re-derive prices on every link in the system — far outside
-  the invariant. REPORTED, NOT FIXED, and pinned as a CONTROL so the next
-  reader does not assume clearing works.
-  NOTE the seeding path, checked on every route in: `applyKit` seeds
-  `supplier_sku` and `unit_cost` but NOT `supplierId`, and the payload only
-  carries `supplier_terms` when `supplierId && supplierSku`. So an edit that
-  does not retype the supplier id sends no terms at all and cannot erase a
-  price; the blank box is only ever read when the operator is actively
-  entering terms. Pinned as a CONTROL.
-- Kit **purchase terms re-save** (`PATCH /api/inventory/kits/<id>/`, shown on
-  the kit list's Unit cost column and the item-detail "Supplied by kits" card)
-  — `_apply_supplier_terms` forced `quantity_per_package = 1` into every
-  `update_or_create`, and this WAS a money figure, which the previous round
-  recorded wrongly. `ItemSupplier.save` re-derives
-  `unit_cost = package_cost / quantity_per_package` whenever `package_cost is
-  not None`, so the reset carried the price with it. Worked path: a link
-  records `unit_cost 5.00`, `package_cost 30.00`, `quantity_per_package 6`; the
-  operator opens the kit, picks the supplier from the dropdown (required for
-  `supplier_terms` to be sent at all) and saves, touching no cost field ->
-  `defaults` carried `quantity_per_package: 1` -> `save()` recomputed
-  `unit_cost = 30.00 / 1` -> a 6-pack at $5.00 became a 1-pack at **$30.00** on
-  both screens. FIXED, and contained: the `setdefault` line is simply removed.
-  `ItemSupplier.quantity_per_package` is already
-  `PositiveIntegerField(default=1)`, so a CREATE still stores 1 from the model
-  default while an UPDATE now leaves the recorded pack size — and therefore the
-  derived price — alone. Nothing in `inventory.services.pack_size` or its gate
-  is touched; the pack-size derivation itself is untouched and still owned
-  there. The previous round's sentence calling this "a non-money figure" was
-  false and is replaced by this entry.
-- **`package_cost` in `_apply_supplier_terms`, REPORTED NOT FIXED** — the same
-  `null=True` shape as `unit_cost`, so NULL is a real answer for it, but the
-  kit form never sends the key at all, so nothing fabricates it today.
+- The kit / supplier-terms **WRITE path has NO entry here, because it moves no
+  figure at all.** `KitSerializer._apply_supplier_terms`,
+  `KitDetailPage.handleSave`, `ItemSupplierSerializer` / `ItemSupplierViewSet`
+  and `inventory/services/suppliers.py` are byte-identical to base `7c078de`.
+  Three earlier rounds did change them and their entries stood here; all of it
+  was withdrawn. See the record below.
+
+- Supplier detail price-trend **records** (`GET /api/inventory/suppliers/<id>/`,
+  `trends[].price_history[].unit_cost`) — `null` -> `0.0` for a recorded zero,
+  which is what the supplier-detail chart plots.
 
 ### oms-supplier-terms-write-path — an attempt that was made, and withdrawn
 
 **A single owner for the supplier-terms WRITE path was built, gated, and then
 reverted in full.** It is recorded here rather than quietly dropped, so the next
-session does not retry it one narrow rule at a time. Nothing below changed any
-money figure: the whole attempt came out, and the tree's write path is what it
-was before it.
+session does not retry it one narrow rule at a time.
 
 **ROOT CAUSE, one sentence.** `ItemSupplier.save()` derives `unit_cost` and
 `package_cost` from EACH OTHER, so any partial write fights that derivation, and
@@ -729,45 +680,90 @@ another:**
    while `5.01` in the same request was honoured.
 2. **Key presence, with a value check** — a cost clears its twin when supplied
    AND different. Discarded a cost the caller had explicitly submitted
-   unchanged: the item form sends both boxes, so editing one silently re-derived
-   the other.
+   unchanged: the item form sends both boxes, so editing one silently
+   re-derived the other.
 3. **Key presence alone** — supplying exactly one cost always clears its twin.
    Reopened rule 1's defect from the other side: a link at
    `unit_cost 3.33 / package_cost 10.00 / pack 3` whose SKU was edited had its
    package price re-derived to `9.99` from the rounded unit price, on a save
    that touched no price at all.
 
-**The owner was not the problem, and neither was any single rule.** It was
-built as one named module, routed from every writer the derivation reached, and
-gated with an AST build-gate in the manner of the pack-size and price gates —
-and it still produced 17 review findings across 6 rounds, 15 of them artefacts
-of its own changes rather than of the original defect. **So the next attempt
-should not open by writing a fourth rule at the callers.** The place to look is
-the mutual derivation in `ItemSupplier.save()` itself: while one column is
-computed from the other on every save, callers cannot express "this is the price
-now" without also implying something about its twin.
+Rule 3 removed the guard rule 1 had added, and the next review reported rule 1's
+exact defect back. **The owner was not the problem, and neither was any single
+rule.** It was built as one named module, routed from every writer the
+derivation reached, and gated with an AST build-gate in the manner of the
+pack-size and price gates — and it still produced 17 review findings across 6
+rounds, 15 of them artefacts of its own changes rather than of the original
+defect. **So the next attempt should not open by writing a fourth rule at the
+callers.** The place to look is the mutual derivation in `ItemSupplier.save()`
+itself: while one column is computed from the other on every save, callers
+cannot express "this is the price now" without also implying something about
+its twin.
 
-**Defects that remain OPEN after the revert. Every one of them is
-PRE-EXISTING — present in base `7c078de`, not introduced by this branch —
-and they are named here so they are not rediscovered one at a time:**
-- The kit form's typed **unit cost is inert** on a link that already records a
-  package cost: `save()` re-derives `unit_cost` from the stored `package_cost`
-  and overwrites what the operator typed.
-- The **derived `package_cost` is not persisted** on the kit-form UPDATE path,
-  because `update_or_create` restricts `update_fields` to the `defaults` keys.
-  Reachable because a blank cost box now correctly stores NULL — that fix stays.
-- `PATCH /api/inventory/item-suppliers/<pk>/ {"unit_cost": ...}` **echoes back
-  the old price**: DRF's `ModelSerializer.update` does the same partial write
-  against the same derivation.
-- A **non-numeric `supplier` id** inside `supplier_terms` reaches the ORM and
-  **500s** rather than returning a 400, because that field is a pass-through
-  `DictField` that validates nothing inside itself. The same is true of a
-  malformed `average_lead_time` and of a cost that overflows the column's
-  `max_digits`.
+**WHAT WAS KEPT FROM THE OWNER ROUNDS: NOTHING.** That is worth stating with its
+reasoning rather than as a bare claim, because two of those fixes looked worth
+rescuing and neither was:
+- The **item-suppliers identity fix** (a PATCH that changes `supplier` must move
+  the addressed row rather than create a second one) repaired a bug that ONLY
+  EXISTED because `ItemSupplierSerializer.update` had been routed through the
+  owner. Base's plain `ModelSerializer.update` does `setattr` + `save()` on the
+  instance the URL names and never resolves a pair, so removing the owner
+  returns that path to base, where the duplicate-row bug does not exist. The fix
+  had nothing left to fix.
+- The **non-numeric supplier-id guard** (a clean 400 instead of a 500) was added
+  to close a failure the owner's own create-retry had turned into a misleading
+  `DoesNotExist`. Base has the malformed-id 500 too — it is listed below as a
+  base defect — but it is base's, not this branch's, and repairing it is part of
+  the write path this branch is no longer touching.
+Everything else in those rounds lived inside `write_supplier_terms` /
+`update_supplier_terms`, its coercers, or its AST gate, all of which are gone.
 
-- Supplier detail price-trend **records** (`GET /api/inventory/suppliers/<id>/`,
-  `trends[].price_history[].unit_cost`) — `null` -> `0.0` for a recorded zero,
-  which is what the supplier-detail chart plots.
+**BASE DEFECTS ON THIS PATH, FILED NOT FIXED.** Each was verified against base
+`7c078de` directly, and each is present with or without this branch. They are
+listed together so the write path is picked up whole rather than piecemeal:
+- `_apply_supplier_terms` has `defaults.setdefault("quantity_per_package", 1)`,
+  so a kit re-save **resets a recorded pack size**, and `save()` then re-derives
+  the unit price from the old package price. Measured: a link at
+  `3.33 / 10.00 / pack 3` re-saved with no cost edit ends at
+  `10.00 / 10.00 / pack 1`.
+- The same function never puts `package_cost` in `defaults`, so **a typed unit
+  cost is overwritten** by `save()`'s re-derivation from the stored package
+  cost.
+- `update_or_create` with all-concrete defaults restricts `update_fields`, so a
+  `package_cost` that `save()` derives is **not persisted on an update**.
+  Measured: a costless link sent a unit cost of `5` ends at
+  `unit_cost 5.00 / package_cost NULL`.
+- `KitDetailPage.tsx` sends `'0'` for a blank cost box, **storing a fabricated
+  zero** that then reads as a known free price.
+- `ItemSupplierSerializer` is a plain `ModelSerializer` with only the timestamps
+  read-only, so `PATCH {"unit_cost": ...}` does a partial write against the
+  derivation and **echoes back the old price**.
+- `supplier_id` is read out of the unvalidated `DictField` and passed to the
+  ORM, so a **non-numeric id is a 500** rather than a 400. The same is true of a
+  malformed `average_lead_time` and of a cost that overflows `max_digits`.
+
+**One reported defect DISSOLVED with the completed revert, and that was measured
+rather than assumed.** Review reported that an uncoerced string cost reaches
+`save()`'s back-fill as STRING REPETITION — `"5" * 6 == "555555"`, a valid
+decimal — fabricating a package price into `PriceHistory`. That needs a pack
+size above 1 on a costless link, which only became reachable because the partial
+revert had dropped base's forced `setdefault(..., 1)` while also dropping the
+coercion that had masked it. With the `setdefault` restored the product is
+always `str * 1`, which is the same string Django coerces to a `Decimal` on
+save. Probed on the exact fixture: a costless link at pack 6 sent
+`unit_cost: "5"` stores `5.00` and records no fabricated package price.
+
+**What this branch still delivers, all of it outside the write path:** the
+`inventory.services.pricing` owner with its four named states, `PriceRollup`,
+`extended` and `explain`; the price and `estimated_cost` AST gates with their
+allowlists and narrowed claims; every read-side routing; the payload and report
+honesty changes on the order pad, the purchasing price-trends report, the two
+stock-value reports, the public transparency feed and the admin columns; both
+refusals with their remedy text; the committee-ledger fix in `receiving.py`;
+every frontend consumer fix and corrected wire type; and the ScanTTY contract
+record. The acceptance criteria this branch was opened for are met by those; the
+write path was an escalation that did not pay off.
+
 
 **A reported figure that does NOT move, measured and rejected — the wire-type
 rule cuts BOTH ways.** Review reported that a PO-form freeform line priced at

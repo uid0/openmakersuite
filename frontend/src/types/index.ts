@@ -2510,8 +2510,7 @@ export interface Kit extends InventoryItem {
 export interface KitSupplierTerms {
   supplier: number;
   supplier_sku: string;
-  /** `null` when the cost box is blank: that is no price, and it stores NULL. */
-  unit_cost: string | number | null;
+  unit_cost: string | number;
   supplier_url?: string;
   average_lead_time?: number;
 }

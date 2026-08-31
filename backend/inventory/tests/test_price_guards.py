@@ -1564,42 +1564,6 @@ def test_two_free_snapshots_have_no_baseline_and_no_direction_either(api):
     assert summary["change_percentage"] is None
 
 
-def test_kit_supplier_terms_store_a_blank_cost_as_unknown(api):
-    """BEFORE/AFTER. A kit saved with no cost must not be priced at zero.
-
-    The kit form used to send the string ``"0"`` for an empty cost box, so a
-    link nobody had priced was stored at ``Decimal("0")`` and then reported
-    ``PRICE_KNOWN`` — the branch's own rule inverted at a write path.
-    """
-    component = _item("Cyan")
-    supplier = Supplier.objects.create(name="Acme")
-
-    response = api.post(
-        "/api/inventory/kits/",
-        {
-            "name": "Blank-cost kit",
-            "description": "x",
-            "sku": "KIT-BLANK",
-            "minimum_stock": 0,
-            "reorder_quantity": 1,
-            "components": [{"component": component.pk, "quantity": 1}],
-            "supplier_terms": {
-                "supplier": supplier.pk,
-                "supplier_sku": "T-BLANK",
-                "unit_cost": None,
-            },
-        },
-        format="json",
-    )
-
-    assert response.status_code == 201, response.data
-    kit = InventoryItem.objects.get(pk=response.data["id"])
-    link = ItemSupplier.objects.get(item=kit, supplier=supplier)
-    assert link.unit_cost is None
-    assert order_unit_price(kit).state == PRICE_NOT_RECORDED
-    assert response.data["unit_cost"] is None
-
-
 def test_kit_supplier_terms_store_a_typed_zero_as_a_real_price(api):
     """CONTROL. A cost the operator actually typed as 0 is a KNOWN price."""
     component = _item("Magenta")
@@ -1631,50 +1595,31 @@ def test_kit_supplier_terms_store_a_typed_zero_as_a_real_price(api):
     assert Decimal(str(response.data["unit_cost"])) == Decimal("0.00")
 
 
-def test_clearing_a_kit_cost_on_an_existing_link_does_not_stick(api):
-    """CONTROL on the LIMIT of the write-path fix, measured rather than assumed.
+def test_clearing_a_kit_cost_through_the_endpoint_does_not_stick(api):
+    """CONTROL on a BASE limit, measured through the endpoint that claims it.
 
-    Sending `null` gives a NEW link a NULL price, but it cannot clear one that
-    already has a price: ``ItemSupplier.save`` back-fills ``package_cost`` from
-    ``unit_cost`` on the first save, and thereafter re-derives ``unit_cost``
-    from that ``package_cost``. Pre-existing model behaviour, not this branch's;
-    pinned so the next reader does not believe clearing works.
+    Sending ``unit_cost: null`` cannot clear a price a link already records:
+    ``ItemSupplier.save`` back-fills ``package_cost`` from ``unit_cost`` on the
+    first save and thereafter re-derives ``unit_cost`` from that
+    ``package_cost``. Base behaviour, unchanged by this branch and filed under
+    oms-supplier-terms-write-path rather than repaired here.
+
+    Measured on this fixture the row ends at ``unit_cost 30.00 / package_cost
+    30.00 / quantity_per_package 1``, because base's
+    ``defaults.setdefault("quantity_per_package", 1)`` resets the pack size and
+    the derivation then divides by 1. Those two figures are deliberately NOT
+    asserted: they are the filed base defect, and repairing it should not have
+    to edit this test. What is asserted is the claim the record makes, which is
+    that clearing does not stick.
     """
-    item = _item("Cartridge")
-    link = _link(item, "Acme", unit_cost="5.00", pack=6, is_primary=True)
-    link.refresh_from_db()
-    assert link.package_cost == Decimal("30.00")
-
-    ItemSupplier.objects.update_or_create(
-        item=item,
-        supplier_id=link.supplier_id,
-        defaults={"supplier_sku": "A", "unit_cost": None, "is_primary": True},
-    )
-
-    link.refresh_from_db()
-    assert link.unit_cost == Decimal("5.00")
-    assert link.quantity_per_package == 6
-    assert order_unit_price(item).state == PRICE_KNOWN
-
-
-def test_saving_kit_terms_leaves_an_untouched_pack_size_and_its_price_alone(api):
-    """BEFORE/AFTER. Re-saving a kit's supplier must not re-derive its price.
-
-    ``_apply_supplier_terms`` forced ``quantity_per_package = 1`` into every
-    ``update_or_create``, and ``ItemSupplier.save`` re-derives
-    ``unit_cost = package_cost / quantity_per_package``. So an operator who
-    opened a kit, picked its supplier and saved -- touching no cost field --
-    turned a 6-pack at 5.00 into a 1-pack at 30.00 on the kit list and the
-    item-detail "Supplied by kits" card.
-    """
-    component = _item("Cyan")
-    supplier = Supplier.objects.create(name="Acme")
-    kit = _item("Ink kit", is_kit=True)
+    component = _item("Cartridge")
+    kit = _item("Cartridge kit", is_kit=True)
     KitComponent.objects.create(kit=kit, component=component, quantity=1)
+    supplier = Supplier.objects.create(name="Acme")
     link = ItemSupplier.objects.create(
         item=kit,
         supplier=supplier,
-        supplier_sku="T-6PK",
+        supplier_sku="A",
         unit_cost=Decimal("5.00"),
         quantity_per_package=6,
         is_primary=True,
@@ -1687,7 +1632,8 @@ def test_saving_kit_terms_leaves_an_untouched_pack_size_and_its_price_alone(api)
         {
             "supplier_terms": {
                 "supplier": supplier.pk,
-                "supplier_sku": "T-6PK",
+                "supplier_sku": "A",
+                "unit_cost": None,
             }
         },
         format="json",
@@ -1695,36 +1641,58 @@ def test_saving_kit_terms_leaves_an_untouched_pack_size_and_its_price_alone(api)
 
     assert response.status_code == 200, response.data
     link.refresh_from_db()
-    assert link.quantity_per_package == 6
-    assert link.unit_cost == Decimal("5.00")
-    assert Decimal(str(response.data["unit_cost"])) == Decimal("5.00")
+    assert link.unit_cost is not None
+    assert order_unit_price(kit).state == PRICE_KNOWN
+    assert response.data["unit_cost"] is not None
 
 
-def test_a_new_kit_link_still_defaults_to_a_pack_of_one(api):
-    """CONTROL. Dropping the forced default must not change what a CREATE stores."""
-    component = _item("Magenta")
-    supplier = Supplier.objects.create(name="Charity")
+def test_a_kit_re_save_never_re_derives_the_package_price_from_a_rounded_unit(api):
+    """CONTROL. The package price an operator pays must not drift on a re-save.
 
-    response = api.post(
-        "/api/inventory/kits/",
+    A link at ``unit_cost 3.33 / package_cost 10.00 / quantity_per_package 3``
+    stores a unit price the column rounded from 10.00 / 3. The kit form always
+    echoes that seeded cost back, so a save touching no cost field must never
+    turn the rounding around and re-derive ``package_cost`` from it: 3.33 x 3
+    is 9.99, and the cent an operator never touched would reach the scan page's
+    "Package cost" and "Estimated Cost" rows and a PriceHistory row presented
+    as a real price change.
+
+    This pins the one thing that must hold on this path whatever else changes.
+    A rule that clears the twin cost re-opens the drift and fails this test.
+    The pack-size reset and the unit-price re-derivation visible on the same
+    request are base behaviour, filed under oms-supplier-terms-write-path.
+    """
+    component = _item("Toner")
+    kit = _item("Toner kit", is_kit=True)
+    KitComponent.objects.create(kit=kit, component=component, quantity=1)
+    supplier = Supplier.objects.create(name="Acme")
+    link = ItemSupplier.objects.create(
+        item=kit,
+        supplier=supplier,
+        supplier_sku="OLD",
+        package_cost=Decimal("10.00"),
+        quantity_per_package=3,
+        is_primary=True,
+    )
+    link.refresh_from_db()
+    assert link.unit_cost == Decimal("3.33")
+
+    response = api.patch(
+        f"/api/inventory/kits/{kit.pk}/",
         {
-            "name": "Fresh kit",
-            "description": "x",
-            "sku": "KIT-FRESH",
-            "minimum_stock": 0,
-            "reorder_quantity": 1,
-            "components": [{"component": component.pk, "quantity": 1}],
             "supplier_terms": {
                 "supplier": supplier.pk,
-                "supplier_sku": "T-NEW",
-                "unit_cost": "4.00",
-            },
+                "supplier_sku": "NEW",
+                "unit_cost": str(link.unit_cost),
+            }
         },
         format="json",
     )
 
-    assert response.status_code == 201, response.data
-    kit = InventoryItem.objects.get(pk=response.data["id"])
-    link = ItemSupplier.objects.get(item=kit, supplier=supplier)
-    assert link.quantity_per_package == 1
-    assert link.unit_cost == Decimal("4.00")
+    assert response.status_code == 200, response.data
+    link.refresh_from_db()
+    assert link.package_cost == Decimal("10.00")
+    recorded = set(
+        PriceHistory.objects.filter(item_supplier=link).values_list("package_cost", flat=True)
+    )
+    assert recorded == {Decimal("10.00")}

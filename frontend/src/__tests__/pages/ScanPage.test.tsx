@@ -134,22 +134,37 @@ describe('ScanPage', () => {
     expect(screen.queryByText(/50\.0 cases/)).toBeNull();
   });
 
-  // The same item must not be handed a reorder quantity in cases: the server
-  // flags it on base units and the line above has just said the cases cannot be
-  // counted, so naming one here would put two different units on one screen.
+  // The DISAGREEING side, which is also the DEFAULT configuration (minimum_stock
+  // defaults to 0, minimum_cases to 1). The threshold the flag uses for an
+  // unknown case size is max(minimum_stock, minimum_cases) = 3; an earlier
+  // version of this test sat on the side where the two coincide and so passed
+  // while the page could still contradict its own badge.
+  const unknownCaseItem = {
+    use_case_based_reorder: true,
+    current_stock: 2,
+    minimum_stock: 0,
+    minimum_cases: 3,
+    reorder_quantity: 40,
+    reorder_cases: 2,
+    current_cases: null,
+    needs_reorder: true,
+  };
+
+  const unknownCaseDisplay = {
+    mode: 'each',
+    unit: 'unit',
+    threshold: 3,
+    current: 2,
+    reorder_quantity: 40,
+    needs_reorder: true,
+    text: '2 units on hand · reorder at 3 units',
+  };
+
   test('names base units, not cases, for an item whose case size is unknown', async () => {
     localStorage.setItem('token', 'test-token');
 
     (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
-      data: {
-        ...mockItem,
-        use_case_based_reorder: true,
-        reorder_quantity: 40,
-        minimum_cases: 1,
-        reorder_cases: 2,
-        current_cases: null,
-        needs_reorder: true,
-      },
+      data: { ...mockItem, ...unknownCaseItem, reorder_display: unknownCaseDisplay },
     });
     (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
       data: { results: [] },
@@ -160,6 +175,50 @@ describe('ScanPage', () => {
     await screen.findByText('Test Widget');
     expect(screen.getByText('40 units')).toBeInTheDocument();
     expect(screen.queryByText(/2 cases/)).toBeNull();
+  });
+
+  // `reorder_display` is optional on the wire, so the fallback must be correct
+  // on its own — never back to the bare minimum_stock.
+  test('falls back to base units when reorder_display is absent', async () => {
+    localStorage.setItem('token', 'test-token');
+
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, ...unknownCaseItem },
+    });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+
+    await renderWithRouter();
+
+    await screen.findByText('Test Widget');
+    expect(screen.getByText('40 units')).toBeInTheDocument();
+    expect(screen.queryByText(/2 cases/)).toBeNull();
+  });
+
+  // The anonymous-scan path auto-submits, and its sentence used to say
+  // "N cases" ungated — three lines below the page saying the cases cannot be
+  // counted. It reads the same owner as every other quantity now.
+  test('the anonymous auto-submit message never quotes cases it cannot count', async () => {
+    localStorage.removeItem('token');
+
+    // A failed auto-submit is the one settled state that shows this block:
+    // the catch sets `submitting` back to false, which is exactly the branch
+    // whose comment says "show the form so user can manually submit".
+    (api.reorderAPI.createRequest as jest.Mock).mockRejectedValue(new Error('offline'));
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, ...unknownCaseItem, reorder_display: unknownCaseDisplay },
+    });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+
+    await renderWithRouter();
+
+    await screen.findByText('Test Widget');
+    const message = await screen.findByText(/automatically submitting a reorder request/i);
+    expect(message).toHaveTextContent('40 units');
+    expect(message).not.toHaveTextContent(/case/i);
   });
 
   test('renders a case-based item whose case size IS recorded', async () => {

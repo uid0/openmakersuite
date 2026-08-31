@@ -197,17 +197,62 @@ describe('InventoryItemDetailPage', () => {
     expect(screen.queryByText(/not recorded/i)).toBeNull();
   });
 
-  // The same item must not be handed a threshold in cases. The server flags it
-  // on base units (`reorder_display` says "reorder at N units"), and the line
-  // above has just said the cases cannot be counted, so naming one here would
-  // put two different units on one card.
-  it('names base units, not cases, for an item whose case size is unknown', async () => {
+  // The DISAGREEING side, which is also the DEFAULT configuration: minimum_stock
+  // defaults to 0 and minimum_cases to 1, so a case-based item is normally
+  // configured in cases with minimum_stock left at 0. The threshold the flag
+  // uses for an unknown case size is max(minimum_stock, minimum_cases) = 3, NOT
+  // the bare minimum_stock of 0. An earlier version of this test used
+  // minimum_stock=100 / minimum_cases=1, where the two coincide, so it passed
+  // while the page printed a threshold the badge beside it contradicted.
+  it('names the threshold the flag uses, in base units, when the case size is unknown', async () => {
     (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
       data: {
         ...mockItem,
         use_case_based_reorder: true,
-        minimum_stock: 100,
-        minimum_cases: 1,
+        current_stock: 2,
+        minimum_stock: 0,
+        minimum_cases: 3,
+        reorder_quantity: 40,
+        reorder_cases: 2,
+        current_cases: null,
+        needs_reorder: true,
+        reorder_display: {
+          mode: 'each',
+          unit: 'unit',
+          threshold: 3,
+          current: 2,
+          reorder_quantity: 40,
+          needs_reorder: true,
+          text: '2 units on hand · reorder at 3 units',
+        },
+      },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+    // The badge and the threshold beside it must name the same rule: flagged
+    // LOW at 2 on hand, against a threshold of 3 — not 0, which 2 clears.
+    expect(screen.getByText('Low Stock')).toBeInTheDocument();
+    expect(screen.getByTestId('item-minimum-stock')).toHaveTextContent('3 units');
+    expect(screen.getByTestId('item-minimum-stock')).not.toHaveTextContent(/case/i);
+    expect(screen.getByTestId('item-reorder-quantity')).toHaveTextContent('40 units');
+    expect(screen.getByTestId('item-reorder-quantity')).not.toHaveTextContent(/case/i);
+  });
+
+  // `reorder_display` is optional on the wire, so the fallback has to be right
+  // on its own — and right means max(minimum_stock, minimum_cases), never the
+  // bare minimum_stock. Same payload, field removed.
+  it('falls back to the flag threshold when reorder_display is absent', async () => {
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockItem,
+        use_case_based_reorder: true,
+        current_stock: 2,
+        minimum_stock: 0,
+        minimum_cases: 3,
         reorder_quantity: 40,
         reorder_cases: 2,
         current_cases: null,
@@ -220,10 +265,9 @@ describe('InventoryItemDetailPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Test Item')).toBeInTheDocument();
     });
-    expect(screen.getByTestId('item-minimum-stock')).toHaveTextContent('100 units');
-    expect(screen.getByTestId('item-minimum-stock')).not.toHaveTextContent(/case/i);
+    expect(screen.getByText('Low Stock')).toBeInTheDocument();
+    expect(screen.getByTestId('item-minimum-stock')).toHaveTextContent('3 units');
     expect(screen.getByTestId('item-reorder-quantity')).toHaveTextContent('40 units');
-    expect(screen.getByTestId('item-reorder-quantity')).not.toHaveTextContent(/case/i);
   });
 
   it('keeps naming cases when the case size IS known', async () => {

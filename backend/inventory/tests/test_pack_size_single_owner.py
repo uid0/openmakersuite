@@ -28,6 +28,11 @@ catches all of:
   ``__`` lookup path such as ``"item_suppliers__quantity_per_package"``, or
   wrapped in ``F()`` / an aggregate. Row-writing calls (``create``, ``update``,
   ``update_or_create``) are deliberately not in that set.
+* the column named inside a bare ``Q()`` (or ``Value``/``When``/``Case``/
+  ``Subquery``/``OuterRef``) with no queryset call around it. This is the shape
+  the example above actually takes: ``low_stock_q`` is assembled from ``Q(...)``
+  kwargs and returned, never filtered with, so scanning only queryset methods
+  would have missed the very twin that justifies scanning SQL at all.
 
 Bare string occurrences OUTSIDE those calls (serializer ``fields`` lists, admin
 columns, help text, docstrings, and the write path in ``InventoryItemViewSet``,
@@ -122,8 +127,21 @@ _ORM_READ_CALLS = frozenset(
     }
 )
 
-#: Expression wrappers that name a column directly, e.g. ``F("...__column")``.
-_EXPRESSION_CALLS = frozenset({"F"})
+#: Expression/condition wrappers that name a column directly, whether as a
+#: string (``F("...__column")``) or as a lookup keyword
+#: (``Q(item_suppliers__quantity_per_package__gt=0)``).
+#:
+#: ``Q`` is the load-bearing one: ``low_stock_q`` — the SQL twin this scan cites
+#: as proof that this codebase writes them — is built ENTIRELY from bare ``Q``
+#: constructor kwargs and never from ``.filter()``, so a sibling
+#: ``known_pack_q()`` would have been the likeliest future bypass of all.
+#:
+#: ``get`` is deliberately NOT here or in :data:`_ORM_READ_CALLS`: almost every
+#: ``get("quantity_per_package")`` in this codebase is ``dict.get`` on a request
+#: payload, i.e. the WRITE path the scan excludes on purpose, and a row fetched
+#: by ``objects.get(...)`` still has its column read as an attribute afterwards,
+#: which is already caught.
+_EXPRESSION_CALLS = frozenset({"F", "Q", "Value", "When", "Case", "Subquery", "OuterRef"})
 
 
 def _modules():
@@ -287,6 +305,23 @@ def test_a_sql_side_derivation_cannot_slip_past():
         _column_reads_in('Item.objects.filter(cases=F("item_suppliers__quantity_per_package"))')
         == 1
     )
+
+
+def test_a_bare_q_twin_of_low_stock_q_cannot_slip_past():
+    """The shape ``low_stock_q`` itself takes: a ``Q`` built and returned, unfiltered.
+
+    A sibling ``known_pack_q()`` is the likeliest future SQL-side bypass, and
+    scanning only queryset methods would never see it.
+    """
+    assert _column_reads_in("Q(item_suppliers__quantity_per_package__gt=0)") == 1
+    assert _column_reads_in("Q(quantity_per_package=0) | Q(quantity_per_package__isnull=True)") == 2
+    assert (
+        _column_reads_in(
+            "def known_pack_q():\n" "    return Q(item_suppliers__quantity_per_package__gt=0)\n"
+        )
+        == 1
+    )
+    assert _column_reads_in('When(quantity_per_package__gt=0, then=F("quantity_per_package"))') == 2
 
 
 def test_a_chained_queryset_counts_each_site_once():

@@ -211,6 +211,80 @@ export const onHandLabel = (item: InventoryItem): string => {
 };
 
 /**
+ * The server's own reorder presentation, or the client twin when it is absent.
+ *
+ * `reorder_display` is OPTIONAL on the wire — a narrowed list payload may omit
+ * it — so the fallback has to be correct on its own. It mirrors
+ * `inventory.services.packaging.reorder_threshold` / `reorder_display` branch
+ * for branch, and the unknown-case-size branch is the one that matters: the
+ * threshold there is `max(minimum_stock, minimum_cases)`, which is exactly the
+ * boundary `needs_reorder`'s disjunction uses. The bare `minimum_stock` is
+ * WRONG and understates it whenever `minimum_cases > minimum_stock` — which is
+ * the default configuration, since `minimum_stock` defaults to 0 and
+ * `minimum_cases` to 1. A card that flags an item LOW and then names a
+ * threshold that item clears is the same defect this branch exists to close.
+ */
+const reorderPresentation = (
+  item: InventoryItem
+): { unit: string; threshold: number; quantity: number } => {
+  const display = item.reorder_display;
+  if (display) {
+    return {
+      unit: display.unit,
+      threshold: display.threshold,
+      quantity: display.reorder_quantity,
+    };
+  }
+  if (countsInPacks(item)) {
+    return {
+      unit: countUnitOf(item),
+      threshold: item.minimum_stock,
+      quantity: item.reorder_quantity,
+    };
+  }
+  if (item.use_case_based_reorder) {
+    // A case count we cannot compute cannot carry a threshold either: judge it
+    // in the unit that CAN be counted, at the boundary the flag actually uses.
+    if (typeof item.current_cases !== 'number') {
+      return {
+        unit: baseUnitOf(item),
+        threshold: Math.max(item.minimum_stock, item.minimum_cases),
+        quantity: item.reorder_quantity,
+      };
+    }
+    return { unit: 'case', threshold: item.minimum_cases, quantity: item.reorder_cases };
+  }
+  return {
+    unit: baseUnitOf(item),
+    threshold: item.minimum_stock,
+    quantity: item.reorder_quantity,
+  };
+};
+
+/**
+ * "3 units" / "2 cases" — the reorder POINT with the unit it is measured in.
+ *
+ * THE one place the web answers "what is this item's threshold, and in what
+ * unit?". Every surface that names a threshold reads this, so a page can no
+ * longer print a number the flag does not use, or a unit the same card has just
+ * said it cannot compute. Three surfaces used to re-derive it from raw columns
+ * and the set of them had to be recalled every time the rule moved.
+ */
+export const reorderThresholdLabel = (item: InventoryItem): string => {
+  const { unit, threshold } = reorderPresentation(item);
+  return `${threshold} ${pluralizeUnit(unit, threshold)}`;
+};
+
+/**
+ * "40 units" / "2 cases" — how much to reorder, with the unit it is counted in.
+ * The quantity twin of {@link reorderThresholdLabel}, same single owner.
+ */
+export const reorderQuantityLabel = (item: InventoryItem): string => {
+  const { unit, quantity } = reorderPresentation(item);
+  return `${quantity} ${pluralizeUnit(unit, quantity)}`;
+};
+
+/**
  * One "1 case = 10 reams" line per non-base rung, innermost rung excluded.
  * Empty for an item with no chain (or a single base rung, which describes
  * nothing).

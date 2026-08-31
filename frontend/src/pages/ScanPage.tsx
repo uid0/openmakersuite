@@ -12,6 +12,7 @@ import { Checklist, InventoryItem, ItemSupplier } from '../types';
 import { formatDateOnly } from '../utils/dates';
 import { promptInput, showError } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
+import { reorderQuantityLabel } from '../utils/packaging';
 
 const ScanPage: React.FC = () => {
   const { itemId } = useParams<{ itemId: string }>();
@@ -365,11 +366,7 @@ const ScanPage: React.FC = () => {
                 </div>
                 <div className="info-item">
                   <span className="label">Reorder Quantity:</span>
-                  <span className="value">
-                    {item.current_cases === null
-                      ? `${item.reorder_quantity} units`
-                      : `${item.reorder_cases} cases`}
-                  </span>
+                  <span className="value">{reorderQuantityLabel(item)}</span>
                 </div>
               </>
             ) : (
@@ -383,7 +380,7 @@ const ScanPage: React.FC = () => {
                 </div>
                 <div className="info-item">
                   <span className="label">Reorder Quantity:</span>
-                  <span className="value">{item.reorder_quantity} units</span>
+                  <span className="value">{reorderQuantityLabel(item)}</span>
                 </div>
               </>
             )}
@@ -420,10 +417,7 @@ const ScanPage: React.FC = () => {
           <div className="auto-submit-message">
             <h2>🔄 Processing Reorder Request</h2>
             <p>We're automatically submitting a reorder request for <strong>
-              {item.use_case_based_reorder
-                ? `${item.reorder_cases} cases`
-                : `${item.reorder_quantity} units`
-              }
+              {reorderQuantityLabel(item)}
             </strong> of this item.</p>
             <p>You'll be redirected to a confirmation page shortly...</p>
           </div>

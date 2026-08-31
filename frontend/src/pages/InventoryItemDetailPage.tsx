@@ -47,6 +47,8 @@ import {
   describePackChain,
   onHandLabel,
   pluralizeUnit,
+  reorderQuantityLabel,
+  reorderThresholdLabel,
 } from '../utils/packaging';
 
 /**
@@ -897,33 +899,16 @@ const InventoryItemDetailPage: React.FC = () => {
                       </Text>
                     </Group>
                   )}
-                  {/* These read raw columns and pick the unit themselves. The
-                      better long-term shape is to render the server's
-                      `reorder_display`, which already names one unit for the
-                      threshold, the count and the badge together; that rewrite
-                      is deliberately out of scope here, and gating on
-                      `current_cases` is the bounded stand-in. A case-based item
-                      whose case size is unknown must not be given a threshold
-                      in cases — the line above has just said the cases cannot
-                      be counted, and the server flags it on base units. */}
                   <Group justify="space-between">
                     <Text size="sm">Minimum Stock:</Text>
                     <Text size="sm" data-testid="item-minimum-stock">
-                      {packCounted
-                        ? `${item.minimum_stock} ${pluralizeUnit(countUnit, item.minimum_stock)}`
-                        : item.use_case_based_reorder && item.current_cases !== null
-                          ? `${item.minimum_cases} cases`
-                          : `${item.minimum_stock} units`}
+                      {reorderThresholdLabel(item)}
                     </Text>
                   </Group>
                   <Group justify="space-between">
                     <Text size="sm">Reorder Quantity:</Text>
                     <Text size="sm" data-testid="item-reorder-quantity">
-                      {packCounted
-                        ? `${item.reorder_quantity} ${pluralizeUnit(countUnit, item.reorder_quantity)}`
-                        : item.use_case_based_reorder && item.current_cases !== null
-                          ? `${item.reorder_cases} cases`
-                          : `${item.reorder_quantity} units`}
+                      {reorderQuantityLabel(item)}
                     </Text>
                   </Group>
                   <Group justify="space-between">

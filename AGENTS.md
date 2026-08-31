@@ -323,6 +323,28 @@ captain) and `get_expected_delivery_date`'s `and self.average_lead_time` — whe
 a KNOWN zero-day lead time yields no date — are the same shape and belong with
 them.
 
+Three more, found by this branch's sweeps and deliberately NOT fixed here:
+
+1. **`ScanPage`'s anonymous auto-submit misdescribes a KNOWN case size.** The
+   sentence reads through `reorder_display`, so an item whose case size is
+   unknown is now correct, but for a KNOWN case size it says "N cases" while
+   `frontend/src/pages/ScanPage.tsx` posts `quantity: item.reorder_quantity` in
+   BASE UNITS. Pre-existing, and about a value the system DOES know, so it is
+   outside the alert-suppression class this branch closes. Filed separately.
+2. **Frontend readers of `quantity_per_package` outside `ScanPage`** — the same
+   falsy-zero pack-size class, all pre-existing, none touched here.
+   `PurchaseOrderFormPage.tsx` has eight `item.quantity_per_package || 1` sites
+   (lines 182, 300, 312, 327, 345, 360, 516, 682) plus its `> 1` display
+   branches (1058, 1143, 1175, 1204); `SupplierRelationshipForm.tsx:201`
+   coerces a typed 0 to 1 on the WRITE path (`Number(e.target.value) || 1`),
+   silently changing what an operator typed. These are FRONTEND sites and the
+   pack-size build gate walks `backend/` only, which is why none of them fails
+   a build today.
+3. **Extending the pack-size build gate to frontend sources**, the follow-up
+   named above with the gate's backend-only scope. It sits beside 2 because 2
+   is the population it would cover: nothing gates a frontend reader until it
+   exists.
+
 ### The pre-send boundary: when a PO is still the shop's own document
 
 `PurchaseOrder.PRE_SUPPLIER_STATUSES` is the ONE definition of "the supplier has

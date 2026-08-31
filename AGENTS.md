@@ -168,16 +168,18 @@ Aggregates that value stock rather than choose a vendor (`lowest_unit_cost`,
 Deriving from the READERS OF A SYMBOL is not the same as deriving from the
 QUESTION BEING ASKED: it reads the helper but asks a different question — how
 many units are in a box on the shelf — which has nothing to do with who we buy
-from. It resolves its pack size from ANY link, orderable or not, because a dead
-vendor's recorded pack size still describes the box already on the shelf, and
-routing it through the orderability filter suppressed a low-stock alert.
+from. It resolves its pack size from the FIRST link in `Meta.ordering`,
+orderable or not, because a dead vendor's recorded pack size still describes the
+box already on the shelf, and routing it through the orderability filter
+suppressed a low-stock alert.
 
 **Deferred and filed: one named derivation for pack size, the way "which
 supplier" got one.** It still has several readers with no single owner —
-`current_cases` (any link) versus `quantity_per_package`, `item_metrics`'s
-`case_size` and `bridge_case_reorder_to_packaging` (the supplier helper) — so
-they can disagree on an item whose links differ. Do that work rather than
-rediscovering the split.
+`current_cases` (the first link, orderable or not) versus
+`quantity_per_package`, `item_metrics`'s `case_size` and
+`bridge_case_reorder_to_packaging` (all three the supplier helper) — so they can
+disagree on an item whose links differ. Do that work rather than rediscovering
+the split.
 
 ### The alert-suppression class: IDENTIFIED, not fixed
 
@@ -217,11 +219,8 @@ honestly, keeping `NO_SUPPLIERS` (a data gap) and `NONE_ORDERABLE` (unbuyable)
 distinct throughout — flagging the data-gap population regardless of stock
 floods the surface until people ignore it, which suppresses alerts too.
 
-Each instance was found late, and by the same mistake each time: COUNTING WHAT
-HAD BEEN SEEN INSTEAD OF DERIVING THE SET OF CONSUMERS — in the very task that
-exists to end that failure, and a derivation done because the count was
-challenged is still a derivation done late. The same root shows up in the
-scoring's falsy guards, where a missing or zero value reads as "absent" or
+The same falsy-guard root shows up elsewhere and is worth recognising on sight:
+in the scoring's guards, where a missing or zero value reads as "absent" or
 "bad" rather than "unknown", and in `reorder_queue/views.py`'s `unit_cost or 0`.
 
 ### The pre-send boundary: when a PO is still the shop's own document

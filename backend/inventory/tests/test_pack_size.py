@@ -16,6 +16,7 @@ import pytest
 from inventory.models import InventoryItem, ItemSupplier, Supplier
 from inventory.services.pack_size import (
     PACK_SIZE_KNOWN,
+    PACK_SIZE_NO_ORDERABLE_LINK,
     PACK_SIZE_NOT_RECORDED,
     PACK_SIZE_RECORDED_ZERO,
     declares_a_case,
@@ -161,8 +162,12 @@ def test_an_item_whose_every_link_is_dead_can_still_count_its_shelf():
     fresh = InventoryItem.objects.get(pk=item.pk)
 
     assert shelf_pack_size(fresh).units == 50
-    # Nothing we can BUY records a pack size, which is a different fact.
-    assert order_pack_size(fresh).is_known is False
+    # Nothing we can BUY records a pack size, which is a different fact — and a
+    # different STATE from an item nobody ever named a supplier for.
+    order = order_pack_size(fresh)
+    assert order.is_known is False
+    assert order.units is None
+    assert order.state == PACK_SIZE_NO_ORDERABLE_LINK
 
 
 def test_an_item_with_no_links_is_not_recorded_on_either_question():
@@ -170,6 +175,34 @@ def test_an_item_with_no_links_is_not_recorded_on_either_question():
 
     assert shelf_pack_size(fresh).state == PACK_SIZE_NOT_RECORDED
     assert order_pack_size(fresh).state == PACK_SIZE_NOT_RECORDED
+
+
+def test_no_supplier_and_no_orderable_supplier_never_collapse_on_the_order_question():
+    """The two ways ``order_pack_size`` comes back empty are DIFFERENT facts.
+
+    "Nobody told us where this comes from" sends an operator to add a vendor;
+    "every vendor we have is dead" sends them to revive or replace one, and the
+    dead vendor may even have recorded a perfectly good pack size. Collapsing
+    them is what over-flagged one population while under-flagging the other in
+    op-2rsp round 4, so the collapse is refused at the state level too.
+
+    Both stay UNKNOWN, so no consumer's number and no flag moves either way.
+    """
+    orphan = InventoryItem.objects.get(pk=_item("NoVendorAtAll").pk)
+
+    dead = _item("EveryVendorDead")
+    _link(dead, "Gone", pack=50, is_discontinued=True)
+    dead = InventoryItem.objects.get(pk=dead.pk)
+
+    orphan_pack = order_pack_size(orphan)
+    dead_pack = order_pack_size(dead)
+
+    assert orphan_pack.state != dead_pack.state
+    assert orphan_pack.state == PACK_SIZE_NOT_RECORDED
+    assert dead_pack.state == PACK_SIZE_NO_ORDERABLE_LINK
+    assert orphan_pack.units is dead_pack.units is None
+    assert orphan_pack.is_known is dead_pack.is_known is False
+    assert bool(orphan_pack) is bool(dead_pack) is False
 
 
 def test_the_shelf_reads_only_the_first_row_and_does_not_scan_past_a_zero():

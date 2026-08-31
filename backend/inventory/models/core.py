@@ -668,13 +668,22 @@ class InventoryItem(OwnableModel):
             # item whose cases cannot be counted is judged in the unit that CAN
             # be counted instead: base units, against its own base-unit floor —
             # which is exactly the predicate ``low_stock_q`` has always applied
-            # to these items in SQL, so the property and its database twin now
-            # agree on this shape where they visibly disagreed.
+            # to these items in SQL.
             #
             # The second disjunct keeps base's own comparison. An unknown may
             # ADD an alert that a fabricated number was suppressing; it must
             # never REMOVE one base raised, and for a small stock under a large
             # ``minimum_cases`` base's comparison was the only one flagging.
+            #
+            # So the two disjuncts together mean the property and its database
+            # twin agree exactly where ``minimum_cases <= minimum_stock`` — the
+            # shape where they visibly disagreed. Above that the property still
+            # flags an item ``low_stock_q`` does not match, which is the
+            # PRE-EXISTING divergence direction and is preserved on purpose:
+            # closing it the other way would delete an alert base raised.
+            # ``inventory.services.packaging.reorder_threshold`` reports
+            # ``max(minimum_stock, minimum_cases)`` for this shape, so the badge
+            # and the threshold printed beside it name the same boundary.
             #
             # Note what this deliberately is NOT: a flag that ignores stock. An
             # item with no supplier link is a DATA GAP, and flagging that

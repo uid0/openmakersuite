@@ -20,9 +20,10 @@ and they must never collapse:
 
 * :data:`PACK_SIZE_KNOWN` — a link records a usable pack size. The number is
   real; use it.
-* :data:`PACK_SIZE_NOT_RECORDED` — no link records one at all (the item has no
-  supplier rows). We were never told. The operator's action is to add a
-  supplier link.
+* :data:`PACK_SIZE_NOT_RECORDED` — the consulted row does not record one, and
+  for the item-level entry points that means there is no row to consult at all:
+  the item has NO supplier links. We were never told. The operator's action is
+  to add a supplier link.
 * :data:`PACK_SIZE_RECORDED_ZERO` — a link records ``quantity_per_package`` of
   ``0``: a box holding no units, which is not a box. ``PositiveIntegerField``
   permits it and ``MinValueValidator(1)`` only bites under ``full_clean()``, so
@@ -30,11 +31,25 @@ and they must never collapse:
   ``update_or_create`` — persists a posted ``0`` unchallenged. The operator's
   action is to correct that row.
 
-The last two are both **unknown**: :attr:`PackSize.units` is ``None`` and
+:func:`order_pack_size` adds a fourth, because the question it asks has one more
+way to come back empty:
+
+* :data:`PACK_SIZE_NO_ORDERABLE_LINK` — supplier rows exist, and one of them may
+  well record a perfectly good pack size, but every one is inactive or
+  discontinued, so nothing we can BUY sizes the next order. The operator's
+  action is to re-activate a link or add a vendor that still carries the item —
+  NOT "add a supplier link", which is the wrong screen for an item that already
+  has three of them. Reusing ``PACK_SIZE_NOT_RECORDED`` here would be the
+  ``NO_SUPPLIERS`` / ``NONE_ORDERABLE`` collapse this branch exists to stop,
+  moved to the state level.
+
+The last three are all **unknown**: :attr:`PackSize.units` is ``None`` and
 :meth:`PackSize.__bool__` is ``False`` for each. They are reported separately
-anyway, because "we were never told" and "we were told something impossible"
-send an operator to different screens — the same reason
-``supplier_selection`` keeps ``NO_SUPPLIERS`` apart from ``NONE_ORDERABLE``.
+anyway, because "we were never told", "we were told something impossible" and
+"we were told, and the answer is no" send an operator to different screens —
+the same reason ``supplier_selection`` keeps ``NO_SUPPLIERS`` apart from
+``NONE_ORDERABLE``, and this state is derived from that very distinction rather
+than re-deciding it here.
 
 **A pack size of 1 is KNOWN, not missing.** ``quantity_per_package`` defaults to
 1, so a link that records 1 cannot be told apart from one nobody filled in —
@@ -82,15 +97,23 @@ PACK_SIZE_NOT_RECORDED = "not_recorded"
 #: A link records ``quantity_per_package`` of 0 — a box holding no units.
 PACK_SIZE_RECORDED_ZERO = "recorded_zero"
 
+#: Supplier links exist, but none is orderable, so nothing we can BUY records a
+#: pack size for the next order. Only :func:`order_pack_size` returns this. A
+#: DIFFERENT fact from :data:`PACK_SIZE_NOT_RECORDED`, pointing the operator at
+#: a different action (revive a vendor, not add one) — the pack-size face of
+#: ``supplier_selection``'s ``NONE_ORDERABLE`` versus ``NO_SUPPLIERS``.
+PACK_SIZE_NO_ORDERABLE_LINK = "no_orderable_link"
+
 
 @dataclass(frozen=True)
 class PackSize:
     """How many base units one package holds, and how well we know it.
 
     ``units`` is the number when it is known and ``None`` when it is not;
-    ``state`` says which of the three cases produced that, so a caller can tell
-    an operator "nobody told us" apart from "this row says a box holds nothing".
-    ``link`` is the row consulted, or ``None`` when there was none to consult.
+    ``state`` says which case produced that, so a caller can tell an operator
+    "nobody told us" apart from "this row says a box holds nothing" apart from
+    "every vendor who could tell us is dead". ``link`` is the row consulted, or
+    ``None`` when there was none to consult.
 
     Truthiness follows ``units``, so ``if pack:`` reads as "do we know?".
     """
@@ -111,6 +134,10 @@ class PackSize:
 #: The answer when there is no link at all. Shared so the common case allocates
 #: nothing and so identity comparisons in tests are stable.
 NOT_RECORDED = PackSize()
+
+#: The answer :func:`order_pack_size` gives when links exist but none is
+#: orderable. Shared for the same reason as :data:`NOT_RECORDED`.
+NO_ORDERABLE_LINK = PackSize(state=PACK_SIZE_NO_ORDERABLE_LINK)
 
 
 def pack_size_of(link: Optional[ItemSupplier]) -> PackSize:
@@ -185,13 +212,29 @@ def order_pack_size(item) -> PackSize:
     Resolved through ``InventoryItem.primary_item_supplier`` — the memoised,
     prefetch-riding face of :mod:`inventory.services.supplier_selection` — so an
     inactive or discontinued vendor never sizes an order, quotes a case on the
-    item detail, or sets ``item_metrics``'s ``case_size``. An item with no
-    orderable link is :data:`PACK_SIZE_NOT_RECORDED`: nothing we can buy records
-    a pack size.
+    item detail, or sets ``item_metrics``'s ``case_size``.
+
+    When there is no such link the two ways of getting there stay APART:
+    :data:`PACK_SIZE_NOT_RECORDED` for an item with no supplier rows (a data
+    gap — add a vendor) and :data:`PACK_SIZE_NO_ORDERABLE_LINK` for one whose
+    rows all name vendors we cannot buy from (unbuyable — revive or replace
+    one). Both are unknown and neither yields a number, so no flag moves either
+    way; what differs is the sentence an operator is owed. Which of the two it
+    is comes from ``select_supplier``'s own reason rather than from a second
+    count of the rows here, so the distinction has one owner.
 
     Read through the model accessor rather than by calling the service again, so
     an item that has already resolved its supplier does not resolve it twice —
     ``test_reading_all_flat_fields_is_one_query_unprefetched_and_cached`` pins
-    that the whole flat compat block costs ONE query.
+    that the whole flat compat block costs ONE query. The reason lookup runs
+    ONLY on the empty path, which that budget never takes.
     """
-    return pack_size_of(item.primary_item_supplier)
+    link = item.primary_item_supplier
+    if link is not None:
+        return pack_size_of(link)
+
+    from inventory.services.supplier_selection import NONE_ORDERABLE, select_supplier
+
+    if select_supplier(item).reason == NONE_ORDERABLE:
+        return NO_ORDERABLE_LINK
+    return NOT_RECORDED

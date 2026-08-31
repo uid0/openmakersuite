@@ -189,12 +189,20 @@ that must never collapse:
   unconfigured link unknown — a flood, which suppresses alerts of its own. "Did
   this vendor declare a CASE?" is a different question with its own answer,
   `declares_a_case`, which is the op-ev14 ordering ladder's entry condition.
-* `PACK_SIZE_NOT_RECORDED` — no link records one. A data gap; the operator adds
-  a supplier.
+* `PACK_SIZE_NOT_RECORDED` — no link records one, which at item level means no
+  links at all. A data gap; the operator adds a supplier.
 * `PACK_SIZE_RECORDED_ZERO` — a link records `0`, a box holding no units.
   `PositiveIntegerField` permits it and `MinValueValidator(1)` only bites under
   `full_clean()`, so `InventoryItemViewSet._sync_primary_supplier` — an
   `update_or_create` — persists a posted `0`. The operator fixes that row.
+* `PACK_SIZE_NO_ORDERABLE_LINK` — `order_pack_size` only: rows exist, one may
+  even record a good size, but every vendor is dead, so nothing we can BUY sizes
+  the next order. The operator revives or replaces a vendor — a different screen
+  from "add a supplier". Reusing `PACK_SIZE_NOT_RECORDED` here would be the
+  `NO_SUPPLIERS`/`NONE_ORDERABLE` collapse at the state level, so which of the
+  two it is comes from `select_supplier`'s own reason rather than a second count
+  of the rows. All three unknowns keep `units` `None` and `is_known` `False`, so
+  no flag moves on any of them.
 
 Two questions, and collapsing them is a bug in either direction:
 
@@ -241,9 +249,18 @@ What moved, and what deliberately did not:
    "1 unit per package", so raw base units read as a case count. It is now
    `None`, and `needs_reorder` judges such an item in the unit that CAN be
    counted: `current_stock <= minimum_stock` — the predicate `low_stock_q` has
-   always applied to these items in SQL, so the property and its database twin
-   now agree on the shape where they visibly disagreed — OR base's own
-   comparison, kept so an unknown may ADD a flag but can never REMOVE one.
+   always applied to these items in SQL — OR base's own comparison, kept so an
+   unknown may ADD a flag but can never REMOVE one. Be precise about how far
+   that closes the split brain: the property and the query agree exactly where
+   `minimum_cases <= minimum_stock`, which is the shape where they visibly
+   disagreed. Where `minimum_cases > minimum_stock` the property still flags an
+   item `low_stock_q` does not match, via the second disjunct — the PRE-EXISTING
+   divergence direction, preserved deliberately because closing it the other way
+   would delete an alert base raised. `reorder_threshold` reports
+   `max(minimum_stock, minimum_cases)` for this shape so the badge and the
+   threshold line printed beside it name the same boundary; reporting the bare
+   `minimum_stock` had one payload calling an item LOW while its own kanban card
+   said "reorder at 0 units".
 2. **`component_forecast`'s `reorder_point` — expression fixed, NO flag change.**
    The row now says `lead_time_known: false` and the number is a stated LOWER
    BOUND (safety stock alone) rather than a horizon at a fabricated zero-day

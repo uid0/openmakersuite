@@ -319,13 +319,23 @@ def reorder_threshold(item: "InventoryItem") -> tuple[int, str]:
     A case-based item whose case size is NOT KNOWN is named in base units
     instead (op-c1ke). "Reorder at: 1 case" is a threshold nothing can evaluate
     when nobody has recorded how many units a case holds, and this line is
-    printed on the kanban card that outlives the screen it came from. It is the
-    same threshold ``needs_reorder`` actually judges such an item on.
+    printed on the kanban card that outlives the screen it came from.
+
+    For that shape the number is ``max(minimum_stock, minimum_cases)``, which is
+    EXACTLY the boundary of the disjunction ``needs_reorder`` judges such an item
+    on (``current_stock <= minimum_stock or current_stock <= minimum_cases``).
+    Reporting the bare ``minimum_stock`` instead let one payload contradict
+    itself: with ``minimum_stock`` 0, ``minimum_cases`` 1 and one unit on hand
+    the badge said LOW while the card beside it printed "reorder at 0 units" — a
+    threshold the stock was above. A badge and its own threshold line must name
+    the same rule.
     """
     if counts_in_packs(item):
         return item.minimum_stock, item.count_level.name
-    if item.use_case_based_reorder and item.current_cases is not None:
-        return item.minimum_cases, "case"
+    if item.use_case_based_reorder:
+        if item.current_cases is not None:
+            return item.minimum_cases, "case"
+        return max(item.minimum_stock, item.minimum_cases), item.base_unit or "unit"
     return item.minimum_stock, item.base_unit or "unit"
 
 
@@ -402,10 +412,14 @@ def low_stock_q() -> Q:
     ``current_stock <= minimum_stock`` — including ``use_case_based_reorder``
     ones, whose SQL filter has always been that base-unit comparison even though
     the property compares cases (a pre-existing divergence this deliberately
-    preserves *where the case size is known*; where it is NOT, ``needs_reorder``
-    now falls back to this same comparison, so the two agree on the shape where
-    they used to disagree visibly — op-c1ke). Pack-counting items compare WHOLE
-    packs instead::
+    preserves *where the case size is known*). Where the case size is NOT known,
+    ``needs_reorder`` adds this same comparison as one disjunct, so the two agree
+    wherever ``minimum_cases <= minimum_stock`` — the shape where they used to
+    disagree visibly (op-c1ke). Above that the property still flags an item this
+    query does not match, through its second disjunct; that is the pre-existing
+    divergence direction, kept deliberately because closing it the other way
+    would REMOVE an alert base raised. Pack-counting items compare WHOLE packs
+    instead::
 
         floor(current_stock / base_units) <= minimum_stock
         ⟺ current_stock < (minimum_stock + 1) × base_units

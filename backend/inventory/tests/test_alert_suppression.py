@@ -198,18 +198,66 @@ def test_an_unknown_case_size_does_not_flag_an_item_that_is_well_stocked():
     assert fresh.needs_reorder is False
 
 
-def test_needs_reorder_and_its_sql_twin_now_agree_where_the_case_size_is_unknown():
-    """The divergence this closes, stated as the two answers disagreeing.
+def test_the_property_and_its_sql_twin_agree_where_minimum_cases_fits_in_minimum_stock():
+    """The divergence this closes — and exactly how far it closes.
 
     BEFORE: ``low_stock_q()`` matched the item (it has always compared base
     units for these) while ``needs_reorder`` said False — so the reorder
     recommendations engine listed it while the item detail, the low-stock
     action and the admin all called it well stocked.
-    """
-    fresh = _fresh(_case_item("SplitBrain"))
 
+    The agreement is CONDITIONAL, not universal: ``needs_reorder``'s first
+    disjunct is the query's own predicate, so the two match wherever
+    ``minimum_cases <= minimum_stock``. Here that is 1 <= 10. The other side of
+    that boundary is pinned by the test below.
+    """
+    fresh = _fresh(_case_item("SplitBrain", minimum_stock=10, minimum_cases=1))
+
+    assert fresh.minimum_cases <= fresh.minimum_stock
     assert fresh.needs_reorder is True
     assert InventoryItem.objects.filter(low_stock_q(), pk=fresh.pk).exists() is True
+
+
+def test_above_that_boundary_the_property_still_flags_what_the_query_does_not():
+    """The residual divergence, pinned deliberately rather than left to luck.
+
+    Where ``minimum_cases > minimum_stock`` the property's SECOND disjunct —
+    base's own comparison, kept so an unknown can never REMOVE an alert base
+    raised — flags an item ``low_stock_q()`` does not match. That is the
+    PRE-EXISTING divergence direction. Closing it by dropping the disjunct would
+    delete an alert base raised, which the branch invariant forbids, so it stays
+    and is asserted here so nobody has to guess whether it was intended.
+    """
+    fresh = _fresh(_case_item("OverTheBoundary", stock=1, minimum_stock=0, minimum_cases=5))
+
+    assert fresh.minimum_cases > fresh.minimum_stock
+    assert fresh.needs_reorder is True
+    assert InventoryItem.objects.filter(low_stock_q(), pk=fresh.pk).exists() is False
+
+
+def test_the_badge_and_the_threshold_printed_beside_it_never_contradict_each_other():
+    """One payload must not call an item LOW and then print a threshold it clears.
+
+    With the column defaults (``minimum_stock`` 0, ``minimum_cases`` 1) and one
+    unit on hand, the item is flagged through the second disjunct while
+    ``reorder_threshold`` reported the bare ``minimum_stock`` — so the badge said
+    LOW beside "1 unit on hand · reorder at 0 units", and the kanban card that
+    outlives the screen printed "Reorder at: 0 units". The threshold reported is
+    now ``max(minimum_stock, minimum_cases)``, the exact boundary the flag uses.
+    """
+    from index_cards.services import IndexCardRenderer
+
+    fresh = _fresh(_case_item("Contradiction", stock=1, minimum_stock=0, minimum_cases=1))
+    display = reorder_display(fresh)
+
+    assert display["needs_reorder"] is True
+    assert display["threshold"] == 1
+    assert display["current"] <= display["threshold"]
+    assert display["text"] == "1 unit on hand · reorder at 1 unit"
+    assert (
+        IndexCardRenderer(base_url="http://localhost:3000")._reorder_at_line(fresh)
+        == "Reorder at: 1 unit"
+    )
 
 
 def test_the_kanban_card_never_prints_a_case_count_it_cannot_compute():

@@ -99,11 +99,14 @@ def _lead_time_days_by_item(items: list[InventoryItem]) -> dict[Any, Optional[fl
     in the same request: a discontinued flagged-primary link at 45 days beside
     a live link at 7 gives 45 here and 7 there.
 
-    That is a KNOWN and ACCEPTED difference, not an oversight. Routing this
-    through the derivation moves the reorder point and therefore moves a
-    low-stock flag, and op-2rsp is scoped to change no alert behaviour
-    anywhere; the alignment is recorded as deferred work in AGENTS.md, under
-    "The alert-suppression class". Read that before changing anything here.
+    That is a KNOWN and ACCEPTED difference, and it is PERMANENT rather than
+    deferred: AGENTS.md, under "The alert-suppression class", says **do NOT**
+    route this through the supplier derivation, and a mutation test pins it.
+    ``average_lead_time`` is non-nullable with a default, so ANY link supplies an
+    estimate — a discontinued one included — and filtering here would leave an
+    item whose only vendor is dead with no lead time at all, dropping it off the
+    demand-forecast report and the nightly digest. That is exactly what op-2rsp
+    round 5 did. Read that section before changing anything here.
     """
     # Imported lazily so this module has no hard import-time dependency on the
     # reorder_queue app (mirrors how the rest of inventory references it).

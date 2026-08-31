@@ -222,11 +222,11 @@ export interface InventoryItem {
   reorder_cases: number;
   current_cases: number;
   supplier: number | null;
-  supplier_name: string;
-  supplier_sku: string;
-  supplier_url: string;
+  supplier_name: string | null;
+  supplier_sku: string | null;
+  supplier_url: string | null;
   unit_cost: string | null;
-  average_lead_time: number;
+  average_lead_time: number | null;
   qr_code: string | null;
   is_active: boolean;
   // Retirement (op-jv7r). A retired item is never flagged for reorder and is

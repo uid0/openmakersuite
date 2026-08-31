@@ -80,9 +80,23 @@ def _lead_time_days_by_item(items: list[InventoryItem]) -> dict[Any, Optional[fl
     """Resolve each item's lead time in days, batched to avoid N+1 queries.
 
     Prefers the mean of *observed* lead times recorded in
-    ``reorder_queue.LeadTimeLog`` across the item's suppliers; falls back to the
-    supplier's estimated ``average_lead_time`` (primary supplier preferred);
+    ``reorder_queue.LeadTimeLog`` across the item's suppliers; falls back to an
+    estimated ``average_lead_time`` read from ANY link, flagged-primary first;
     maps to ``None`` when neither is available.
+
+    **This deliberately does NOT share the supplier derivation** in
+    :mod:`inventory.services.supplier_selection`, which every "which supplier"
+    reader uses (op-2rsp). Both branches here read EVERY link, inactive and
+    discontinued included, and neither applies the gate or the score. So this
+    can disagree with :attr:`InventoryItem.average_lead_time` on the same item
+    in the same request: a discontinued flagged-primary link at 45 days beside
+    a live link at 7 gives 45 here and 7 there.
+
+    That is a KNOWN and ACCEPTED difference, not an oversight. Routing this
+    through the derivation moves the reorder point and therefore moves a
+    low-stock flag, and op-2rsp is scoped to change no alert behaviour
+    anywhere; the alignment is recorded as deferred work in AGENTS.md, under
+    "The alert-suppression class". Read that before changing anything here.
     """
     # Imported lazily so this module has no hard import-time dependency on the
     # reorder_queue app (mirrors how the rest of inventory references it).
@@ -97,9 +111,11 @@ def _lead_time_days_by_item(items: list[InventoryItem]) -> dict[Any, Optional[fl
         )
     }
 
-    # Estimated fallback: the primary supplier's average_lead_time (or any
-    # supplier's if none is flagged primary), matching InventoryItem's own
-    # ``average_lead_time`` resolution without a query per item.
+    # Estimated fallback: the flagged-primary link's average_lead_time, or any
+    # link's if none is flagged — orderable or not, and with no ``unit_cost``
+    # tiebreak. NOT ``InventoryItem.average_lead_time``, which resolves through
+    # the shared supplier derivation; see this function's docstring for why the
+    # two are allowed to differ. One query per page.
     estimated: dict[Any, Any] = {}
     for row in (
         ItemSupplier.objects.filter(item__in=items)

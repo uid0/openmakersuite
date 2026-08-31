@@ -498,6 +498,22 @@ complete, and it was twice not:
   `no_data`. All three strings are pinned in `TransparencyUnknownCosts.test.tsx`.
 - Outbound reorder webhook (Discord/Slack) and three admin `Est. Cost` columns
   — `null` / `—` -> `$0.00` for a free line.
+- Member-facing scan / reorder-request screen (`/scan/<item>`) — the "Package
+  cost", "Unit cost", "estimated cost" help text and the Order Summary's
+  "Estimated Cost" row: `$0.00` (and a bare `$` on the two detail cells) ->
+  `— (no price on file)` where the selected supplier link records no cost.
+  `parseFloat(supplier.package_cost || '0')` was the last frontend site turning
+  an unknown price into a confident zero. A recorded `0.00` still reads
+  `$0.00`. The screen already told the truth about an unknown PACK SIZE from
+  the sibling branch, so it was reporting how many units honestly and what they
+  cost dishonestly; the two now match. An unpriced request is still SUBMITTABLE
+  — unlike an unsized one — with a note naming what to add.
+- PO create form, the asset lines — an asset a vendor is DONATING can now go on
+  an order. `canSubmit` required `parseFloat(a.unit_cost) > 0`, so a typed `0`
+  left the button disabled with nothing saying why, while the freeform half of
+  the same form already accepted `>= 0` and the server refuses only a MISSING
+  cost. Both halves now share one `hasTypedPrice` helper: a number was entered
+  and it is not negative. An empty box still blocks.
 - Admin PurchaseOrder changelist, the **Est. Total** column
   (`reorder_queue/admin.py`'s `estimated_total_display`) — `—` -> `$0.00` for
   an order whose every line is donated. The payload twin of this same field was
@@ -541,6 +557,18 @@ real number":
   which is DERIVED from `unit_cost_actual` and IS inside the branch (the
   `receiving.py` twin was the real defect), and whose two admin columns are
   named in the moved-figures list above.
+- `ScanPage`'s auto-selection of a default supplier at load,
+  `supplierList.filter(s => s.is_active && s.unit_cost)`. This is the same
+  falsy-zero shape — a vendor that charges NOTHING, the cheapest price there
+  is, can never be the preselected "most cost-effective supplier" — but
+  repairing it changes WHICH supplier a member sees chosen for them, which is
+  the captain-reserved class `score_candidate` is reserved under, and it moves
+  a figure for a reason that is not "base presented an unknown price as a real
+  number". REPORTED, NOT FIXED, and named here so it is not mistaken for an
+  oversight. What the same screen DOES now do honestly is render the price
+  once a supplier is selected, by hand or otherwise — see the moved-figures
+  list above. The `|| '999'` sort key beside it is the same shape and the same
+  reservation.
 - `MaintenanceItem.estimated_cost` on the work-order PDF
   (`inventory/utils/work_order_pdf.py`), where `if item.estimated_cost:` omits
   the "Est. Cost" line for a task budgeted at a recorded `0.00`. A maintenance
@@ -557,6 +585,32 @@ real number":
 twice, character-for-character, in `inventory/views.py` and
 `inventory/serializers.py` — two spellings of one fact on a branch whose whole
 thesis is that there should be one. Non-functional; no figure moved.
+
+**THE CROSS-PROJECT CONTRACT: two changes ScanTTY must make.** Verified against
+`uid0/scantty` remote main at `385d12ae` — a fresh clone whose SHA was confirmed
+through the GitHub API, not a local checkout — by probing its real Go structs
+with the new payloads. Recorded here because this repo is what BREAKS them, and
+because the defect they cause is the one this branch exists to close, displaced
+one repository along:
+
+- `PurchasingPriceTrend.MinUnitCost` / `MaxUnitCost` / `LatestUnitCost` are
+  plain `float64`. The `null` `reorder_queue/views.py`'s `_as_float` now sends
+  unmarshals to `0` and re-renders as "$0.00" — an unknown price presented as a
+  fact. They should become `*float64`, as `PriceChangePercentage` on the same
+  struct already is.
+- `suggested_unit_cost` is now nullable (`services/line_entry.py`), so
+  ScanTTY's `poAddIsZeroMoney(SuggestedUnitCost.String())` stops matching and
+  its "there is NO price on file" hint disappears. It should become
+  `SuggestedUnitCost.Empty()` — which additionally fixes that hint currently
+  MISFIRING on a genuinely free vendor.
+
+**Verified SAFE, so nobody redoes the work:** every other field this branch
+made nullable is a `DecimalString`, which already handles `null` as `Empty()`;
+the new payload keys (`unit_cost_state`, `unit_cost_detail`,
+`unpriced_item_count`, `estimated_total_is_partial`, `items_without_price`,
+`direction`) are ignored by `encoding/json`; `create_optimized_order` is not
+among the endpoints ScanTTY calls at all; and both new write-path refusals
+reach an operator with the full remedy text.
 
 ### The pre-send boundary: when a PO is still the shop's own document
 

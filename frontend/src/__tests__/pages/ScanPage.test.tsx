@@ -495,6 +495,80 @@ describe('ScanPage', () => {
     });
   });
 
+  // --- A price nobody recorded is not $0.00 (op-9m2v) ---------------------
+  // `parseFloat(supplier.package_cost || '0')` turned a NULL package cost into
+  // a confident 0, so this member-facing screen quoted "$0.00 estimated cost"
+  // for a link nobody had priced — while telling the truth about the pack size
+  // three lines above.
+
+  const unpricedSupplier = {
+    id: 9,
+    supplier_name: 'Silent Vendor',
+    unit_cost: null,
+    package_cost: null,
+    quantity_per_package: 12,
+    is_active: true,
+    average_lead_time: 7,
+  };
+
+  /**
+   * The auto-selection at load only considers suppliers with a truthy
+   * `unit_cost`, so an unpriced (or free) link is never PRE-selected — that
+   * site is a recorded exclusion, since it changes which supplier is chosen.
+   * A member selects it by hand, which is the path these tests take.
+   */
+  const selectSupplier = (supplier: Record<string, unknown>) =>
+    fireEvent.change(screen.getByLabelText(/^supplier$/i), {
+      target: { value: String(supplier.id) },
+    });
+
+  const packageDetails = () => document.querySelector('.supplier-details')!;
+  const estimatedCostRow = () =>
+    Array.from(document.querySelectorAll('.order-summary .summary-item')).find((row) =>
+      /estimated cost/i.test(row.textContent || '')
+    )!;
+
+  test('BEFORE/AFTER: an unrecorded price is shown as unknown, never as $0.00', async () => {
+    await renderWithSupplier(unpricedSupplier);
+    selectSupplier(unpricedSupplier);
+
+    expect(screen.queryByText(/\$0\.00/)).not.toBeInTheDocument();
+    // Both cost cells, which used to render a bare "$" for the same null.
+    expect(packageDetails().textContent).toContain('Package cost: — (no price on file)');
+    expect(packageDetails().textContent).toContain('Unit cost: — (no price on file)');
+    expect(estimatedCostRow().textContent).toContain('— (no price on file)');
+  });
+
+  test('the unknown price names what is missing and does not block the request', async () => {
+    await renderWithSupplier(unpricedSupplier);
+    selectSupplier(unpricedSupplier);
+
+    // Informational, not a refusal: an unpriced request is still legitimate.
+    const note = screen.getByRole('status');
+    expect(note).toHaveTextContent(/no package cost on file/i);
+    expect(note).toHaveTextContent(/can still be submitted/i);
+    expect(screen.getByRole('button', { name: /request \d+ units/i })).not.toBeDisabled();
+  });
+
+  test('CONTROL: a vendor that genuinely charges nothing still reads $0.00', async () => {
+    const free = { ...unpricedSupplier, unit_cost: '0.00', package_cost: '0.00' };
+    await renderWithSupplier(free);
+    selectSupplier(free);
+
+    expect(screen.queryByText(/no price on file/i)).not.toBeInTheDocument();
+    expect(estimatedCostRow().textContent).toContain('$0.00');
+  });
+
+  test('CONTROL: an ordinary price is unchanged — the branch invariant', async () => {
+    await renderWithSupplier({ ...unpricedSupplier, unit_cost: '1.25', package_cost: '15.00' });
+
+    const packagesInput = screen.getByLabelText(/number of packages/i);
+    fireEvent.change(packagesInput, { target: { value: '3' } });
+
+    expect(screen.queryByText(/no price on file/i)).not.toBeInTheDocument();
+    expect(estimatedCostRow().textContent).toContain('$45.00');
+  });
+
   test('AC-15: an existing pending reorder is not duplicated and shows a clear final state', async () => {
     const pendingItem = {
       ...mockItem,

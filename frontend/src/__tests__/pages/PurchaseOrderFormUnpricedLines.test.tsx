@@ -35,7 +35,7 @@ const supplier = {
   name: 'Test Supplier',
   supplier_type: 'online',
   total_items: 1,
-  assets: [],
+  assets: [] as api.ReorderDataAsset[],
   estimated_total: '0.00',
   avg_lead_time: 5,
 };
@@ -191,5 +191,57 @@ describe('an ordinary priced line', () => {
     expect(total).not.toHaveTextContent('+');
     expect(screen.queryByTestId('po-unpriced-warning')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /create purchase order/i })).toBeEnabled();
+  });
+});
+
+
+/**
+ * A vendor donating an ASSET states a price of zero (op-9m2v). `canSubmit`
+ * required `parseFloat(a.unit_cost) > 0`, so that line could not go on an order
+ * at all — the button sat disabled with nothing saying why — while the freeform
+ * half of the same form already accepted `>= 0` and the server refuses only a
+ * MISSING cost.
+ */
+describe('an asset line the vendor is donating', () => {
+  const asset = {
+    id: 'asset-1',
+    name: 'Donated Lathe',
+    asset_tag: 'A-001',
+    serial_number: 'SN-1',
+    product_url: '',
+  };
+
+  const renderWithAsset = async () => {
+    await renderWith(baseItem, { assets: [asset] });
+    fireEvent.click(screen.getByText('Donated Lathe').closest('tr')!.querySelector('input')!);
+    return screen
+      .getByText('Donated Lathe')
+      .closest('tr')!
+      .querySelector('.col-cost input') as HTMLInputElement;
+  };
+
+  test('BEFORE/AFTER: a typed $0.00 asset cost no longer blocks the order', async () => {
+    const costInput = await renderWithAsset();
+    fireEvent.change(costInput, { target: { value: '0' } });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /create purchase order/i })).toBeEnabled()
+    );
+  });
+
+  test('CONTROL: an empty asset cost still blocks — a blank is not a price', async () => {
+    const costInput = await renderWithAsset();
+    fireEvent.change(costInput, { target: { value: '' } });
+
+    expect(screen.getByRole('button', { name: /create purchase order/i })).toBeDisabled();
+  });
+
+  test('CONTROL: an ordinary asset price still submits — the branch invariant', async () => {
+    const costInput = await renderWithAsset();
+    fireEvent.change(costInput, { target: { value: '250' } });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /create purchase order/i })).toBeEnabled()
+    );
   });
 });

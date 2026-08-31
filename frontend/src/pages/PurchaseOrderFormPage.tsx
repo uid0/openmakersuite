@@ -80,6 +80,22 @@ const formatCostValue = (value: number): string => {
   return String(parseFloat(value.toFixed(6)));
 };
 
+/**
+ * Did the operator actually TYPE a price, and is it a real one?
+ *
+ * `>= 0`, not `> 0` (op-9m2v). A vendor donating an asset states a price of
+ * zero, and the asset guard's `parseFloat(cost) > 0` refused to let that line
+ * onto an order at all — with the button silently disabled and nothing saying
+ * why — while the freeform guard on the same screen already accepted it, and
+ * the server refuses only a MISSING cost. An empty box is still not a price:
+ * this is "a number was entered and it is not negative", never truthiness.
+ */
+const hasTypedPrice = (cost: string | null | undefined): boolean => {
+  if (cost === null || cost === undefined || cost.trim() === '') return false;
+  const amount = parseFloat(cost);
+  return Number.isFinite(amount) && amount >= 0;
+};
+
 const PurchaseOrderFormPage: React.FC = () => {
   const navigate = useNavigate();
 
@@ -703,16 +719,13 @@ const PurchaseOrderFormPage: React.FC = () => {
     totalLineItems > 0 &&
     !submitting &&
     // Check that all selected assets have unit_cost
-    selectedAssets.filter((a) => a.selected).every((a) => a.unit_cost && parseFloat(a.unit_cost) > 0) &&
+    selectedAssets.filter((a) => a.selected).every((a) => hasTypedPrice(a.unit_cost)) &&
     // No inventory or kit line may go out at a price nobody has stated. The
     // server refuses one; refusing here first means the operator is told which
     // line and what to do about it, instead of a 400 after the fact (op-9m2v).
     unpricedLines.length === 0 &&
     // Check that all freeform items have description and unit_cost
-    freeformItems.every(
-      (item) =>
-        !item.description || (item.description && item.unit_cost && parseFloat(item.unit_cost) >= 0)
-    );
+    freeformItems.every((item) => !item.description || hasTypedPrice(item.unit_cost));
 
   // Submit order
   const handleSubmit = async (e: React.FormEvent) => {

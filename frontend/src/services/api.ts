@@ -1864,14 +1864,29 @@ export interface ReorderDataItem {
   minimum_stock: number;
   reorder_quantity: number;
   suggested_quantity: number;
-  unit_cost: string;
+  /**
+   * What the vendor charges per base unit, or `null` when nobody recorded it
+   * (op-9m2v). This used to be the string "0.00" for BOTH an unpriced link and
+   * a vendor that gives the item away, so the form prefilled a fabricated zero
+   * into the cost box and the operator confirmed it onto a purchase order.
+   * A "0.00" here now means the vendor charges nothing.
+   */
+  unit_cost: string | null;
+  /**
+   * Why there is no price, and what to do about it. Optional in the type even
+   * though the backend always sends them — the same reason `kits?` is: an
+   * older cached payload must not crash the purchase-order form.
+   */
+  unit_cost_state?: 'known' | 'not_recorded' | 'no_supplier_link' | 'no_orderable_link';
+  unit_cost_detail?: string | null;
   package_cost: string | null;
   quantity_per_package: number;
   lead_time_days: number;
   supplier_sku: string;
   supplier_url: string;
   is_primary: boolean;
-  line_total: string;
+  /** `null` when `unit_cost` is: an unknown price makes an unknown line total. */
+  line_total: string | null;
   has_active_reorder_request?: boolean;
   reorder_request_id?: number | null;
 }
@@ -1904,7 +1919,8 @@ export interface ReorderDataKit {
   name: string;
   sku: string;
   supplier_sku: string;
-  unit_cost: string;
+  /** `null` when no price is recorded for the kit — see `ReorderDataItem`. */
+  unit_cost: string | null;
   item_supplier_id: number;
   components: ReorderDataKitComponent[];
   low_component_count: number;
@@ -1924,7 +1940,15 @@ export interface ReorderDataSupplier {
    */
   kits?: ReorderDataKit[];
   total_items: number;
+  /**
+   * The sum of the lines this pad COULD price. `unpriced_item_count` is how
+   * many it could not, and `estimated_total_is_partial` is the claim a screen
+   * is allowed to make about the number (op-9m2v). Optional in the type so an
+   * older cached payload cannot crash the form.
+   */
   estimated_total: string;
+  unpriced_item_count?: number;
+  estimated_total_is_partial?: boolean;
   avg_lead_time: number;
 }
 
@@ -2168,7 +2192,15 @@ export interface PurchaseOrderLineCandidate {
   quantity_per_package: number;
   /** What a FRESH line would land on — not what a repeat add produces. */
   suggested_quantity: number;
-  suggested_unit_cost: string;
+  /**
+   * `null` when nothing is on file — neither a price on the supplier
+   * relationship nor a past purchase from them (op-9m2v). It used to be the
+   * string "0.00", which a prompt could show and an operator accept as a
+   * quote. Adding a candidate whose suggestion is `null` without sending a
+   * `unit_cost` is REFUSED by the server, so render the null as a blank the
+   * operator must fill in. A "0.00" means the vendor charges nothing.
+   */
+  suggested_unit_cost: string | null;
   already_on_order: {
     line_item: string;
     quantity_ordered: number;

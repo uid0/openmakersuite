@@ -124,6 +124,43 @@ def test_receipt_prefers_actual_unit_cost_over_ordered():
     assert txn.legs.get(debit__isnull=False).debit.amount == Decimal("7.50")  # 3 × 2.50
 
 
+def test_a_comped_line_charges_the_committee_nothing():
+    """BEFORE/AFTER (op-9m2v). ``actual or ordered`` billed a free line.
+
+    A vendor that comps a replacement records ``unit_cost_actual = 0.00``, and
+    ``po_item.unit_cost_actual or po_item.unit_cost_ordered`` skipped that zero
+    and booked the ORDERED price against the committee — real money charged for
+    goods nobody paid for. Both readers of "the real price paid per unit" now go
+    through ``purchase_line_unit_cost``, whose docstring already said this is
+    why it is ``is None``; this site had a second spelling with the ``or``.
+    """
+    user = UserFactory()
+    group = Group.objects.create(name="Warranty SIG")
+    po, line, item = _committee_po(user, group=group, qty=3, unit_cost=Decimal("9.00"), stock=0)
+    line.unit_cost_actual = Decimal("0.00")
+    line.save()
+
+    services.receive_delivery(po, [(line, 3)], received_by=user, delivery_datetime=timezone.now())
+
+    # The goods still arrived; only the charge is gone.
+    item.refresh_from_db()
+    assert item.current_stock == 3
+    assert not Transaction.objects.filter(meta__source_type=PO_RECEIPT).exists()
+
+
+def test_an_unrecorded_actual_cost_still_charges_the_ordered_price():
+    """CONTROL. ``None`` is the absence, and the ordered price is the estimate."""
+    user = UserFactory()
+    group = Group.objects.create(name="Estimate SIG")
+    po, line, _item = _committee_po(user, group=group, qty=3, unit_cost=Decimal("9.00"), stock=0)
+    assert line.unit_cost_actual is None
+
+    services.receive_delivery(po, [(line, 3)], received_by=user, delivery_datetime=timezone.now())
+
+    txn = Transaction.objects.get(meta__source_type=PO_RECEIPT)
+    assert txn.legs.get(debit__isnull=False).debit.amount == Decimal("27.00")  # 3 × 9.00
+
+
 def test_receipt_is_idempotent_on_delivery_item():
     """Re-driving the same delivery_item does not double-post."""
     user = UserFactory()

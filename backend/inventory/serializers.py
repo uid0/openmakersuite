@@ -63,6 +63,15 @@ from .models import (
 )
 
 
+def _price_float(price):
+    """A :class:`~inventory.services.pricing.Price` as a JSON number, or ``None``.
+
+    ``None`` only where the price is genuinely unknown; a recorded ``0.00``
+    comes through as ``0.0`` (op-9m2v).
+    """
+    return None if not price.is_known else float(price.amount)
+
+
 class SupplierSerializer(serializers.ModelSerializer):
     """Basic serializer for supplier list views."""
 
@@ -404,6 +413,8 @@ class SupplierDetailSerializer(SupplierSerializer):
 
             from django.utils import timezone
 
+            from inventory.services.pricing import package_price_of, unit_price_of
+
             # Get price history for items from this supplier
             price_history = PriceHistory.objects.filter(item_supplier__supplier=obj).order_by(
                 "-recorded_at"
@@ -446,15 +457,17 @@ class SupplierDetailSerializer(SupplierSerializer):
                             "price_history": [
                                 {
                                     "recorded_at": ph.recorded_at.isoformat(),
-                                    "unit_cost": (float(ph.unit_cost) if ph.unit_cost else None),
-                                    "package_cost": (
-                                        float(ph.package_cost) if ph.package_cost else None
-                                    ),
+                                    # A snapshot recording 0.00 is a price the
+                                    # supplier charged, and a 0% change is "no
+                                    # change" rather than "no data" — neither
+                                    # survives a truthiness guard (op-9m2v).
+                                    "unit_cost": _price_float(unit_price_of(ph)),
+                                    "package_cost": _price_float(package_price_of(ph)),
                                     "change_type": ph.change_type,
                                     "price_change_percentage": (
-                                        float(ph.price_change_percentage)
-                                        if ph.price_change_percentage
-                                        else None
+                                        None
+                                        if ph.price_change_percentage is None
+                                        else float(ph.price_change_percentage)
                                     ),
                                 }
                                 for ph in item_history
@@ -462,8 +475,15 @@ class SupplierDetailSerializer(SupplierSerializer):
                         }
                     )
 
-            # Calculate summary statistics
-            unit_costs = [float(ph.unit_cost) for ph in price_history if ph.unit_cost is not None]
+            # Calculate summary statistics. Every snapshot that RECORDS a
+            # price counts, ``0.00`` included — the summary is what this
+            # supplier has charged, and dropping the free rows would push the
+            # average and the minimum up (op-9m2v).
+            unit_costs = [
+                float(price.amount)
+                for price in (unit_price_of(ph) for ph in price_history)
+                if price.is_known
+            ]
 
             return {
                 "trends": trends,
@@ -536,7 +556,13 @@ class InventoryItemSerializer(serializers.ModelSerializer):
         return supplier.name if supplier else None
 
     needs_reorder = serializers.BooleanField(read_only=True)
-    total_value = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    # ``null`` when no supplier records a price for the item: the stock's value
+    # is unknown, and base said ``"0.00"`` — a claim about money nobody made
+    # (op-9m2v). Every consumer moved in the same commit: ``types/index.ts``
+    # (``string | null``) and ScanTTY's already-nil-tolerant ``DecimalString``.
+    total_value = serializers.DecimalField(
+        max_digits=10, decimal_places=2, read_only=True, allow_null=True
+    )
     image = serializers.ImageField(read_only=True)
     thumbnail = serializers.SerializerMethodField()
     qr_code_url = serializers.SerializerMethodField()
@@ -969,6 +995,8 @@ class InventoryItemDetailSerializer(InventoryItemSerializer):
 
     def get_price_trend_summary(self, obj):
         """Get price trend summary for the primary supplier."""
+        from inventory.services.pricing import unit_price_of
+
         primary_supplier = obj.primary_item_supplier
         if not primary_supplier:
             return None
@@ -981,7 +1009,10 @@ class InventoryItemDetailSerializer(InventoryItemSerializer):
         latest = recent_history[0]
         previous = recent_history[1]
 
-        if latest.unit_cost and previous.unit_cost:
+        # ``is_known``, not truthiness: a supplier that dropped to 0.00 has a
+        # price and a trend, and ``if latest.unit_cost and previous.unit_cost``
+        # reported "no_data" for it (op-9m2v).
+        if unit_price_of(latest).is_known and unit_price_of(previous).is_known:
             change_percentage = latest.price_change_percentage
             if change_percentage is None:
                 return {"trend": "no_change", "change_percentage": 0}
@@ -1272,8 +1303,16 @@ class KitSummarySerializer(serializers.ModelSerializer):
         return primary.supplier_sku if primary else None
 
     def get_unit_cost(self, obj):
-        primary = self._primary(obj)
-        return primary.unit_cost if primary else None
+        """What one of this component costs from the vendor we would buy through.
+
+        Through the ONE price derivation (op-9m2v) rather than off the link,
+        so this row cannot drift from ``InventoryItem.unit_cost`` or from
+        ``item_metrics``. No value moves: it was already ``None`` for an
+        unpriced or supplier-less component.
+        """
+        from inventory.services.pricing import order_unit_price
+
+        return order_unit_price(obj).amount
 
 
 class DemandForecastSerializer(serializers.ModelSerializer):

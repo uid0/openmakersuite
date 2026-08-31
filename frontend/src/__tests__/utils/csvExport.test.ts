@@ -1,7 +1,11 @@
 /**
  * Tests for CSV export utilities
  */
-import { exportAssetsToCSV, exportInventoryItemsToCSV } from '../../utils/csvExport';
+import {
+  exportAssetsToCSV,
+  exportInventoryItemsToCSV,
+  reportMoney,
+} from '../../utils/csvExport';
 
 // Mock URL.createObjectURL and Blob for test environment
 global.URL.createObjectURL = jest.fn(() => 'mock-url');
@@ -169,5 +173,25 @@ describe('CSV Export Utilities', () => {
       const lines = content.split('\n');
       expect(lines.length).toBeGreaterThanOrEqual(4);
     });
+  });
+});
+
+/**
+ * A price the server did not record must not export as "$0.00" (op-9m2v).
+ *
+ * A CSV is summed by whoever opens it. "$0.00" for a price nobody recorded
+ * counted the unknowns as free in whatever total the operator built on top;
+ * a blank cell sums as nothing AND reads as nothing, which is the truth. A
+ * genuinely free supplier still exports "$0.00", because that is a price.
+ */
+describe('reportMoney', () => {
+  test('renders a real price, zero included', () => {
+    expect(reportMoney(4.5)).toBe('$4.50');
+    expect(reportMoney(0)).toBe('$0.00');
+  });
+
+  test('renders an absence as a blank cell, never as $0.00', () => {
+    expect(reportMoney(null)).toBe('');
+    expect(reportMoney(undefined)).toBe('');
   });
 });

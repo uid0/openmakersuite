@@ -245,7 +245,10 @@ export interface InventoryItem {
   reorder_alerts_enabled: boolean;
   notes: string;
   needs_reorder: boolean;
-  total_value: string;
+  // `null` when no supplier records a price, so the stock cannot be valued
+  // (op-9m2v). The server used to send "0.00", which claims the shelf is worth
+  // nothing. Render the absence, never a $0.00.
+  total_value: string | null;
   created_at: string;
   updated_at: string;
   // Ownership fields
@@ -1596,7 +1599,11 @@ export interface InventoryStockByCategory {
   category_name: string;
   total_items: number;
   total_stock: number;
+  // The value of the stock this report CAN price. `items_without_price` is how
+  // many items it could not — a total that omits them is a lower bound, not a
+  // valuation (op-9m2v).
   total_value: number;
+  items_without_price: number;
   low_stock_count: number;
 }
 
@@ -1613,7 +1620,9 @@ export interface InventoryValueByLocation {
   location_name: string;
   total_items: number;
   total_stock: number;
+  // See InventoryStockByCategory — same partial total, same honesty count.
   total_value: number;
+  items_without_price: number;
 }
 
 export interface PurchasingSpendBySupplier {
@@ -1648,9 +1657,13 @@ export interface PurchasingPriceTrends {
   item_name: string;
   supplier_name: string;
   price_changes: number;
-  min_unit_cost: number;
-  max_unit_cost: number;
-  latest_unit_cost: number;
+  // `null` where nothing is recorded (op-9m2v). These used to be `0` for a
+  // price nobody recorded, for a supplier that charges nothing, AND — on
+  // `latest_unit_cost` — for an item with no price history at all. A `0` here
+  // now means the supplier is free.
+  min_unit_cost: number | null;
+  max_unit_cost: number | null;
+  latest_unit_cost: number | null;
   price_change_percentage: number | null;
 }
 

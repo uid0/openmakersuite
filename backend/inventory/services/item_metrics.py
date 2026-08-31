@@ -20,6 +20,7 @@ from django.db.models import Q, Sum
 
 from inventory.models import MaintenanceMaterial, WorkOrder, WorkOrderMaterialUsage
 from inventory.services.pack_size import pack_size_of
+from inventory.services.pricing import package_price_of, unit_price_of
 from inventory.services.supplier_selection import primary_suppliers_for
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
 
@@ -40,7 +41,12 @@ OPEN_WO_STATUSES = (
 
 
 def _cost_trend(current_unit_cost, last_po_unit_cost):
-    """Direction of the primary supplier's unit cost vs the most recent PO line."""
+    """Direction of the primary supplier's unit cost vs the most recent PO line.
+
+    Both sides are compared with ``is None``, never truthiness: a supplier that
+    dropped to ``0.00`` has moved DOWN, and a guard spelled ``if current and
+    last`` would call that "no data" (op-9m2v).
+    """
     if current_unit_cost is None or last_po_unit_cost is None:
         return "no_history"
     if current_unit_cost > last_po_unit_cost:
@@ -277,8 +283,14 @@ def compute_item_metrics_batch(items):
 
     for item in items:
         supplier = primary_supplier.get(item.id)
-        unit_cost = supplier.unit_cost if supplier else None
-        package_cost = supplier.package_cost if supplier else None
+        # Cost through the ONE price derivation (op-9m2v), fed the row
+        # ``primary_suppliers_for`` already resolved so the query budget below
+        # is unchanged. No value moves here — this row was already ``None`` for
+        # an unpriced or supplier-less item — but it is a READ of the column
+        # and belongs on the derivation with every other one, so the next
+        # reader of this loop inherits the guard rather than an ``or``.
+        unit_cost = unit_price_of(supplier).amount
+        package_cost = package_price_of(supplier).amount
         lead_time_days = supplier.average_lead_time if supplier else None
         # ``case_size`` — units per case from that same link, read through the
         # ONE pack-size derivation (op-c1ke) rather than off the column. Fed the

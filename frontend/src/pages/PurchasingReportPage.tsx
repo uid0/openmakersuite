@@ -28,6 +28,16 @@ import { exportPurchasingReportToCSV } from '../utils/csvExport';
 type SortField = string;
 type SortDirection = 'asc' | 'desc';
 
+/**
+ * A price from a report, or an em dash where the server recorded none.
+ *
+ * `null` and `0` are different answers here (op-9m2v): the server used to send
+ * `0` for a price nobody recorded, for a supplier that charges nothing, and for
+ * an item with no price history at all. A `$0.00` in this column now means the
+ * supplier is free, so it must not also be what an absence looks like.
+ */
+const money = (amount: number | null) => (amount === null ? '—' : `$${amount.toFixed(2)}`);
+
 // Default to last 6 months
 const getDefaultDateRange = (): DatesRangeValue => {
   const endDate = new Date();
@@ -417,9 +427,9 @@ const PurchasingReportPage: React.FC = () => {
                           <Table.Td>{item.item_name}</Table.Td>
                           <Table.Td>{item.supplier_name}</Table.Td>
                           <Table.Td>{item.price_changes}</Table.Td>
-                          <Table.Td>${item.min_unit_cost.toFixed(2)}</Table.Td>
-                          <Table.Td>${item.max_unit_cost.toFixed(2)}</Table.Td>
-                          <Table.Td>${item.latest_unit_cost.toFixed(2)}</Table.Td>
+                          <Table.Td>{money(item.min_unit_cost)}</Table.Td>
+                          <Table.Td>{money(item.max_unit_cost)}</Table.Td>
+                          <Table.Td>{money(item.latest_unit_cost)}</Table.Td>
                           <Table.Td>
                             {item.price_change_percentage !== null
                               ? `${item.price_change_percentage > 0 ? '+' : ''}${item.price_change_percentage.toFixed(2)}%`

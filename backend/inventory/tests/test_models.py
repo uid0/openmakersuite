@@ -125,9 +125,15 @@ class TestInventoryItemModel:
         assert item.total_value == Decimal("255.00")
 
     def test_total_value_without_cost(self):
-        """Test total_value returns 0 when unit_cost is None."""
+        """total_value is None — not 0 — when nobody records a price (op-9m2v).
+
+        BEFORE/AFTER. Base returned ``Decimal("0")``, which says the shelf is
+        worth nothing; the shelf's worth is simply unknown. A genuinely free
+        item still values at ``0.00`` — see
+        ``test_price_guards.test_a_free_supplier_values_the_shelf_at_zero``.
+        """
         item = InventoryItemFactory(unit_cost=None)
-        assert item.total_value == 0
+        assert item.total_value is None
 
     def test_item_with_category(self):
         """Test item with category relationship."""

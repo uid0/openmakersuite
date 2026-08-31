@@ -44,6 +44,7 @@ from inventory.models import ItemSupplier
 from inventory.services.kits import build_kit_snapshot
 from inventory.services.pack_size import declares_a_case
 from inventory.services.packaging import order_level, parse_at_level, resolve_base_quantity
+from inventory.services.pricing import unit_price_of
 
 from ..models import PurchaseOrder, PurchaseOrderItem, ReorderRequest
 from ..settlement_signals import settlement_batch
@@ -240,7 +241,32 @@ def create_purchase_order(validated_data, items_data, user):
                                 f"got {unit_cost_override!r}"
                             )
                     else:
-                        unit_cost_ordered = item_supplier.unit_cost or Decimal("0.00")
+                        # No override, so the price comes off the supplier link
+                        # through the ONE derivation (op-9m2v). When the link
+                        # records none, REFUSE rather than writing a fabricated
+                        # $0.00 into ``unit_cost_ordered``: that column is
+                        # non-nullable and permanent, so a fabricated zero is
+                        # laundered into the order's stored ``estimated_total``,
+                        # into the payment schedule, and into every screen and
+                        # report downstream, with nothing left to say it was
+                        # never a price.
+                        #
+                        # This is the SAME refusal the asset and freeform
+                        # branches below already make ("unit_cost is required
+                        # when purchasing asset X") — the inventory branch was
+                        # the one that substituted instead. The remedy is named
+                        # and the caller has both: price the supplier link, or
+                        # send ``unit_cost`` with the line.
+                        unit_price = unit_price_of(item_supplier)
+                        if not unit_price.is_known:
+                            raise serializers.ValidationError(
+                                f"Item at index {idx}: no price is on file for "
+                                f"{item_supplier.item.name} from "
+                                f"{item_supplier.supplier.name}. Send unit_cost with "
+                                "this line, or record a unit or package cost on that "
+                                "supplier link."
+                            )
+                        unit_cost_ordered = unit_price.amount
 
                     # Get expected_shipment_date if provided
                     expected_shipment_date = item_data.get("expected_shipment_date")

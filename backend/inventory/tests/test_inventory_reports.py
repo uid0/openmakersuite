@@ -511,7 +511,10 @@ class TestInventoryReportViewSet:
         empty_item = InventoryItemFactory(unit_cost=Decimal("5.00"), current_stock=7)
         ItemSupplier.objects.filter(item=empty_item).delete()
         assert empty_item.average_unit_cost() is None
-        assert empty_item.average_total_value() == Decimal("0")
+        # ``None``, not ``Decimal("0")``: with no supplier recording a price the
+        # stock cannot be valued, and saying "$0.00" is a claim about money
+        # nobody made (op-9m2v).
+        assert empty_item.average_total_value() is None
 
     def test_value_by_location_multi_supplier_average(self, authenticated_client):
         """value_by_location uses the same average-cost logic as stock_by_category."""

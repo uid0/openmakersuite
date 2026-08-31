@@ -32,6 +32,12 @@ from inventory.services.packaging import (
     reorder_display,
     resolve_base_quantity,
 )
+from inventory.services.pricing import (
+    PriceRollup,
+    explain,
+    package_price_of,
+    unit_price_of,
+)
 from inventory.services.supplier_selection import (
     NO_SUPPLIERS,
     primary_item_supplier,
@@ -994,11 +1000,20 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     supplier_groups[supplier_id] = {
                         "supplier": best_supplier.supplier,
                         "items": [],
-                        "estimated_total": Decimal("0.00"),
+                        "rollup": PriceRollup(),
                     }
 
                 # Calculate optimal quantity (considering package sizes)
                 optimal_qty = self._calculate_optimal_quantity(item, best_supplier)
+
+                # What this vendor charges, through the ONE price derivation
+                # (op-9m2v). ``unit_price_of`` keeps a recorded 0.00 (donated
+                # stock, a free sample) apart from a column nobody filled in,
+                # which ``unit_cost or 0`` could not: both produced the same
+                # confident $0.00 line and the same understated order total.
+                unit_price = unit_price_of(best_supplier)
+                package_price = package_price_of(best_supplier)
+                line_total = supplier_groups[supplier_id]["rollup"].add(unit_price, optimal_qty)
 
                 supplier_groups[supplier_id]["items"].append(
                     {
@@ -1008,10 +1023,20 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         "current_stock": item.current_stock,
                         "minimum_stock": item.minimum_stock,
                         "recommended_quantity": optimal_qty,
-                        "unit_cost": best_supplier.unit_cost,
-                        "package_cost": best_supplier.package_cost,
+                        "unit_cost": unit_price.amount,
+                        "package_cost": package_price.amount,
                         "quantity_per_package": best_supplier.quantity_per_package,
-                        "estimated_line_total": optimal_qty * (best_supplier.unit_cost or 0),
+                        # ``null``, not 0, when this vendor has no price on
+                        # file — with the cause and the remedy beside it, so a
+                        # blank row tells the purchaser which screen to fix it
+                        # on rather than merely refusing to say a number.
+                        "estimated_line_total": line_total,
+                        "unit_cost_state": unit_price.state,
+                        "unit_cost_detail": explain(
+                            unit_price,
+                            item_name=item.name,
+                            supplier_name=best_supplier.supplier.name,
+                        ),
                         # Count-level presentation (op-ev14); the quantities
                         # above remain base units.
                         "count_unit": count_unit(item),
@@ -1024,19 +1049,25 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     }
                 )
 
-                supplier_groups[supplier_id]["estimated_total"] += optimal_qty * (
-                    best_supplier.unit_cost or 0
-                )
-
-        # Prepare recommendations for review
+        # Prepare recommendations for review. Every total below is the sum of
+        # the lines this endpoint COULD price, and says how many it could not
+        # (op-9m2v): base summed an unpriced line as $0.00, so a recommendation
+        # read as complete while understating what the order would actually
+        # cost. ``estimated_total_is_partial`` is the claim a screen is allowed
+        # to make about the number beside it.
+        overall = PriceRollup()
         for supplier_id, group in supplier_groups.items():
+            rollup = group["rollup"]
+            overall.absorb(rollup)
             recommendations.append(
                 {
                     "supplier_id": supplier_id,
                     "supplier_name": group["supplier"].name,
                     "supplier_type": group["supplier"].supplier_type,
                     "total_items": len(group["items"]),
-                    "estimated_total": group["estimated_total"],
+                    "estimated_total": rollup.amount,
+                    "unpriced_item_count": rollup.unpriced_count,
+                    "estimated_total_is_partial": not rollup.is_complete,
                     "items": group["items"],
                 }
             )
@@ -1048,7 +1079,9 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             {
                 "recommendations": recommendations,
                 "total_suppliers": len(recommendations),
-                "total_estimated_cost": sum(r["estimated_total"] for r in recommendations),
+                "total_estimated_cost": overall.amount,
+                "unpriced_item_count": overall.unpriced_count,
+                "total_estimated_cost_is_partial": not overall.is_complete,
                 "message": "Order recommendations generated. Review and confirm to create purchase orders.",
             }
         )
@@ -1163,7 +1196,9 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         # unconditionally.
                         "kits": [],
                         "total_items": 0,
-                        "estimated_total": Decimal("0.00"),
+                        # The group's money, and what it could not price
+                        # (op-9m2v) — see the rollup read-out below.
+                        "rollup": PriceRollup(),
                         "avg_lead_time": 0,
                     }
 
@@ -1190,8 +1225,15 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     packages_needed = (suggested_qty + declared_case - 1) // declared_case
                     suggested_qty = packages_needed * declared_case
 
-                unit_cost = item_supplier.unit_cost or Decimal("0.00")
-                line_total = unit_cost * suggested_qty
+                # What this vendor charges, through the ONE price derivation
+                # (op-9m2v). Base's ``unit_cost or Decimal("0.00")`` costed an
+                # unpriced line at nothing and added that nothing to the pad's
+                # ``estimated_total``, so the purchaser saw a complete-looking
+                # total that the invoice would then exceed. A recorded 0.00 is
+                # still a price and still lands on the line.
+                unit_price = unit_price_of(item_supplier)
+                package_price = package_price_of(item_supplier)
+                line_total = supplier_data[supplier_id]["rollup"].add(unit_price, suggested_qty)
 
                 # Flag the line as request-driven. The API key keeps its
                 # ``has_active_reorder_request`` name (clients read it), but
@@ -1209,16 +1251,24 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         "minimum_stock": item.minimum_stock,
                         "reorder_quantity": item.reorder_quantity,
                         "suggested_quantity": suggested_qty,
-                        "unit_cost": str(unit_cost),
-                        "package_cost": (
-                            str(item_supplier.package_cost) if item_supplier.package_cost else None
+                        # ``null`` where the price is unknown; a string where
+                        # it is known, ``"0.00"`` included. The client must not
+                        # render an unknown as $0.00 — ``unit_cost_detail``
+                        # carries the sentence that says what to do instead.
+                        "unit_cost": None if not unit_price else str(unit_price.amount),
+                        "unit_cost_state": unit_price.state,
+                        "unit_cost_detail": explain(
+                            unit_price,
+                            item_name=item.name,
+                            supplier_name=supplier.name,
                         ),
+                        "package_cost": (None if not package_price else str(package_price.amount)),
                         "quantity_per_package": item_supplier.quantity_per_package,
                         "lead_time_days": item_supplier.average_lead_time,
                         "supplier_sku": item_supplier.supplier_sku,
                         "supplier_url": item_supplier.supplier_url,
                         "is_primary": item_supplier.is_primary,
-                        "line_total": str(line_total),
+                        "line_total": None if line_total is None else str(line_total),
                         "has_active_reorder_request": has_active_request,
                         "reorder_request_id": reorder_request_id,
                         # Presentation at the item's counting granularity
@@ -1238,7 +1288,6 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 )
 
                 supplier_data[supplier_id]["total_items"] += 1
-                supplier_data[supplier_id]["estimated_total"] += line_total
 
         # Kits that would restock a low component (op-8n0). "Show, don't act":
         # a purchaser looking at low cyan ink sees that the Eufy Ink Kit is one
@@ -1288,16 +1337,20 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                             "assets": [],
                             "kits": [],
                             "total_items": 0,
-                            "estimated_total": Decimal("0.00"),
+                            "rollup": PriceRollup(),
                             "avg_lead_time": 0,
                         }
+                    # A kit row is informational and never an action row, so it
+                    # touches no total — but it is still a price on a screen,
+                    # and an unknown one must not read as free (op-9m2v).
+                    kit_price = unit_price_of(item_supplier)
                     supplier_data[supplier.id].setdefault("kits", []).append(
                         {
                             "id": kit.id,
                             "name": kit.name,
                             "sku": kit.sku,
                             "supplier_sku": item_supplier.supplier_sku,
-                            "unit_cost": str(item_supplier.unit_cost or Decimal("0.00")),
+                            "unit_cost": None if not kit_price else str(kit_price.amount),
                             "item_supplier_id": item_supplier.id,
                             "components": components,
                             "low_component_count": sum(
@@ -1335,7 +1388,15 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 item["lead_time_days"] for item in data["items"] if item["lead_time_days"]
             ]
             data["avg_lead_time"] = sum(lead_times) / len(lead_times) if lead_times else 0
-            data["estimated_total"] = str(data["estimated_total"])
+            # The group's money, read off the rollup rather than accumulated
+            # into the payload dict: ``estimated_total`` is the sum of the
+            # lines this pad COULD price and ``unpriced_item_count`` is how
+            # many it could not, so a partial total says so instead of looking
+            # complete (op-9m2v).
+            rollup = data.pop("rollup")
+            data["estimated_total"] = str(rollup.amount)
+            data["unpriced_item_count"] = rollup.unpriced_count
+            data["estimated_total_is_partial"] = not rollup.is_complete
 
         # Also include suppliers that have assets but no low-stock items
         suppliers_with_assets = (
@@ -1382,7 +1443,12 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 ],
                 "kits": [],
                 "total_items": 0,
+                # No items at all, so nothing to price and nothing omitted:
+                # "$0.00 of items" is a true statement about an assets-only
+                # group, not a fabricated one.
                 "estimated_total": "0.00",
+                "unpriced_item_count": 0,
+                "estimated_total_is_partial": False,
                 "avg_lead_time": 0,
             }
 
@@ -3970,6 +4036,19 @@ class WebHookViewSet(viewsets.ModelViewSet):
             )
 
 
+def _as_float(amount):
+    """A money figure as a JSON number, or ``None`` when there is no figure.
+
+    The purchasing reports are declared in floats (ScanTTY reads them as
+    ``float64``), and every one of them used to spell the null guard
+    ``float(x or 0)`` — which reports "$0.00" for a price nobody recorded, for
+    a supplier that charges nothing, and for an item with no price history at
+    all. This keeps the absence an absence (op-9m2v); a recorded ``0.00`` comes
+    through as ``0.0``, which is what it is.
+    """
+    return None if amount is None else float(amount)
+
+
 class PurchasingReportViewSet(viewsets.ViewSet):
     """API endpoint for purchasing reports."""
 
@@ -4169,15 +4248,15 @@ class PurchasingReportViewSet(viewsets.ViewSet):
                     .order_by("recorded_at")
                     .first()
                 )
-                if (
-                    first_price
-                    and latest_price
-                    and first_price.unit_cost
-                    and latest_price.unit_cost
-                ):
-                    change = (
-                        (latest_price.unit_cost - first_price.unit_cost) / first_price.unit_cost
-                    ) * 100
+                first = unit_price_of(first_price)
+                latest = unit_price_of(latest_price)
+                # ``first.amount`` of 0.00 leaves the percentage undefined
+                # (nothing to divide by) — but a drop TO 0.00 is a real -100%,
+                # and base's ``and latest_price.unit_cost`` swallowed it, so a
+                # supplier that started donating an item reported no change
+                # (op-9m2v). Same rule as ``PriceHistory.price_change_percentage``.
+                if first.is_known and latest.is_known and first.amount != 0:
+                    change = ((latest.amount - first.amount) / first.amount) * 100
                     price_change_pct = round(change, 2)
 
             data.append(
@@ -4186,9 +4265,15 @@ class PurchasingReportViewSet(viewsets.ViewSet):
                     "item_name": item["item_supplier__item__name"],
                     "supplier_name": item["item_supplier__supplier__name"],
                     "price_changes": item["price_changes"],
-                    "min_unit_cost": float(item["min_unit_cost"] or 0),
-                    "max_unit_cost": float(item["max_unit_cost"] or 0),
-                    "latest_unit_cost": float(latest_price.unit_cost or 0) if latest_price else 0,
+                    # ``null``, not 0, where nothing is recorded: base
+                    # reported "$0.00" for a supplier with no price on file
+                    # AND for one that charges nothing AND — on
+                    # ``latest_unit_cost`` — for an item with no price history
+                    # at all, three different facts collapsed onto one number
+                    # in a report whose whole subject is price (op-9m2v).
+                    "min_unit_cost": _as_float(item["min_unit_cost"]),
+                    "max_unit_cost": _as_float(item["max_unit_cost"]),
+                    "latest_unit_cost": _as_float(unit_price_of(latest_price).amount),
                     "price_change_percentage": price_change_pct,
                 }
             )

@@ -1649,3 +1649,84 @@ describe('PurchaseOrderPage adapter-aware export (op-svpq)', () => {
     expect(warning).toHaveTextContent(/1 item has an invalid part number/i);
   });
 });
+
+/**
+ * CONTROL for the money falsy-guard class (op-9m2v): this page was ALREADY right.
+ *
+ * `unit_cost_actual` is nullable — `null` means nobody recorded what was
+ * charged, `"0.00"` means the vendor comped the line (a warranty replacement, a
+ * goodwill part). The cell guards it with truthiness, which is the shape this
+ * branch removed everywhere else; here it is SAFE, because DRF serialises the
+ * DecimalField as a STRING and `"0.00"` is truthy in JavaScript. The BACKEND
+ * twin of the same expression — `po_item.unit_cost_actual or
+ * po_item.unit_cost_ordered` in `receiving.py`, where the value is a Decimal
+ * and `Decimal("0.00")` is falsy — WAS a real defect and is fixed with
+ * `test_a_comped_line_charges_the_committee_nothing`.
+ *
+ * These tests changed no behaviour. They exist because that safety rests
+ * entirely on the field crossing the wire as a string: parse it to a number
+ * anywhere on the way in and a comped line silently starts displaying the
+ * price it was ordered at. Nothing pinned that before.
+ */
+describe('PurchaseOrderPage comped line cost (op-9m2v)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    localStorage.clear();
+    localStorage.setItem('token', 'test-token');
+    localStorage.setItem('is_staff', 'true');
+  });
+
+  const lineWithActual = (actual: string | null) => ({
+    id: 'line-1',
+    item_type: 'inventory_item',
+    description: null,
+    item_details: { id: 'i1', name: 'Comped Widget', sku: 'CW-1' },
+    asset_details: null,
+    quantity_ordered: 2,
+    quantity_received: 2,
+    quantity_pending: 0,
+    is_fully_received: true,
+    unit_cost_ordered: '9.00',
+    unit_cost_actual: actual,
+    estimated_cost: '18.00',
+    actual_cost: null,
+    expected_shipment_date: null,
+    notes: '',
+    is_voided: false,
+    voided_at: null,
+    void_reason: '',
+  });
+
+  const renderWithActual = async (actual: string | null) => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: { ...baseOrder, attachments: [], items: [lineWithActual(actual)] },
+    });
+    renderPage();
+    await waitFor(() => expect(screen.getByText('Comped Widget')).toBeInTheDocument());
+    return screen.getByText('Comped Widget').closest('tr')!;
+  };
+
+  test('a comped line shows $0.00, not the price it was ordered at', async () => {
+    const row = await renderWithActual('0.00');
+
+    expect(row).toHaveTextContent('$0.00');
+    // The ordered price is still shown, but as the note it is — not as the
+    // figure standing in for what was charged. This is the assertion that
+    // fails the moment "0.00" stops being a string.
+    expect(row).toHaveTextContent('(ordered: $9.00)');
+  });
+
+  test('an unrecorded actual cost still falls back to the ordered price', async () => {
+    const row = await renderWithActual(null);
+
+    expect(row).toHaveTextContent('$9.00');
+    expect(row).not.toHaveTextContent('(ordered:');
+  });
+
+  test('an ordinary actual cost is unchanged — the branch invariant', async () => {
+    const row = await renderWithActual('7.50');
+
+    expect(row).toHaveTextContent('$7.50');
+    expect(row).toHaveTextContent('(ordered: $9.00)');
+  });
+});

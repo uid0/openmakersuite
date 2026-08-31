@@ -1,0 +1,889 @@
+"""A price we do not know must never be presented, summed or compared (op-9m2v).
+
+The rule, in one sentence: **a price the system does not know must never be
+presented, summed, or compared as a real number; a recorded price of zero is a
+KNOWN price and must be treated as one.**
+
+The money sibling of ``test_alert_suppression.py``. Same discipline, different
+fact: that class inverted a boolean and hid an alert, this one distorts money.
+The branch invariant these pin: *no money figure changes versus base EXCEPT
+where base was presenting an unknown price as a real number.* Every test is
+labelled BEFORE/AFTER where a figure moves and CONTROL where it must not.
+
+**Both halves of the sentence had failures**, and they point in opposite
+directions, which is why every site needed both a BEFORE/AFTER and a CONTROL:
+
+* ``unit_cost or 0`` costed an UNPRICED line at nothing and summed it. An order
+  read as cheaper than it was, with nothing on the payload to say a line had
+  been costed at zero.
+* ``if unit_cost:`` read a supplier that charges NOTHING as one with no price on
+  file. A makerspace runs on donated stock, free samples and internal
+  transfers, so that population is real and not rare.
+
+``or`` cannot tell the two apart. That is why the derivation is spelled
+``is None`` and why ``test_price_single_owner.py`` fails the build on a new
+reader that is not.
+"""
+
+from decimal import Decimal
+
+from django.contrib.auth import get_user_model
+
+import pytest
+from rest_framework.test import APIClient
+
+from inventory.models import InventoryItem, ItemSupplier, PriceHistory, Supplier
+from inventory.services.pricing import (
+    PRICE_KNOWN,
+    PRICE_NO_ORDERABLE_LINK,
+    PRICE_NO_SUPPLIER_LINK,
+    PRICE_NOT_RECORDED,
+    PriceRollup,
+    explain,
+    extended,
+    lowest_unit_price,
+    order_unit_price,
+    package_price_of,
+    unit_price_of,
+)
+from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
+from reorder_queue.services import line_entry
+
+pytestmark = pytest.mark.django_db
+
+User = get_user_model()
+
+OPTIMIZED_URL = "/api/reorders/purchase-orders/create_optimized_order/"
+REORDER_DATA_URL = "/api/reorders/purchase-orders/reorder_data/"
+PRICE_TRENDS_URL = "/api/reorders/reports/purchasing/price_trends/"
+STOCK_BY_CATEGORY_URL = "/api/inventory/reports/inventory/stock_by_category/"
+VALUE_BY_LOCATION_URL = "/api/inventory/reports/inventory/value_by_location/"
+
+
+def _item(name="Widget", **kwargs):
+    defaults = dict(
+        name=name,
+        description="x",
+        sku=f"SKU-{name}",
+        reorder_quantity=5,
+        current_stock=0,
+        minimum_stock=10,
+        is_active=True,
+    )
+    defaults.update(kwargs)
+    return InventoryItem.objects.create(**defaults)
+
+
+def _link(item, name, *, unit_cost="1.00", package_cost=None, pack=1, **flags):
+    """One supplier link. ``unit_cost=None`` means NO price recorded."""
+    return ItemSupplier.objects.create(
+        item=item,
+        supplier=Supplier.objects.create(name=name, supplier_type=Supplier.SupplierType.LOCAL),
+        supplier_sku=f"{name}-sku",
+        unit_cost=None if unit_cost is None else Decimal(unit_cost),
+        package_cost=None if package_cost is None else Decimal(package_cost),
+        quantity_per_package=pack,
+        average_lead_time=7,
+        is_primary=flags.get("is_primary", False),
+        is_active=flags.get("is_active", True),
+        is_discontinued=flags.get("is_discontinued", False),
+    )
+
+
+def _fresh(item):
+    return InventoryItem.objects.get(pk=item.pk)
+
+
+@pytest.fixture
+def api():
+    client = APIClient()
+    client.force_authenticate(
+        user=User.objects.create_user(
+            username="purchaser", password="pw", is_staff=True, is_superuser=True
+        )
+    )
+    return client
+
+
+def _line_for(recommendations, item):
+    for rec in recommendations:
+        for line in rec["items"]:
+            if line["item_id"] == item.id:
+                return rec, line
+    raise AssertionError(f"{item.name} is not in the recommendations")
+
+
+def _pad_line_for(suppliers, item):
+    for group in suppliers:
+        for line in group["items"]:
+            if line["item_id"] == str(item.id):
+                return group, line
+    raise AssertionError(f"{item.name} is not on the order pad")
+
+
+# ── The derivation itself: four states, and a zero that is a price ───────────
+
+
+def test_a_recorded_zero_is_a_known_price():
+    """The load-bearing judgement. ``or`` cannot express this, which is the point."""
+    item = _item("Donated")
+    link = _link(item, "Charity", unit_cost="0.00")
+
+    price = unit_price_of(link)
+    assert price.is_known
+    assert bool(price) is True
+    assert price.amount == Decimal("0.00")
+    assert price.state == PRICE_KNOWN
+
+
+def test_a_null_price_is_not_recorded_and_is_not_a_number():
+    item = _item("Mystery")
+    link = _link(item, "Acme", unit_cost=None)
+
+    price = unit_price_of(link)
+    assert price.is_known is False
+    assert price.amount is None
+    assert price.state == PRICE_NOT_RECORDED
+
+
+def test_the_three_ways_of_having_no_price_stay_apart():
+    """ "Nobody priced it", "no vendor at all" and "no vendor you can buy from".
+
+    Different facts, different screens, different operator actions — the same
+    ``NO_SUPPLIERS`` / ``NONE_ORDERABLE`` split ``supplier_selection`` keeps,
+    and the one whose collapse cost op-2rsp four rounds.
+    """
+    unpriced = _item("Unpriced")
+    _link(unpriced, "Acme", unit_cost=None)
+    assert order_unit_price(_fresh(unpriced)).state == PRICE_NOT_RECORDED
+
+    orphan = _item("Orphan")
+    assert order_unit_price(_fresh(orphan)).state == PRICE_NO_SUPPLIER_LINK
+
+    unbuyable = _item("Unbuyable")
+    _link(unbuyable, "Dead", unit_cost="5.00", is_discontinued=True)
+    assert order_unit_price(_fresh(unbuyable)).state == PRICE_NO_ORDERABLE_LINK
+
+
+def test_every_unknown_state_carries_the_operator_a_remedy():
+    """A refusal an operator cannot act on is not a fix."""
+    item = _item("Unpriced")
+    link = _link(item, "Acme", unit_cost=None)
+
+    detail = explain(unit_price_of(link), item_name="Unpriced", supplier_name="Acme")
+    assert detail and "Acme" in detail and "supplier link" in detail
+
+    orphan = _item("Orphan")
+    assert "Add" in explain(order_unit_price(_fresh(orphan)), item_name="Orphan")
+
+    unbuyable = _item("Unbuyable")
+    _link(unbuyable, "Dead", unit_cost="5.00", is_discontinued=True)
+    assert "Reactivate" in explain(order_unit_price(_fresh(unbuyable)), item_name="Unbuyable")
+
+    # Nothing to say about a price we have.
+    assert explain(unit_price_of(_link(_item("Fine"), "Ok")), item_name="Fine") is None
+
+
+def test_an_unknown_price_extends_to_an_unknown_total_and_a_zero_to_zero():
+    item = _item("W")
+    assert extended(unit_price_of(_link(item, "Acme", unit_cost=None)), 10) is None
+    assert extended(unit_price_of(_link(item, "Free", unit_cost="0.00")), 10) == Decimal("0.00")
+    assert extended(unit_price_of(_link(item, "Paid", unit_cost="2.50")), 10) == Decimal("25.00")
+
+
+def test_a_rollup_sums_what_it_can_and_counts_what_it_cannot():
+    item = _item("W")
+    rollup = PriceRollup()
+
+    assert rollup.add(unit_price_of(_link(item, "Paid", unit_cost="2.00")), 3) == Decimal("6.00")
+    assert rollup.add(unit_price_of(_link(item, "Free", unit_cost="0.00")), 3) == Decimal("0.00")
+    assert rollup.add(unit_price_of(_link(item, "Acme", unit_cost=None)), 3) is None
+
+    assert rollup.amount == Decimal("6.00")
+    assert rollup.unpriced_count == 1
+    assert rollup.is_complete is False
+
+
+def test_a_rollup_of_only_priced_lines_claims_to_be_complete():
+    """CONTROL. A total with nothing missing must not be labelled partial."""
+    item = _item("W")
+    rollup = PriceRollup()
+    rollup.add(unit_price_of(_link(item, "Free", unit_cost="0.00")), 4)
+    assert rollup.amount == Decimal("0.00")
+    assert rollup.is_complete is True
+
+
+def test_package_price_reads_its_own_column():
+    """The two columns are separate facts and separate answers.
+
+    ``ItemSupplier.save()`` derives each from the other, so the population where
+    they disagree is exactly the one ``pack_size`` calls ``RECORDED_ZERO``: a
+    link recording ``quantity_per_package`` of 0 runs neither derivation, and
+    the package price genuinely stays unrecorded while the unit price is known.
+    """
+    item = _item("W")
+    link = _link(item, "Acme", unit_cost="1.00", package_cost=None, pack=0)
+    assert unit_price_of(link).is_known
+    assert package_price_of(link).is_known is False
+    assert package_price_of(link).state == PRICE_NOT_RECORDED
+
+
+def test_the_cheapest_price_on_file_ignores_orderability_but_not_nulls():
+    """``lowest_unit_price`` values the SHELF, so a dead vendor's price counts.
+
+    Filtering this for orderability would revalue a shelf when a vendor's status
+    changed — the mistake ``pack_size.shelf_pack_size`` records from op-2rsp
+    round 1.
+    """
+    item = _item("W")
+    _link(item, "Dead", unit_cost="1.00", is_discontinued=True)
+    _link(item, "Live", unit_cost="9.00")
+    _link(item, "Silent", unit_cost=None)
+
+    assert lowest_unit_price(_fresh(item)).amount == Decimal("1.00")
+
+
+# ── Site 1: create_optimized_order's line and order totals ───────────────────
+
+
+def test_an_unpriced_recommendation_line_reports_no_total_and_says_why(api):
+    """BEFORE/AFTER. ``estimated_line_total`` was ``0``; it is now ``null``.
+
+    Screen: the optimized-order recommendation payload
+    (``POST /api/reorders/purchase-orders/create_optimized_order/``), per line.
+    """
+    item = _item("Unpriced", current_stock=0, minimum_stock=10)
+    _link(item, "Acme", unit_cost=None)
+
+    response = api.post(OPTIMIZED_URL, {}, format="json")
+    assert response.status_code == 200
+    rec, line = _line_for(response.data["recommendations"], item)
+
+    assert line["estimated_line_total"] is None
+    assert line["unit_cost"] is None
+    assert line["unit_cost_state"] == PRICE_NOT_RECORDED
+    assert "Acme" in line["unit_cost_detail"]
+
+
+def test_a_recommendation_total_says_how_many_lines_it_could_not_price(api):
+    """BEFORE/AFTER. The group total omitted the unpriced line SILENTLY.
+
+    Screen: the same payload's per-supplier ``estimated_total`` and the
+    response-level ``total_estimated_cost``. The numbers are unchanged — the
+    unpriced line contributed nothing before and contributes nothing now — but
+    the claim beside them is not.
+    """
+    supplier = Supplier.objects.create(name="Acme", supplier_type=Supplier.SupplierType.LOCAL)
+    priced = _item("Priced", current_stock=0, minimum_stock=10, reorder_quantity=4)
+    unpriced = _item("Unpriced", current_stock=0, minimum_stock=10, reorder_quantity=4)
+    for item, cost in ((priced, Decimal("2.00")), (unpriced, None)):
+        ItemSupplier.objects.create(
+            item=item,
+            supplier=supplier,
+            supplier_sku=f"{item.sku}-s",
+            unit_cost=cost,
+            quantity_per_package=1,
+            average_lead_time=7,
+        )
+
+    response = api.post(OPTIMIZED_URL, {}, format="json")
+    rec, _line = _line_for(response.data["recommendations"], unpriced)
+
+    assert rec["unpriced_item_count"] == 1
+    assert rec["estimated_total_is_partial"] is True
+    assert response.data["unpriced_item_count"] == 1
+    assert response.data["total_estimated_cost_is_partial"] is True
+    # The priced line is still summed exactly as base summed it.
+    assert rec["estimated_total"] > 0
+
+
+def test_a_free_supplier_is_a_priced_recommendation_line(api):
+    """CONTROL for the second half of the rule. A $0 vendor is PRICED.
+
+    Screen: the same payload. ``estimated_line_total`` is ``0.00`` — a real
+    number for a real price — and the line is NOT counted as unpriced, which is
+    the whole difference between it and the test above.
+    """
+    item = _item("Donated", current_stock=0, minimum_stock=10, reorder_quantity=4)
+    _link(item, "Charity", unit_cost="0.00")
+
+    response = api.post(OPTIMIZED_URL, {}, format="json")
+    rec, line = _line_for(response.data["recommendations"], item)
+
+    assert line["estimated_line_total"] == Decimal("0.00")
+    assert line["unit_cost"] == Decimal("0.00")
+    assert line["unit_cost_state"] == PRICE_KNOWN
+    assert line["unit_cost_detail"] is None
+    assert rec["unpriced_item_count"] == 0
+    assert rec["estimated_total_is_partial"] is False
+
+
+def test_a_priced_recommendation_is_byte_for_byte_what_base_produced(api):
+    """CONTROL. The invariant: no money moves where the price was known."""
+    item = _item("Priced", current_stock=0, minimum_stock=10, reorder_quantity=4)
+    _link(item, "Acme", unit_cost="2.50")
+
+    response = api.post(OPTIMIZED_URL, {}, format="json")
+    rec, line = _line_for(response.data["recommendations"], item)
+
+    assert line["estimated_line_total"] == Decimal("2.50") * line["recommended_quantity"]
+    assert rec["estimated_total"] == line["estimated_line_total"]
+    assert response.data["total_estimated_cost"] == rec["estimated_total"]
+
+
+# ── Site 2: the order pad (reorder_data) ─────────────────────────────────────
+
+
+def test_the_order_pad_sends_null_for_a_price_nobody_recorded(api):
+    """BEFORE/AFTER. ``unit_cost`` was the string ``"0.00"``; it is now ``null``.
+
+    Screen: the PO create form's supplier pad (``reorder_data``), the price cell
+    and the line total beside it. The form prefilled ``0.00`` into the cost box
+    and the operator confirmed it, which is how an unpriced item reached a
+    purchase order costed at nothing.
+    """
+    item = _item("Unpriced", current_stock=0, minimum_stock=10)
+    _link(item, "Acme", unit_cost=None)
+
+    response = api.get(REORDER_DATA_URL)
+    assert response.status_code == 200
+    group, line = _pad_line_for(response.data["suppliers"], item)
+
+    assert line["unit_cost"] is None
+    assert line["line_total"] is None
+    assert line["unit_cost_state"] == PRICE_NOT_RECORDED
+    assert "Acme" in line["unit_cost_detail"]
+    assert group["unpriced_item_count"] == 1
+    assert group["estimated_total_is_partial"] is True
+
+
+def test_the_order_pad_prices_a_free_supplier_at_zero(api):
+    """CONTROL. ``"0.00"`` on the pad now means the vendor charges nothing."""
+    item = _item("Donated", current_stock=0, minimum_stock=10)
+    _link(item, "Charity", unit_cost="0.00")
+
+    response = api.get(REORDER_DATA_URL)
+    group, line = _pad_line_for(response.data["suppliers"], item)
+
+    assert line["unit_cost"] == "0.00"
+    assert line["line_total"] == "0.00"
+    assert line["unit_cost_state"] == PRICE_KNOWN
+    assert group["unpriced_item_count"] == 0
+    assert group["estimated_total_is_partial"] is False
+
+
+def test_the_order_pad_total_is_unchanged_where_every_line_is_priced(api):
+    """CONTROL. The invariant, on the pad."""
+    item = _item("Priced", current_stock=0, minimum_stock=10)
+    _link(item, "Acme", unit_cost="3.00")
+
+    response = api.get(REORDER_DATA_URL)
+    group, line = _pad_line_for(response.data["suppliers"], item)
+
+    expected = Decimal("3.00") * line["suggested_quantity"]
+    assert Decimal(line["line_total"]) == expected
+    assert Decimal(group["estimated_total"]) == expected
+    assert group["estimated_total_is_partial"] is False
+
+
+def test_an_unknown_package_cost_is_null_rather_than_a_zero_case_price(api):
+    """A case price nobody recorded must not read as a free case."""
+    item = _item("Unpriced", current_stock=0, minimum_stock=10)
+    # pack=0 is the one shape where save() derives neither column from the
+    # other — see ``test_package_price_reads_its_own_column``.
+    _link(item, "Acme", unit_cost="1.00", package_cost=None, pack=0)
+
+    response = api.get(REORDER_DATA_URL)
+    _group, line = _pad_line_for(response.data["suppliers"], item)
+    assert line["package_cost"] is None
+    assert line["unit_cost"] == "1.00"
+
+
+# ── Site 3: the purchase order itself — the price that gets STORED ───────────
+
+
+def _po_payload(item_supplier, supplier, **line_extra):
+    line = {"item_supplier_id": item_supplier.id, "quantity": 2}
+    line.update(line_extra)
+    return {"supplier": supplier.id, "items": [line]}
+
+
+def test_creating_an_order_refuses_a_line_no_price_is_on_file_for(api):
+    """BEFORE/AFTER. Base wrote ``unit_cost_ordered = 0.0000`` and moved on.
+
+    Screen: ``POST /api/reorders/purchase-orders/``. ``unit_cost_ordered`` is
+    NON-NULLABLE and permanent, so a fabricated zero is laundered into the
+    order's stored ``estimated_total``, its payment schedule and every report
+    downstream, with nothing left to say it was never a price. The asset and
+    freeform branches of the same function ALREADY refuse for exactly this
+    reason ("unit_cost is required when purchasing asset X"); the inventory
+    branch was the one that substituted instead.
+    """
+    item = _item("Unpriced")
+    link = _link(item, "Acme", unit_cost=None)
+
+    response = api.post(
+        "/api/reorders/purchase-orders/",
+        _po_payload(link, link.supplier),
+        format="json",
+    )
+
+    assert response.status_code == 400
+    body = str(response.data)
+    assert "no price is on file" in body.lower()
+    # The remedy, both halves of it, so the refusal is actionable.
+    assert "unit_cost" in body and "supplier link" in body
+    assert not PurchaseOrder.objects.exists()
+
+
+def test_creating_an_order_accepts_an_explicit_price_for_an_unpriced_link(api):
+    """CONTROL. The refusal is escapable exactly as its message says."""
+    item = _item("Unpriced")
+    link = _link(item, "Acme", unit_cost=None)
+
+    response = api.post(
+        "/api/reorders/purchase-orders/",
+        _po_payload(link, link.supplier, unit_cost="7.25"),
+        format="json",
+    )
+
+    assert response.status_code == 201
+    stored = PurchaseOrderItem.objects.get()
+    assert stored.unit_cost_ordered == Decimal("7.2500")
+
+
+def test_creating_an_order_from_a_free_supplier_stores_a_real_zero(api):
+    """CONTROL. A vendor that charges nothing is priced, so the order is created."""
+    item = _item("Donated")
+    link = _link(item, "Charity", unit_cost="0.00")
+
+    response = api.post(
+        "/api/reorders/purchase-orders/",
+        _po_payload(link, link.supplier),
+        format="json",
+    )
+
+    assert response.status_code == 201
+    stored = PurchaseOrderItem.objects.get()
+    assert stored.unit_cost_ordered == Decimal("0.0000")
+    assert stored.purchase_order.estimated_total == Decimal("0.00")
+
+
+def test_creating_an_order_from_a_priced_supplier_is_unchanged(api):
+    """CONTROL. The invariant, on the stored total."""
+    item = _item("Priced")
+    link = _link(item, "Acme", unit_cost="4.00")
+
+    response = api.post(
+        "/api/reorders/purchase-orders/",
+        _po_payload(link, link.supplier),
+        format="json",
+    )
+
+    assert response.status_code == 201
+    assert PurchaseOrderItem.objects.get().unit_cost_ordered == Decimal("4.0000")
+    assert PurchaseOrder.objects.get().estimated_total == Decimal("8.00")
+
+
+# ── Site 4: adding a line by scan (line_entry) ───────────────────────────────
+
+
+def _draft_for(supplier, user):
+    return PurchaseOrder.objects.create(
+        supplier=supplier, status=PurchaseOrder.Status.DRAFT, created_by=user
+    )
+
+
+@pytest.fixture
+def scanner_user():
+    return User.objects.create_user(username="scanner", password="pw")
+
+
+def test_a_default_unit_cost_is_none_when_nothing_is_on_file():
+    """BEFORE/AFTER. ``default_unit_cost`` returned ``Decimal("0.00")``."""
+    item = _item("Unpriced")
+    link = _link(item, "Acme", unit_cost=None)
+    assert line_entry.default_unit_cost(link) is None
+
+
+def test_a_default_unit_cost_of_zero_means_the_vendor_charges_nothing():
+    """CONTROL. And it does NOT fall through to purchase history."""
+    item = _item("Donated")
+    link = _link(item, "Charity", unit_cost="0.00")
+    assert line_entry.default_unit_cost(link) == Decimal("0.00")
+
+
+def test_adding_a_scanned_line_is_refused_when_no_price_is_on_file(scanner_user):
+    """BEFORE/AFTER. The scan used to add the line at a fabricated ``0.0000``.
+
+    Screen: the scanner add-line flow (``POST .../items/`` on an open order,
+    and ScanTTY's add-line prompt). The refusal names both remedies, which is
+    what makes it a fix rather than a wall.
+    """
+    item = _item("Unpriced")
+    link = _link(item, "Acme", unit_cost=None)
+    order = _draft_for(link.supplier, scanner_user)
+
+    with pytest.raises(line_entry.LineEntryError) as exc:
+        line_entry.add_line_item(order, link)
+
+    assert exc.value.code == "no_unit_cost"
+    assert "Acme" in str(exc.value)
+    assert not PurchaseOrderItem.objects.exists()
+
+
+def test_a_scanned_line_with_an_explicit_price_is_added(scanner_user):
+    """CONTROL. The documented escape from the refusal."""
+    item = _item("Unpriced")
+    link = _link(item, "Acme", unit_cost=None)
+    order = _draft_for(link.supplier, scanner_user)
+
+    line, created = line_entry.add_line_item(order, link, unit_cost="3.50")
+    assert created and line.unit_cost_ordered == Decimal("3.5000")
+
+
+def test_a_scanned_line_from_a_free_supplier_is_added_at_zero(scanner_user):
+    """CONTROL. A free vendor is priced, so the scan works as it always did."""
+    item = _item("Donated")
+    link = _link(item, "Charity", unit_cost="0.00")
+    order = _draft_for(link.supplier, scanner_user)
+
+    line, created = line_entry.add_line_item(order, link)
+    assert created and line.unit_cost_ordered == Decimal("0.0000")
+
+
+def test_an_unpriced_link_still_falls_back_to_what_it_last_cost(scanner_user):
+    """CONTROL. The purchase-history fallback is untouched by the refusal."""
+    item = _item("Unpriced")
+    link = _link(item, "Acme", unit_cost=None)
+    first = _draft_for(link.supplier, scanner_user)
+    PurchaseOrderItem.objects.create(
+        purchase_order=first,
+        item_supplier=link,
+        quantity_ordered=1,
+        unit_cost_ordered=Decimal("6.0000"),
+        order_in_packages=1,
+    )
+
+    assert line_entry.default_unit_cost(link) == Decimal("6.00")
+
+
+def test_the_candidate_payload_suggests_null_rather_than_a_zero_to_accept(scanner_user):
+    """BEFORE/AFTER. ``suggested_unit_cost`` was the string ``"0.00"``.
+
+    Screen: the line-entry candidate list a scanner prompt renders. A
+    ``"0.00"`` there is a number an operator accepts by reflex; ScanTTY had
+    already written a special hint beside it saying the zero was "the default,
+    not a quote" — which is the downstream cost of this collapse, and which
+    misfires on a vendor that genuinely charges nothing.
+    """
+    item = _item("Unpriced")
+    link = _link(item, "Acme", unit_cost=None)
+    candidate = type("C", (), {"item_supplier": link, "existing_line": None})()
+    candidate.match_kind = "supplier_sku"
+    candidate.match_label = None
+    candidate.matched_value = "x"
+
+    assert line_entry.serialize_candidate(candidate)["suggested_unit_cost"] is None
+
+    free = _item("Donated")
+    free_link = _link(free, "Charity", unit_cost="0.00")
+    candidate.item_supplier = free_link
+    assert line_entry.serialize_candidate(candidate)["suggested_unit_cost"] == "0.00"
+
+
+# ── Site 5: what the stock on the shelf is worth ─────────────────────────────
+
+
+def test_stock_value_is_unknown_when_nobody_records_a_price():
+    """BEFORE/AFTER. ``total_value`` was ``Decimal("0")`` — "worth nothing"."""
+    item = _item("Unpriced", current_stock=40)
+    _link(item, "Acme", unit_cost=None)
+    assert _fresh(item).total_value is None
+
+
+def test_a_free_supplier_values_the_shelf_at_zero():
+    """CONTROL. Free stock IS worth nothing, and that is a fact not a gap."""
+    item = _item("Donated", current_stock=40)
+    _link(item, "Charity", unit_cost="0.00")
+    assert _fresh(item).total_value == Decimal("0.00")
+
+
+def test_a_priced_shelf_is_valued_exactly_as_before():
+    """CONTROL. The invariant, on stock value."""
+    item = _item("Priced", current_stock=40)
+    _link(item, "Acme", unit_cost="1.25")
+    assert _fresh(item).total_value == Decimal("50.00")
+
+
+def test_the_item_list_renders_for_an_item_whose_stock_cannot_be_valued(api):
+    """The consumer half: a null ``total_value`` must not break the page.
+
+    Round 5 of the previous branch shipped a null against untyped consumers and
+    blanked two member-facing pages. This is the same check, one fact along.
+    """
+    item = _item("Unpriced", current_stock=40)
+    _link(item, "Acme", unit_cost=None)
+
+    response = api.get(f"/api/inventory/items/{item.id}/")
+    assert response.status_code == 200
+    assert response.data["total_value"] is None
+
+
+def test_the_stock_value_report_counts_the_items_it_could_not_price(api):
+    """BEFORE/AFTER on the CLAIM, not on the number.
+
+    Screen: the inventory report's stock-by-category table. ``total_value``
+    there is ``Sum(stock * Coalesce(unit_cost, 0))`` — ``unit_cost or 0``
+    written in SQL — so an unpriced item contributed nothing and the column
+    read as a complete valuation. The total is deliberately UNCHANGED (moving
+    it would be inventing money); ``items_without_price`` is what makes it
+    honest.
+    """
+    priced = _item("Priced", current_stock=10)
+    _link(priced, "Acme", unit_cost="2.00")
+    unpriced = _item("Unpriced", current_stock=10)
+    _link(unpriced, "Silent", unit_cost=None)
+
+    response = api.get(STOCK_BY_CATEGORY_URL)
+    assert response.status_code == 200
+    row = next(r for r in response.data if r["category_name"] == "Uncategorized")
+    assert row["total_value"] == 20.0
+    assert row["items_without_price"] == 1
+
+
+# ── Site 6: a reorder request's estimated cost ───────────────────────────────
+
+
+def test_the_location_value_report_counts_what_it_could_not_price(api):
+    """The location twin of the category report — a SEPARATE endpoint payload.
+
+    ``value_by_location`` builds the same ``Coalesce(unit_cost, 0)`` total from
+    its own query, so it needs its own count and its own test; ScanTTY reads
+    this one too (``/reports/inventory/value_by_location/``).
+    """
+    priced = _item("Priced", current_stock=10)
+    _link(priced, "Acme", unit_cost="2.00")
+    unpriced = _item("Unpriced", current_stock=10)
+    _link(unpriced, "Silent", unit_cost=None)
+
+    response = api.get(VALUE_BY_LOCATION_URL)
+    assert response.status_code == 200
+    row = next(r for r in response.data if r["location_name"] == "No Location")
+    assert row["total_value"] == 20.0
+    assert row["items_without_price"] == 1
+
+
+def test_a_free_item_costs_zero_rather_than_nothing_known():
+    """BEFORE/AFTER on the second half of the rule.
+
+    Screen: the reorder-request list and detail. ``if unit_cost:`` reported
+    ``None`` ("we cannot cost this") for an item a vendor gives away.
+    """
+    from reorder_queue.models import ReorderRequest
+
+    item = _item("Donated")
+    _link(item, "Charity", unit_cost="0.00")
+    request = ReorderRequest.objects.create(item=_fresh(item), quantity=6)
+    assert request.estimated_cost == Decimal("0.00")
+
+
+def test_an_unpriced_item_still_has_no_estimated_cost():
+    """CONTROL. The other half stays ``None``."""
+    from reorder_queue.models import ReorderRequest
+
+    item = _item("Unpriced")
+    _link(item, "Acme", unit_cost=None)
+    request = ReorderRequest.objects.create(item=_fresh(item), quantity=6)
+    assert request.estimated_cost is None
+
+
+# ── Site 7: price history and the price-trend report ─────────────────────────
+
+
+def _history(link, costs):
+    """Replace ``link``'s price history with exactly ``costs``, oldest first.
+
+    ``ItemSupplier.save()`` writes a ``CREATED`` snapshot of its own, which
+    would otherwise be the "first price" these tests reason about. Cleared here
+    so each test states its whole history.
+    """
+    PriceHistory.objects.filter(item_supplier=link).delete()
+    rows = []
+    for cost in costs:
+        rows.append(
+            PriceHistory.objects.create(
+                item_supplier=link,
+                unit_cost=None if cost is None else Decimal(cost),
+                package_cost=None,
+                quantity_per_package=1,
+            )
+        )
+    return rows
+
+
+def test_a_drop_to_free_is_a_price_change_of_minus_one_hundred_percent():
+    """BEFORE/AFTER. ``if previous.unit_cost and self.unit_cost`` swallowed it.
+
+    Screen: the item detail's price-trend summary and the purchasing
+    price-trend report. A supplier that started donating an item reported "no
+    change" — the single most notable price move there is.
+    """
+    item = _item("Donated")
+    link = _link(item, "Charity", unit_cost="0.00")
+    _first, latest = _history(link, ["5.00", "0.00"])
+    assert latest.price_change_percentage == Decimal("-100.00")
+
+
+def test_a_change_from_free_has_no_percentage_because_there_is_no_base():
+    """CONTROL. Undefined arithmetic, not a data gap — and it stays ``None``."""
+    item = _item("Donated")
+    link = _link(item, "Charity", unit_cost="4.00")
+    _first, latest = _history(link, ["0.00", "4.00"])
+    assert latest.price_change_percentage is None
+
+
+def test_an_unrecorded_price_still_yields_no_percentage():
+    """CONTROL. Both halves of the guard still refuse an unknown."""
+    item = _item("Mystery")
+    link = _link(item, "Acme", unit_cost="4.00")
+    _first, latest = _history(link, [None, "4.00"])
+    assert latest.price_change_percentage is None
+
+
+def test_an_ordinary_price_rise_is_unchanged():
+    """CONTROL. The invariant, on the percentage."""
+    item = _item("Priced")
+    link = _link(item, "Acme", unit_cost="5.00")
+    _first, latest = _history(link, ["4.00", "5.00"])
+    assert latest.price_change_percentage == Decimal("25.00")
+
+
+def test_the_price_trend_report_sends_null_rather_than_a_zero_price(api):
+    """BEFORE/AFTER. ``float(x or 0)`` reported "$0.00" for three different facts.
+
+    Screen: the purchasing price-trend report table (and ScanTTY's
+    ``report_table`` row). "No price recorded", "this vendor is free" and "no
+    price history at all" all rendered as ``0``.
+    """
+    item = _item("Mystery")
+    link = _link(item, "Acme", unit_cost=None)
+    _history(link, [None, None])
+
+    response = api.get(PRICE_TRENDS_URL)
+    assert response.status_code == 200
+    row = next(r for r in response.data if r["item_name"] == "Mystery")
+    assert row["min_unit_cost"] is None
+    assert row["max_unit_cost"] is None
+    assert row["latest_unit_cost"] is None
+
+
+def test_the_price_trend_report_still_reports_a_real_free_price(api):
+    """CONTROL. ``0.0`` on that report now means the vendor charges nothing."""
+    item = _item("Donated")
+    link = _link(item, "Charity", unit_cost="0.00")
+    _history(link, ["0.00", "0.00"])
+
+    response = api.get(PRICE_TRENDS_URL)
+    row = next(r for r in response.data if r["item_name"] == "Donated")
+    assert row["min_unit_cost"] == 0.0
+    assert row["latest_unit_cost"] == 0.0
+
+
+def test_the_price_trend_report_reports_a_drop_to_free(api):
+    """BEFORE/AFTER. ``if first_price.unit_cost and latest_price.unit_cost``.
+
+    Screen: the purchasing price-trend report's "% change" column. A supplier
+    that stopped charging is the largest price move the report can show, and
+    the truthiness guard reported nothing for it. This is the report's own
+    guard, distinct from ``PriceHistory.price_change_percentage`` — a mutation
+    run proved the two need separate tests, because every other input gives
+    both spellings the same answer.
+    """
+    item = _item("Donated")
+    link = _link(item, "Charity", unit_cost="0.00")
+    _history(link, ["5.00", "0.00"])
+
+    response = api.get(PRICE_TRENDS_URL)
+    row = next(r for r in response.data if r["item_name"] == "Donated")
+    assert row["price_change_percentage"] == Decimal("-100.00")
+    assert row["latest_unit_cost"] == 0.0
+
+
+def test_the_price_trend_report_is_unchanged_for_ordinary_prices(api):
+    """CONTROL. The invariant, on the report."""
+    item = _item("Priced")
+    link = _link(item, "Acme", unit_cost="5.00")
+    _history(link, ["4.00", "5.00"])
+
+    response = api.get(PRICE_TRENDS_URL)
+    row = next(r for r in response.data if r["item_name"] == "Priced")
+    assert row["min_unit_cost"] == 4.0
+    assert row["max_unit_cost"] == 5.0
+    assert row["latest_unit_cost"] == 5.0
+    assert row["price_change_percentage"] == 25.0
+
+
+def test_a_kit_row_on_the_pad_never_prices_an_unknown_at_zero(api):
+    """BEFORE/AFTER. The kit row is informational, and it is still a price.
+
+    Screen: the PO create form's "kits that would restock a low component"
+    strip. It touches no total (kits are never action rows — op-8n0), which is
+    exactly why an unknown price there had nothing else to correct it.
+    """
+    supplier = Supplier.objects.create(name="Acme", supplier_type=Supplier.SupplierType.LOCAL)
+    component = _item("Ink", current_stock=0, minimum_stock=10)
+    ItemSupplier.objects.create(
+        item=component,
+        supplier=supplier,
+        supplier_sku="ink",
+        unit_cost=Decimal("1.00"),
+        quantity_per_package=1,
+        average_lead_time=7,
+    )
+    kit = _item("InkKit", is_kit=True)
+    kit.kit_components.create(component=component, quantity=2)
+    ItemSupplier.objects.create(
+        item=kit,
+        supplier=supplier,
+        supplier_sku="kit",
+        unit_cost=None,
+        quantity_per_package=1,
+        average_lead_time=7,
+    )
+
+    response = api.get(REORDER_DATA_URL)
+    group = next(g for g in response.data["suppliers"] if g["id"] == supplier.id)
+    row = next(k for k in group["kits"] if k["name"] == "InkKit")
+    assert row["unit_cost"] is None
+
+
+def test_the_supplier_price_summary_counts_a_free_snapshot(api):
+    """BEFORE/AFTER. ``if ph.unit_cost is not None`` was already right here...
+
+    ...but the ``min``/``average`` it feeds is the place a dropped ``0.00``
+    would push every figure UP. Screen: the supplier detail's price-trend
+    summary. Pinned so the list comprehension cannot quietly become a
+    truthiness filter.
+    """
+    item = _item("Donated")
+    link = _link(item, "Charity", unit_cost="0.00")
+    _history(link, ["4.00", "0.00"])
+
+    response = api.get(f"/api/inventory/suppliers/{link.supplier.id}/")
+    assert response.status_code == 200
+    summary = response.data["price_trends"]["summary"]
+    assert summary["min_unit_cost"] == 0.0
+    assert summary["average_unit_cost"] == 2.0
+
+
+def test_the_supplier_price_summary_ignores_a_snapshot_with_no_price(api):
+    """CONTROL. An unrecorded price is still not a data point."""
+    item = _item("Mystery")
+    link = _link(item, "Acme", unit_cost="4.00")
+    _history(link, ["4.00", None])
+
+    response = api.get(f"/api/inventory/suppliers/{link.supplier.id}/")
+    summary = response.data["price_trends"]["summary"]
+    assert summary["min_unit_cost"] == 4.0
+    assert summary["average_unit_cost"] == 4.0

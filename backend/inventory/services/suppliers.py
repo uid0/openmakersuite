@@ -13,7 +13,12 @@ pure local invariant, not a workflow side effect.
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Optional
+
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError, transaction
+from django.db.backends.utils import format_number
 
 if TYPE_CHECKING:
     from inventory.models.core import ItemSupplier, PriceHistory
@@ -37,6 +42,22 @@ def enforce_single_primary(item_supplier: "ItemSupplier") -> None:
     ).update(is_primary=False)
 
 
+def _as_stored(item_supplier: "ItemSupplier", field_name: str, value):
+    """``value`` rounded the way the column will store it.
+
+    ``save()``'s derivation divides, so ``package_cost 10.00`` over a pack of 3
+    yields ``3.3333…`` in memory while the ``numeric(10,2)`` column holds
+    ``3.33``. Comparing the two raw made :func:`pricing_changed` answer True on
+    every save of such a link, writing a phantom "Price Update" into the
+    supplier price-trend chart. Uses Django's own write-path rounding so this
+    comparison cannot drift from what the database actually keeps.
+    """
+    if value is None:
+        return None
+    field = item_supplier._meta.get_field(field_name)
+    return format_number(Decimal(str(value)), field.max_digits, field.decimal_places)
+
+
 def pricing_changed(item_supplier: "ItemSupplier") -> bool:
     """Return ``True`` when a persisted supplier's cost/quantity differs from its DB row.
 
@@ -55,8 +76,10 @@ def pricing_changed(item_supplier: "ItemSupplier") -> bool:
         return False
 
     return (
-        old.unit_cost != item_supplier.unit_cost
-        or old.package_cost != item_supplier.package_cost
+        _as_stored(item_supplier, "unit_cost", old.unit_cost)
+        != _as_stored(item_supplier, "unit_cost", item_supplier.unit_cost)
+        or _as_stored(item_supplier, "package_cost", old.package_cost)
+        != _as_stored(item_supplier, "package_cost", item_supplier.package_cost)
         or old.quantity_per_package != item_supplier.quantity_per_package
     )
 
@@ -94,6 +117,10 @@ UNCHANGED = object()
 #: The cost columns whose values ``ItemSupplier.save`` derives from each other.
 _DERIVED_COSTS = ("unit_cost", "package_cost")
 
+#: Every writable column of the relationship. Wider than "the costs" on
+#: purpose: the generic ``/item-suppliers/`` endpoint writes the dimensional and
+#: bookkeeping columns in the SAME request as the costs, so splitting the write
+#: would put half of it back outside the owner.
 _TERM_FIELDS = (
     "supplier_sku",
     "supplier_url",
@@ -103,8 +130,91 @@ _TERM_FIELDS = (
     "average_lead_time",
     "package_upc",
     "unit_upc",
+    "package_height",
+    "package_width",
+    "package_length",
+    "package_weight",
+    "notes",
     "is_primary",
+    "is_active",
+    "is_discontinued",
 )
+
+
+def _coerce_cost(value, field):
+    """A cost as a ``Decimal``, or ``None`` for "no price".
+
+    The boundary this owner needs. ``supplier_terms`` is a plain ``DictField``
+    whose ``_UnvalidatedField`` child passes JSON through untouched, so a cost
+    arrives as whatever the caller sent — the kit form sends ``String(unitCost)``.
+    An uncoerced string reaches ``ItemSupplier.save``'s derivation and
+    ``"5.00" * 6`` is string repetition, not arithmetic. Same shape, and the same
+    remedy, as :func:`reorder_queue.services.line_entry._coerce_unit_cost`.
+
+    An explicit ``None`` stays ``None``: "no price" is not ``Decimal("0")``.
+    """
+    if value is None:
+        return None
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        raise DjangoValidationError({field: f"Must be a number, got {value!r}."})
+    if not amount.is_finite():
+        raise DjangoValidationError({field: f"Must be a finite number, got {value!r}."})
+    if amount < 0:
+        raise DjangoValidationError({field: "Cannot be negative."})
+    return amount
+
+
+def _coerce_pack_size(value):
+    """A pack size as a positive ``int``. NULL is not one of its answers."""
+    try:
+        size = int(value)
+    except (ValueError, TypeError):
+        raise DjangoValidationError(
+            {"quantity_per_package": f"Must be a whole number, got {value!r}."}
+        )
+    if size < 1:
+        raise DjangoValidationError({"quantity_per_package": "Must be at least 1."})
+    return size
+
+
+def _coerce_terms(terms):
+    """Coerce every value that reaches the model's cost derivation."""
+    coerced = dict(terms)
+    for field in _DERIVED_COSTS:
+        if coerced.get(field, UNCHANGED) is not UNCHANGED:
+            coerced[field] = _coerce_cost(coerced[field], field)
+    if coerced.get("quantity_per_package", UNCHANGED) is not UNCHANGED:
+        coerced["quantity_per_package"] = _coerce_pack_size(coerced["quantity_per_package"])
+    return coerced
+
+
+def _apply(link, terms):
+    """Set the named terms on ``link``, keeping the two costs one fact.
+
+    Naming ONE cost means "this is the price now", so its twin is cleared and
+    ``save()`` re-derives it — but ONLY when the named value actually differs
+    from what is stored. The kit form seeds its cost box from the stored price
+    and echoes it back on every save, so clearing unconditionally re-derived a
+    package price the operator never touched (a link at ``package_cost 10.00``
+    over a pack of 3 stores ``unit_cost 3.33``, and ``3.33 * 3`` is ``9.99``).
+    An echoed value is a no-op: it moves nothing and records no price history.
+    """
+    named_costs = [
+        name
+        for name in _DERIVED_COSTS
+        if terms.get(name, UNCHANGED) is not UNCHANGED and terms[name] != getattr(link, name)
+    ]
+    if len(named_costs) == 1:
+        stale = _DERIVED_COSTS[0] if named_costs[0] == _DERIVED_COSTS[1] else _DERIVED_COSTS[1]
+        terms = {**terms, stale: None}
+
+    for name in _TERM_FIELDS:
+        value = terms.get(name, UNCHANGED)
+        if value is not UNCHANGED:
+            setattr(link, name, value)
+    return link
 
 
 def write_supplier_terms(*, item, supplier=None, supplier_id=None, **terms):
@@ -147,19 +257,30 @@ def write_supplier_terms(*, item, supplier=None, supplier_id=None, **terms):
     if supplier_id is None:
         supplier_id = supplier.pk
 
-    link = ItemSupplier.objects.filter(item=item, supplier_id=supplier_id).first()
-    if link is None:
-        link = ItemSupplier(item=item, supplier_id=supplier_id)
+    terms = _coerce_terms(terms)
 
-    named_costs = [name for name in _DERIVED_COSTS if terms.get(name, UNCHANGED) is not UNCHANGED]
-    if len(named_costs) == 1:
-        stale = _DERIVED_COSTS[0] if named_costs[0] == _DERIVED_COSTS[1] else _DERIVED_COSTS[1]
-        terms[stale] = None
+    with transaction.atomic():
+        link = (
+            ItemSupplier.objects.select_for_update()
+            .filter(item=item, supplier_id=supplier_id)
+            .first()
+        )
+        if link is not None:
+            _apply(link, terms).save()
+            return link
 
-    for name in _TERM_FIELDS:
-        value = terms.get(name, UNCHANGED)
-        if value is not UNCHANGED:
-            setattr(link, name, value)
+        try:
+            with transaction.atomic():
+                link = _apply(ItemSupplier(item=item, supplier_id=supplier_id), terms)
+                link.save()
+                return link
+        except IntegrityError:
+            pass
 
-    link.save()
-    return link
+        link = (
+            ItemSupplier.objects.select_for_update()
+            .filter(item=item, supplier_id=supplier_id)
+            .get()
+        )
+        _apply(link, terms).save()
+        return link

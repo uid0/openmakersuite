@@ -671,8 +671,9 @@ complete, and it was twice not:
   comprehension puts it in `defaults` — measured, not assumed.
   **That limit is now CLOSED** — the round that recorded it as unfixable was
   wrong about the cost. See the supplier-terms owner below: clearing a recorded
-  price now sticks, because naming one cost clears its twin so the derivation
-  has nothing stale to restore. The CONTROL that pinned the limitation is
+  price now sticks, because naming one cost clears its twin — but ONLY when the
+  named value actually differs from what is stored, so an echoed price is a
+  no-op. See the owner entry below for why that qualifier is load-bearing. The CONTROL that pinned the limitation is
   rewritten as a BEFORE/AFTER that pins the fix.
   NOTE the seeding path, checked on every route in: `applyKit` seeds
   `supplier_sku` and `unit_cost` but NOT `supplierId`, and the payload only
@@ -733,6 +734,67 @@ complete, and it was twice not:
   named — all four turned out to write FLAGS rather than costs
   (`update_lead_times`, `mark_discontinued`, `void_line_item`,
   `enforce_single_primary`) and are allowlisted with that reason.
+- **The owner's own first cut had three defects; all are fixed and named here,
+  because the round that introduced them is on this branch.**
+  - **It COERCES at its boundary now.** `supplier_terms` is a plain `DictField`
+    whose `_UnvalidatedField` child passes JSON through untouched, so the kit
+    form's `String(unitCost)` arrived as the STRING `"5.00"`. Clearing the twin
+    then fed that raw `str` into `save()`'s back-fill, where `"5.00" * 6` is
+    string REPETITION: a kit whose supplier link records a pack size above 1
+    could not be saved at all, rejected with
+    `"5.005.005.005.005.005.00" value must be a decimal number`. **REGRESSION of
+    this branch**, introduced by the owner and live only between it and this
+    fix; before the owner, `package_cost` was non-NULL so `save()` replaced the
+    string with a `Decimal` before any multiplication. (The reviewer called this
+    an unhandled 500; measured, it is a **400** — this project's handler does
+    convert Django's `ValidationError` — but the operator still cannot save the
+    kit, and the message is unusable.) Costs now coerce to `Decimal` and the
+    pack size to `int` at the boundary, the same shape as
+    `line_entry._coerce_unit_cost`, with a field-named 400 for a non-numeric or
+    negative value. An explicit `null` still means "no price", never
+    `Decimal("0")`.
+  - **The twin-clear is conditional on the value actually changing.** "Naming
+    either cost clears its twin" was too blunt: `applyKit` seeds the cost box
+    from the stored unit price, so an ordinary re-save echoes it back, and
+    clearing unconditionally re-derived it. A link at `package_cost 10.00` over
+    a pack of 3 stores `unit_cost 3.33`; echoing that back moved the package
+    price to **$9.99** and wrote a `PriceHistory` row calling it a real price
+    change — visible on the scan page's "Package cost" and "Estimated Cost",
+    which read `order_package_price`. A money figure moving on a save that
+    changed nothing is an outright breach of the branch invariant.
+    **REGRESSION of this branch**, same window as above. An incoming value equal
+    to the stored one is now a no-op: nothing moves and no history is written.
+    Compared as `Decimal`, so `"5"`, `"5.00"` and `Decimal("5.00")` are one
+    value.
+  - **`pricing_changed` compares at the column's precision.** Surfaced by the
+    no-op CONTROL above and PRE-EXISTING, not this branch's: `save()`'s
+    derivation DIVIDES, so `package_cost 10.00` over a pack of 3 yields
+    `3.3333…` in memory while the `numeric(10,2)` column holds `3.33`.
+    Comparing the two raw made `pricing_changed` answer True on EVERY save of
+    such a link, writing a phantom "Price Update" into the supplier
+    price-trend chart and the `price_trend_summary` this same branch reworked.
+    It now rounds both sides through Django's own write-path `format_number`,
+    so the comparison cannot drift from what the database keeps. No stored
+    figure moves; what stops is the fabricated history row.
+  - **It is no weaker than the `update_or_create` it replaced.** `filter().first()`
+    plus `save()` dropped the row lock and the losing-create retry that manager
+    method provided. The read-modify-write now runs under `select_for_update()`
+    inside `transaction.atomic()`, and a concurrent create that loses the
+    `unique_together` race is caught and retried as an update rather than
+    surfacing as a 500.
+- **The generic `/item-suppliers/` endpoint is routed through the owner too**,
+  and it is the writer the first derivation missed. `ItemSupplierViewSet` is a
+  full `ModelViewSet`, so DRF's `ModelSerializer.update` did the partial write
+  itself — `PATCH {"unit_cost": "7.00"}` on a link with a stored package price
+  recomputed the OLD price back over it and echoed **5.00** in the response,
+  discarding what the operator typed. **PRE-EXISTING**: that endpoint and
+  serializer predate this branch and base behaved identically. Now `$7.00`.
+  `_TERM_FIELDS` widened to every writable column so the dimensional and
+  bookkeeping fields the same request carries are not split back out of the
+  owner. The gate could not see this shape at all — a `ModelSerializer` is a
+  writer with no write CALL in it — so it now counts `class Meta: model =
+  ItemSupplier` as a write site, and its docstring states that as limit 4 along
+  with what the scan still cannot see.
 - **WHAT WAS ALREADY BROKEN, verified against base `7c078de` rather than
   assumed** — the captain asked for this explicitly, so each kit-form defect is
   labelled:

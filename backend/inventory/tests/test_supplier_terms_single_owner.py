@@ -30,9 +30,18 @@ bypass the owner" sounds:**
    not, because the AST cannot tell what ``qs`` is. The same limit the
    pack-size and price gates carry.
 3. A ``.save()`` is counted only when the receiver READS like an item supplier
-   (``link``, ``item_supplier``, ``supplier_link``, ``rel`` …). A save on a
-   differently-named local is invisible. This is the loosest of the three and is
-   why the allowlist reasons matter more than the count.
+   (``item_supplier``, ``supplier_link`` …). A save on a differently-named local
+   is invisible. This is the loosest of the rules and is why the allowlist
+   reasons matter more than the count.
+4. A DRF ``ModelSerializer`` on this model is a writer with no write CALL in it
+   at all — ``ModelSerializer.update`` does the ``setattr`` + ``save()`` itself,
+   inside the framework. Review found exactly that blind spot: the generic
+   ``/item-suppliers/`` endpoint was writing these columns and the first version
+   of this gate could not see it. The scan now counts a ``class Meta`` whose
+   ``model`` is ``ItemSupplier`` as a write site for that reason. What it still
+   cannot see: a serializer that reaches the model through a variable or an
+   import alias rather than naming it, and any framework that writes the table
+   without a Python-visible model reference.
 
 **What counts as a write** is deliberately broad, because the defect is a
 partial write rather than any particular spelling:
@@ -41,6 +50,8 @@ partial write rather than any particular spelling:
 * ``ItemSupplier.objects.create`` / ``update_or_create`` / ``get_or_create`` /
   ``update`` / ``bulk_create`` / ``bulk_update``.
 * ``<supplier-ish>.save(...)``.
+* ``class Meta: model = ItemSupplier`` — a serializer or form that writes the
+  row through the framework rather than through a call this scan can see.
 
 Naming a cost column in a serializer ``fields`` list, an admin column or prose
 is NOT a write: naming a field cannot store a number.
@@ -72,6 +83,14 @@ ALLOWED: dict[str, tuple[int, str]] = {
         "THE OWNER, plus its neighbour. `write_supplier_terms` performs the one "
         "construction every caller now delegates to; `enforce_single_primary` "
         "bulk-updates `is_primary` only, which is a flag rather than a cost.",
+    ),
+    "inventory/serializers.py": (
+        1,
+        "`ItemSupplierSerializer` — a `ModelSerializer` on this model, which is "
+        "a framework writer (limit 4). Its `create`/`update` are overridden to "
+        "delegate to `write_supplier_terms`, so DRF's own partial "
+        "`setattr` + `save()` never runs. Allowlisted because it IS routed, not "
+        "because a partial write would be safe here — it demonstrably is not.",
     ),
     "inventory/tasks.py": (
         1,
@@ -126,9 +145,30 @@ def _called_name(node: ast.Call) -> str:
     return ".".join(reversed(parts))
 
 
+def _binds_model(node: ast.AST) -> bool:
+    """``model = ItemSupplier`` inside a ``class Meta`` — a framework writer."""
+    if not isinstance(node, ast.ClassDef) or node.name != "Meta":
+        return False
+    for stmt in node.body:
+        if not isinstance(stmt, ast.Assign):
+            continue
+        for target in stmt.targets:
+            if isinstance(target, ast.Name) and target.id == "model":
+                value = stmt.value
+                name = (
+                    value.attr if isinstance(value, ast.Attribute) else getattr(value, "id", None)
+                )
+                if name == "ItemSupplier":
+                    return True
+    return False
+
+
 def _writes(tree: ast.AST) -> set[int]:
     found: set[int] = set()
     for node in ast.walk(tree):
+        if _binds_model(node):
+            found.add(node.lineno)
+            continue
         if not isinstance(node, ast.Call):
             continue
         dotted = _called_name(node)
@@ -246,3 +286,24 @@ def test_reading_a_supplier_is_not_a_write():
 
 def test_an_unrelated_model_never_trips_the_gate():
     assert _writes_in("PurchaseOrder.objects.update_or_create(defaults={'x': 1})") == 0
+
+
+def test_a_model_serializer_on_this_model_is_a_writer():
+    """Limit 4: DRF writes the row itself, so there is no call to catch."""
+    source = """
+class ItemSupplierSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ItemSupplier
+        fields = ["unit_cost", "package_cost"]
+"""
+    assert _writes_in(source) == 1
+
+
+def test_a_model_serializer_on_another_model_is_not_a_writer():
+    source = """
+class PurchaseOrderSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PurchaseOrder
+        fields = ["unit_cost"]
+"""
+    assert _writes_in(source) == 0

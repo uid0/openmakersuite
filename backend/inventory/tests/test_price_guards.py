@@ -53,7 +53,6 @@ from inventory.services.pricing import (
     package_price_of,
     unit_price_of,
 )
-from inventory.services.suppliers import write_supplier_terms
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
 from reorder_queue.services import line_entry
 
@@ -1643,24 +1642,34 @@ def test_clearing_a_kit_cost_on_an_existing_link_now_sticks(api):
     ``write_supplier_terms`` closes it — naming one cost clears its twin, so the
     derivation has nothing stale to restore.
     """
-    item = _item("Cartridge")
-    link = _link(item, "Acme", unit_cost="5.00", pack=6, is_primary=True)
+    component = _item("Cyan")
+    supplier = Supplier.objects.create(name="Acme")
+    kit = _item("Clearable kit", is_kit=True)
+    KitComponent.objects.create(kit=kit, component=component, quantity=1)
+    link = ItemSupplier.objects.create(
+        item=kit,
+        supplier=supplier,
+        supplier_sku="A",
+        unit_cost=Decimal("5.00"),
+        quantity_per_package=6,
+        is_primary=True,
+    )
     link.refresh_from_db()
     assert link.package_cost == Decimal("30.00")
 
-    write_supplier_terms(
-        item=item,
-        supplier_id=link.supplier_id,
-        supplier_sku="A",
-        unit_cost=None,
-        is_primary=True,
+    response = api.patch(
+        f"/api/inventory/kits/{kit.pk}/",
+        {"supplier_terms": {"supplier": supplier.pk, "supplier_sku": "A", "unit_cost": None}},
+        format="json",
     )
 
+    assert response.status_code == 200, response.data
     link.refresh_from_db()
     assert link.unit_cost is None
     assert link.package_cost is None
     assert link.quantity_per_package == 6
-    assert order_unit_price(item).state == PRICE_NOT_RECORDED
+    assert order_unit_price(kit).state == PRICE_NOT_RECORDED
+    assert response.data["unit_cost"] is None
 
 
 def test_saving_kit_terms_leaves_an_untouched_pack_size_and_its_price_alone(api):
@@ -1804,3 +1813,235 @@ def test_a_first_price_on_an_unpriced_kit_link_stores_both_costs(api):
     assert link.unit_cost == Decimal("4.00")
     assert link.package_cost == Decimal("4.00")
     assert order_package_price(kit).state == PRICE_KNOWN
+
+
+def test_a_string_cost_on_a_multipack_kit_is_coerced_not_repeated(api):
+    """BEFORE/AFTER. The kit form's string price saves on a multipack link.
+
+    ``supplier_terms`` is a plain ``DictField``, so the form's
+    ``String(unitCost)`` arrives uncoerced. Clearing the twin then sent that raw
+    ``str`` into ``ItemSupplier.save``'s back-fill, where ``"5.00" * 6`` is
+    string repetition — the save was rejected with
+    "5.005.005.005.005.005.00 value must be a decimal number" and the operator
+    could not save the kit at all.
+    """
+    component = _item("Cyan")
+    supplier = Supplier.objects.create(name="Acme")
+    kit = _item("Sixpack kit", is_kit=True)
+    KitComponent.objects.create(kit=kit, component=component, quantity=1)
+    link = ItemSupplier.objects.create(
+        item=kit,
+        supplier=supplier,
+        supplier_sku="T-6",
+        unit_cost=Decimal("5.00"),
+        quantity_per_package=6,
+        is_primary=True,
+    )
+
+    response = api.patch(
+        f"/api/inventory/kits/{kit.pk}/",
+        {"supplier_terms": {"supplier": supplier.pk, "supplier_sku": "T-6", "unit_cost": "7.00"}},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
+    link.refresh_from_db()
+    assert link.unit_cost == Decimal("7.00")
+    assert link.package_cost == Decimal("42.00")
+    assert link.quantity_per_package == 6
+
+
+def test_a_non_numeric_kit_cost_is_refused_with_a_readable_message(api):
+    """CONTROL. Garbage in the cost box is a 400 naming the field, not a crash."""
+    component = _item("Magenta")
+    supplier = Supplier.objects.create(name="Acme")
+    kit = _item("Bad kit", is_kit=True)
+    KitComponent.objects.create(kit=kit, component=component, quantity=1)
+    ItemSupplier.objects.create(
+        item=kit, supplier=supplier, supplier_sku="T-X", quantity_per_package=1, is_primary=True
+    )
+
+    response = api.patch(
+        f"/api/inventory/kits/{kit.pk}/",
+        {"supplier_terms": {"supplier": supplier.pk, "supplier_sku": "T-X", "unit_cost": "abc"}},
+        format="json",
+    )
+
+    assert response.status_code == 400, response.data
+    assert "unit_cost" in str(response.data)
+
+
+def test_a_negative_kit_cost_is_refused(api):
+    """CONTROL. A price below zero is not a price."""
+    component = _item("Yellow")
+    supplier = Supplier.objects.create(name="Acme")
+    kit = _item("Negative kit", is_kit=True)
+    KitComponent.objects.create(kit=kit, component=component, quantity=1)
+    ItemSupplier.objects.create(
+        item=kit, supplier=supplier, supplier_sku="T-N", quantity_per_package=1, is_primary=True
+    )
+
+    response = api.patch(
+        f"/api/inventory/kits/{kit.pk}/",
+        {"supplier_terms": {"supplier": supplier.pk, "supplier_sku": "T-N", "unit_cost": "-1.00"}},
+        format="json",
+    )
+
+    assert response.status_code == 400, response.data
+
+
+def test_re_saving_an_echoed_kit_price_moves_nothing(api):
+    """CONTROL on the branch invariant. A save that changed nothing changes nothing.
+
+    ``applyKit`` seeds the cost box from the stored unit price, so an ordinary
+    re-save echoes it back. Clearing the twin unconditionally then re-derived it:
+    a link at ``package_cost 10.00`` over a pack of 3 stores ``unit_cost 3.33``,
+    and ``3.33 * 3`` is ``9.99`` — the package price the operator actually pays
+    moved by a cent, on a save that touched no cost field, and a PriceHistory row
+    recorded it as a real price change.
+    """
+    component = _item("Cyan")
+    supplier = Supplier.objects.create(name="Acme")
+    kit = _item("Echo kit", is_kit=True)
+    KitComponent.objects.create(kit=kit, component=component, quantity=1)
+    link = ItemSupplier.objects.create(
+        item=kit,
+        supplier=supplier,
+        supplier_sku="T-E",
+        package_cost=Decimal("10.00"),
+        quantity_per_package=3,
+        is_primary=True,
+    )
+    link.refresh_from_db()
+    assert (link.unit_cost, link.package_cost) == (Decimal("3.33"), Decimal("10.00"))
+    history_before = PriceHistory.objects.filter(item_supplier=link).count()
+
+    response = api.patch(
+        f"/api/inventory/kits/{kit.pk}/",
+        {
+            "supplier_terms": {
+                "supplier": supplier.pk,
+                "supplier_sku": "T-E",
+                "unit_cost": str(link.unit_cost),
+            }
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
+    link.refresh_from_db()
+    assert link.unit_cost == Decimal("3.33")
+    assert link.package_cost == Decimal("10.00")
+    assert link.quantity_per_package == 3
+    assert PriceHistory.objects.filter(item_supplier=link).count() == history_before
+
+
+def test_the_item_supplier_endpoint_stores_the_typed_price(api):
+    """BEFORE/AFTER. The generic REST endpoint no longer discards a typed price.
+
+    ``ItemSupplierViewSet`` is a ModelViewSet, so DRF's ``ModelSerializer.update``
+    did the partial write the owner exists to stop: ``PATCH {"unit_cost": "7.00"}``
+    on a link with a stored package price recomputed the OLD 5.00 back over it and
+    echoed 5.00 in the response.
+    """
+    item = _item("Cartridge")
+    supplier = Supplier.objects.create(name="Acme")
+    link = ItemSupplier.objects.create(
+        item=item,
+        supplier=supplier,
+        supplier_sku="T-R",
+        unit_cost=Decimal("5.00"),
+        quantity_per_package=1,
+        is_primary=True,
+    )
+    link.refresh_from_db()
+    assert link.package_cost == Decimal("5.00")
+
+    response = api.patch(
+        f"/api/inventory/item-suppliers/{link.pk}/", {"unit_cost": "7.00"}, format="json"
+    )
+
+    assert response.status_code == 200, response.data
+    link.refresh_from_db()
+    assert link.unit_cost == Decimal("7.00")
+    assert Decimal(str(response.data["unit_cost"])) == Decimal("7.00")
+
+
+def test_the_item_supplier_endpoint_still_writes_its_other_columns(api):
+    """CONTROL. Routing the write through the owner did not narrow the endpoint."""
+    item = _item("Widget")
+    supplier = Supplier.objects.create(name="Acme")
+    link = ItemSupplier.objects.create(
+        item=item, supplier=supplier, supplier_sku="T-C", quantity_per_package=1
+    )
+
+    response = api.patch(
+        f"/api/inventory/item-suppliers/{link.pk}/",
+        {"notes": "back order", "package_weight": "1.250", "is_discontinued": True},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
+    link.refresh_from_db()
+    assert link.notes == "back order"
+    assert link.package_weight == Decimal("1.250")
+    assert link.is_discontinued is True
+
+
+def test_creating_an_item_supplier_through_the_endpoint_derives_both_costs(api):
+    """CONTROL on the create path, which the endpoint now routes through the owner.
+
+    Behaviour-neutral for a single request — DRF's own ``create`` would derive
+    the same pair — so this pins the outcome rather than a difference. The
+    override exists so every write to these columns goes through one path, which
+    is what the writer gate's allowlist entry claims.
+    """
+    item = _item("Fresh")
+    supplier = Supplier.objects.create(name="Acme")
+
+    response = api.post(
+        "/api/inventory/item-suppliers/",
+        {
+            "item": str(item.pk),
+            "supplier": supplier.pk,
+            "supplier_sku": "T-N",
+            "unit_cost": "4.00",
+            "quantity_per_package": 3,
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201, response.data
+    link = ItemSupplier.objects.get(item=item, supplier=supplier)
+    assert link.unit_cost == Decimal("4.00")
+    assert link.package_cost == Decimal("12.00")
+    assert link.quantity_per_package == 3
+
+
+def test_a_duplicate_item_supplier_post_is_refused_not_duplicated(api):
+    """CONTROL. The unique pair is enforced before any write is attempted."""
+    item = _item("Cartridge")
+    supplier = Supplier.objects.create(name="Acme")
+    ItemSupplier.objects.create(
+        item=item,
+        supplier=supplier,
+        supplier_sku="T-D",
+        unit_cost=Decimal("5.00"),
+        quantity_per_package=1,
+    )
+
+    response = api.post(
+        "/api/inventory/item-suppliers/",
+        {
+            "item": str(item.pk),
+            "supplier": supplier.pk,
+            "supplier_sku": "T-D",
+            "unit_cost": "9.00",
+            "quantity_per_package": 1,
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400, response.data
+    assert ItemSupplier.objects.filter(item=item, supplier=supplier).count() == 1
+    ItemSupplier.objects.get(item=item, supplier=supplier).refresh_from_db()

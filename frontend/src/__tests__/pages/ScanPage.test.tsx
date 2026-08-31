@@ -99,6 +99,151 @@ describe('ScanPage', () => {
     expect(screen.getByText(/average lead time:/i)).toBeInTheDocument();
   });
 
+  // op-c1ke: `current_cases` is null when nothing records how many units a case
+  // holds. Round 5 of PR #1035 shipped that null against a frontend that still
+  // declared it a number and called `.toFixed(1)`, which threw and blanked this
+  // whole page for a scanned item whose supplier had died.
+  test('renders a case-based item whose case size is unknown', async () => {
+    localStorage.setItem('token', 'test-token');
+
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockItem,
+        use_case_based_reorder: true,
+        minimum_cases: 1,
+        reorder_cases: 2,
+        current_cases: null,
+        needs_reorder: true,
+      },
+    });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+
+    await renderWithRouter();
+
+    // The page still renders — the item name proves it did not blank.
+    await screen.findByText('Test Widget');
+    // "unknown", NOT the older "case size not recorded". That wording was a
+    // specific claim the payload does not support: a null `current_cases` also
+    // covers an item whose link DID record a pack size — of 0 — where the fix
+    // is to correct that row, not to add a supplier. "Unknown" is what the
+    // derivation actually establishes. Do not restore the old sentence.
+    expect(screen.getByText(/case size unknown/i)).toBeInTheDocument();
+    expect(screen.queryByText(/not recorded/i)).toBeNull();
+    expect(screen.queryByText(/50\.0 cases/)).toBeNull();
+  });
+
+  // The DISAGREEING side, which is also the DEFAULT configuration (minimum_stock
+  // defaults to 0, minimum_cases to 1). The threshold the flag uses for an
+  // unknown case size is max(minimum_stock, minimum_cases) = 3; an earlier
+  // version of this test sat on the side where the two coincide and so passed
+  // while the page could still contradict its own badge.
+  const unknownCaseItem = {
+    use_case_based_reorder: true,
+    current_stock: 2,
+    minimum_stock: 0,
+    minimum_cases: 3,
+    reorder_quantity: 40,
+    reorder_cases: 2,
+    current_cases: null,
+    needs_reorder: true,
+  };
+
+  const unknownCaseDisplay = {
+    mode: 'each',
+    unit: 'unit',
+    threshold: 3,
+    current: 2,
+    reorder_quantity: 40,
+    needs_reorder: true,
+    text: '2 units on hand · reorder at 3 units',
+  };
+
+  test('names base units, not cases, for an item whose case size is unknown', async () => {
+    localStorage.setItem('token', 'test-token');
+
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, ...unknownCaseItem, reorder_display: unknownCaseDisplay },
+    });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+
+    await renderWithRouter();
+
+    await screen.findByText('Test Widget');
+    expect(screen.getByText('40 units')).toBeInTheDocument();
+    expect(screen.queryByText(/2 cases/)).toBeNull();
+  });
+
+  // `reorder_display` is optional on the wire, so the fallback must be correct
+  // on its own — never back to the bare minimum_stock.
+  test('falls back to base units when reorder_display is absent', async () => {
+    localStorage.setItem('token', 'test-token');
+
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, ...unknownCaseItem },
+    });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+
+    await renderWithRouter();
+
+    await screen.findByText('Test Widget');
+    expect(screen.getByText('40 units')).toBeInTheDocument();
+    expect(screen.queryByText(/2 cases/)).toBeNull();
+  });
+
+  // The anonymous-scan path auto-submits, and its sentence used to say
+  // "N cases" ungated — three lines below the page saying the cases cannot be
+  // counted. It reads the same owner as every other quantity now.
+  test('the anonymous auto-submit message never quotes cases it cannot count', async () => {
+    localStorage.removeItem('token');
+
+    // A failed auto-submit is the one settled state that shows this block:
+    // the catch sets `submitting` back to false, which is exactly the branch
+    // whose comment says "show the form so user can manually submit".
+    (api.reorderAPI.createRequest as jest.Mock).mockRejectedValue(new Error('offline'));
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, ...unknownCaseItem, reorder_display: unknownCaseDisplay },
+    });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+
+    await renderWithRouter();
+
+    await screen.findByText('Test Widget');
+    const message = await screen.findByText(/automatically submitting a reorder request/i);
+    expect(message).toHaveTextContent('40 units');
+    expect(message).not.toHaveTextContent(/case/i);
+  });
+
+  test('renders a case-based item whose case size IS recorded', async () => {
+    localStorage.setItem('token', 'test-token');
+
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockItem,
+        use_case_based_reorder: true,
+        minimum_cases: 1,
+        reorder_cases: 2,
+        current_cases: 2.5,
+        needs_reorder: false,
+      },
+    });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+
+    await renderWithRouter();
+
+    await screen.findByText('Test Widget');
+    expect(screen.getByText(/2\.5 cases/)).toBeInTheDocument();
+  });
+
   test('displays low stock warning when needed', async () => {
     // Set logged in state to avoid auto-submit
     localStorage.setItem('token', 'test-token');
@@ -168,6 +313,98 @@ describe('ScanPage', () => {
           requested_by: 'John Doe',
           request_notes: 'Need more stock',
           priority: 'normal',
+        })
+      );
+    });
+  });
+
+  // --- A pack size of 0 is not a quantity (op-c1ke) -----------------------
+  // `quantity_per_package: 0` is `pack_size.py`'s PACK_SIZE_RECORDED_ZERO: a
+  // box holding no units. The form used to multiply by it, so asking for 3
+  // packages POSTed a 0-unit request and silently discarded the 3.
+
+  const zeroPackSupplier = {
+    id: 7,
+    supplier_name: 'Zero Pack Vendor',
+    unit_cost: '1.25',
+    package_cost: '0.00',
+    quantity_per_package: 0,
+    is_active: true,
+    average_lead_time: 7,
+  };
+
+  const renderWithSupplier = async (supplier: Record<string, unknown>) => {
+    localStorage.setItem('token', 'test-token');
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({ data: mockItem });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [supplier] },
+    });
+    (api.reorderAPI.createRequest as jest.Mock).mockResolvedValue({
+      data: { id: 1, item: mockItem.id },
+    });
+    await renderWithRouter();
+    await screen.findByText('Test Widget');
+  };
+
+  test('a recorded pack size of 0 is shown as unknown, never as the number 0', async () => {
+    await renderWithSupplier(zeroPackSupplier);
+
+    // Neither the supplier picker nor the package details may print a
+    // confident "0" beside a refusal that says the size is unknown.
+    expect(screen.getByRole('option', { name: /case size unknown/i })).toBeInTheDocument();
+    expect(screen.queryByText(/0 per package/)).not.toBeInTheDocument();
+    expect(screen.getByText(/units per package/i).parentElement).toHaveTextContent(
+      /case size unknown/i
+    );
+  });
+
+  test('the refusal names both the cause and the remedy', async () => {
+    await renderWithSupplier(zeroPackSupplier);
+
+    const refusal = screen.getByRole('alert');
+    // Cause: the row records a pack size of 0 — a box holding no units.
+    expect(refusal).toHaveTextContent(/records a pack size of 0/i);
+    expect(refusal).toHaveTextContent(/box holding no units/i);
+    // Remedy: exactly what pack_size.py prescribes for PACK_SIZE_RECORDED_ZERO.
+    expect(refusal).toHaveTextContent(/correct "Quantity per Package"/i);
+    expect(refusal).toHaveTextContent(/choose a different supplier that records one/i);
+  });
+
+  test('an unknown pack size cannot be submitted and posts nothing', async () => {
+    await renderWithSupplier(zeroPackSupplier);
+
+    const packagesInput = screen.getByLabelText(/number of packages/i);
+    fireEvent.change(packagesInput, { target: { value: '3' } });
+
+    expect(screen.queryByRole('button', { name: /request \d+ units/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /cannot request/i })).toBeDisabled();
+
+    // Submitting the form directly bypasses the disabled button, so the
+    // handler's own guard is what must refuse. The operator's 3 packages must
+    // never become a 0-unit request.
+    fireEvent.submit(screen.getByRole('button', { name: /cannot request/i }).closest('form')!);
+
+    await waitFor(() => {
+      expect(api.reorderAPI.createRequest).not.toHaveBeenCalled();
+    });
+  });
+
+  test('control: a known pack size still computes and submits unchanged', async () => {
+    await renderWithSupplier({ ...zeroPackSupplier, quantity_per_package: 12 });
+
+    const packagesInput = screen.getByLabelText(/number of packages/i);
+    fireEvent.change(packagesInput, { target: { value: '3' } });
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /request 36 units/i }));
+
+    await waitFor(() => {
+      expect(api.reorderAPI.createRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          item: mockItem.id,
+          quantity: 36,
+          package_quantity: 3,
+          preferred_supplier: 7,
         })
       );
     });

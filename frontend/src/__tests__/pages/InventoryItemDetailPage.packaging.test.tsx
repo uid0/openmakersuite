@@ -248,7 +248,12 @@ describe('InventoryItemDetailPage — on-hand at the count level', () => {
     await loaded();
 
     expect(screen.getByTestId('item-on-hand')).toHaveTextContent('450 sheets');
-    expect(screen.getByTestId('item-minimum-stock')).toHaveTextContent('2 units');
+    // "Base units" means the ITEM's base unit — the same noun the on-hand line
+    // above uses, and the one `reorder_threshold` names server-side for a
+    // non-pack-counting item (`base_unit or "unit"`). This label used to
+    // hard-code "units" while on-hand beside it said "sheets"; routing it
+    // through the single threshold owner ends that contradiction.
+    expect(screen.getByTestId('item-minimum-stock')).toHaveTextContent('2 sheets');
     expect(screen.queryByTestId('pack-container-controls')).not.toBeInTheDocument();
   });
 });

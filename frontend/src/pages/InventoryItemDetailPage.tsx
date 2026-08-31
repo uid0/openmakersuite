@@ -47,6 +47,8 @@ import {
   describePackChain,
   onHandLabel,
   pluralizeUnit,
+  reorderQuantityLabel,
+  reorderThresholdLabel,
 } from '../utils/packaging';
 
 /**
@@ -891,28 +893,22 @@ const InventoryItemDetailPage: React.FC = () => {
                     <Group justify="space-between">
                       <Text size="sm">Current Cases:</Text>
                       <Text size="sm" fw={600}>
-                        {item.current_cases.toFixed(1)} cases
+                        {item.current_cases === null
+                          ? '— (case size unknown)'
+                          : `${item.current_cases.toFixed(1)} cases`}
                       </Text>
                     </Group>
                   )}
                   <Group justify="space-between">
                     <Text size="sm">Minimum Stock:</Text>
                     <Text size="sm" data-testid="item-minimum-stock">
-                      {packCounted
-                        ? `${item.minimum_stock} ${pluralizeUnit(countUnit, item.minimum_stock)}`
-                        : item.use_case_based_reorder
-                          ? `${item.minimum_cases} cases`
-                          : `${item.minimum_stock} units`}
+                      {reorderThresholdLabel(item)}
                     </Text>
                   </Group>
                   <Group justify="space-between">
                     <Text size="sm">Reorder Quantity:</Text>
                     <Text size="sm" data-testid="item-reorder-quantity">
-                      {packCounted
-                        ? `${item.reorder_quantity} ${pluralizeUnit(countUnit, item.reorder_quantity)}`
-                        : item.use_case_based_reorder
-                          ? `${item.reorder_cases} cases`
-                          : `${item.reorder_quantity} units`}
+                      {reorderQuantityLabel(item)}
                     </Text>
                   </Group>
                   <Group justify="space-between">

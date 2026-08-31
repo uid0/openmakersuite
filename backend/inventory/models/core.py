@@ -21,6 +21,7 @@ from .ownership import OwnableModel
 
 if TYPE_CHECKING:
     from inventory.models.asset import Asset
+    from inventory.services.pack_size import PackSize
 
 
 def generate_sku() -> str:
@@ -557,54 +558,58 @@ class InventoryItem(OwnableModel):
             )
 
     @cached_property
-    def _case_pack_size(self) -> Optional[int]:
-        """Units per package from the FIRST link, or ``None`` if it has none.
+    def _shelf_pack_size(self) -> "PackSize":
+        """Units in the box ON THE SHELF, from the ONE pack-size derivation.
 
-        Reads ``item_suppliers`` directly rather than
-        :attr:`primary_item_supplier`, because this asks how many units are in
-        a box already sitting on the shelf — which has nothing to do with who
-        we would buy the next one from. Routing it through the
-        orderability-filtered helper changed a low-stock flag (op-2rsp), and
-        this branch deliberately changes no flag: a dead vendor's recorded pack
-        size still describes the box on the shelf.
+        Delegates to :func:`inventory.services.pack_size.shelf_pack_size`, which
+        owns "how many base units are in one package" the way
+        :mod:`inventory.services.supplier_selection` owns "which supplier"
+        (op-c1ke). It reads the FIRST link in ``Meta.ordering``, orderable or
+        not, because this asks how many units are in a box already sitting on
+        the shelf — which has nothing to do with who we would buy the next one
+        from. Routing it through the orderability-filtered helper changed a
+        low-stock flag (op-2rsp): a dead vendor's recorded pack size still
+        describes the box on the shelf.
 
-        Rows arrive in ``Meta.ordering``, and ONLY the first is consulted —
-        byte-for-byte the row the pre-op-2rsp ``primary_item_supplier``
-        returned. A first row recording ``quantity_per_package`` of 0 therefore
-        yields ``None`` and :attr:`current_cases` falls back to raw base units
-        rather than scanning on to a later link. That fallback is wrong — it
-        reads base units as a case count — but it is BASE's wrongness, and
-        skipping past the zero row would newly flag an item base did not flag.
-        Routed as its own follow-up rather than fixed under a no-flag-change
-        invariant.
+        The answer carries its own state, so :attr:`current_cases` and
+        :attr:`needs_reorder` can tell a KNOWN pack size from one that was never
+        recorded and from a row recording ``0`` — three facts the old ``or``
+        guards collapsed into the confident number 1.
 
         Memoised, so the readers that chain — ``reorder_display`` asks for
         ``current_cases`` and then ``needs_reorder``, which asks again — cost
         one query per instance.
-
-        NOTE: pack size still has several readers with no single owner
-        (:attr:`quantity_per_package`, ``item_metrics``'s ``case_size``,
-        ``bridge_case_reorder_to_packaging``), which resolve it through the
-        supplier derivation instead. Giving it ONE named derivation the way
-        "which supplier" got one is known and filed as its own work.
         """
-        first = next(iter(self.item_suppliers.all()), None)
-        if first is None or not first.quantity_per_package or first.quantity_per_package <= 0:
-            return None
-        return first.quantity_per_package
+        from inventory.services.pack_size import shelf_pack_size
+
+        return shelf_pack_size(self)
 
     @property
-    def current_cases(self) -> float:
-        """Calculate current number of cases/packages in stock."""
+    def current_cases(self) -> Optional[float]:
+        """Cases in stock, or ``None`` when the case size is not known.
+
+        ``0`` for an item that is not reordered by the case, exactly as before.
+
+        ``None`` — NOT the raw base-unit count — when nothing records how many
+        units a box holds (:attr:`_shelf_pack_size`). Base fell back to "1 unit
+        per package" here, so ten loose units read as ten cases and an item
+        below its reorder point silently stopped being flagged; that fallback
+        is the alert-suppression defect this closes (op-c1ke). A number we do
+        not have is reported as absent, and every consumer across the stack
+        handles it: the serializer field allows null, the three web pages that
+        render it show an em dash, and ScanTTY's ``CurrentCases`` was already a
+        nil-checked ``*float64``.
+
+        :attr:`needs_reorder` does not compare against ``None`` — see there for
+        what an item whose cases cannot be counted is judged on instead.
+        """
         if not self.use_case_based_reorder:
             return 0
 
-        pack_size = self._case_pack_size
-        if pack_size is not None:
-            return self.current_stock / pack_size
-
-        # Fallback to 1 unit per package if no supplier info
-        return self.current_stock
+        pack = self._shelf_pack_size
+        if not pack.is_known:
+            return None
+        return self.current_stock / pack.units
 
     @property
     def needs_reorder(self) -> bool:
@@ -616,7 +621,9 @@ class InventoryItem(OwnableModel):
         * ``count_mode=each`` — unchanged, and it is what every pre-existing
           item is: case-based items compare ``current_cases`` to
           ``minimum_cases``, everything else ``current_stock`` to
-          ``minimum_stock``, both in base units.
+          ``minimum_stock``, both in base units. A case-based item whose case
+          size is NOT KNOWN has no ``current_cases`` to compare, and is judged
+          in base units instead — see the comment at that branch below.
         * ``by_level`` / ``open_closed`` — whole packs of ``count_level``
           against ``minimum_stock``, which for these modes is a threshold in the
           item's COUNT unit (cases/reams/sealed packs). ``count_mode`` is the
@@ -654,7 +661,39 @@ class InventoryItem(OwnableModel):
         if self.use_case_based_reorder:
             # For case-based reordering, calculate current cases and compare to minimum cases
             current_cases = self.current_cases
-            return current_cases <= self.minimum_cases
+            if current_cases is not None:
+                return current_cases <= self.minimum_cases
+            # The case count is UNKNOWN — nothing records how many units a box
+            # holds (op-c1ke). Base fabricated "1 unit per package" here and
+            # compared raw base units against a case threshold, so ten loose
+            # units read as ten cases and the item stopped being flagged. An
+            # item whose cases cannot be counted is judged in the unit that CAN
+            # be counted instead: base units, against its own base-unit floor —
+            # which is exactly the predicate ``low_stock_q`` has always applied
+            # to these items in SQL.
+            #
+            # The second disjunct keeps base's own comparison. An unknown may
+            # ADD an alert that a fabricated number was suppressing; it must
+            # never REMOVE one base raised, and for a small stock under a large
+            # ``minimum_cases`` base's comparison was the only one flagging.
+            #
+            # So the two disjuncts together mean the property and its database
+            # twin agree exactly where ``minimum_cases <= minimum_stock`` — the
+            # shape where they visibly disagreed. Above that the property still
+            # flags an item ``low_stock_q`` does not match, which is the
+            # PRE-EXISTING divergence direction and is preserved on purpose:
+            # closing it the other way would delete an alert base raised.
+            # ``inventory.services.packaging.reorder_threshold`` reports
+            # ``max(minimum_stock, minimum_cases)`` for this shape, so the badge
+            # and the threshold printed beside it name the same boundary.
+            #
+            # Note what this deliberately is NOT: a flag that ignores stock. An
+            # item with no supplier link is a DATA GAP, and flagging that
+            # population regardless of stock floods the surface until people
+            # ignore it — which suppresses alerts too.
+            return (
+                self.current_stock <= self.minimum_stock or self.current_stock <= self.minimum_cases
+            )
         else:
             # Traditional individual unit reordering
             return self.current_stock <= self.minimum_stock
@@ -875,10 +914,24 @@ class InventoryItem(OwnableModel):
 
     @property
     def quantity_per_package(self) -> Optional[int]:
-        """Expose the primary supplier's quantity per package when available."""
+        """Units per package from the supplier we would BUY through, or ``None``.
 
-        link = self.primary_item_supplier
-        return link.quantity_per_package if link else None
+        Reads the one pack-size derivation
+        (:func:`inventory.services.pack_size.order_pack_size`) rather than the
+        column, so a link recording ``0`` — an impossible box — reports as
+        unknown instead of as the confident number 0 (op-c1ke). ``None``
+        already meant "no supplier you can buy from" here, so the null itself
+        is not new to any consumer.
+
+        The ORDER question, not the shelf one: :attr:`current_cases` asks how
+        many units are in the box already on the shelf and resolves it
+        differently. See :mod:`inventory.services.pack_size` for why the two
+        must not collapse.
+        """
+
+        from inventory.services.pack_size import order_pack_size
+
+        return order_pack_size(self).units
 
     # ── InventorySafetyProfile compatibility layer (#885) ────────────────────
     #

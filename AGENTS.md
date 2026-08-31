@@ -118,10 +118,17 @@ the order pad and the PO-building screens. Do not re-derive it: three copies of
 `ORDER BY -is_primary, unit_cost` had already drifted apart before op-2rsp
 collapsed them.
 
-The forecasts (`component_forecast`, `demand_forecast_engine`) still resolve
-their own lead time and are NOT on this derivation. That is deliberate for now:
-routing them through it moves a reorder point and therefore a flag, and op-2rsp
-ships no flag change. They belong to the deferred piece below.
+The forecasts (`component_forecast`, `demand_forecast_engine`) resolve their own
+lead time and are NOT on this derivation, permanently. Both read EVERY link,
+inactive and discontinued included, because "how long does a replacement take to
+arrive" is answered by whoever last shipped one — and routing them through the
+orderability filter drops a dead-vendor item off the demand-forecast report and
+the nightly digest entirely. op-c1ke pins that with two behavioural tests in
+`inventory/tests/test_alert_suppression.py` —
+`test_the_serialized_forecast_keeps_a_dead_vendors_lead_time` and
+`test_an_item_whose_only_supplier_died_reaches_the_report_and_the_digest`, both
+of which fail if the filter is reintroduced; see "The alert-suppression class"
+below.
 
 The rule is three things, in this order:
 
@@ -164,64 +171,156 @@ call site's readability. It has no rule of its own.
 Aggregates that value stock rather than choose a vendor (`lowest_unit_cost`,
 `total_value`, the report averages) deliberately still read every link.
 
-`InventoryItem.current_cases` is EXCLUDED from this supplier derivation.
-Deriving from the READERS OF A SYMBOL is not the same as deriving from the
-QUESTION BEING ASKED: it reads the helper but asks a different question — how
-many units are in a box on the shelf — which has nothing to do with who we buy
-from. It resolves its pack size from the FIRST link in `Meta.ordering`,
-orderable or not, because a dead vendor's recorded pack size still describes the
-box already on the shelf, and routing it through the orderability filter
-suppressed a low-stock alert.
+`InventoryItem.current_cases` is EXCLUDED from this supplier derivation, and
+still is. Deriving from the READERS OF A SYMBOL is not the same as deriving from
+the QUESTION BEING ASKED: it asks how many units are in a box on the shelf,
+which has nothing to do with who we buy from. See the pack-size derivation
+below, which now owns that answer.
 
-**Deferred and filed: one named derivation for pack size, the way "which
-supplier" got one.** It still has several readers with no single owner —
-`current_cases` (the first link, orderable or not) versus
-`quantity_per_package`, `item_metrics`'s `case_size` and
-`bridge_case_reorder_to_packaging` (all three the supplier helper) — so they can
-disagree on an item whose links differ. Do that work rather than rediscovering
-the split.
+### How many units are in a box: one derivation, three states (op-c1ke)
 
-### The alert-suppression class: IDENTIFIED, not fixed
+`inventory.services.pack_size` is the ONE answer to "how many base units are in
+one package of this item". It is the sibling of `supplier_selection` and the
+same discipline: one module, one interpretation of the column, entry points that
+differ only in WHICH row they ask.
+
+`pack_size_of(link)` is the only place `ItemSupplier.quantity_per_package` is
+turned into an answer; `shelf_pack_size` and `order_pack_size` are the two
+item-level entry points, and they ask genuinely different questions.
+
+**That module's docstring owns the mechanics — read it before touching any of
+this.** The three states plus `order_pack_size`'s fourth and what each one tells
+an operator; the judgement that **a recorded 1 is KNOWN** and why
+`declares_a_case` is the separate question; which link each entry point consults
+and why filtering `shelf_pack_size` for orderability is what suppressed a
+low-stock alert in op-2rsp round 1; and the query budget `order_pack_size` rides
+by reading the memoised `InventoryItem.primary_item_supplier`. All of it lives
+there. Do not restate it here — fix it there.
+
+What is worth knowing before you open it: the states are an INTERNAL
+distinction. `PackSize.state` does not reach the wire, and both web surfaces say
+only "case size unknown" for every one of them. They earn their keep by stopping
+`order_pack_size` collapsing `NO_SUPPLIERS` with `NONE_ORDERABLE`, and by
+keeping each unknown's CAUSE available to the surface that will word it — filed
+as separate follow-up. No flag moves between them.
+
+`inventory/tests/test_pack_size_single_owner.py` is the build gate: it walks
+every non-test module under `backend/` with the AST and pins the exact set of
+direct reads of the column. A new one anywhere fails until it goes through the
+derivation or is added to that allowlist with a reason. The allowlist holds only
+the column's own definition, verbatim copies (`PriceHistory`, the payload
+fields) and the write path — never a derivation.
+
+**The gate is BACKEND-ONLY.** It walks `backend/` and nothing else, so a
+frontend reader of `quantity_per_package` is NOT covered and does not fail the
+build. That is precisely how `ScanPage.tsx`'s reorder form kept multiplying by a
+recorded 0 after the backend readers were all moved onto the derivation; it was
+found by review, not by the gate, and is fixed in the page itself. Extending the
+scan to frontend sources is filed as separate follow-up. The "a reader added
+later fails the build" criterion holds for backend readers only — read it that
+way, and do not assume a green suite says anything about `frontend/`.
+
+### The alert-suppression class: CLOSED (op-c1ke)
 
 A value made honestly `None` gets collapsed by downstream arithmetic or a
 fallback into a confident, OPTIMISTIC answer — which inverts a boolean and
-suppresses an alert on exactly the item that most needs one. THREE derived
-instances, ALL PREDATING op-2rsp and all still live:
+suppresses an alert on exactly the item that most needs one. The rule, in one
+sentence: **a value the system does not know must never be presented, computed
+with, or compared against as though it were a known number — and must never
+make an item look adequately stocked.**
 
-1. `InventoryItem.current_cases` — no usable pack size on the first supplier
-   link falls through to "1 unit per package", so raw base units read as a case
-   count. Reachable for an item with no links at all, and for one whose first
-   link records `quantity_per_package` of 0.
-2. `component_forecast`'s `reorder_point` — `lead_time_days or 0` computes a
-   horizon at a zero-day wait.
-3. `demand_forecast_engine.forecast_item_by_interval` — the same collapse in
-   the demand-forecast report and the nightly reorder digest.
+`inventory/tests/test_alert_suppression.py` is where this class lives. Every
+test there is labelled BEFORE/AFTER (a flag that moved) or CONTROL (one that
+must not), against the invariant that let it ship: *no item's alerting or
+flagging behaviour changes versus base EXCEPT where base was suppressing an
+alert because a value was unknown.*
 
-Do not read these as consequences of the orderability filter. op-2rsp briefly
-WIDENED their reachability by routing each through the filtered helper, then
-tried to represent the resulting unknowns honestly; both halves were reverted,
-so every site is back to base and the class is exactly as reachable as it has
-always been. Reverting the supplier derivation would not close any of it.
+What moved, and what deliberately did not:
 
-**The fix was attempted across four review rounds and REVERTED wholesale.** Do
-not simply retry it. Each round's fix opened a new site: making these values
-null reached untyped frontend consumers (`current_cases.toFixed(1)` on the scan
-and item-detail pages), removed a low-stock alert that worked before, and
-re-collapsed `NO_SUPPLIERS` with `NONE_ORDERABLE` at one site while narrowing
-them at another. The blast radius of making a previously-total value nullable —
-across untyped consumers and boolean comparisons — is larger than the
-inconsistency it removes. op-2rsp therefore ships the supplier derivation ONLY,
-and changes no reorder flag anywhere.
+1. **`current_cases` — FIXED, flags moved.** No usable pack size fell through to
+   "1 unit per package", so raw base units read as a case count. It is now
+   `None`, and `needs_reorder` judges such an item in the unit that CAN be
+   counted OR by base's own comparison, kept so an unknown may ADD a flag but
+   can never REMOVE one. Be precise about how far that closes the split brain:
+   the property and the query agree exactly where
+   `minimum_cases <= minimum_stock`, which is the shape where they visibly
+   disagreed. Where `minimum_cases > minimum_stock` the property still flags an
+   item `low_stock_q` does not match — the PRE-EXISTING divergence direction,
+   preserved deliberately because closing it the other way would delete an alert
+   base raised — and `reorder_threshold` names `max(minimum_stock,
+   minimum_cases)` for this shape so a badge and the threshold line beside it
+   name the same boundary. The disjunction, and why each of those holds, is
+   spelled out where it lives: the comment at that branch of
+   `InventoryItem.needs_reorder` and the docstrings on
+   `packaging.reorder_threshold` and `packaging.low_stock_q`.
+2. **`component_forecast`'s `reorder_point` — expression fixed, NO flag change.**
+   The row now says `lead_time_known: false` and the number is a stated LOWER
+   BOUND (safety stock alone) rather than a horizon at a fabricated zero-day
+   wait.
+3. **`demand_forecast_engine` — expression fixed, NO flag change.** The
+   threshold falls back to the due date itself.
 
-The redo is one coherent piece, not three patches: derive and retype EVERY
-consumer first, then represent unknown pack size / lead time / reorder point
-honestly, keeping `NO_SUPPLIERS` (a data gap) and `NONE_ORDERABLE` (unbuyable)
-distinct throughout — flagging the data-gap population regardless of stock
-floods the surface until people ignore it, which suppresses alerts too.
+Why 2 and 3 change no flag, and this is the load-bearing part: `average_lead_time`
+is non-nullable with a default, so ANY link supplies an estimate — **a
+discontinued one included**. The entire population reaching "no lead time known"
+is therefore items with NO supplier link at all. Flagging that population
+regardless of what a lead time would have said turns a DATA GAP into a permanent
+alert, which is exactly op-2rsp round 4's failure: flooding the surface until
+people ignore it suppresses alerts too. `NO_SUPPLIERS` (a data gap) and
+`NONE_ORDERABLE` (unbuyable) point in OPPOSITE directions and must stay apart
+everywhere. Do NOT route `_lead_time_days_by_item` through the supplier
+derivation — `test_the_serialized_forecast_keeps_a_dead_vendors_lead_time` and
+`test_an_item_whose_only_supplier_died_reaches_the_report_and_the_digest` in
+`inventory/tests/test_alert_suppression.py` pin that, and both fail if the
+filter comes back. That function's own docstring carries the rest of the
+reasoning; read it before changing anything there.
 
-The same falsy-guard root shows up elsewhere and is worth recognising on sight:
-in the scoring's guards, where a missing or zero value reads as "absent" or
-"bad" rather than "unknown", and in `reorder_queue/views.py`'s `unit_cost or 0`.
+`current_cases` is nullable on the wire. Every consumer moved in the same commit:
+`InventoryItemSerializer` (`allow_null`), the three web sites that called
+`.toFixed(1)` (`InventoryList`, item detail, scan page) and `types/index.ts`.
+ScanTTY's `CurrentCases` was already a nil-checked `*float64`; its `case_size`
+was already `*int` and reads 0 as `null` now — a cross-project VALUE change,
+named as one. Round 5 shipped this null against untyped consumers and blanked
+two member-facing pages; that is why the consumer set is DERIVED, not recalled.
+
+**Reported, not fixed, and filed separately.** `unit_cost or 0` in
+`reorder_queue/views.py` (`create_optimized_order` lines and totals,
+`reorder_data`), `unit_cost or Decimal("0.00")` in
+`purchase_orders.create_purchase_order`, and `line_entry.default_unit_cost`'s
+`Decimal("0.00")` are the same rule on a different fact: they distort MONEY
+rather than suppressing an alert, so they need their own invariant and their own
+tests. Filed as `oms-falsy-zero-money-guards`. The scoring's own falsy guards
+(`test_supplier_scoring.py`, REPORTED NOT FIXED, retuning reserved to the
+captain) and `get_expected_delivery_date`'s `and self.average_lead_time` — where
+a KNOWN zero-day lead time yields no date — are the same shape and belong with
+them.
+
+Three more, found by this branch's sweeps and deliberately NOT fixed here:
+
+1. **`ScanPage`'s anonymous auto-submit misdescribes a KNOWN case size.** The
+   sentence reads through `reorder_display`, so an item whose case size is
+   unknown is now correct, but for a KNOWN case size it says "N cases" while
+   `frontend/src/pages/ScanPage.tsx` posts `quantity: item.reorder_quantity` in
+   BASE UNITS. Pre-existing, and about a value the system DOES know, so it is
+   outside the alert-suppression class this branch closes. Filed separately.
+2. **Frontend readers of `quantity_per_package` outside `ScanPage`** — the same
+   falsy-zero pack-size class, all pre-existing, none touched here.
+   `PurchaseOrderFormPage.tsx` has eight `item.quantity_per_package || 1` sites
+   — in `loadReorderData`, `updateItemQuantity`, `updateItemCases`,
+   `updateItemUnitCost`, `updateItemCaseCost`, `caseCostPlaceholderFor`,
+   `handleProductSearch` and `handleSubmit` — plus four unguarded reads in its
+   selected-items table (three `quantity_per_package > 1` branches and the
+   "N cases × N units/case" summary line beside them);
+   `SupplierRelationshipForm.tsx` coerces a typed 0 to 1 on the WRITE path, in
+   the pack-size input's `onChange`
+   (`quantity_per_package: Number(e.target.value) || 1`), silently changing what
+   an operator typed. Those counts are as of this branch — grep the expressions,
+   do not trust the numbers. These are FRONTEND sites and the pack-size build
+   gate walks `backend/` only, which is why none of them fails a build today.
+3. **Extending the pack-size build gate to frontend sources**, the follow-up
+   named above with the gate's backend-only scope. It sits beside 2 because 2
+   is the population it would cover: nothing gates a frontend reader until it
+   exists.
 
 ### The pre-send boundary: when a PO is still the shop's own document
 

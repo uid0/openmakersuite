@@ -12,6 +12,30 @@ import { Checklist, InventoryItem, ItemSupplier } from '../types';
 import { formatDateOnly } from '../utils/dates';
 import { promptInput, showError } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
+import { reorderQuantityLabel } from '../utils/packaging';
+
+/** The page's one phrasing for a pack size it cannot count with. */
+const PACK_SIZE_UNKNOWN = '— (case size unknown)';
+
+/**
+ * Base units in this vendor's package, or null when the row records none we can
+ * multiply by. The web face of `inventory.services.pack_size`: a
+ * `quantity_per_package` of 0 is `PACK_SIZE_RECORDED_ZERO` — a box holding no
+ * units — and this form is the FIRST place that state's prescribed operator
+ * action (correct the row, or buy from a vendor that records one) reaches a
+ * human, so {@link packSizeRefusal} words it.
+ */
+const packSizeOf = (supplier: ItemSupplier): number | null => {
+  const units = supplier.quantity_per_package;
+  return typeof units === 'number' && units >= 1 ? units : null;
+};
+
+/** The cause and the remedy — a refusal an operator cannot act on is not a fix. */
+const packSizeRefusal = (supplier: ItemSupplier): string =>
+  `${supplier.supplier_name} records a pack size of ${supplier.quantity_per_package} — ` +
+  'a box holding no units — so the number of units in a package is unknown and no ' +
+  'reorder can be sized from it. Correct "Quantity per Package" on this supplier ' +
+  'relationship, or choose a different supplier that records one.';
 
 const ScanPage: React.FC = () => {
   const { itemId } = useParams<{ itemId: string }>();
@@ -42,7 +66,10 @@ const ScanPage: React.FC = () => {
 
   // Update calculations when supplier or quantity changes
   const updateCalculations = useCallback((supplier: ItemSupplier, packages: number) => {
-    const units = packages * supplier.quantity_per_package;
+    // An unrecorded pack size is not the number 0: it yields no unit count at
+    // all, and the form refuses rather than reporting one.
+    const packSize = packSizeOf(supplier);
+    const units = packSize === null ? 0 : packages * packSize;
     const cost = packages * parseFloat(supplier.package_cost || '0');
 
     setTotalUnits(units);
@@ -181,6 +208,14 @@ const ScanPage: React.FC = () => {
       return;
     }
 
+    // Never POST a quantity derived from a pack size we do not have: `packages
+    // * 0` would discard the package count the operator typed and file a
+    // 0-unit request. Refuse, naming the remedy `pack_size.py` prescribes.
+    if (packSizeOf(selectedSupplier) === null) {
+      showError(packSizeRefusal(selectedSupplier));
+      return;
+    }
+
     try {
       setSubmitting(true);
 
@@ -205,6 +240,12 @@ const ScanPage: React.FC = () => {
       setSubmitting(false);
     }
   };
+
+  // Pack size of the supplier the form would order through, and whether it is
+  // one we can count with. Every unit figure below reads these, so the page
+  // cannot print a confident number beside a refusal that says it has none.
+  const selectedPackSize = selectedSupplier ? packSizeOf(selectedSupplier) : null;
+  const packSizeUnknown = selectedSupplier !== null && selectedPackSize === null;
 
   if (loading) {
     return (
@@ -352,7 +393,9 @@ const ScanPage: React.FC = () => {
                 <div className="info-item">
                   <span className="label">Current Cases:</span>
                   <span className={`value ${item.needs_reorder ? 'low-stock' : ''}`}>
-                    {item.current_cases.toFixed(1)} cases
+                    {item.current_cases === null
+                      ? '— (case size unknown)'
+                      : `${item.current_cases.toFixed(1)} cases`}
                   </span>
                 </div>
                 <div className="info-item">
@@ -363,7 +406,7 @@ const ScanPage: React.FC = () => {
                 </div>
                 <div className="info-item">
                   <span className="label">Reorder Quantity:</span>
-                  <span className="value">{item.reorder_cases} cases</span>
+                  <span className="value">{reorderQuantityLabel(item)}</span>
                 </div>
               </>
             ) : (
@@ -377,7 +420,7 @@ const ScanPage: React.FC = () => {
                 </div>
                 <div className="info-item">
                   <span className="label">Reorder Quantity:</span>
-                  <span className="value">{item.reorder_quantity} units</span>
+                  <span className="value">{reorderQuantityLabel(item)}</span>
                 </div>
               </>
             )}
@@ -414,10 +457,7 @@ const ScanPage: React.FC = () => {
           <div className="auto-submit-message">
             <h2>🔄 Processing Reorder Request</h2>
             <p>We're automatically submitting a reorder request for <strong>
-              {item.use_case_based_reorder
-                ? `${item.reorder_cases} cases`
-                : `${item.reorder_quantity} units`
-              }
+              {reorderQuantityLabel(item)}
             </strong> of this item.</p>
             <p>You'll be redirected to a confirmation page shortly...</p>
           </div>
@@ -461,7 +501,9 @@ const ScanPage: React.FC = () => {
                       .map(supplier => (
                         <option key={supplier.id} value={supplier.id}>
                           {supplier.supplier_name} - ${supplier.unit_cost}/unit
-                          ({supplier.quantity_per_package} per package)
+                          {packSizeOf(supplier) === null
+                            ? ` ${PACK_SIZE_UNKNOWN}`
+                            : ` (${packSizeOf(supplier)} per package)`}
                           {supplier.package_dimensions_display !== 'No dimensions specified' &&
                             ` - ${supplier.package_dimensions_display}`}
                         </option>
@@ -476,7 +518,8 @@ const ScanPage: React.FC = () => {
                     <h3>Package Details</h3>
                     <div className="detail-grid">
                       <div>
-                        <strong>Units per package:</strong> {selectedSupplier.quantity_per_package}
+                        <strong>Units per package:</strong>{' '}
+                        {selectedPackSize === null ? PACK_SIZE_UNKNOWN : selectedPackSize}
                       </div>
                       <div>
                         <strong>Package cost:</strong> ${selectedSupplier.package_cost}
@@ -495,6 +538,12 @@ const ScanPage: React.FC = () => {
                     </div>
                   </div>
 
+                  {packSizeUnknown && (
+                    <div className="alert alert-warning" role="alert">
+                      {packSizeRefusal(selectedSupplier)}
+                    </div>
+                  )}
+
                   <div className="form-group">
                     <label htmlFor="packageQuantity">Number of Packages</label>
                     <input
@@ -506,7 +555,8 @@ const ScanPage: React.FC = () => {
                       required
                     />
                     <small className="form-help">
-                      = {totalUnits} total units (${estimatedCost.toFixed(2)} estimated cost)
+                      = {packSizeUnknown ? PACK_SIZE_UNKNOWN : `${totalUnits} total units`} ($
+                      {estimatedCost.toFixed(2)} estimated cost)
                     </small>
                   </div>
 
@@ -514,7 +564,7 @@ const ScanPage: React.FC = () => {
                     <h3>Order Summary</h3>
                     <div className="summary-item">
                       <span>Total Units:</span>
-                      <span><strong>{totalUnits} units</strong></span>
+                      <span><strong>{packSizeUnknown ? PACK_SIZE_UNKNOWN : `${totalUnits} units`}</strong></span>
                     </div>
                     <div className="summary-item">
                       <span>Estimated Cost:</span>
@@ -553,9 +603,13 @@ const ScanPage: React.FC = () => {
               <button
                 type="submit"
                 className="submit-button"
-                disabled={submitting || !selectedSupplier}
+                disabled={submitting || !selectedSupplier || packSizeUnknown}
               >
-                {submitting ? 'Submitting...' : `Request ${totalUnits} Units`}
+                {submitting
+                  ? 'Submitting...'
+                  : packSizeUnknown
+                    ? 'Cannot request — case size unknown'
+                    : `Request ${totalUnits} Units`}
               </button>
           </form>
         )}

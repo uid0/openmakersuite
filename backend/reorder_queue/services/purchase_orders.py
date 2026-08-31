@@ -42,6 +42,7 @@ from rest_framework import serializers
 
 from inventory.models import ItemSupplier
 from inventory.services.kits import build_kit_snapshot
+from inventory.services.pack_size import declares_a_case
 from inventory.services.packaging import order_level, parse_at_level, resolve_base_quantity
 
 from ..models import PurchaseOrder, PurchaseOrderItem, ReorderRequest
@@ -88,10 +89,18 @@ def order_package_size(item_supplier):
 
     Costs no extra query for an ``each`` item: :func:`order_level` reads
     ``count_mode`` and short-circuits before touching the chain.
+
+    "Does this vendor declare a case?" is asked of the ONE pack-size derivation
+    (:func:`inventory.services.pack_size.declares_a_case`, op-c1ke), not of the
+    column. The rung it returns is unchanged for every recorded value — the old
+    ``or 1`` mapped a recorded 0 onto the same "sells singles" answer a recorded
+    1 gets, and the ladder falls through in both cases — but the two are no
+    longer the same fact wearing one guard: a 0 is an impossible box, a 1 is a
+    vendor selling singles, and only one of them is something we know.
     """
-    quantity_per_package = item_supplier.quantity_per_package or 1
-    if quantity_per_package > 1:
-        return quantity_per_package
+    declared_case = declares_a_case(item_supplier)
+    if declared_case is not None:
+        return declared_case
 
     rung = order_level(item_supplier.item)
     if rung is not None:

@@ -19,6 +19,7 @@ import {
   Table,
   Text,
   Title,
+  Tooltip,
 } from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
 
@@ -169,7 +170,25 @@ const SerializedForecastPanel: React.FC<Props> = ({
                   </Table.Td>
                   <Table.Td ta="right">{row.avg_daily_use}</Table.Td>
                   <Table.Td ta="right">{fmtDays(row.days_until_stockout)}</Table.Td>
-                  <Table.Td ta="right">{row.reorder_point}</Table.Td>
+                  <Table.Td ta="right">
+                    {row.lead_time_known === false ? (
+                      // No lead time is known for this item (it carries no
+                      // supplier link), so the reorder point is the safety
+                      // stock alone — a lower bound, not a horizon (op-c1ke).
+                      // Say so rather than quoting the number as complete.
+                      <Tooltip label="No supplier lead time recorded — this is the safety stock only, with no lead-time allowance. Add a supplier to complete it.">
+                        <Text
+                          span
+                          c="dimmed"
+                          data-testid={`serialized-forecast-partial-rp-${row.item_id}`}
+                        >
+                          ≥ {row.reorder_point}
+                        </Text>
+                      </Tooltip>
+                    ) : (
+                      row.reorder_point
+                    )}
+                  </Table.Td>
                   <Table.Td>
                     {row.needs_reorder ? (
                       <Badge color="orange" variant="filled">

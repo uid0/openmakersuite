@@ -37,6 +37,7 @@ const buildRow = (overrides: Partial<SerializedForecastRow> = {}): SerializedFor
   days_until_stockout: 30,
   projected_stockout_date: '2026-08-01',
   lead_time_days: 7,
+  lead_time_known: true,
   safety_stock: 2,
   reorder_point: 3,
   needs_reorder: true,
@@ -53,6 +54,45 @@ const renderPanel = (props = {}) =>
 describe('SerializedForecastPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  // op-c1ke: a reorder point computed without a lead time is a LOWER BOUND —
+  // the safety stock alone — because nothing records how long a replacement
+  // takes to arrive. Quoting it as a horizon is a confident number for a value
+  // the system does not have.
+  it('marks a reorder point that has no lead-time component as a lower bound', async () => {
+    mockReports.getSerializedForecast.mockResolvedValue({
+      data: [
+        buildRow({
+          item_id: 'no-supplier',
+          item_name: 'Orphan blade',
+          lead_time_days: null,
+          lead_time_known: false,
+          reorder_point: 2,
+        }),
+      ],
+    } as never);
+
+    renderPanel();
+
+    const marked = await screen.findByTestId(
+      'serialized-forecast-partial-rp-no-supplier',
+    );
+    expect(marked).toHaveTextContent('2');
+    expect(marked).toHaveTextContent('\u2265');
+  });
+
+  it('quotes a complete reorder point plainly', async () => {
+    mockReports.getSerializedForecast.mockResolvedValue({
+      data: [buildRow({ item_id: 'has-supplier', reorder_point: 4 })],
+    } as never);
+
+    renderPanel();
+
+    await screen.findByTestId('serialized-forecast-row-has-supplier');
+    expect(
+      screen.queryByTestId('serialized-forecast-partial-rp-has-supplier'),
+    ).toBeNull();
   });
 
   it('loads and renders forecast rows with a low-stock flag', async () => {

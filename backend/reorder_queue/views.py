@@ -21,6 +21,7 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from inventory.models import InventoryItem, Supplier
+from inventory.services.pack_size import declares_a_case
 from inventory.services.packaging import (
     base_reorder_quantity,
     count_unit,
@@ -1181,16 +1182,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 # Adjust for package quantities. Supplier packaging only rounds
                 # items counted in base units: a pack-counting item already
                 # ordered whole packs of its own chain above, and re-rounding to
-                # a supplier's case would silently inflate that.
-                if (
-                    not counts_in_packs(item)
-                    and item_supplier.quantity_per_package
-                    and item_supplier.quantity_per_package > 1
-                ):
-                    packages_needed = (
-                        suggested_qty + item_supplier.quantity_per_package - 1
-                    ) // item_supplier.quantity_per_package
-                    suggested_qty = packages_needed * item_supplier.quantity_per_package
+                # a supplier's case would silently inflate that. "Does this
+                # vendor declare a case?" comes from the ONE pack-size
+                # derivation (op-c1ke); the rounding is unchanged.
+                declared_case = None if counts_in_packs(item) else declares_a_case(item_supplier)
+                if declared_case is not None:
+                    packages_needed = (suggested_qty + declared_case - 1) // declared_case
+                    suggested_qty = packages_needed * declared_case
 
                 unit_cost = item_supplier.unit_cost or Decimal("0.00")
                 line_total = unit_cost * suggested_qty
@@ -1442,13 +1440,15 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         if counts_in_packs(item):
             return base_quantity
 
-        # Adjust for package quantities if available
-        if supplier.quantity_per_package and supplier.quantity_per_package > 1:
+        # Adjust for package quantities if the vendor declares a case. Asked of
+        # the ONE pack-size derivation (op-c1ke) rather than the column, so a
+        # recorded 0 is an unknown rather than a silent "sells singles"; the
+        # quantity is unchanged for every recorded value.
+        declared_case = declares_a_case(supplier)
+        if declared_case is not None:
             # Round up to nearest package
-            packages_needed = (
-                base_quantity + supplier.quantity_per_package - 1
-            ) // supplier.quantity_per_package
-            return packages_needed * supplier.quantity_per_package
+            packages_needed = (base_quantity + declared_case - 1) // declared_case
+            return packages_needed * declared_case
 
         return base_quantity
 

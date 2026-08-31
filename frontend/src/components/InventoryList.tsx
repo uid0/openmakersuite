@@ -9,6 +9,7 @@ import { indexCardsAPI, inventoryAPI } from '../services/api';
 import '../styles/InventoryList.css';
 import { InventoryItem } from '../types';
 import { showError, showInfo } from '../utils/dialogs';
+import { reorderQuantityLabel, reorderThresholdLabel } from '../utils/packaging';
 
 interface InventoryCardProps {
   item: InventoryItem;
@@ -58,12 +59,14 @@ const InventoryCard: React.FC<InventoryCardProps> = ({
                 <span
                   className={`stock-value ${item.needs_reorder ? 'low' : 'good'}`}
                 >
-                  {item.current_cases.toFixed(1)}
+                  {item.current_cases === null
+                    ? '—'
+                    : item.current_cases.toFixed(1)}
                 </span>
               </div>
               <div className="stock-row">
-                <span className="stock-label">Minimum Cases:</span>
-                <span className="stock-value">{item.minimum_cases}</span>
+                <span className="stock-label">Minimum:</span>
+                <span className="stock-value">{reorderThresholdLabel(item)}</span>
               </div>
               <div className="stock-row units-detail">
                 <span className="stock-label">Units:</span>
@@ -82,7 +85,7 @@ const InventoryCard: React.FC<InventoryCardProps> = ({
               </div>
               <div className="stock-row">
                 <span className="stock-label">Minimum:</span>
-                <span className="stock-value">{item.minimum_stock}</span>
+                <span className="stock-value">{reorderThresholdLabel(item)}</span>
               </div>
             </>
           )}
@@ -90,11 +93,7 @@ const InventoryCard: React.FC<InventoryCardProps> = ({
 
         {item.needs_reorder && (
           <div className="reorder-badge">
-            ⚠️ Needs Reorder (
-            {item.use_case_based_reorder
-              ? `${item.reorder_cases} cases`
-              : `${item.reorder_quantity} units`
-            })
+            ⚠️ Needs Reorder ({reorderQuantityLabel(item)})
           </div>
         )}
 

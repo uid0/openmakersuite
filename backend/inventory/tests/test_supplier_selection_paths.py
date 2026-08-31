@@ -25,6 +25,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from inventory.models import InventoryItem, ItemSupplier, Supplier
+from inventory.services.pack_size import PACK_SIZE_RECORDED_ZERO
 from reorder_queue.models import ReorderRequest
 
 pytestmark = pytest.mark.django_db
@@ -361,15 +362,15 @@ def test_a_flagged_primary_gates_every_surface_alike(api):
 # ── Case counting is NOT a "which supplier" question ─────────────────────────
 #
 # Deriving from the READERS OF A SYMBOL is not the same as deriving from the
-# QUESTION BEING ASKED. ``current_cases`` reads the supplier helper but asks a
-# different question — how many units are in a box on the shelf — which has
-# nothing to do with who we buy from. Routing it through the orderability rule
-# suppressed a low-stock alert on exactly the item that most needs one, so it
-# reads ``quantity_per_package`` from ANY link instead.
+# QUESTION BEING ASKED. ``current_cases`` asks how many units are in a box on
+# the shelf, which has nothing to do with who we buy from. Routing it through
+# the orderability rule suppressed a low-stock alert on exactly the item that
+# most needs one, so it reads the pack size from the FIRST link — orderable or
+# not — through :func:`inventory.services.pack_size.shelf_pack_size`.
 #
-# These pin BASE behaviour: this branch changes which SUPPLIER is chosen, and
-# must change no reorder flag anywhere. A dead vendor's recorded pack size
-# still describes the box already sitting on the shelf.
+# These pin that a dead vendor's recorded pack size still describes the box
+# already sitting on the shelf, and that op-c1ke did not quietly re-route this
+# through the orderability filter.
 
 
 def _case_based_item_with_a_dead_supplier():
@@ -419,13 +420,22 @@ def _case_based_item_with_a_live_supplier():
     return InventoryItem.objects.get(pk=item.pk)
 
 
-def test_a_zero_pack_first_link_falls_back_exactly_as_base_did():
-    """Base read ONLY the first row and fell back on a zero pack size.
+def test_a_zero_pack_first_link_is_unknown_not_one_unit_per_package():
+    """A box holding no units is not a case size, and never was (op-c1ke).
 
-    Scanning past that row to a later link would newly flag an item base did
-    not flag, and this branch changes no reorder flag anywhere. The fallback it
-    preserves is itself wrong — 10 loose units read as 10 cases — but that
-    wrongness is base's, and it is routed rather than fixed here.
+    BEFORE: the first row recorded ``quantity_per_package`` of 0, the guard was
+    truthiness, and ``current_cases`` fell through to "1 unit per package" — so
+    ten loose units read as ten cases, ``10 <= 1`` was False, and an item at a
+    tenth of its reorder point silently dropped off every low-stock surface.
+
+    AFTER: the case count is reported as unknown and the item is judged in the
+    unit that CAN be counted — base units against ``minimum_stock``, which is
+    the predicate ``low_stock_q`` has always applied to it in SQL.
+
+    Still only the FIRST row is consulted. Scanning on to ``SecondPacksFifty``
+    would substitute a different vendor's box for the one on the shelf; which
+    vendor's box that is cannot be known, so a later row's pack size is another
+    guess rather than a better answer.
     """
     item = _item(
         "Acetone",
@@ -448,8 +458,9 @@ def test_a_zero_pack_first_link_falls_back_exactly_as_base_did():
 
     fresh = InventoryItem.objects.get(pk=item.pk)
 
-    assert fresh.current_cases == 10
-    assert fresh.needs_reorder is False
+    assert fresh._shelf_pack_size.state == PACK_SIZE_RECORDED_ZERO
+    assert fresh.current_cases is None
+    assert fresh.needs_reorder is True
 
 
 def test_a_case_based_item_with_a_live_supplier_is_completely_unaffected():

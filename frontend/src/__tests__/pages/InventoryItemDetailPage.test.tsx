@@ -166,6 +166,149 @@ describe('InventoryItemDetailPage', () => {
     expect(screen.getByText(/Stock Information/i)).toBeInTheDocument();
   });
 
+  // op-c1ke: `current_cases` is null when nothing records how many units a case
+  // holds. Round 5 of PR #1035 shipped that null against a frontend that still
+  // declared it a number and called `.toFixed(1)`, which threw and blanked this
+  // page for an item whose only supplier had been discontinued.
+  it('renders a case-based item whose case size is unknown', async () => {
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockItem,
+        use_case_based_reorder: true,
+        minimum_cases: 1,
+        reorder_cases: 2,
+        current_cases: null,
+        needs_reorder: true,
+      },
+    });
+
+    renderPage();
+
+    // The page still renders — the item name proves it did not blank.
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+    // "unknown", NOT the older "case size not recorded". That wording was a
+    // specific claim the payload does not support: a null `current_cases` also
+    // covers an item whose link DID record a pack size — of 0 — where the fix
+    // is to correct that row, not to add a supplier. "Unknown" is what the
+    // derivation actually establishes. Do not restore the old sentence.
+    expect(screen.getByText(/case size unknown/i)).toBeInTheDocument();
+    expect(screen.queryByText(/not recorded/i)).toBeNull();
+  });
+
+  // The DISAGREEING side, which is also the DEFAULT configuration: minimum_stock
+  // defaults to 0 and minimum_cases to 1, so a case-based item is normally
+  // configured in cases with minimum_stock left at 0. The threshold the flag
+  // uses for an unknown case size is max(minimum_stock, minimum_cases) = 3, NOT
+  // the bare minimum_stock of 0. An earlier version of this test used
+  // minimum_stock=100 / minimum_cases=1, where the two coincide, so it passed
+  // while the page printed a threshold the badge beside it contradicted.
+  it('names the threshold the flag uses, in base units, when the case size is unknown', async () => {
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockItem,
+        use_case_based_reorder: true,
+        current_stock: 2,
+        minimum_stock: 0,
+        minimum_cases: 3,
+        reorder_quantity: 40,
+        reorder_cases: 2,
+        current_cases: null,
+        needs_reorder: true,
+        reorder_display: {
+          mode: 'each',
+          unit: 'unit',
+          threshold: 3,
+          current: 2,
+          reorder_quantity: 40,
+          needs_reorder: true,
+          text: '2 units on hand · reorder at 3 units',
+        },
+      },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+    // The badge and the threshold beside it must name the same rule: flagged
+    // LOW at 2 on hand, against a threshold of 3 — not 0, which 2 clears.
+    expect(screen.getByText('Low Stock')).toBeInTheDocument();
+    expect(screen.getByTestId('item-minimum-stock')).toHaveTextContent('3 units');
+    expect(screen.getByTestId('item-minimum-stock')).not.toHaveTextContent(/case/i);
+    expect(screen.getByTestId('item-reorder-quantity')).toHaveTextContent('40 units');
+    expect(screen.getByTestId('item-reorder-quantity')).not.toHaveTextContent(/case/i);
+  });
+
+  // `reorder_display` is optional on the wire, so the fallback has to be right
+  // on its own — and right means max(minimum_stock, minimum_cases), never the
+  // bare minimum_stock. Same payload, field removed.
+  it('falls back to the flag threshold when reorder_display is absent', async () => {
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockItem,
+        use_case_based_reorder: true,
+        current_stock: 2,
+        minimum_stock: 0,
+        minimum_cases: 3,
+        reorder_quantity: 40,
+        reorder_cases: 2,
+        current_cases: null,
+        needs_reorder: true,
+      },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Low Stock')).toBeInTheDocument();
+    expect(screen.getByTestId('item-minimum-stock')).toHaveTextContent('3 units');
+    expect(screen.getByTestId('item-reorder-quantity')).toHaveTextContent('40 units');
+  });
+
+  it('keeps naming cases when the case size IS known', async () => {
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockItem,
+        use_case_based_reorder: true,
+        minimum_cases: 3,
+        reorder_cases: 2,
+        current_cases: 2.5,
+      },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('item-minimum-stock')).toHaveTextContent('3 cases');
+    expect(screen.getByTestId('item-reorder-quantity')).toHaveTextContent('2 cases');
+  });
+
+  it('renders a case-based item whose case size IS recorded', async () => {
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockItem,
+        use_case_based_reorder: true,
+        minimum_cases: 1,
+        reorder_cases: 2,
+        current_cases: 2.5,
+      },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/2\.5 cases/)).toBeInTheDocument();
+  });
+
   it('displays stock history chart', async () => {
     renderPage();
 

@@ -109,9 +109,9 @@ const InventoryCard: React.FC<InventoryCardProps> = ({
           </div>
         )}
 
-        {item.unit_cost && (
+        {item.unit_cost != null && (
           <div className="item-price">
-            ${parseFloat(item.unit_cost).toFixed(2)} per unit
+            ${item.unit_cost.toFixed(2)} per unit
           </div>
         )}
       </div>

@@ -1455,7 +1455,9 @@ class InventoryMetricsSerializer(serializers.Serializer):
     All values are computed in ``InventoryItemViewSet.metrics``; this
     serializer only shapes the output and is fed a plain ``dict`` (not a model
     instance). Quantities are numbers; money fields are DRF ``DecimalField``s
-    (serialized as strings, matching the item serializer's ``unit_cost``).
+    and so serialize as STRINGS -- unlike ``InventoryItemSerializer.unit_cost``,
+    which is a model property and therefore a ``ReadOnlyField`` handing the raw
+    ``Decimal`` to the JSON encoder as a number (op-9m2v).
     """
 
     current_stock = serializers.IntegerField()  # QOH — on hand

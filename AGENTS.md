@@ -380,14 +380,44 @@ figure changes versus base EXCEPT where base was presenting an unknown price as
 a real number.*
 
 **A falsy guard on a price is only a bug where the value is falsy at zero.**
-`PurchaseOrderPage.tsx` guards `unit_cost_actual` with truthiness and is
-CORRECT: DRF serialises the DecimalField as a string, and `"0.00"` is truthy in
-JavaScript. The identical expression in `reorder_queue/services/receiving.py`
-was a real defect, because there the value is a `Decimal` and `Decimal("0.00")`
-is falsy — it billed a committee the ORDERED price for a line the vendor had
-comped. Check which side of the wire you are on before calling one a bug; the
-frontend one is pinned as a CONTROL in `PurchaseOrderPage.test.tsx` so it fails
-if the field is ever parsed to a number.
+Backend-side that is easy: the value is a `Decimal` and `Decimal("0.00")` is
+falsy, so `if cost:` in `reorder_queue/services/receiving.py` was a real defect
+— it billed a committee the ORDERED price for a line the vendor had comped.
+
+**Frontend-side, the answer is decided by the SERIALIZER FIELD, not the field
+name — measure it, do not reason about it.** Two rounds of this review recorded
+the wrong answer here, in opposite directions, because both reasoned from the
+attribute name. The rule, once, relied on everywhere below:
+
+| the serializer field | wire type | truthiness guard |
+| --- | --- | --- |
+| a real model `DecimalField` on a `ModelSerializer` | STRING (`"0.00"`) | SAFE — `"0.00"` is truthy |
+| a model PROPERTY named in `Meta.fields` with no explicit declaration | NUMBER (`0`) | BUG |
+| a `SerializerMethodField` returning a `Decimal` | NUMBER (`0`) | BUG |
+
+A property named in `Meta.fields` gets `build_property_field`, which makes a
+`ReadOnlyField`; that hands the raw `Decimal` straight to
+`rest_framework.utils.encoders.JSONEncoder`, which returns `float(obj)`.
+`COERCE_DECIMAL_TO_STRING` only ever applies to an actual `DecimalField`.
+
+So the SAME attribute name has two wire types on this project:
+`ItemSupplier.unit_cost` is a model field and arrives as `"0.00"`, while
+`InventoryItem.unit_cost` is `order_unit_price(self).amount` — a property — and
+arrives as `0`. `Kit` inherits the property kind from `InventoryItemSerializer`;
+`KitSummary.unit_cost` is a method field, so also a number.
+
+A falsy number is worse than a falsy string in JSX specifically: `{0 && <X/>}`
+evaluates to `0`, which React RENDERS, so the guard both drops the row and
+prints a stray "0" where the price belonged. Numbers also need `.toFixed(2)` at
+the render site — `` `${5.1}` `` is `"5.1"`, not `"5.10"` — which a decimal
+string never did.
+
+`PurchaseOrderPage.tsx`'s `unit_cost_actual` is the string kind and its
+truthiness guard is CORRECT; it is pinned as a CONTROL in
+`PurchaseOrderPage.test.tsx` so it fails if the field is ever parsed to a
+number. Every guard on the number kind is fixed, and the declared types in
+`frontend/src/types/index.ts` now say `number | null` so the next reader is not
+misled the way these two rounds were.
 
 "The real price PAID per unit" is a different fact with its own older owner,
 `work_order_purchase_bridge.purchase_line_unit_cost` (actual when recorded, else
@@ -509,22 +539,25 @@ complete, and it was twice not:
   the sibling branch, so it was reporting how many units honestly and what they
   cost dishonestly; the two now match. An unpriced request is still SUBMITTABLE
   — unlike an unsized one — with a note naming what to add.
-  NOTE the boundary, measured rather than assumed: only `package_cost` is
-  collapsed here, because only it is fed through `parseFloat(x || '0')` into
-  arithmetic. The `unit_cost` truthiness on this screen — the auto-selection
-  filter and the `|| '999'` sort key — is SAFE for the same reason
-  `PurchaseOrderPage.tsx`'s is, recorded above: DRF serialises that nullable
-  DecimalField as a STRING, so a free link arrives as `"0.00"`, survives the
-  filter, sorts first via `parseFloat("0.00") = 0` and IS preselected. Only a
-  genuine `null` is dropped or sorted last, which is the behaviour we want.
+  NOTE the boundary, and note that an earlier round drew it WRONG. What is
+  safe on this screen is the truthiness on `supplier.unit_cost` — the
+  auto-selection filter and the `|| '999'` sort key — because `ItemSupplier`
+  rows are real `DecimalField`s: a free link arrives as `"0.00"`, survives the
+  filter, sorts first via `parseFloat("0.00") = 0` and IS preselected, and only
+  a genuine `null` is dropped or sorted last. That is the behaviour we want.
+  The ITEM's own `unit_cost` on the same screen is NOT the same value and was
+  never safe; it is fixed in the entry below.
 - Item detail, the "Supplied by kits" card (`GET /api/inventory/items/<id>/
   kits/`) — a kit whose primary supplier charges nothing: the price was OMITTED
   entirely (and, because `{0 && <Text/>}` evaluates to `0`, a stray "0" was
   printed into the row) -> `$0.00`, with an unpriced kit now saying so instead
   of looking identical. `KitSummarySerializer.get_unit_cost` is a
   `SerializerMethodField` returning a `Decimal`, which DRF's `JSONEncoder`
-  renders as a JSON NUMBER — so unlike every string-valued price beside it on
-  that page, truthiness here IS falsy at zero. The wire format is UNCHANGED
+  renders as a JSON NUMBER, so truthiness here IS falsy at zero. (An earlier
+  round wrote "unlike every string-valued price beside it on that page". That
+  was wrong: the item's OWN `unit_cost` row on the same page is a number too —
+  see the entry below. The supplier rows are the string-valued ones.) The wire
+  format is UNCHANGED
   (base returned a `Decimal` from the same method field): what was wrong was
   `frontend/src/types/index.ts` declaring it `string | null`, which is what
   made the guard read as safe. The type is corrected to `number | null` rather
@@ -550,6 +583,40 @@ complete, and it was twice not:
   `PurchaseOrderItem.actual_cost` returns a real `Decimal("0.00")`. This is the
   DERIVED property, whose `unit_cost_actual` twin in `receiving.py` was the
   branch's own defect — not `ReorderRequest.actual_cost`, which is excluded.
+- **Six readers of `InventoryItem.unit_cost` / `Kit.unit_cost`, the PROPERTY-
+  backed number** — the shape the two rounds above each mis-recorded. Every one
+  guarded a JSON number with truthiness, so a DONATED item (a real `0`) was
+  reported as a price nobody had recorded. Listed individually because the
+  invariant requires it; a genuinely unpriced item still reads as unknown on
+  all six, and every ordinary price is byte-identical:
+  - Member scan screen (`/scan/<item>`), the item's own "Unit Cost:" row —
+    the row VANISHED and a stray "0" was printed in its place -> `$0.00`. It
+    also rendered `${item.unit_cost}` raw, so an unpriced item now reads
+    `— (no price on file)` and `5.1` now reads `$5.10`. Uses the page's
+    existing `money` helper, widened to take both wire types rather than
+    growing a second spelling.
+  - Item detail card (`/inventory/items/<id>`), the "Unit Cost:" row — hidden
+    with a stray "0" -> `$0.00`, and an unpriced item now says
+    `no price on file` instead of nothing, matching the kit card below it.
+  - Inventory card grid (`InventoryList.tsx`) — the price line vanished with a
+    stray "0" -> `$0.00 per unit`. An unpriced item still shows no price line.
+  - Inventory table (`/inventory`), the Cost column — `-` (this table's
+    spelling for "unknown") -> `$0.00`.
+  - Kit list (`/inventory/kits`), the Unit cost column — `—` -> `$0.00`, and
+    the cell interpolated the number raw, so `5.1` -> `$5.10`.
+  - Browser-side inventory **CSV export** (`csvExport.ts`), the Unit Cost cell
+    — a BLANK cell, the same cell an unpriced item gets, -> `0`.
+  NOT touched, because they are the string kind and correct: `supplier.unit_cost`
+  on the scan screen, the ItemSupplier rows on the supplier detail page, and
+  `InventoryItemMetrics.unit_cost` (an explicit `DecimalField` on
+  `InventoryMetricsSerializer` — measured, not assumed).
+- Item detail, the "Supplied by kits" card — a SECOND move on the row named
+  above, from the same round-8 fix: `${kit.unit_cost}` -> `.toFixed(2)`, so a
+  kit priced `5.10` reads `$5.10` rather than `$5.1`. Switching the type from
+  the string DRF never sent to the number it does send is what exposed this:
+  a decimal string already carried its cent column, a JS number does not. Held
+  by a trailing-zero-cent fixture in `InventoryItemSuppliedByKits.test.tsx`;
+  the round-8 tests used `89.99`, which cannot fail under the mutation.
 - Supplier detail price-trend **records** (`GET /api/inventory/suppliers/<id>/`,
   `trends[].price_history[].unit_cost`) — `null` -> `0.0` for a recorded zero,
   which is what the supplier-detail chart plots.
@@ -590,6 +657,18 @@ real number":
   either way. `PurchaseOrder.effective_estimated_total`'s
   `self.estimated_total or Decimal("0.00")` is inert on the same argument, and
   doubly so because that column cannot be `NULL` at all.
+
+**Not an exclusion — a correctness finding, and the distinction matters.** An
+earlier round filed the truthiness on the scan screen's `supplier.unit_cost` as
+a deliberate EXCLUSION, reasoning that a free vendor could never be preselected.
+It was measured wrong and the entry was hollow, so it was deleted rather than
+reworded. Truthiness on a STRING-valued price is not something this branch
+tolerates; it is something the branch has verified is CORRECT, per the wire-type
+table above, and changing it would be churn. Anything in this section is
+excluded because the VALUE is outside the branch, never because a guard on it
+merely looks safe. If you are about to file a frontend price guard either way,
+measure the serializer field first — `type(SomeSerializer().fields["unit_cost"])`
+answers it in one line.
 
 "A price as JSON" has one owner too: `pricing.price_float`. It was written out
 twice, character-for-character, in `inventory/views.py` and

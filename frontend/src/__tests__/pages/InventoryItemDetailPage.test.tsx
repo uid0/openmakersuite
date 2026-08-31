@@ -52,7 +52,9 @@ describe('InventoryItemDetailPage', () => {
     current_stock: 10,
     minimum_stock: 5,
     reorder_quantity: 20,
-    unit_cost: '15.99',
+    // A NUMBER on the wire: a property-backed `ReadOnlyField`, not the
+    // `DecimalField` string the metrics payload below sends (op-9m2v).
+    unit_cost: 15.99,
     supplier_name: 'Test Supplier',
     needs_reorder: false,
     has_pending_reorder: false,
@@ -859,5 +861,51 @@ describe('InventoryItemDetailPage', () => {
     expect(await screen.findByTestId('committed-breakdown-empty')).toHaveTextContent(
       'Nothing is committed to an open work order.'
     );
+  });
+
+  /**
+   * The Unit Cost row on the item card (op-9m2v).
+   *
+   * `{item.unit_cost && ...}` treated the number `0` a donated item sends as
+   * "no price": it dropped the row and rendered a stray "0". It now says which
+   * of the two it is, matching the kit card lower down the same page.
+   */
+  describe("the item's unit cost", () => {
+    const renderPriced = async (unitCost: number | null) => {
+      (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+        data: { ...mockItem, unit_cost: unitCost },
+      });
+      renderPage();
+      await screen.findByText('Unit Cost:');
+    };
+
+    const costRow = () =>
+      screen.getByText('Unit Cost:').closest('div') as HTMLElement;
+
+    it('BEFORE/AFTER: prices a donated item at $0.00 rather than hiding it', async () => {
+      await renderPriced(0);
+
+      expect(costRow()).toHaveTextContent('$0.00');
+      expect(costRow()).not.toHaveTextContent(/no price on file/i);
+    });
+
+    it('says so when nobody has priced the item', async () => {
+      await renderPriced(null);
+
+      expect(costRow()).toHaveTextContent(/no price on file/i);
+      expect(costRow()).not.toHaveTextContent('$');
+    });
+
+    it('CONTROL: an ordinary price is unchanged', async () => {
+      await renderPriced(15.99);
+
+      expect(costRow()).toHaveTextContent('$15.99');
+    });
+
+    it('writes a trailing zero cent in full', async () => {
+      await renderPriced(5.1);
+
+      expect(costRow()).toHaveTextContent('$5.10');
+    });
   });
 });

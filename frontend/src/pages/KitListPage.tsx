@@ -102,7 +102,9 @@ const KitListPage: React.FC = () => {
                     </Anchor>
                   </Table.Td>
                   <Table.Td>{kit.supplier_sku || '—'}</Table.Td>
-                  <Table.Td>{kit.unit_cost ? `$${kit.unit_cost}` : '—'}</Table.Td>
+                  <Table.Td>
+                    {kit.unit_cost != null ? `$${kit.unit_cost.toFixed(2)}` : '—'}
+                  </Table.Td>
                   <Table.Td>{kit.component_count ?? kit.components?.length ?? 0}</Table.Td>
                   <Table.Td>
                     <Badge color={kit.is_active ? 'green' : 'gray'} variant="light">

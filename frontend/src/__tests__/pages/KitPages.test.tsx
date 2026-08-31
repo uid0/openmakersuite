@@ -40,7 +40,9 @@ const KIT = {
   is_kit: true,
   is_active: true,
   supplier_sku: 'T3200',
-  unit_cost: '89.99',
+  // A NUMBER on the wire: KitSerializer inherits the property-backed
+  // ReadOnlyField from InventoryItemSerializer (op-9m2v).
+  unit_cost: 89.99,
   component_count: 1,
   components: [
     {

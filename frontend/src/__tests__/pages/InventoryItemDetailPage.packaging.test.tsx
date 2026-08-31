@@ -56,7 +56,8 @@ const makeItem = (overrides: Record<string, unknown> = {}) => ({
   current_stock: 450,
   minimum_stock: 2,
   reorder_quantity: 4,
-  unit_cost: '0.02',
+  // A NUMBER on the wire — property-backed `ReadOnlyField` (op-9m2v).
+  unit_cost: 0.02,
   supplier_name: '',
   needs_reorder: false,
   has_pending_reorder: false,

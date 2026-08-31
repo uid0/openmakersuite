@@ -116,7 +116,9 @@ export function exportInventoryItemsToCSV(items: any[]): void {
     'Current Stock': item.current_stock || 0,
     'Minimum Stock': item.minimum_stock || 0,
     'Reorder Quantity': item.reorder_quantity || 0,
-    'Unit Cost': item.unit_cost || '',
+    // A donated item records a real 0, not an absent price; `|| ''` exported it
+    // as a blank cell — the spelling this file uses for "unknown" (op-9m2v).
+    'Unit Cost': item.unit_cost ?? '',
     Supplier: item.supplier_name || '',
     'Needs Reorder': item.needs_reorder ? 'Yes' : 'No',
     'Is Active': item.is_active ? 'Yes' : 'No',

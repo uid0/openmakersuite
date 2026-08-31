@@ -111,3 +111,35 @@ describe('InventoryList card units', () => {
     expect(screen.getByText(/Needs Reorder/)).toHaveTextContent('2 cases');
   });
 });
+
+/**
+ * `InventoryItem.unit_cost` is a NUMBER on the wire (op-9m2v).
+ *
+ * It is a model PROPERTY named in `Meta.fields` with no explicit declaration,
+ * so DRF builds a `ReadOnlyField` and the raw `Decimal` reaches the JSON
+ * encoder as a number — unlike `ItemSupplier.unit_cost`, a real `DecimalField`
+ * that arrives as the string `"0.00"`. `{item.unit_cost && ...}` therefore
+ * failed twice on a donated item: it dropped the price row, and because JSX
+ * renders the number `0`, it printed a bare "0" where the price belonged.
+ */
+describe("the inventory card's unit price", () => {
+  it('BEFORE/AFTER: prices a donated item at $0.00 with no stray "0"', async () => {
+    await renderWith({ ...unknownCaseItem, unit_cost: 0 });
+
+    expect(screen.getByText('$0.00 per unit')).toBeInTheDocument();
+    // The falsy guard rendered the number 0 itself into the card.
+    expect(screen.queryByText('0')).toBeNull();
+  });
+
+  it('CONTROL: an ordinary price is unchanged', async () => {
+    await renderWith({ ...unknownCaseItem, unit_cost: 12.5 });
+
+    expect(screen.getByText('$12.50 per unit')).toBeInTheDocument();
+  });
+
+  it('CONTROL: an item nobody has priced shows no price row', async () => {
+    await renderWith({ ...unknownCaseItem, unit_cost: null });
+
+    expect(screen.queryByText(/per unit/)).toBeNull();
+  });
+});

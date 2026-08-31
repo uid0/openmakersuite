@@ -50,7 +50,9 @@ const makeItem = (overrides: Record<string, unknown> = {}) => ({
   current_stock: 10,
   minimum_stock: 5,
   reorder_quantity: 20,
-  unit_cost: '15.99',
+  // A NUMBER on the wire; the usage-log record below is a real
+  // `DecimalField` and stays a string (op-9m2v).
+  unit_cost: 15.99,
   supplier_name: 'Test Supplier',
   needs_reorder: false,
   has_pending_reorder: false,

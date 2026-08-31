@@ -229,7 +229,21 @@ export interface InventoryItem {
   supplier_name: string | null;
   supplier_sku: string | null;
   supplier_url: string | null;
-  unit_cost: string | null;
+  /**
+   * A NUMBER, not a decimal string (op-9m2v).
+   *
+   * The rule, once, for every price in this file: a price that is a real model
+   * `DecimalField` on a `ModelSerializer` (`ItemSupplier.unit_cost`) is
+   * serialised by DRF as a decimal STRING, so `"0.00"` is truthy and a
+   * truthiness guard on it is safe. A price that is a model PROPERTY named in
+   * `Meta.fields` with no explicit declaration becomes a `ReadOnlyField`, which
+   * hands the raw `Decimal` to DRF's `JSONEncoder` and arrives as a JSON
+   * NUMBER — as does a `SerializerMethodField`. `InventoryItem.unit_cost` is
+   * the property kind (`order_unit_price(self).amount`), so a donated item
+   * sends `0`, which is falsy AND which React renders as a stray "0".
+   * Same attribute name, two wire types, decided by the serializer field.
+   */
+  unit_cost: number | null;
   average_lead_time: number | null;
   qr_code: string | null;
   is_active: boolean;
@@ -353,7 +367,9 @@ export interface CommittedBreakdownEntry {
 
 // Computed stock + cost metrics for the item-detail metrics row (issue-5).
 // Served by GET /api/inventory/items/<id>/metrics/. Quantities are numbers;
-// money fields arrive as decimal strings (matching InventoryItem.unit_cost).
+// money fields arrive as decimal strings — `unit_cost` here is an explicit
+// `DecimalField` on the serializer, like `ItemSupplier.unit_cost` and unlike
+// the property-backed `InventoryItem.unit_cost`, which is a number.
 export interface InventoryItemMetrics {
   current_stock: number; // QOH — on hand
   quantity_on_order: number; // QOO — open PO units
@@ -374,7 +390,7 @@ export interface InventoryItemMetrics {
 // GET /api/inventory/items/<id>/purchase_history/. Both lists are flat, oldest
 // first, and carry the PO pk (`purchase_order`) alongside `po_number` because
 // po_number is nullable and so is not a safe grouping key. Money fields arrive
-// as decimal strings (DRF DecimalField), like InventoryItem.unit_cost.
+// as decimal strings (DRF DecimalField), like ItemSupplier.unit_cost.
 
 // One purchase-order line: what this item cost on that order.
 export interface ItemOrderCost {

@@ -47,15 +47,19 @@ const PRICE_UNKNOWN = '— (no price on file)';
  * a KNOWN price — a makerspace runs on donated stock — and only a genuine
  * absence is null. `parseFloat(cost || '0')` cannot tell the two apart and
  * turned "nobody priced this" into a confident $0.00 on a member-facing screen.
+ *
+ * Takes numbers as well as strings because this page reads both wire types:
+ * `supplier.unit_cost` is a `DecimalField` and arrives as `"0.00"`, while
+ * `item.unit_cost` is a property-backed `ReadOnlyField` and arrives as `0`.
  */
-const priceOf = (cost: string | null | undefined): number | null => {
+const priceOf = (cost: string | number | null | undefined): number | null => {
   if (cost === null || cost === undefined) return null;
-  const amount = parseFloat(cost);
+  const amount = typeof cost === 'number' ? cost : parseFloat(cost);
   return Number.isFinite(amount) ? amount : null;
 };
 
 /** A price as money, or the page's phrasing for its absence. */
-const money = (cost: string | null | undefined): string => {
+const money = (cost: string | number | null | undefined): string => {
   const amount = priceOf(cost);
   return amount === null ? PRICE_UNKNOWN : `$${amount.toFixed(2)}`;
 };
@@ -473,12 +477,10 @@ const ScanPage: React.FC = () => {
               </div>
             )}
 
-            {item.unit_cost && (
-              <div className="info-item">
-                <span className="label">Unit Cost:</span>
-                <span className="value">${item.unit_cost}</span>
-              </div>
-            )}
+            <div className="info-item">
+              <span className="label">Unit Cost:</span>
+              <span className="value">{money(item.unit_cost)}</span>
+            </div>
           </div>
 
           {item.needs_reorder && (

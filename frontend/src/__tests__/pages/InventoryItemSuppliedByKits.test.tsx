@@ -30,7 +30,7 @@ const ITEM = {
   current_stock: 1,
   minimum_stock: 5,
   reorder_quantity: 5,
-  unit_cost: '15.99',
+  unit_cost: 15.99,
   supplier_name: 'Eufy Direct',
   needs_reorder: true,
   has_pending_reorder: false,
@@ -173,6 +173,26 @@ describe('AC-45 — Supplied by kits card', () => {
     const card = screen.getByTestId('supplied-by-kits-card');
     expect(card).toHaveTextContent('$0.00');
     expect(card).not.toHaveTextContent(/no price on file/i);
+  });
+
+  it('writes a trailing zero cent in full, not as "$5.1"', async () => {
+    // The card used to interpolate the string DRF would have sent for a
+    // `DecimalField` (`"5.10"`). It is a NUMBER, so `${kit.unit_cost}` renders
+    // JavaScript's shortest form and drops the trailing zero — a price that
+    // reads as five dollars ten rather than five dollars and ten cents
+    // (op-9m2v). `.toFixed(2)` is what holds the cent column.
+    (api.inventoryAPI.getItemKits as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [{ ...KITS[0], unit_cost: 5.1 }],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('supplied-by-kits-card')).toBeInTheDocument();
+    });
+    const card = screen.getByTestId('supplied-by-kits-card');
+    expect(card).toHaveTextContent('$5.10');
+    expect(card).not.toHaveTextContent('$5.1 ');
   });
 
   it('says so when nobody has priced the kit', async () => {

@@ -419,6 +419,39 @@ def _case_based_item_with_a_live_supplier():
     return InventoryItem.objects.get(pk=item.pk)
 
 
+def test_a_zero_pack_first_link_falls_back_exactly_as_base_did():
+    """Base read ONLY the first row and fell back on a zero pack size.
+
+    Scanning past that row to a later link would newly flag an item base did
+    not flag, and this branch changes no reorder flag anywhere. The fallback it
+    preserves is itself wrong — 10 loose units read as 10 cases — but that
+    wrongness is base's, and it is routed rather than fixed here.
+    """
+    item = _item(
+        "Acetone",
+        current_stock=10,
+        minimum_stock=10,
+        use_case_based_reorder=True,
+        minimum_cases=1,
+        reorder_cases=2,
+    )
+    for name, pack in (("FirstNoPack", 0), ("SecondPacksFifty", 50)):
+        ItemSupplier.objects.create(
+            item=item,
+            supplier=Supplier.objects.create(name=name, supplier_type=Supplier.SupplierType.LOCAL),
+            supplier_sku=f"{name}-sku",
+            unit_cost=Decimal("1.00"),
+            quantity_per_package=pack,
+            average_lead_time=7,
+            is_primary=(pack == 0),
+        )
+
+    fresh = InventoryItem.objects.get(pk=item.pk)
+
+    assert fresh.current_cases == 10
+    assert fresh.needs_reorder is False
+
+
 def test_a_case_based_item_with_a_live_supplier_is_completely_unaffected():
     """A real count, a normal flag, a normal display — no unknown anywhere."""
     from inventory.services.packaging import reorder_display

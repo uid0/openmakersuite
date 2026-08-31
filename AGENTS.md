@@ -184,14 +184,22 @@ rediscovering the split.
 A value made honestly `None` gets collapsed by downstream arithmetic or a
 fallback into a confident, OPTIMISTIC answer — which inverts a boolean and
 suppresses an alert on exactly the item that most needs one. THREE derived
-instances, all made reachable by op-2rsp's orderability filter:
+instances, ALL PREDATING op-2rsp and all still live:
 
-1. `InventoryItem.current_cases` — a `None` supplier falls through to "1 unit
-   per package", so raw base units read as a case count.
+1. `InventoryItem.current_cases` — no usable pack size on the first supplier
+   link falls through to "1 unit per package", so raw base units read as a case
+   count. Reachable for an item with no links at all, and for one whose first
+   link records `quantity_per_package` of 0.
 2. `component_forecast`'s `reorder_point` — `lead_time_days or 0` computes a
    horizon at a zero-day wait.
 3. `demand_forecast_engine.forecast_item_by_interval` — the same collapse in
    the demand-forecast report and the nightly reorder digest.
+
+Do not read these as consequences of the orderability filter. op-2rsp briefly
+WIDENED their reachability by routing each through the filtered helper, then
+tried to represent the resulting unknowns honestly; both halves were reverted,
+so every site is back to base and the class is exactly as reachable as it has
+always been. Reverting the supplier derivation would not close any of it.
 
 **The fix was attempted across four review rounds and REVERTED wholesale.** Do
 not simply retry it. Each round's fix opened a new site: making these values

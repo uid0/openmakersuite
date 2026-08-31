@@ -558,7 +558,7 @@ class InventoryItem(OwnableModel):
 
     @cached_property
     def _case_pack_size(self) -> Optional[int]:
-        """Units per package for case counting, from ANY link, or ``None``.
+        """Units per package from the FIRST link, or ``None`` if it has none.
 
         Reads ``item_suppliers`` directly rather than
         :attr:`primary_item_supplier`, because this asks how many units are in
@@ -568,10 +568,19 @@ class InventoryItem(OwnableModel):
         this branch deliberately changes no flag: a dead vendor's recorded pack
         size still describes the box on the shelf.
 
-        Rows arrive in ``Meta.ordering``, so this is the same pack size the
-        pre-op-2rsp ``primary_item_supplier`` returned. Memoised, so the
-        readers that chain — ``reorder_display`` asks for ``current_cases`` and
-        then ``needs_reorder``, which asks again — cost one query per instance.
+        Rows arrive in ``Meta.ordering``, and ONLY the first is consulted —
+        byte-for-byte the row the pre-op-2rsp ``primary_item_supplier``
+        returned. A first row recording ``quantity_per_package`` of 0 therefore
+        yields ``None`` and :attr:`current_cases` falls back to raw base units
+        rather than scanning on to a later link. That fallback is wrong — it
+        reads base units as a case count — but it is BASE's wrongness, and
+        skipping past the zero row would newly flag an item base did not flag.
+        Routed as its own follow-up rather than fixed under a no-flag-change
+        invariant.
+
+        Memoised, so the readers that chain — ``reorder_display`` asks for
+        ``current_cases`` and then ``needs_reorder``, which asks again — cost
+        one query per instance.
 
         NOTE: pack size still has several readers with no single owner
         (:attr:`quantity_per_package`, ``item_metrics``'s ``case_size``,
@@ -579,10 +588,10 @@ class InventoryItem(OwnableModel):
         supplier derivation instead. Giving it ONE named derivation the way
         "which supplier" got one is known and filed as its own work.
         """
-        for link in self.item_suppliers.all():
-            if link.quantity_per_package and link.quantity_per_package > 0:
-                return link.quantity_per_package
-        return None
+        first = next(iter(self.item_suppliers.all()), None)
+        if first is None or not first.quantity_per_package or first.quantity_per_package <= 0:
+            return None
+        return first.quantity_per_package
 
     @property
     def current_cases(self) -> float:

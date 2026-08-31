@@ -3592,7 +3592,9 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     "expected_delivery_date": (
                         po.expected_delivery_date.isoformat() if po.expected_delivery_date else None
                     ),
-                    "estimated_total": (float(po.estimated_total) if po.estimated_total else None),
+                    "estimated_total": (
+                        None if po.estimated_total is None else float(po.estimated_total)
+                    ),
                     "actual_total": float(po.actual_total) if po.actual_total else None,
                     "total_items": total_items,
                     "total_quantity": total_quantity,

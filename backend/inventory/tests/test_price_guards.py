@@ -1355,6 +1355,66 @@ def test_the_public_transparency_feed_reports_no_variance_it_cannot_stand_behind
     assert row["cost_variance"] is None
 
 
+def test_the_public_transparency_feed_prices_a_free_purchase_order_at_zero(api):
+    """BEFORE/AFTER on the CLAIM. The THIRD block of the same public payload.
+
+    ``PurchaseOrder.estimated_total`` is NON-nullable with
+    ``default=Decimal("0.00")``, so ``null`` was never a true answer for it —
+    the falsy guard could only ever mislabel a real zero as "we do not know
+    what this cost". A donated line writes ``unit_cost_ordered = 0.00``, which
+    sums to an order total of ``0.00``, and the community feed published that
+    as ``null`` (op-9m2v).
+    """
+    from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
+
+    item = _item("Donated")
+    link = _link(item, "Charity", unit_cost="0.00", is_primary=True)
+    user = User.objects.create_user(username="po-transparency", password="pw")
+    order = PurchaseOrder.objects.create(
+        supplier=link.supplier, status=PurchaseOrder.Status.SENT, created_by=user
+    )
+    PurchaseOrderItem.objects.create(
+        purchase_order=order,
+        item_supplier=link,
+        quantity_ordered=4,
+        unit_cost_ordered=Decimal("0.0000"),
+        order_in_packages=1,
+    )
+    order.estimated_total = order.calculate_estimated_total()
+    order.save(update_fields=["estimated_total"])
+
+    response = api.get(TRANSPARENCY_URL)
+    assert response.status_code == 200
+    row = next(p for p in response.data["purchase_orders"] if p["id"] == str(order.id))
+    assert row["estimated_total"] == 0.0
+    assert row["actual_total"] is None
+
+
+def test_the_public_transparency_feed_is_unchanged_for_a_priced_purchase_order(api):
+    """CONTROL. The invariant, on the purchase-order block."""
+    from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
+
+    item = _item("Priced")
+    link = _link(item, "Acme", unit_cost="2.00", is_primary=True)
+    user = User.objects.create_user(username="po-transparency2", password="pw")
+    order = PurchaseOrder.objects.create(
+        supplier=link.supplier, status=PurchaseOrder.Status.SENT, created_by=user
+    )
+    PurchaseOrderItem.objects.create(
+        purchase_order=order,
+        item_supplier=link,
+        quantity_ordered=5,
+        unit_cost_ordered=Decimal("2.0000"),
+        order_in_packages=1,
+    )
+    order.estimated_total = order.calculate_estimated_total()
+    order.save(update_fields=["estimated_total"])
+
+    response = api.get(TRANSPARENCY_URL)
+    row = next(p for p in response.data["purchase_orders"] if p["id"] == str(order.id))
+    assert row["estimated_total"] == 10.0
+
+
 def test_the_public_transparency_feed_is_unchanged_for_a_priced_order(api):
     """CONTROL. The invariant, on the public payload."""
     from reorder_queue.models import ReorderRequest

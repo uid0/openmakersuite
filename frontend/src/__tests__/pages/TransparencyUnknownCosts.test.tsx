@@ -43,7 +43,27 @@ const order = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-const renderFeed = async (orders: Record<string, unknown>[]) => {
+const ledgerEntry = (overrides: Record<string, unknown> = {}) => ({
+  id: 1,
+  item_id: 'item-1',
+  item_name: 'Ledger Filament',
+  supplier_name: 'Charity',
+  quantity: 6,
+  requested_at: '2026-01-01T00:00:00Z',
+  ordered_at: '2026-01-02T00:00:00Z',
+  delivered_at: null,
+  actual_cost: null,
+  estimated_cost: 0,
+  status: 'ordered',
+  order_number: 'PO-FREE-1',
+  invoice_number: '',
+  ...overrides,
+});
+
+const renderFeed = async (
+  orders: Record<string, unknown>[],
+  ledger: Record<string, unknown>[] = []
+) => {
   (analyticsAPI.getTransparencyLedger as jest.Mock).mockResolvedValue({
     data: {
       summary: {
@@ -53,7 +73,7 @@ const renderFeed = async (orders: Record<string, unknown>[]) => {
         transparency_note: 'note',
       },
       orders,
-      ledger: [],
+      ledger,
     },
   });
 
@@ -91,14 +111,34 @@ describe('the public transparency order card', () => {
     expect(financials.textContent).toBe('Estimated Cost:$0.00');
   });
 
-  it('shows a genuine 0.00 variance rather than dropping it', async () => {
+  it('shows a genuine 0.00 variance, and calls it ON budget not UNDER', async () => {
     const card = await renderFeed([
       order({ estimated_cost: 10, actual_cost: 10, cost_variance: 0 }),
     ]);
     const financials = card.querySelector('.financial-info')!;
 
     expect(within(financials as HTMLElement).getByText('Cost Variance:')).toBeInTheDocument();
-    expect(financials.textContent).toContain('Cost Variance:$0.00');
+    expect(financials.textContent).toContain('Cost Variance:$0.00 on budget');
+    // Landing exactly on estimate is a THIRD state, not the favourable one.
+    expect(financials.querySelector('.on-budget')).not.toBeNull();
+    expect(financials.querySelector('.under-budget')).toBeNull();
+    expect(financials.querySelector('.over-budget')).toBeNull();
+  });
+
+  it('still calls a real overrun over budget', async () => {
+    const card = await renderFeed([order({ cost_variance: 2 })]);
+
+    expect(card.querySelector('.financial-info')!.textContent).toContain('+$2.00 over budget');
+    expect(card.querySelector('.over-budget')).not.toBeNull();
+    expect(card.querySelector('.on-budget')).toBeNull();
+  });
+
+  it('still calls a real saving under budget', async () => {
+    const card = await renderFeed([order({ cost_variance: -2 })]);
+
+    expect(card.querySelector('.financial-info')!.textContent).toContain('-$2.00 under budget');
+    expect(card.querySelector('.under-budget')).not.toBeNull();
+    expect(card.querySelector('.on-budget')).toBeNull();
   });
 
   it('still renders nothing where the server reported no figure', async () => {
@@ -121,5 +161,43 @@ describe('the public transparency order card', () => {
     expect(financials).toHaveTextContent('$10.00');
     expect(financials).toHaveTextContent('$12.00');
     expect(financials).toHaveTextContent('+$2.00');
+  });
+});
+
+
+/**
+ * The ledger table's Cost column reads `actual_cost ?? estimated_cost`, so it
+ * moved when the feed started publishing `estimated_cost: 0.0` for a donated
+ * order: base sent `null` for both and the cell read "N/A".
+ */
+describe('the public transparency ledger table', () => {
+  const costCell = () =>
+    screen.getByRole('table').querySelectorAll('tbody tr td')[6];
+
+  it('shows a donated purchase as $0.00 rather than N/A', async () => {
+    await renderFeed([order()], [ledgerEntry()]);
+
+    expect(costCell().textContent).toBe('$0.00');
+  });
+
+  it('still shows N/A where neither cost is known', async () => {
+    await renderFeed([order()], [ledgerEntry({ estimated_cost: null })]);
+
+    expect(costCell().textContent).toBe('N/A');
+  });
+
+  it('still prefers a real actual cost — the branch invariant', async () => {
+    await renderFeed([order()], [ledgerEntry({ actual_cost: 12, estimated_cost: 10 })]);
+
+    expect(costCell().textContent).toBe('$12.00');
+  });
+
+  it('shows a comped purchase as $0.00, not as its estimate', async () => {
+    // `??`, never `||`: a recorded actual cost of 0 is what the purchase
+    // ACTUALLY cost, and falling through to the estimate would publish a
+    // number nobody paid (op-9m2v).
+    await renderFeed([order()], [ledgerEntry({ actual_cost: 0, estimated_cost: 10 })]);
+
+    expect(costCell().textContent).toBe('$0.00');
   });
 });

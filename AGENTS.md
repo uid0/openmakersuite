@@ -470,11 +470,28 @@ complete, and it was twice not:
   cost were known. The exclusion boundary must not run through one arithmetic
   expression. The `ledger` block needs no such pairing — it carries no derived
   figure, only the two independent fields.
+- Public transparency feed, `purchase_orders` block — `estimated_total`:
+  `null` -> `0.0` for an order whose every line is donated. That column is
+  NON-nullable with `default=Decimal("0.00")`, so `null` was never a true
+  answer for it and the falsy guard could only ever mislabel a real zero as
+  unknown. The figure derives from `unit_cost_ordered`, which this branch owns
+  and writes.
 - Public transparency PAGE (`/transparency`, the only consumer of that feed) —
   the "Estimated Cost" and "Cost Variance" rows: hidden, with a stray `0`
   printed into the card, -> `$0.00`. `{order.estimated_cost && <div/>}` fails
   twice over on a numeric `0` in JSX: the row disappears AND React renders the
   `0` itself. Pinned in `TransparencyUnknownCosts.test.tsx`.
+- Same page, the LEDGER table's Cost column
+  (`formatCurrency(entry.actual_cost ?? entry.estimated_cost)`) — `N/A` ->
+  `$0.00` for a donated purchase. The cell itself did not change; it moved
+  because the feed beneath it did, which is exactly why a consumer sweep has to
+  reach every cell and not just the ones whose code changed.
+- Same page, the "Cost Variance" row's TONE — an order that landed exactly on
+  estimate was styled `under-budget` and now reads `$0.00 on budget` in a
+  neutral `on-budget` class. Newly reachable code: the truthiness guard used to
+  drop the row entirely, so `> 0 ? over : under` never had to answer for the
+  zero case. Three states, three labels — the same rule that keeps
+  `no_baseline` apart from `no_data`.
 - Outbound reorder webhook (Discord/Slack) and three admin `Est. Cost` columns
   — `null` / `—` -> `$0.00` for a free line.
 - Two admin **Actual Cost** columns — `reorder_queue/admin.py`'s
@@ -504,6 +521,11 @@ real number":
   truthiness on them in the TRANSPARENCY PAYLOAD specifically — both the
   `orders` block and the `ledger` block. `actual_cost` is a nullable column an
   operator types in, not a derived price, and this branch did not change it.
+  `PurchaseOrder.actual_total` in the `purchase_orders` block is the same
+  shape and excluded for the same reason: `null=True` and operator-typed. That
+  is precisely what separates it from `estimated_total` beside it, which is
+  non-nullable-with-default and therefore inside the branch — the nullability
+  of the column, not the name of the field, is what decides.
   Read that narrowly: it does NOT extend to `PurchaseOrderItem.actual_cost`,
   which is DERIVED from `unit_cost_actual` and IS inside the branch (the
   `receiving.py` twin was the real defect), and whose two admin columns are

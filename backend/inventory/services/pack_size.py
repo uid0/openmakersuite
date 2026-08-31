@@ -15,8 +15,15 @@ their own ``quantity_per_package or 1``. They could disagree on one item, and
 three of them turned "nobody recorded a pack size" into the confident number 1.
 
 **Three states, kept distinct.** The whole point of this module is that a caller
-can tell them apart, because they need different words in front of an operator
-and they must never collapse:
+CAN tell them apart. They are an INTERNAL distinction today — no surface
+renders :attr:`PackSize.state`, and the web pages say only "case size unknown"
+for all of them — and they earn their keep anyway for two reasons: they stop
+:func:`order_pack_size` collapsing "no supplier" with "no orderable supplier",
+which is the collapse that over-flagged one population and under-flagged another
+on a previous attempt, and they keep each unknown's CAUSE available to the
+surface that will eventually word it. Wording each cause for an operator is
+filed as separate follow-up work; do not read the operator actions below as
+something a screen says today.
 
 * :data:`PACK_SIZE_KNOWN` — a link records a usable pack size. The number is
   real; use it.
@@ -44,11 +51,13 @@ way to come back empty:
   moved to the state level.
 
 The last three are all **unknown**: :attr:`PackSize.units` is ``None`` and
-:meth:`PackSize.__bool__` is ``False`` for each. They are reported separately
+:meth:`PackSize.__bool__` is ``False`` for each, so nothing downstream branches
+on which one it is and no flag moves between them. They are carried separately
 anyway, because "we were never told", "we were told something impossible" and
-"we were told, and the answer is no" send an operator to different screens —
-the same reason ``supplier_selection`` keeps ``NO_SUPPLIERS`` apart from
-``NONE_ORDERABLE``, and this state is derived from that very distinction rather
+"we were told, and the answer is no" are different facts that would need
+different words in front of an operator — the same reason ``supplier_selection``
+keeps ``NO_SUPPLIERS`` apart from ``NONE_ORDERABLE``, and
+:data:`PACK_SIZE_NO_ORDERABLE_LINK` is derived from that very distinction rather
 than re-deciding it here.
 
 **A pack size of 1 is KNOWN, not missing.** ``quantity_per_package`` defaults to

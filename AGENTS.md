@@ -182,7 +182,13 @@ differ only in WHICH row they ask.
 
 `pack_size_of(link)` is the only place `ItemSupplier.quantity_per_package` is
 turned into an answer, and it returns a `PackSize` carrying one of THREE states
-that must never collapse:
+that must never collapse. They are an INTERNAL distinction: `PackSize.state`
+does not reach the wire, and both web surfaces say only "case size unknown" for
+every one of them. They earn their keep by stopping `order_pack_size` collapsing
+`NO_SUPPLIERS` with `NONE_ORDERABLE`, and by keeping each unknown's CAUSE
+available to the surface that will word it — which is filed as separate
+follow-up. Read the operator actions below as what the state MEANS, not as
+something a screen says today:
 
 * `PACK_SIZE_KNOWN` — a link records a usable size. **A recorded 1 is KNOWN.**
   The column defaults to 1, so reading 1 as "missing" would make every
@@ -197,8 +203,9 @@ that must never collapse:
   `update_or_create` — persists a posted `0`. The operator fixes that row.
 * `PACK_SIZE_NO_ORDERABLE_LINK` — `order_pack_size` only: rows exist, one may
   even record a good size, but every vendor is dead, so nothing we can BUY sizes
-  the next order. The operator revives or replaces a vendor — a different screen
-  from "add a supplier". Reusing `PACK_SIZE_NOT_RECORDED` here would be the
+  the next order. The operator revives or replaces a vendor, which is a
+  different action from "add a supplier". Reusing `PACK_SIZE_NOT_RECORDED` here
+  would be the
   `NO_SUPPLIERS`/`NONE_ORDERABLE` collapse at the state level, so which of the
   two it is comes from `select_supplier`'s own reason rather than a second count
   of the rows. All three unknowns keep `units` `None` and `is_known` `False`, so

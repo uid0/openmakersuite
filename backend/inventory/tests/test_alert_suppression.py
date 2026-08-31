@@ -329,6 +329,45 @@ def test_item_metrics_still_quotes_a_real_case_size(api):
     assert response.data["case_size"] == 24
 
 
+def test_one_payload_carries_an_unknown_shelf_case_beside_a_buyable_case_of_24(api):
+    """The shelf-vs-order split, working as designed. NOT a contradiction.
+
+    ``mark_discontinued`` deliberately leaves ``is_primary`` set and
+    ``ItemSupplier.Meta.ordering`` is ``["-is_primary", "unit_cost"]``, so a dead
+    flagged-primary row sorts FIRST. Give an item that row recording an
+    impossible ``quantity_per_package`` of 0, plus a live row recording 24, and
+    one payload carries ``current_cases: null`` alongside
+    ``quantity_per_package: 24`` and ``case_size: 24``.
+
+    The two fields answer DIFFERENT questions and both answers are true:
+
+    * ``current_cases`` counts the box ALREADY ON THE SHELF, whose size the row
+      that sold it records as an impossible 0 — so the count is unknown, and the
+      page says "case size unknown". Scanning past that row to the live one
+      would substitute a different vendor's box for the one actually sitting
+      there, which is a guess, not a better answer.
+    * ``quantity_per_package`` / ``case_size`` size the box the NEXT ORDER ships
+      in, through the orderability-filtered derivation — 24, from the only
+      vendor we can buy from.
+
+    Collapsing these into one number is a bug in either direction: filtering the
+    shelf for orderability is what suppressed a low-stock alert in op-2rsp round
+    1, and letting a dead vendor size an order quotes a case nobody can buy. A
+    future reader must not "fix" this pairing.
+    """
+    item = _case_item("TwoLinks")
+    _link(item, "DeadFlaggedPrimary", pack=0, is_primary=True, is_discontinued=True)
+    _link(item, "LiveVendor", pack=24)
+
+    response = api.get(f"/api/inventory/items/{item.id}/")
+    metrics = api.get(f"/api/inventory/items/{item.id}/metrics/")
+
+    assert response.status_code == 200, response.content
+    assert response.data["current_cases"] is None
+    assert response.data["quantity_per_package"] == 24
+    assert metrics.data["case_size"] == 24
+
+
 # ── Sites 2 and 3: the lead time ─────────────────────────────────────────────
 #
 # ``ItemSupplier.average_lead_time`` is non-nullable with a default, so ANY link

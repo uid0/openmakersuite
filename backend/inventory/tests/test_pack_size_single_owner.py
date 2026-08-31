@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from typing import Optional
 
 COLUMN = "quantity_per_package"
 
@@ -84,8 +85,25 @@ ALLOWED: dict[str, tuple[int, str]] = {
     ),
 }
 
-#: Directories whose modules are never scanned.
-_SKIP_PARTS = {"migrations", "tests", "__pycache__", "node_modules", "staticfiles"}
+#: Directories whose modules are never scanned. The virtualenv names matter:
+#: ``backend/.venv`` is an expected in-tree location here (CI prunes it by name,
+#: and ``.gitignore``'s ``venv/`` / ``env/`` match at any depth), and walking a
+#: contributor's site-packages would cost tens of thousands of parses to answer
+#: a question about THIS codebase.
+_SKIP_PARTS = {
+    "migrations",
+    "tests",
+    "__pycache__",
+    "node_modules",
+    "staticfiles",
+    "site-packages",
+    ".venv",
+    "venv",
+    ".env",
+    "env",
+    ".tox",
+    ".eggs",
+}
 
 #: ORM calls that READ rows. A field named inside one of these reaches the
 #: column in SQL, which is exactly how a future derivation would bypass a
@@ -180,8 +198,22 @@ def _column_reads_in(source: str, filename: str = "<snippet>") -> int:
     return len(_reads(ast.parse(source, filename=filename)))
 
 
-def _column_reads(path: pathlib.Path) -> int:
-    return _column_reads_in(path.read_text(), filename=str(path))
+def _column_reads(path: pathlib.Path) -> Optional[int]:
+    """How many sites in ``path`` read the column, or ``None`` if unreadable.
+
+    A file this Python cannot decode as UTF-8 or cannot parse is SKIPPED rather
+    than raised through: an unparsable module is not a pack-size reader, and
+    failing the gate on one would report a decoding problem under a message
+    about ``quantity_per_package``, pointing a future author at neither.
+    """
+    try:
+        source = path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return None
+    try:
+        return _column_reads_in(source, filename=str(path))
+    except SyntaxError:
+        return None
 
 
 def test_every_pack_size_reader_goes_through_the_one_derivation():
@@ -190,6 +222,13 @@ def test_every_pack_size_reader_goes_through_the_one_derivation():
         count = _column_reads(path)
         if count:
             found[str(path.relative_to(BACKEND))] = count
+    assert found, (
+        "The scan found no reads of "
+        f"ItemSupplier.{COLUMN} anywhere under {BACKEND} — not even the owner. "
+        "The walk itself is broken (a bad _SKIP_PARTS entry, or a moved tree), "
+        "so this gate is passing vacuously rather than guarding "
+        "inventory.services.pack_size."
+    )
 
     expected = {name: count for name, (count, _reason) in ALLOWED.items()}
 

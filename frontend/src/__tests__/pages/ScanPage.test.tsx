@@ -103,7 +103,7 @@ describe('ScanPage', () => {
   // holds. Round 5 of PR #1035 shipped that null against a frontend that still
   // declared it a number and called `.toFixed(1)`, which threw and blanked this
   // whole page for a scanned item whose supplier had died.
-  test('renders a case-based item whose case size is not recorded', async () => {
+  test('renders a case-based item whose case size is unknown', async () => {
     localStorage.setItem('token', 'test-token');
 
     (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
@@ -124,8 +124,42 @@ describe('ScanPage', () => {
 
     // The page still renders — the item name proves it did not blank.
     await screen.findByText('Test Widget');
-    expect(screen.getByText(/case size not recorded/i)).toBeInTheDocument();
+    // "unknown", NOT the older "case size not recorded". That wording was a
+    // specific claim the payload does not support: a null `current_cases` also
+    // covers an item whose link DID record a pack size — of 0 — where the fix
+    // is to correct that row, not to add a supplier. "Unknown" is what the
+    // derivation actually establishes. Do not restore the old sentence.
+    expect(screen.getByText(/case size unknown/i)).toBeInTheDocument();
+    expect(screen.queryByText(/not recorded/i)).toBeNull();
     expect(screen.queryByText(/50\.0 cases/)).toBeNull();
+  });
+
+  // The same item must not be handed a reorder quantity in cases: the server
+  // flags it on base units and the line above has just said the cases cannot be
+  // counted, so naming one here would put two different units on one screen.
+  test('names base units, not cases, for an item whose case size is unknown', async () => {
+    localStorage.setItem('token', 'test-token');
+
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockItem,
+        use_case_based_reorder: true,
+        reorder_quantity: 40,
+        minimum_cases: 1,
+        reorder_cases: 2,
+        current_cases: null,
+        needs_reorder: true,
+      },
+    });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+
+    await renderWithRouter();
+
+    await screen.findByText('Test Widget');
+    expect(screen.getByText('40 units')).toBeInTheDocument();
+    expect(screen.queryByText(/2 cases/)).toBeNull();
   });
 
   test('renders a case-based item whose case size IS recorded', async () => {

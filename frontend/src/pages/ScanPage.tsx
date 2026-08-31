@@ -353,7 +353,7 @@ const ScanPage: React.FC = () => {
                   <span className="label">Current Cases:</span>
                   <span className={`value ${item.needs_reorder ? 'low-stock' : ''}`}>
                     {item.current_cases === null
-                      ? '— (case size not recorded)'
+                      ? '— (case size unknown)'
                       : `${item.current_cases.toFixed(1)} cases`}
                   </span>
                 </div>
@@ -365,7 +365,11 @@ const ScanPage: React.FC = () => {
                 </div>
                 <div className="info-item">
                   <span className="label">Reorder Quantity:</span>
-                  <span className="value">{item.reorder_cases} cases</span>
+                  <span className="value">
+                    {item.current_cases === null
+                      ? `${item.reorder_quantity} units`
+                      : `${item.reorder_cases} cases`}
+                  </span>
                 </div>
               </>
             ) : (

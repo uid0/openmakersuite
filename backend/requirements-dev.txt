@@ -2,7 +2,7 @@
 -r requirements.txt
 
 # Pre-commit Hooks
-pre-commit==4.6.1
+pre-commit==4.6.2
 
 # Code Quality
 flake8==7.3.0
@@ -12,7 +12,7 @@ black==26.5.1
 isort==8.0.1
 
 # Django Tools
-django-upgrade==1.31.1
+django-upgrade==1.32.0
 
 # Security Scanning
 bandit==1.9.4
@@ -21,9 +21,9 @@ safety>=3.0.0
 typer[all]>=0.9.0
 
 # Type Checking
-mypy==2.3.0
-django-stubs==6.0.7
-djangorestframework-stubs==3.17.1
+mypy==2.3.1
+django-stubs==6.1.0
+djangorestframework-stubs==3.18.1
 
 # Enhanced Testing
 pytest-xdist==3.8.0  # Parallel test execution

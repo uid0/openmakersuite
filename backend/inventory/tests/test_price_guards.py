@@ -39,6 +39,7 @@ from inventory.models import (
     PriceHistory,
     Supplier,
 )
+from inventory.serializers import ItemSupplierSerializer
 from inventory.services.pricing import (
     PRICE_KNOWN,
     PRICE_NO_ORDERABLE_LINK,
@@ -2171,3 +2172,150 @@ def test_the_kit_pair_path_still_creates_a_link_on_first_save(api):
     kit = InventoryItem.objects.get(pk=response.data["id"])
     link = ItemSupplier.objects.get(item=kit, supplier=supplier)
     assert link.unit_cost == Decimal("4.00")
+
+
+def test_moving_a_link_to_another_item_is_refused_not_silently_dropped(api):
+    """BEFORE/AFTER. A changed `item` is never accepted and then discarded.
+
+    Routing the endpoint's writes through the owner passed `supplier` and left
+    `item` behind, so `PATCH {"item": <other>}` returned 200 with the row
+    untouched and echoed the OLD item back — operator input discarded behind a
+    success. It is refused now, because applying it is destructive: nothing
+    pointing at a link carries its own item, so moving the link re-attributes
+    the price history and order lines recorded against the old one.
+    """
+    alpha = _item("Alpha")
+    beta = _item("Beta")
+    supplier = Supplier.objects.create(name="Acme")
+    link = ItemSupplier.objects.create(
+        item=alpha,
+        supplier=supplier,
+        supplier_sku="T-MOVE-ITEM",
+        unit_cost=Decimal("5.00"),
+        quantity_per_package=1,
+    )
+
+    response = api.patch(
+        f"/api/inventory/item-suppliers/{link.pk}/", {"item": beta.pk}, format="json"
+    )
+
+    assert response.status_code == 400, response.data
+    message = response.data["error"]["details"]["item"][0]
+    assert "cannot be moved to another item" in message
+    assert "Create a new supplier link on Beta" in message
+    link.refresh_from_db()
+    assert link.item_id == alpha.pk
+    assert link.supplier_sku == "T-MOVE-ITEM"
+
+
+def test_resending_the_same_item_is_not_a_move(api):
+    """CONTROL. Only a CHANGED item is refused, so an echoed one still saves.
+
+    The item form sends `item` on some routes, so refusing the field rather
+    than the change would break an ordinary edit.
+    """
+    item = _item("Cartridge")
+    supplier = Supplier.objects.create(name="Acme")
+    link = ItemSupplier.objects.create(
+        item=item,
+        supplier=supplier,
+        supplier_sku="T-ECHO",
+        unit_cost=Decimal("5.00"),
+        quantity_per_package=1,
+    )
+
+    response = api.patch(
+        f"/api/inventory/item-suppliers/{link.pk}/",
+        {"item": item.pk, "supplier_sku": "T-ECHO-2"},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
+    link.refresh_from_db()
+    assert link.item_id == item.pk
+    assert link.supplier_sku == "T-ECHO-2"
+
+
+def test_a_cost_only_patch_leaves_the_links_identity_alone(api):
+    """CONTROL. Writing terms moves neither half of the link's identity."""
+    item = _item("Cartridge")
+    supplier = Supplier.objects.create(name="Acme")
+    link = ItemSupplier.objects.create(
+        item=item,
+        supplier=supplier,
+        supplier_sku="T-IDENTITY",
+        unit_cost=Decimal("5.00"),
+        quantity_per_package=1,
+    )
+
+    response = api.patch(
+        f"/api/inventory/item-suppliers/{link.pk}/", {"unit_cost": "7.00"}, format="json"
+    )
+
+    assert response.status_code == 200, response.data
+    link.refresh_from_db()
+    assert link.unit_cost == Decimal("7.00")
+    assert link.item_id == item.pk
+    assert link.supplier_id == supplier.pk
+
+
+def test_every_writable_supplier_field_reaches_the_link(api):
+    """Every field the endpoint accepts must land on the row, or be refused.
+
+    Derived from the serializer's own writable fields rather than a remembered
+    list, because this test exists precisely because ONE writable field was
+    dropped when the write path was rerouted and nothing noticed. `item` is the
+    one field deliberately not applied; it is refused out loud instead, and the
+    two tests above pin that.
+    """
+    item = _item("Cartridge")
+    supplier = Supplier.objects.create(name="Acme")
+    later = Supplier.objects.create(name="Zenith")
+    link = ItemSupplier.objects.create(
+        item=item, supplier=supplier, supplier_sku="T-ALL", quantity_per_package=1
+    )
+    sent = {
+        "supplier": later.pk,
+        "supplier_sku": "MOVED",
+        "supplier_url": "https://example.test/part",
+        "package_upc": "111111111111",
+        "unit_upc": "222222222222",
+        "quantity_per_package": 4,
+        "package_height": "1.50",
+        "package_width": "2.50",
+        "package_length": "3.50",
+        "package_weight": "4.500",
+        "unit_cost": "2.00",
+        "package_cost": "8.00",
+        "average_lead_time": 9,
+        "is_primary": True,
+        "is_active": False,
+        "is_discontinued": True,
+        "notes": "moved wholesale",
+    }
+    writable = {
+        name for name, field in ItemSupplierSerializer().fields.items() if not field.read_only
+    }
+    assert writable == set(sent) | {"item"}, f"unaccounted: {writable ^ (set(sent) | {'item'})}"
+
+    response = api.patch(f"/api/inventory/item-suppliers/{link.pk}/", sent, format="json")
+
+    assert response.status_code == 200, response.data
+    link.refresh_from_db()
+    assert link.item_id == item.pk
+    assert link.supplier_id == later.pk
+    assert link.supplier_sku == "MOVED"
+    assert link.supplier_url == "https://example.test/part"
+    assert link.package_upc == "111111111111"
+    assert link.unit_upc == "222222222222"
+    assert link.quantity_per_package == 4
+    assert link.package_height == Decimal("1.50")
+    assert link.package_width == Decimal("2.50")
+    assert link.package_length == Decimal("3.50")
+    assert link.package_weight == Decimal("4.500")
+    assert link.package_cost == Decimal("8.00")
+    assert link.average_lead_time == 9
+    assert link.is_primary is True
+    assert link.is_active is False
+    assert link.is_discontinued is True
+    assert link.notes == "moved wholesale"

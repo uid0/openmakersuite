@@ -225,6 +225,10 @@ class ItemSupplierSerializer(serializers.ModelSerializer):
     row in the URL: a PATCH that changes ``supplier`` must MOVE that row rather
     than resolve a different (item, supplier) pair and orphan the addressed one.
     ``create`` takes the pair owner, because creating is what it means there.
+
+    ``_terms`` strips the two identity fields, so BOTH are handed to the owner
+    explicitly. Passing only one of them is how a writable ``item`` came to be
+    accepted and then dropped on the floor.
     """
 
     def _terms(self, validated_data):
@@ -242,11 +246,12 @@ class ItemSupplierSerializer(serializers.ModelSerializer):
         )
 
     def update(self, instance, validated_data):
-        from inventory.services.suppliers import update_supplier_terms
+        from inventory.services.suppliers import UNCHANGED, update_supplier_terms
 
         supplier = validated_data.get("supplier")
         return update_supplier_terms(
             instance,
+            item=validated_data.get("item", UNCHANGED),
             supplier_id=instance.supplier_id if supplier is None else supplier.pk,
             **self._terms(validated_data),
         )

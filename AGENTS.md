@@ -734,6 +734,40 @@ complete, and it was twice not:
   named — all four turned out to write FLAGS rather than costs
   (`update_lead_times`, `mark_discontinued`, `void_line_item`,
   `enforce_single_primary`) and are allowlisted with that reason.
+- **Both halves of a link's identity are now explicit parameters on the
+  row-addressed owner, and one of them is refused out loud.** Routing the
+  `/item-suppliers/<pk>/` endpoint through the owner passed `supplier` and left
+  `item` behind — `_terms()` strips both, and only one was handed back. So
+  `PATCH {"item": <other>}` returned **HTTP 200 with the row untouched**, and
+  the response echoed the OLD item: operator input accepted and discarded
+  behind a success. **REGRESSION of this branch**, introduced by the identity
+  split and live only between that round and this fix; base's
+  `ModelSerializer.update` applied it. Derived rather than recalled: the
+  serializer's writable fields are exactly `_TERM_FIELDS` plus `item` and
+  `supplier`, so `item` was the only one dropped, and a test now asserts that
+  set equality so a field cannot go missing again the next time this write path
+  moves.
+  Applying the move is the part that needed measuring, and it is **destructive**:
+  none of the three tables pointing at an `ItemSupplier` — `PriceHistory`,
+  `PurchaseOrderItem`, `LeadTimeLog` — carries its own item; all three reach it
+  THROUGH the link. Moving the link therefore does not strand them, it silently
+  re-attributes them. Measured: a purchase order line recording what was
+  actually bought from Alpha reports Beta afterwards, and Alpha's price history
+  becomes Beta's. So a changed `item` is **refused with a 400 naming the rows
+  that record the link and telling the operator to create a new link on the
+  target item**. Only a CHANGED item is refused, so a form that echoes the
+  current one back still saves.
+  The refusal is UNCONDITIONAL, and that is a correction to the first cut of
+  this fix: it originally refused only when something already pointed at the
+  link, until measurement showed `record_price_history` writes a row on every
+  link's first save whether or not it carries a price — so every link has
+  history from birth and the "safe move" branch was unreachable. A conditional
+  refusal would have read as though some moves are allowed while refusing every
+  one of them. NAMED EXCLUSION, with that reason: moving a supplier link
+  between items is not supported.
+  No money figure moves. The web form sends `item` on CREATE only, so this
+  reaches API clients alone, and the previously-accepted move was never applied
+  anyway — the 200 was empty.
 - **The owner now has TWO named entry points, because inferring identity was
   itself a defect.** `update_supplier_terms(link, ...)` writes a row the caller
   already holds and never creates; `write_supplier_terms(item=, supplier=)`

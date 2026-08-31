@@ -229,7 +229,58 @@ def _apply(link, terms):
     return link
 
 
-def update_supplier_terms(link, *, supplier_id=UNCHANGED, **terms):
+def _dependents_of(link):
+    """What already points at this link, counted by relation.
+
+    Derived from the model's own reverse relations rather than a remembered
+    list, so a table added later is covered without editing this.
+    """
+    counts = {}
+    for rel in link._meta.related_objects:
+        found = rel.related_model._base_manager.filter(**{rel.field.name: link}).count()
+        if found:
+            counts[str(rel.related_model._meta.verbose_name_plural)] = found
+    return counts
+
+
+def _refuse_item_move(link, item):
+    """Refuse to move a persisted link to a different item. Always refuses.
+
+    None of the tables pointing at an ``ItemSupplier`` carries its own item —
+    :class:`PriceHistory`, :class:`PurchaseOrderItem` and :class:`LeadTimeLog`
+    all reach it THROUGH the link. So moving the link does not strand them, it
+    silently RE-ATTRIBUTES them: measured, a purchase order line recording what
+    was actually bought from one item reports the other afterwards, and one
+    item's price history becomes the other's.
+
+    Unconditional rather than "refuse only when something points at it",
+    because :func:`record_price_history` writes a row on every link's first
+    save whether or not it carries a price, so there is always history to
+    rewrite. A conditional refusal would read as though some moves are allowed
+    while refusing every one of them in practice.
+
+    The remedy is in the message, because a refusal an operator cannot act on
+    is not a fix.
+    """
+    recorded = _dependents_of(link)
+    detail = (
+        ", ".join(f"{count} {name}" for name, count in sorted(recorded.items()))
+        if recorded
+        else "its recorded history"
+    )
+    raise DjangoValidationError(
+        {
+            "item": (
+                f"A supplier link cannot be moved to another item: {detail} "
+                f"already record it against {link.item}, and moving it would "
+                f"re-attribute them. Create a new supplier link on {item} "
+                f"instead, and deactivate this one if it is no longer used."
+            )
+        }
+    )
+
+
+def update_supplier_terms(link, *, item=UNCHANGED, supplier_id=UNCHANGED, **terms):
     """Write terms onto a link the caller ALREADY HOLDS. Never creates.
 
     The entry point for a caller that addressed one row — the
@@ -243,6 +294,11 @@ def update_supplier_terms(link, *, supplier_id=UNCHANGED, **terms):
     SKU and costs. The item form's supplier dropdown stays enabled on saved
     rows and ``relationshipChanged`` lists a changed supplier as a reason to
     write, so that is an ordinary edit, not a corner.
+
+    Both halves of the link's identity are parameters here for the same reason
+    the terms are: a writable field the caller supplied must either land or be
+    refused out loud. ``supplier`` lands; ``item`` is refused — see
+    :func:`_refuse_item_move`.
     """
     from inventory.models.core import ItemSupplier
 
@@ -251,6 +307,8 @@ def update_supplier_terms(link, *, supplier_id=UNCHANGED, **terms):
 
     with transaction.atomic():
         locked = ItemSupplier.objects.select_for_update().get(pk=link.pk)
+        if item is not UNCHANGED and item.pk != locked.item_id:
+            _refuse_item_move(locked, item)
         if supplier_id is not UNCHANGED:
             locked.supplier_id = supplier_id
         _apply(locked, terms).save()

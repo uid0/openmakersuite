@@ -190,24 +190,36 @@ def _coerce_terms(terms):
     return coerced
 
 
-def _apply(link, terms):
-    """Set the named terms on ``link``, keeping the two costs one fact.
+def _reject_unknown(terms):
+    unknown = set(terms) - set(_TERM_FIELDS)
+    if unknown:
+        raise TypeError(f"supplier terms got unexpected fields: {sorted(unknown)}")
 
-    Naming ONE cost means "this is the price now", so its twin is cleared and
-    ``save()`` re-derives it — but ONLY when the named value actually differs
-    from what is stored. The kit form seeds its cost box from the stored price
-    and echoes it back on every save, so clearing unconditionally re-derived a
-    package price the operator never touched (a link at ``package_cost 10.00``
-    over a pack of 3 stores ``unit_cost 3.33``, and ``3.33 * 3`` is ``9.99``).
-    An echoed value is a no-op: it moves nothing and records no price history.
+
+def _apply(link, terms):
+    """Set the supplied terms on ``link``, keeping the two costs one fact.
+
+    "The caller did not mention ``package_cost``" and "the caller SENT
+    ``package_cost`` with its current value" are TWO DIFFERENT FACTS and must
+    not be collapsed. Intent comes from KEY PRESENCE only — a key in ``terms``
+    means the caller supplied it, absent means leave it alone. Value equality
+    decides one thing and one thing only: whether a write is actually needed.
+
+    So the twin-clear fires when the caller supplied EXACTLY ONE of the pair AND
+    that one differs from what is stored:
+
+    * supplied one, and it changed — "this is the price now", so the unnamed
+      twin is cleared and ``save()`` re-derives it from the new value.
+    * supplied one, unchanged — the kit form echoes its seeded box back on every
+      save, so this is a no-op: nothing moves and no price history is written.
+    * supplied BOTH — the item form always sends both boxes, so they are the
+      caller's own values and neither is cleared. Where the two disagree
+      ``save()``'s derivation decides, exactly as it did before this owner
+      existed; that derivation is not this module's to second-guess.
     """
-    named_costs = [
-        name
-        for name in _DERIVED_COSTS
-        if terms.get(name, UNCHANGED) is not UNCHANGED and terms[name] != getattr(link, name)
-    ]
-    if len(named_costs) == 1:
-        stale = _DERIVED_COSTS[0] if named_costs[0] == _DERIVED_COSTS[1] else _DERIVED_COSTS[1]
+    supplied = [name for name in _DERIVED_COSTS if terms.get(name, UNCHANGED) is not UNCHANGED]
+    if len(supplied) == 1 and terms[supplied[0]] != getattr(link, supplied[0]):
+        stale = _DERIVED_COSTS[0] if supplied[0] == _DERIVED_COSTS[1] else _DERIVED_COSTS[1]
         terms = {**terms, stale: None}
 
     for name in _TERM_FIELDS:
@@ -215,6 +227,34 @@ def _apply(link, terms):
         if value is not UNCHANGED:
             setattr(link, name, value)
     return link
+
+
+def update_supplier_terms(link, *, supplier_id=UNCHANGED, **terms):
+    """Write terms onto a link the caller ALREADY HOLDS. Never creates.
+
+    The entry point for a caller that addressed one row — the
+    ``/item-suppliers/<pk>/`` endpoint names it in the URL. It writes THAT row,
+    including when the terms move it to a different supplier.
+
+    Split out from :func:`write_supplier_terms` because inferring the row from
+    an (item, supplier) pair is wrong here: a PATCH that changes ``supplier``
+    matches no existing pair, so the pair resolver CREATED a second link and
+    left the addressed one behind, pointing at the old supplier with its old
+    SKU and costs. The item form's supplier dropdown stays enabled on saved
+    rows and ``relationshipChanged`` lists a changed supplier as a reason to
+    write, so that is an ordinary edit, not a corner.
+    """
+    from inventory.models.core import ItemSupplier
+
+    _reject_unknown(terms)
+    terms = _coerce_terms(terms)
+
+    with transaction.atomic():
+        locked = ItemSupplier.objects.select_for_update().get(pk=link.pk)
+        if supplier_id is not UNCHANGED:
+            locked.supplier_id = supplier_id
+        _apply(locked, terms).save()
+        return locked
 
 
 def write_supplier_terms(*, item, supplier=None, supplier_id=None, **terms):
@@ -250,9 +290,7 @@ def write_supplier_terms(*, item, supplier=None, supplier_id=None, **terms):
     """
     from inventory.models.core import ItemSupplier
 
-    unknown = set(terms) - set(_TERM_FIELDS)
-    if unknown:
-        raise TypeError(f"write_supplier_terms got unexpected terms: {sorted(unknown)}")
+    _reject_unknown(terms)
 
     if supplier_id is None:
         supplier_id = supplier.pk

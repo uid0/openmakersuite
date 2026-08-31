@@ -2045,3 +2045,129 @@ def test_a_duplicate_item_supplier_post_is_refused_not_duplicated(api):
     assert response.status_code == 400, response.data
     assert ItemSupplier.objects.filter(item=item, supplier=supplier).count() == 1
     ItemSupplier.objects.get(item=item, supplier=supplier).refresh_from_db()
+
+
+def test_moving_a_link_to_another_supplier_updates_that_row(api):
+    """BEFORE/AFTER. A PATCH that changes the supplier MOVES the addressed row.
+
+    Routing `update` through the pair resolver made it write a DIFFERENT row:
+    no (item, new supplier) link existed, so a second one was created and the
+    row the URL named was left behind pointing at the old supplier with its old
+    SKU and costs. The item carried two links where the operator moved one, and
+    every price derivation downstream saw the phantom.
+    """
+    item = _item("Cartridge")
+    old_supplier = Supplier.objects.create(name="Acme")
+    new_supplier = Supplier.objects.create(name="Zenith")
+    link = ItemSupplier.objects.create(
+        item=item,
+        supplier=old_supplier,
+        supplier_sku="T-MOVE",
+        unit_cost=Decimal("5.00"),
+        quantity_per_package=1,
+        is_primary=True,
+    )
+
+    response = api.patch(
+        f"/api/inventory/item-suppliers/{link.pk}/",
+        {"supplier": new_supplier.pk},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
+    assert ItemSupplier.objects.filter(item=item).count() == 1
+    link.refresh_from_db()
+    assert link.supplier_id == new_supplier.pk
+    assert link.supplier_sku == "T-MOVE"
+    assert link.unit_cost == Decimal("5.00")
+    assert response.data["id"] == link.pk
+
+
+def test_submitting_both_cost_boxes_keeps_the_package_price_given(api):
+    """BEFORE/AFTER. A package price the operator SUBMITTED is not re-derived.
+
+    The twin-clear decided "named" by value comparison, which collapsed two
+    different facts: "the caller did not mention package_cost" and "the caller
+    sent package_cost with its current value". The item form always sends BOTH
+    boxes, so editing Unit Cost alone made the unchanged package price look
+    unnamed, cleared it, and let `save()` re-derive $30.00 into **$42.00** — a
+    money figure moving on a value the operator could see and had submitted.
+
+    Intent now comes from key presence, so both are honoured as given. Where the
+    two disagree `save()`'s derivation still decides, exactly as before this
+    owner existed: the package price wins and `unit_cost` returns to 5.00.
+    """
+    item = _item("Cartridge")
+    supplier = Supplier.objects.create(name="Acme")
+    link = ItemSupplier.objects.create(
+        item=item,
+        supplier=supplier,
+        supplier_sku="T-BOTH",
+        package_cost=Decimal("30.00"),
+        quantity_per_package=6,
+    )
+    link.refresh_from_db()
+    assert (link.unit_cost, link.package_cost) == (Decimal("5.00"), Decimal("30.00"))
+
+    response = api.patch(
+        f"/api/inventory/item-suppliers/{link.pk}/",
+        {"unit_cost": "7.00", "package_cost": "30.00", "quantity_per_package": 6},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
+    link.refresh_from_db()
+    assert link.package_cost == Decimal("30.00")
+    assert link.quantity_per_package == 6
+
+
+def test_naming_only_the_unit_cost_still_rederives_the_package_price(api):
+    """CONTROL. Supplying ONE cost is still "this is the price now"."""
+    item = _item("Widget")
+    supplier = Supplier.objects.create(name="Acme")
+    link = ItemSupplier.objects.create(
+        item=item,
+        supplier=supplier,
+        supplier_sku="T-ONE",
+        package_cost=Decimal("30.00"),
+        quantity_per_package=6,
+    )
+    link.refresh_from_db()
+
+    response = api.patch(
+        f"/api/inventory/item-suppliers/{link.pk}/", {"unit_cost": "7.00"}, format="json"
+    )
+
+    assert response.status_code == 200, response.data
+    link.refresh_from_db()
+    assert link.unit_cost == Decimal("7.00")
+    assert link.package_cost == Decimal("42.00")
+
+
+def test_the_kit_pair_path_still_creates_a_link_on_first_save(api):
+    """CONTROL. Splitting the entry points left the create path where it belongs."""
+    component = _item("Cyan")
+    supplier = Supplier.objects.create(name="Acme")
+
+    response = api.post(
+        "/api/inventory/kits/",
+        {
+            "name": "Pair-path kit",
+            "description": "x",
+            "sku": "KIT-PAIR",
+            "minimum_stock": 0,
+            "reorder_quantity": 1,
+            "components": [{"component": component.pk, "quantity": 1}],
+            "supplier_terms": {
+                "supplier": supplier.pk,
+                "supplier_sku": "T-PAIR",
+                "unit_cost": "4.00",
+            },
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201, response.data
+    kit = InventoryItem.objects.get(pk=response.data["id"])
+    link = ItemSupplier.objects.get(item=kit, supplier=supplier)
+    assert link.unit_cost == Decimal("4.00")

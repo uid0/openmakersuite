@@ -33,15 +33,19 @@ bypass the owner" sounds:**
    (``item_supplier``, ``supplier_link`` …). A save on a differently-named local
    is invisible. This is the loosest of the rules and is why the allowlist
    reasons matter more than the count.
-4. A DRF ``ModelSerializer`` on this model is a writer with no write CALL in it
-   at all — ``ModelSerializer.update`` does the ``setattr`` + ``save()`` itself,
-   inside the framework. Review found exactly that blind spot: the generic
-   ``/item-suppliers/`` endpoint was writing these columns and the first version
-   of this gate could not see it. The scan now counts a ``class Meta`` whose
-   ``model`` is ``ItemSupplier`` as a write site for that reason. What it still
-   cannot see: a serializer that reaches the model through a variable or an
-   import alias rather than naming it, and any framework that writes the table
-   without a Python-visible model reference.
+4. A FRAMEWORK writer has no write CALL in it at all — DRF's
+   ``ModelSerializer.update`` and Django admin's ``ModelForm`` both do the
+   ``setattr`` + ``save()`` themselves, inside the framework. Review found
+   exactly that blind spot twice: first the generic ``/item-suppliers/``
+   endpoint, then the Django admin. The scan therefore counts all three ways
+   this model gets bound to a framework class as write sites — ``model =
+   ItemSupplier`` inside a ``class Meta``, the same assignment at CLASS level
+   (``ItemSupplierInline(admin.TabularInline)``), and an
+   ``@admin.register(ItemSupplier)`` decorator. What it still cannot see: a
+   class that reaches the model through a variable or an import alias rather
+   than naming it, a ``ModelForm`` declared outside an admin or serializer, and
+   any framework that writes the table with no Python-visible model reference
+   at all.
 
 **What counts as a write** is deliberately broad, because the defect is a
 partial write rather than any particular spelling:
@@ -50,8 +54,10 @@ partial write rather than any particular spelling:
 * ``ItemSupplier.objects.create`` / ``update_or_create`` / ``get_or_create`` /
   ``update`` / ``bulk_create`` / ``bulk_update``.
 * ``<supplier-ish>.save(...)``.
-* ``class Meta: model = ItemSupplier`` — a serializer or form that writes the
-  row through the framework rather than through a call this scan can see.
+* ``model = ItemSupplier`` bound to a framework class — in a ``class Meta``, at
+  class level on an admin inline, or via ``@admin.register(ItemSupplier)``.
+  Each writes the row through the framework rather than through a call this
+  scan can see.
 
 Naming a cost column in a serializer ``fields`` list, an admin column or prose
 is NOT a write: naming a field cannot store a number.
@@ -81,8 +87,10 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "inventory/services/suppliers.py": (
         2,
         "THE OWNER, plus its neighbour. `write_supplier_terms` performs the one "
-        "construction every caller now delegates to; `enforce_single_primary` "
-        "bulk-updates `is_primary` only, which is a flag rather than a cost.",
+        "construction every pair-resolving caller delegates to (its "
+        "row-addressed twin `update_supplier_terms` never creates); "
+        "`enforce_single_primary` bulk-updates `is_primary` only, which is a "
+        "flag rather than a cost.",
     ),
     "inventory/serializers.py": (
         1,
@@ -91,6 +99,17 @@ ALLOWED: dict[str, tuple[int, str]] = {
         "delegate to `write_supplier_terms`, so DRF's own partial "
         "`setattr` + `save()` never runs. Allowlisted because it IS routed, not "
         "because a partial write would be safe here — it demonstrably is not.",
+    ),
+    "inventory/admin.py": (
+        2,
+        "The Django admin's two bindings — `ItemSupplierInline`'s class-level "
+        "`model =` and `@admin.register(ItemSupplier)`. Both write through a "
+        "ModelForm, but MEASURED, neither can fight the derivation: `unit_cost` "
+        "is in `ItemSupplierAdmin.readonly_fields` and the inline shows the "
+        "read-only `unit_cost_display`, so only `package_cost` and "
+        "`quantity_per_package` are editable — the direction `save()` prefers "
+        "anyway. Allowlisted as safe, not as routed; an admin that made "
+        "`unit_cost` editable would need routing.",
     ),
     "inventory/tasks.py": (
         1,
@@ -145,11 +164,8 @@ def _called_name(node: ast.Call) -> str:
     return ".".join(reversed(parts))
 
 
-def _binds_model(node: ast.AST) -> bool:
-    """``model = ItemSupplier`` inside a ``class Meta`` — a framework writer."""
-    if not isinstance(node, ast.ClassDef) or node.name != "Meta":
-        return False
-    for stmt in node.body:
+def _assigns_model(body) -> bool:
+    for stmt in body:
         if not isinstance(stmt, ast.Assign):
             continue
         for target in stmt.targets:
@@ -161,6 +177,34 @@ def _binds_model(node: ast.AST) -> bool:
                 if name == "ItemSupplier":
                     return True
     return False
+
+
+def _registers_model(node: ast.ClassDef) -> bool:
+    """``@admin.register(ItemSupplier)`` — the admin's own binding."""
+    for decorator in node.decorator_list:
+        if not isinstance(decorator, ast.Call):
+            continue
+        if not _called_name(decorator).endswith("register"):
+            continue
+        for arg in decorator.args:
+            name = arg.attr if isinstance(arg, ast.Attribute) else getattr(arg, "id", None)
+            if name == "ItemSupplier":
+                return True
+    return False
+
+
+def _binds_model(node: ast.AST) -> bool:
+    """This class is bound to ItemSupplier by a framework — so it writes the row.
+
+    Three shapes, because the two frameworks in this tree spell it three ways:
+    a serializer's ``class Meta``, an admin inline's CLASS-level ``model =``,
+    and an ``@admin.register`` decorator.
+    """
+    if not isinstance(node, ast.ClassDef):
+        return False
+    if node.name == "Meta":
+        return _assigns_model(node.body)
+    return _registers_model(node) or _assigns_model(node.body)
 
 
 def _writes(tree: ast.AST) -> set[int]:
@@ -212,7 +256,7 @@ def test_every_supplier_terms_writer_goes_through_the_one_owner():
 
     unexpected = {rel: n for rel, n in actual.items() if rel not in expected}
     assert not unexpected, (
-        "A writer outside inventory.services.suppliers.write_supplier_terms sets "
+        "A writer outside inventory.services.suppliers sets "
         f"ItemSupplier rows: {unexpected}. Route it through the owner, or add it "
         "to ALLOWED with a reason saying why a partial write is safe there."
     )
@@ -305,5 +349,33 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = PurchaseOrder
         fields = ["unit_cost"]
+"""
+    assert _writes_in(source) == 0
+
+
+def test_a_class_level_model_binding_is_a_writer():
+    """Limit 4, the admin inline shape: no `class Meta`, no write call."""
+    source = """
+class ItemSupplierInline(admin.TabularInline):
+    model = ItemSupplier
+    fields = ["package_cost"]
+"""
+    assert _writes_in(source) == 1
+
+
+def test_an_admin_register_decorator_is_a_writer():
+    source = """
+@admin.register(ItemSupplier)
+class ItemSupplierAdmin(admin.ModelAdmin):
+    list_display = ["package_cost"]
+"""
+    assert _writes_in(source) == 1
+
+
+def test_registering_another_model_is_not_a_writer():
+    source = """
+@admin.register(PurchaseOrder)
+class PurchaseOrderAdmin(admin.ModelAdmin):
+    list_display = ["unit_cost"]
 """
     assert _writes_in(source) == 0

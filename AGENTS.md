@@ -734,6 +734,54 @@ complete, and it was twice not:
   named — all four turned out to write FLAGS rather than costs
   (`update_lead_times`, `mark_discontinued`, `void_line_item`,
   `enforce_single_primary`) and are allowlisted with that reason.
+- **The owner now has TWO named entry points, because inferring identity was
+  itself a defect.** `update_supplier_terms(link, ...)` writes a row the caller
+  already holds and never creates; `write_supplier_terms(item=, supplier=)`
+  resolves an (item, supplier) pair and get-or-creates under the lock. Routing
+  the `/item-suppliers/<pk>/` endpoint through the PAIR resolver made a PATCH
+  that changes `supplier` write a DIFFERENT row: no (item, new supplier) link
+  existed, so a second one was created and the row the URL named was left
+  behind, still pointing at the old supplier with its old SKU and costs. The
+  item carried two links where the operator moved one, and every price
+  derivation downstream — `lowest_unit_price`, `primary_item_supplier`, the
+  supplier scoring, the reorder pad — saw the phantom. Nothing reported it: the
+  response body was the NEW row, so its `id` no longer matched the URL and the
+  item form wrote it over its local copy of the row it had addressed. That is a
+  designed-for edit, not a corner: the supplier dropdown stays enabled on saved
+  rows and `relationshipChanged` lists a changed supplier as a reason to write.
+  **REGRESSION of this branch**, introduced when the endpoint was routed and
+  live only between that round and this fix. Now the addressed row MOVES, and
+  its pk, SKU and costs come with it.
+- **Intent comes from KEY PRESENCE, never from value comparison** — the
+  branch's own rule, which the owner had broken in its own image. "The caller
+  did not mention `package_cost`" and "the caller SENT `package_cost` with its
+  current value" are two different facts; the twin-clear was deciding "named" by
+  comparing values, so it collapsed them. The item form always sends BOTH cost
+  boxes, so an operator who edited Unit Cost and left Package Cost showing
+  `$30.00` had that submitted value treated as unnamed, cleared, and re-derived:
+  a link at `unit_cost 5.00 / package_cost 30.00 / pack 6` stored **$42.00**,
+  moving a price the operator could see in the adjacent box and had submitted
+  unchanged. Visible on the scan page's "Package cost" and "Estimated Cost",
+  which read `order_package_price`. **REGRESSION of this branch**, same window.
+  The twin-clear now fires only when the caller supplied EXACTLY ONE of the pair
+  and it differs from what is stored; value equality still decides whether a
+  write is needed (the echo no-op), never whether a field was named.
+  **A consequence, named because the invariant requires it:** when both boxes
+  are submitted and disagree, neither is cleared and `save()`'s derivation
+  decides — the package price wins and the unit edit is re-derived away, exactly
+  as base behaved. That half is PRE-EXISTING and unchanged; the fix is that the
+  package price the operator submitted no longer moves.
+- **The writer gate can see the Django admin now.** Its limit 4 named DRF's
+  `ModelSerializer` as the framework-writer blind spot it had closed, while the
+  other framework writer in the tree went unnamed: `ItemSupplierInline` binds
+  the model at CLASS level and `@admin.register(ItemSupplier)` binds it by
+  decorator, neither of which is a `class Meta`. The scan now counts all three
+  shapes. Both admin sites are allowlisted as SAFE rather than routed, and the
+  reason is measured: `unit_cost` is in `ItemSupplierAdmin.readonly_fields` and
+  the inline shows the read-only `unit_cost_display`, so only `package_cost` and
+  `quantity_per_package` are editable — the direction `save()` prefers anyway.
+  An admin that made `unit_cost` editable would need routing. No figure moves;
+  what changes is that the gate's stated blind spots are now true.
 - **The owner's own first cut had three defects; all are fixed and named here,
   because the round that introduced them is on this branch.**
   - **It COERCES at its boundary now.** `supplier_terms` is a plain `DictField`

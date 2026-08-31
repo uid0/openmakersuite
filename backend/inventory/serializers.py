@@ -214,35 +214,41 @@ class PriceHistorySerializer(serializers.ModelSerializer):
 class ItemSupplierSerializer(serializers.ModelSerializer):
     """Serializer for item-supplier relationships with pricing and dimensional data.
 
-    Writes route through :func:`inventory.services.suppliers.write_supplier_terms`
-    rather than DRF's default ``setattr`` + ``save()``. That default is a PARTIAL
-    write against a model whose ``save()`` derives ``unit_cost`` and
-    ``package_cost`` from each other, so ``PATCH {"unit_cost": "7.00"}`` on a
-    link that already had a package price recomputed the OLD price straight back
-    over the operator's typed one (op-9m2v).
+    Writes route through :mod:`inventory.services.suppliers` rather than DRF's
+    default ``setattr`` + ``save()``. That default is a PARTIAL write against a
+    model whose ``save()`` derives ``unit_cost`` and ``package_cost`` from each
+    other, so ``PATCH {"unit_cost": "7.00"}`` on a link that already had a
+    package price recomputed the OLD price straight back over the operator's
+    typed one (op-9m2v).
+
+    ``update`` takes the ROW-ADDRESSED owner, because this endpoint names its
+    row in the URL: a PATCH that changes ``supplier`` must MOVE that row rather
+    than resolve a different (item, supplier) pair and orphan the addressed one.
+    ``create`` takes the pair owner, because creating is what it means there.
     """
 
-    def _write(self, validated_data, *, item, supplier_id):
-        from inventory.services.suppliers import write_supplier_terms
-
-        terms = {
+    def _terms(self, validated_data):
+        return {
             key: value for key, value in validated_data.items() if key not in ("item", "supplier")
         }
-        return write_supplier_terms(item=item, supplier_id=supplier_id, **terms)
 
     def create(self, validated_data):
-        return self._write(
-            validated_data,
+        from inventory.services.suppliers import write_supplier_terms
+
+        return write_supplier_terms(
             item=validated_data["item"],
             supplier_id=validated_data["supplier"].pk,
+            **self._terms(validated_data),
         )
 
     def update(self, instance, validated_data):
+        from inventory.services.suppliers import update_supplier_terms
+
         supplier = validated_data.get("supplier")
-        return self._write(
-            validated_data,
-            item=validated_data.get("item", instance.item),
+        return update_supplier_terms(
+            instance,
             supplier_id=instance.supplier_id if supplier is None else supplier.pk,
+            **self._terms(validated_data),
         )
 
     supplier_name = serializers.CharField(source="supplier.name", read_only=True)

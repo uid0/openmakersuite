@@ -563,7 +563,20 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], permission_classes=[IsAuthenticated])
     def by_supplier(self, request):
-        """Group pending requests by supplier for easier bulk ordering."""
+        """Group pending requests by supplier for easier bulk ordering.
+
+        ``total_estimated_cost`` is the sum of the requests this group COULD
+        price, and ``unpriced_item_count`` / ``estimated_total_is_partial`` say
+        how many it could not — the same shape ``create_optimized_order`` and
+        ``reorder_data`` carry, and for the same reason (op-9m2v): the admin
+        dashboard renders this number as a bulk-ordering total, and a request
+        for an item nobody has priced contributed nothing to it and said
+        nothing about itself. The NUMBER is unchanged — an unpriced request
+        added nothing before and adds nothing now, and a free one adds its
+        honest ``0.00`` either way.
+        """
+        from inventory.services.pricing import PriceRollup, order_unit_price
+
         pending = (
             ReorderRequest.objects.filter(status=ReorderRequest.Status.PENDING)
             .select_related("item", "item__count_level")
@@ -572,6 +585,7 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
 
         # Group by supplier
         suppliers = {}
+        rollups = {}
         for req in pending:
             supplier_name = req.item.supplier.name if req.item.supplier else "No Supplier"
             supplier_type = req.item.supplier.supplier_type if req.item.supplier else "other"
@@ -584,11 +598,17 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
                     "total_estimated_cost": 0,
                     "item_count": 0,
                 }
+                rollups[supplier_name] = PriceRollup()
 
             suppliers[supplier_name]["requests"].append(ReorderRequestSerializer(req).data)
             suppliers[supplier_name]["item_count"] += 1
-            if req.estimated_cost:
-                suppliers[supplier_name]["total_estimated_cost"] += float(req.estimated_cost)
+            rollups[supplier_name].add(order_unit_price(req.item), req.quantity)
+
+        for supplier_name, group in suppliers.items():
+            rollup = rollups[supplier_name]
+            group["total_estimated_cost"] = float(rollup.amount)
+            group["unpriced_item_count"] = rollup.unpriced_count
+            group["estimated_total_is_partial"] = not rollup.is_complete
 
         return Response(list(suppliers.values()))
 
@@ -4049,6 +4069,20 @@ def _as_float(amount):
     return None if amount is None else float(amount)
 
 
+def _money_cell(amount):
+    """A money figure as a CSV cell, or an EMPTY cell where there is none.
+
+    The export twin of :func:`_as_float`, and the backend twin of
+    ``csvExport.ts``'s ``reportMoney``. ``f"{x:.2f}"`` on a ``None`` raises —
+    the three cost columns of the price-trend export became nullable in the
+    same commit that made ``latest_unit_cost`` honest — and ``f"{x or 0:.2f}"``
+    would be the falsy guard again, one layer along: a blank sums as nothing
+    AND reads as nothing, whereas "0.00" makes a spreadsheet count the unknowns
+    as free. A recorded ``0.00`` still exports as ``0.00`` (op-9m2v).
+    """
+    return "" if amount is None else f"{amount:.2f}"
+
+
 class PurchasingReportViewSet(viewsets.ViewSet):
     """API endpoint for purchasing reports."""
 
@@ -4403,13 +4437,17 @@ class PurchasingReportViewSet(viewsets.ViewSet):
                         "item_name": row["item_name"],
                         "supplier_name": row["supplier_name"],
                         "price_changes": row["price_changes"],
-                        "min_unit_cost": f"{row['min_unit_cost']:.2f}",
-                        "max_unit_cost": f"{row['max_unit_cost']:.2f}",
-                        "latest_unit_cost": f"{row['latest_unit_cost']:.2f}",
+                        "min_unit_cost": _money_cell(row["min_unit_cost"]),
+                        "max_unit_cost": _money_cell(row["max_unit_cost"]),
+                        "latest_unit_cost": _money_cell(row["latest_unit_cost"]),
+                        # ``is None``, not truthiness: a price that did not
+                        # move is a 0.00% change and a fact, and the falsy
+                        # spelling exported it as the same blank an
+                        # incomputable percentage gets (op-9m2v).
                         "price_change_percentage": (
-                            f"{row['price_change_percentage']:.2f}%"
-                            if row["price_change_percentage"]
-                            else ""
+                            ""
+                            if row["price_change_percentage"] is None
+                            else f"{row['price_change_percentage']:.2f}%"
                         ),
                     }
                 )

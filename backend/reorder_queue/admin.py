@@ -159,8 +159,12 @@ class ReorderRequestAdmin(admin.ModelAdmin):
 
     @admin.display(description="Est. Cost")
     def estimated_cost_display(self, obj):
-        """Display estimated cost with currency formatting."""
-        if obj.estimated_cost:
+        """Display estimated cost with currency formatting.
+
+        ``is not None``: the em dash means "we cannot cost this", so a line a
+        vendor gives away must render as ``$0.00`` and not borrow it (op-9m2v).
+        """
+        if obj.estimated_cost is not None:
             return f"${obj.estimated_cost:.2f}"
         return "-"
 
@@ -211,13 +215,15 @@ class PurchaseOrderItemInline(admin.TabularInline):
 
     @admin.display(description="Est. Cost")
     def estimated_cost_display(self, obj):
-        if obj and obj.estimated_cost:
+        # ``is not None`` on both: the em dash means "not known", and a comped
+        # or donated line costs a real $0.00 (op-9m2v).
+        if obj and obj.estimated_cost is not None:
             return f"${obj.estimated_cost:.2f}"
         return "-"
 
     @admin.display(description="Actual Cost")
     def actual_cost_display(self, obj):
-        if obj and obj.actual_cost:
+        if obj and obj.actual_cost is not None:
             return f"${obj.actual_cost:.2f}"
         return "-"
 
@@ -514,13 +520,16 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
 
     @admin.display(description="Est. Cost")
     def estimated_cost_display(self, obj):
-        if obj.estimated_cost:
+        # ``is not None`` on both: ``PurchaseOrderItem.estimated_cost`` is
+        # non-nullable and returns ``Decimal("0.00")`` for a free line, so the
+        # em dash here has ALWAYS meant the wrong thing for one (op-9m2v).
+        if obj.estimated_cost is not None:
             return f"${obj.estimated_cost:.2f}"
         return "-"
 
     @admin.display(description="Actual Cost")
     def actual_cost_display(self, obj):
-        if obj.actual_cost:
+        if obj.actual_cost is not None:
             return f"${obj.actual_cost:.2f}"
         return "-"
 

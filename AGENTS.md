@@ -393,6 +393,34 @@ if the field is ever parsed to a number.
 `work_order_purchase_bridge.purchase_line_unit_cost` (actual when recorded, else
 ordered, spelled `is None`). Read it; do not write a second `actual or ordered`.
 
+**Two things the first pass got wrong, both about CONSUMERS.** Recorded so the
+next derivation sweeps for the same shapes:
+
+- **A value becoming nullable has backend readers too.** `total_value` going
+  `Decimal("0")` -> `None` was swept across the frontend and ScanTTY but not
+  across `backend/`, and `dashboard.views.get_inventory_summary`'s
+  `sum(item.total_value for ...)` folded the `None` into an int accumulator —
+  a 500 on a public endpoint. It sums through `PriceRollup` now and reports
+  `items_without_price` beside an unchanged total. Sweep BOTH sides.
+- **The "all but one site" shape.** Where a payload gains an honesty count or a
+  guard is respelled, find every twin. The browser-side CSV export got
+  `items_without_price` and the server-side one did not; the price-trend
+  report's cost columns became nullable and its CSV export still formatted them
+  with `:.2f` (a `TypeError`, so a 500); `ReorderRequest.estimated_cost` started
+  returning a real `Decimal("0.00")` and four readers — the outbound reorder
+  webhook and three admin displays — re-collapsed it to "unknown" with the old
+  falsy guard. `requests/by_supplier/` now carries `unpriced_item_count` /
+  `estimated_total_is_partial` like every other order-shaped payload, and the
+  admin dashboard's supplier modal renders them.
+
+One figure the change list over-claimed, corrected: the supplier detail's
+price-trend **summary** (`average_unit_cost` / `min_unit_cost` /
+`max_unit_cost`) is byte-identical to base, which already spelled that filter
+`if ph.unit_cost is not None`. Only the per-record `unit_cost` / `package_cost`
+inside `trends` moved (`null` -> `0.0` for a recorded zero), which is what the
+supplier-detail chart plots. Both are pinned in `test_price_guards.py`, the
+summary as a CONTROL and the records as the BEFORE/AFTER.
+
 ### The pre-send boundary: when a PO is still the shop's own document
 
 `PurchaseOrder.PRE_SUPPLIER_STATUSES` is the ONE definition of "the supplier has

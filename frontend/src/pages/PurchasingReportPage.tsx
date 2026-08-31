@@ -136,15 +136,31 @@ const PurchasingReportPage: React.FC = () => {
     }
   };
 
+  /**
+   * Sort rows by the active column, with the unknowns last in BOTH directions.
+   *
+   * The three cost columns are nullable (op-9m2v), and JavaScript coerces
+   * `null` to `0` in a relational comparison — so a price nobody recorded used
+   * to sort in among the cheapest, indistinguishable from a supplier that
+   * genuinely charges nothing. An unknown price must not be COMPARED as a real
+   * number any more than it may be shown as one. A real `0` still sorts as the
+   * cheapest real price.
+   */
   const sortData = <T extends Record<string, any>>(data: T[]): T[] => {
     const sorted = [...data];
     if (!sortField) return sorted;
     sorted.sort((a, b) => {
       let aVal: any = a[sortField];
       let bVal: any = b[sortField];
+      const aMissing = aVal === null || aVal === undefined;
+      const bMissing = bVal === null || bVal === undefined;
+      if (aMissing || bMissing) {
+        if (aMissing && bMissing) return 0;
+        return aMissing ? 1 : -1;
+      }
       if (typeof aVal === 'string') {
         aVal = aVal.toLowerCase();
-        bVal = bVal.toLowerCase();
+        bVal = typeof bVal === 'string' ? bVal.toLowerCase() : bVal;
       }
       if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
       if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;

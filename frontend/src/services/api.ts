@@ -1800,6 +1800,25 @@ export const assetPartsAPI = {
     ),
 };
 
+/**
+ * One supplier's pending reorder requests, as `by_supplier` groups them.
+ *
+ * `total_estimated_cost` is the sum of the requests the server COULD price;
+ * `unpriced_item_count` is how many it could not, and
+ * `estimated_total_is_partial` is the claim a screen is allowed to make about
+ * the number (op-9m2v). The two counts are optional in the type so an older
+ * cached payload cannot crash the dashboard.
+ */
+export interface ReorderRequestsBySupplierGroup {
+  supplier: string;
+  supplier_type: string;
+  requests: ReorderRequest[];
+  item_count: number;
+  total_estimated_cost: number;
+  unpriced_item_count?: number;
+  estimated_total_is_partial?: boolean;
+}
+
 // Reorder API
 export const reorderAPI = {
   createRequest: (data: CreateReorderRequest) =>
@@ -1815,7 +1834,7 @@ export const reorderAPI = {
     api.get<ReorderRequest[]>('/reorders/requests/sig_pending/'),
 
   getBySupplier: () =>
-    api.get('/reorders/requests/by_supplier/'),
+    api.get<ReorderRequestsBySupplierGroup[]>('/reorders/requests/by_supplier/'),
 
   approveRequest: (id: number, adminNotes?: string) =>
     api.post(`/reorders/requests/${id}/approve/`, { admin_notes: adminNotes }),

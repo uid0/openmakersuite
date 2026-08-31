@@ -429,3 +429,56 @@ describe('AdminDashboard — reorder-triage resilience (#457 R3)', () => {
     });
   });
 });
+
+
+/**
+ * The "Requests by Supplier" modal renders `total_estimated_cost` as a
+ * bulk-ordering total. It is the sum of the requests the server COULD price
+ * (op-9m2v), so where it could not price them all the screen has to say so —
+ * otherwise a purchaser reads a confident figure that silently omits a line.
+ */
+describe('AdminDashboard — requests by supplier', () => {
+  const group = (overrides: Record<string, unknown> = {}) => ({
+    supplier: 'Acme',
+    supplier_type: 'local',
+    requests: [],
+    item_count: 2,
+    total_estimated_cost: 10,
+    unpriced_item_count: 0,
+    estimated_total_is_partial: false,
+    ...overrides,
+  });
+
+  const openModal = async (groups: Record<string, unknown>[]) => {
+    mockReorderAPI.getPendingRequests.mockResolvedValue({ data: [] } as any);
+    mockReorderAPI.getBySupplier.mockResolvedValue({ data: groups } as any);
+
+    renderDashboard();
+    fireEvent.click(await screen.findByRole('button', { name: /view by supplier/i }));
+    return (await screen.findByText('Acme')).closest('.supplier-group')!;
+  };
+
+  it('says the total is partial when a request could not be priced', async () => {
+    const card = await openModal([
+      group({ unpriced_item_count: 1, estimated_total_is_partial: true }),
+    ]);
+
+    // The number itself is unchanged; the count beside it is what is new.
+    expect(card).toHaveTextContent('$10.00');
+    expect(card).toHaveTextContent('1 unpriced');
+  });
+
+  it('claims nothing extra when every request was priced — the invariant', async () => {
+    const card = await openModal([group()]);
+
+    expect(card).toHaveTextContent('$10.00');
+    expect(card).not.toHaveTextContent('unpriced');
+  });
+
+  it('treats a group of free requests as fully priced, not as unknown', async () => {
+    const card = await openModal([group({ total_estimated_cost: 0 })]);
+
+    expect(card).toHaveTextContent('$0.00');
+    expect(card).not.toHaveTextContent('unpriced');
+  });
+});

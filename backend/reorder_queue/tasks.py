@@ -244,7 +244,12 @@ def trigger_reorder_request_webhook(request_id: int) -> Dict[str, Any]:
             "requested_by": request.requested_by,
             "requested_at": request.requested_at.isoformat(),
             "request_notes": request.request_notes,
-            "estimated_cost": (float(request.estimated_cost) if request.estimated_cost else None),
+            # ``is not None``: a request for a donated item costs a real
+            # ``0.00``, and the falsy spelling announced it to Discord/Slack as
+            # having no estimated cost at all (op-9m2v).
+            "estimated_cost": (
+                None if request.estimated_cost is None else float(request.estimated_cost)
+            ),
             # Admin URL for viewing the request
             "admin_url": f"/admin/reorder_queue/reorderrequest/{request.id}/",
         },

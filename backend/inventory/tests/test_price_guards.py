@@ -58,6 +58,10 @@ REORDER_DATA_URL = "/api/reorders/purchase-orders/reorder_data/"
 PRICE_TRENDS_URL = "/api/reorders/reports/purchasing/price_trends/"
 STOCK_BY_CATEGORY_URL = "/api/inventory/reports/inventory/stock_by_category/"
 VALUE_BY_LOCATION_URL = "/api/inventory/reports/inventory/value_by_location/"
+INVENTORY_EXPORT_URL = "/api/inventory/reports/inventory/export/"
+PURCHASING_EXPORT_URL = "/api/reorders/reports/purchasing/export/"
+BY_SUPPLIER_URL = "/api/reorders/requests/by_supplier/"
+DASHBOARD_SUMMARY_URL = "/api/dashboard/inventory-summary/"
 
 
 def _item(name="Widget", **kwargs):
@@ -859,12 +863,16 @@ def test_a_kit_row_on_the_pad_never_prices_an_unknown_at_zero(api):
 
 
 def test_the_supplier_price_summary_counts_a_free_snapshot(api):
-    """BEFORE/AFTER. ``if ph.unit_cost is not None`` was already right here...
+    """CONTROL, not BEFORE/AFTER — these three figures did NOT move.
 
-    ...but the ``min``/``average`` it feeds is the place a dropped ``0.00``
-    would push every figure UP. Screen: the supplier detail's price-trend
-    summary. Pinned so the list comprehension cannot quietly become a
-    truthiness filter.
+    Base already spelled this filter ``if ph.unit_cost is not None``, so
+    ``average_unit_cost`` / ``min_unit_cost`` / ``max_unit_cost`` are identical
+    to base; only the per-record ``unit_cost`` / ``package_cost`` inside
+    ``trends`` moved (``null`` -> ``0.0`` for a recorded zero), and
+    ``test_the_supplier_price_trend_records_a_free_snapshot_as_zero`` owns
+    that. This pins the summary so the comprehension cannot quietly become a
+    truthiness filter, which is the change that WOULD push the average and the
+    minimum up. Screen: the supplier detail's price-trend summary.
     """
     item = _item("Donated")
     link = _link(item, "Charity", unit_cost="0.00")
@@ -877,6 +885,26 @@ def test_the_supplier_price_summary_counts_a_free_snapshot(api):
     assert summary["average_unit_cost"] == 2.0
 
 
+def test_the_supplier_price_trend_records_a_free_snapshot_as_zero(api):
+    """BEFORE/AFTER — the one figure on this payload that DID move.
+
+    Screen: the supplier detail's price-trend chart. Base spelled the
+    per-record value ``float(ph.unit_cost) if ph.unit_cost else None``, so a
+    snapshot recording ``0.00`` — a supplier that started donating an item —
+    arrived as ``null`` and the chart drew a gap where the drop to free was.
+    It is ``0.0`` now, and ``null`` is reserved for a snapshot that records no
+    price at all.
+    """
+    item = _item("Donated")
+    link = _link(item, "Charity", unit_cost="0.00")
+    _history(link, ["4.00", "0.00"])
+
+    response = api.get(f"/api/inventory/suppliers/{link.supplier.id}/")
+    assert response.status_code == 200
+    trend = next(t for t in response.data["price_trends"]["trends"] if t["item_name"] == "Donated")
+    assert [ph["unit_cost"] for ph in trend["price_history"]] == [4.0, 0.0]
+
+
 def test_the_supplier_price_summary_ignores_a_snapshot_with_no_price(api):
     """CONTROL. An unrecorded price is still not a data point."""
     item = _item("Mystery")
@@ -887,3 +915,337 @@ def test_the_supplier_price_summary_ignores_a_snapshot_with_no_price(api):
     summary = response.data["price_trends"]["summary"]
     assert summary["min_unit_cost"] == 4.0
     assert summary["average_unit_cost"] == 4.0
+
+
+# ── Round 2: the consumers the first sweep missed ────────────────────────────
+
+
+def test_the_dashboard_summary_survives_an_item_it_cannot_value(api):
+    """BEFORE/AFTER on the CLAIM; the NUMBER must not move.
+
+    Screen: the public ``/api/dashboard/inventory-summary/`` tile. Making
+    ``InventoryItem.total_value`` nullable left this ``sum()`` folding ``None``
+    into an int accumulator, so one unpriced active item turned the whole
+    endpoint into a 500 through its blanket ``except``. The total reproduces
+    base exactly — base contributed ``Decimal("0")`` for those items — and
+    ``items_without_price`` is what stops it reading as a complete valuation.
+    """
+    priced = _item("Priced", current_stock=10)
+    _link(priced, "Acme", unit_cost="2.00")
+    unpriced = _item("Unpriced", current_stock=10)
+    _link(unpriced, "Silent", unit_cost=None)
+    orphan = _item("Orphan", current_stock=10)
+
+    response = api.get(DASHBOARD_SUMMARY_URL)
+    assert response.status_code == 200
+    inventory = response.data["inventory"]
+    assert inventory["total_value"] == 20.0
+    assert inventory["items_without_price"] == 2
+    assert orphan.pk is not None
+
+
+def test_the_dashboard_summary_is_unchanged_when_everything_is_priced(api):
+    """CONTROL. The invariant, on the dashboard tile."""
+    priced = _item("Priced", current_stock=10)
+    _link(priced, "Acme", unit_cost="2.00")
+    free = _item("Donated", current_stock=10)
+    _link(free, "Charity", unit_cost="0.00")
+
+    response = api.get(DASHBOARD_SUMMARY_URL)
+    assert response.status_code == 200
+    inventory = response.data["inventory"]
+    assert inventory["total_value"] == 20.0
+    assert inventory["items_without_price"] == 0
+
+
+def _csv_rows(response):
+    import csv
+    import io
+
+    body = b"".join(response.streaming_content) if response.streaming else response.content
+    return list(csv.DictReader(io.StringIO(body.decode())))
+
+
+def test_the_price_trend_export_leaves_an_unknown_price_blank(api):
+    """BEFORE/AFTER. ``f"{None:.2f}"`` raised — an unhandled 500 on the export.
+
+    Payload: ``GET /api/reorders/reports/purchasing/export/?type=price_trends``.
+    A blank cell sums as nothing AND reads as nothing, which is the truth;
+    "0.00" would make a spreadsheet count the unknowns as free. The same rule
+    ``csvExport.ts``'s ``reportMoney`` follows on the browser-side export.
+    """
+    item = _item("Mystery")
+    link = _link(item, "Acme", unit_cost=None)
+    _history(link, [None, None])
+
+    response = api.get(PURCHASING_EXPORT_URL, {"type": "price_trends"})
+    assert response.status_code == 200
+    row = next(r for r in _csv_rows(response) if r["item_name"] == "Mystery")
+    assert row["min_unit_cost"] == ""
+    assert row["max_unit_cost"] == ""
+    assert row["latest_unit_cost"] == ""
+
+
+def test_the_price_trend_export_writes_a_real_zero_for_a_free_vendor(api):
+    """CONTROL. A recorded 0.00 is a price and must not export as a blank."""
+    item = _item("Donated")
+    link = _link(item, "Charity", unit_cost="0.00")
+    _history(link, ["0.00", "0.00"])
+
+    response = api.get(PURCHASING_EXPORT_URL, {"type": "price_trends"})
+    row = next(r for r in _csv_rows(response) if r["item_name"] == "Donated")
+    assert row["min_unit_cost"] == "0.00"
+    assert row["latest_unit_cost"] == "0.00"
+    # The percentage IS undefined here — there is no base to divide by — so a
+    # blank is the honest cell for it, unlike the prices beside it.
+    assert row["price_change_percentage"] == ""
+
+
+def test_the_price_trend_export_writes_a_real_zero_percent_change(api):
+    """CONTROL on the second half of the rule, one column along.
+
+    A price that did not move is a 0.00% change and a fact; the falsy guard
+    ``if row["price_change_percentage"]`` exported it as the same blank an
+    INCOMPUTABLE percentage gets, collapsing the two (op-9m2v).
+    """
+    item = _item("Steady")
+    link = _link(item, "Acme", unit_cost="4.00")
+    _history(link, ["4.00", "4.00"])
+
+    response = api.get(PURCHASING_EXPORT_URL, {"type": "price_trends"})
+    row = next(r for r in _csv_rows(response) if r["item_name"] == "Steady")
+    assert row["price_change_percentage"] == "0.00%"
+
+
+def test_the_price_trend_export_is_unchanged_for_ordinary_prices(api):
+    """CONTROL. The invariant, on the export."""
+    item = _item("Priced")
+    link = _link(item, "Acme", unit_cost="5.00")
+    _history(link, ["4.00", "5.00"])
+
+    response = api.get(PURCHASING_EXPORT_URL, {"type": "price_trends"})
+    row = next(r for r in _csv_rows(response) if r["item_name"] == "Priced")
+    assert row["min_unit_cost"] == "4.00"
+    assert row["max_unit_cost"] == "5.00"
+    assert row["latest_unit_cost"] == "5.00"
+    assert row["price_change_percentage"] == "25.00%"
+
+
+def test_the_stock_value_export_carries_the_count_that_qualifies_the_total(api):
+    """BEFORE/AFTER on the CLAIM, not on the number.
+
+    Payload: ``GET /api/inventory/reports/inventory/export/?type=stock_by_category``.
+    The JSON payload, the UI table and the browser-side export all carry
+    ``items_without_price``; the server-side CSV — the surface most likely to
+    be pasted into a spreadsheet and summed — did not.
+    """
+    priced = _item("Priced", current_stock=10)
+    _link(priced, "Acme", unit_cost="2.00")
+    unpriced = _item("Unpriced", current_stock=10)
+    _link(unpriced, "Silent", unit_cost=None)
+
+    response = api.get(INVENTORY_EXPORT_URL, {"type": "stock_by_category"})
+    assert response.status_code == 200
+    row = next(r for r in _csv_rows(response) if r["category_name"] == "Uncategorized")
+    assert row["total_value"] == "20.00"
+    assert row["items_without_price"] == "1"
+
+
+def test_the_location_value_export_carries_the_count_too(api):
+    """BEFORE/AFTER on the CLAIM. The location twin — its own CSV branch."""
+    priced = _item("Priced", current_stock=10)
+    _link(priced, "Acme", unit_cost="2.00")
+    unpriced = _item("Unpriced", current_stock=10)
+    _link(unpriced, "Silent", unit_cost=None)
+
+    response = api.get(INVENTORY_EXPORT_URL, {"type": "value_by_location"})
+    assert response.status_code == 200
+    row = next(r for r in _csv_rows(response) if r["location_name"] == "No Location")
+    assert row["total_value"] == "20.00"
+    assert row["items_without_price"] == "1"
+
+
+def test_the_by_supplier_total_says_how_many_requests_it_could_not_price(api):
+    """BEFORE/AFTER on the CLAIM, not on the number.
+
+    Screen: the admin dashboard's "Requests by Supplier" modal, which renders
+    ``total_estimated_cost.toFixed(2)`` as a bulk-ordering total. An unpriced
+    request contributed nothing and the payload said nothing about it — the
+    defect ``PriceRollup`` exists for. The number is unchanged.
+    """
+    from reorder_queue.models import ReorderRequest
+
+    priced = _item("Priced")
+    _link(priced, "Acme", unit_cost="2.00", is_primary=True)
+    unpriced = _item("Unpriced")
+    _link(unpriced, "Acme Two", unit_cost=None, is_primary=True)
+    ReorderRequest.objects.create(item=_fresh(priced), quantity=5)
+    ReorderRequest.objects.create(item=_fresh(unpriced), quantity=5)
+
+    response = api.get(BY_SUPPLIER_URL)
+    assert response.status_code == 200
+    priced_group = next(g for g in response.data if g["supplier"] == "Acme")
+    unpriced_group = next(g for g in response.data if g["supplier"] == "Acme Two")
+
+    assert priced_group["total_estimated_cost"] == 10.0
+    assert priced_group["unpriced_item_count"] == 0
+    assert priced_group["estimated_total_is_partial"] is False
+
+    assert unpriced_group["total_estimated_cost"] == 0
+    assert unpriced_group["unpriced_item_count"] == 1
+    assert unpriced_group["estimated_total_is_partial"] is True
+
+
+def test_the_by_supplier_total_counts_a_free_request_as_priced(api):
+    """CONTROL. A vendor that charges nothing is PRICED, so nothing is missing."""
+    from reorder_queue.models import ReorderRequest
+
+    free = _item("Donated")
+    _link(free, "Charity", unit_cost="0.00", is_primary=True)
+    ReorderRequest.objects.create(item=_fresh(free), quantity=5)
+
+    response = api.get(BY_SUPPLIER_URL)
+    group = next(g for g in response.data if g["supplier"] == "Charity")
+    assert group["total_estimated_cost"] == 0
+    assert group["unpriced_item_count"] == 0
+    assert group["estimated_total_is_partial"] is False
+
+
+def test_a_price_rise_from_free_is_not_reported_as_no_change(api):
+    """BEFORE/AFTER. The serializer mapped an UNDEFINED percentage onto ``0``.
+
+    Screen: the item detail's ``price_trend_summary``. A supplier that stops
+    donating an item leaves the percentage undefined — there is no base to
+    divide by — and the payload said ``{"trend": "no_change",
+    "change_percentage": 0}``: a confident real number for arithmetic that has
+    no answer. The purchasing price-trend endpoint already answers ``null`` for
+    the same pair.
+    """
+    item = _item("Donated")
+    link = _link(item, "Charity", unit_cost="4.00", is_primary=True)
+    _history(link, ["0.00", "4.00"])
+
+    response = api.get(f"/api/inventory/items/{item.id}/")
+    assert response.status_code == 200
+    summary = response.data["price_trend_summary"]
+    assert summary["change_percentage"] is None
+    assert summary["trend"] == "no_data"
+
+
+def test_a_price_that_did_not_move_is_still_reported_as_stable(api):
+    """CONTROL. A REAL 0% change is a fact and must keep its number."""
+    item = _item("Priced")
+    link = _link(item, "Acme", unit_cost="4.00", is_primary=True)
+    _history(link, ["4.00", "4.00"])
+
+    response = api.get(f"/api/inventory/items/{item.id}/")
+    summary = response.data["price_trend_summary"]
+    assert summary["trend"] == "stable"
+    assert summary["change_percentage"] == Decimal("0.00")
+
+
+def test_an_ordinary_price_rise_is_reported_unchanged(api):
+    """CONTROL. The invariant, on the item-detail trend summary."""
+    item = _item("Priced")
+    link = _link(item, "Acme", unit_cost="5.00", is_primary=True)
+    _history(link, ["4.00", "5.00"])
+
+    response = api.get(f"/api/inventory/items/{item.id}/")
+    summary = response.data["price_trend_summary"]
+    assert summary["trend"] == "increasing"
+    assert summary["change_percentage"] == Decimal("25.00")
+
+
+def _webhook_payload_for(item, quantity=6):
+    """The outbound reorder webhook body for a fresh request against ``item``."""
+    from unittest.mock import patch
+
+    from reorder_queue.models import ReorderRequest
+    from reorder_queue.tasks import trigger_reorder_request_webhook
+
+    req = ReorderRequest.objects.create(item=_fresh(item), quantity=quantity)
+    with patch("reorder_queue.tasks.send_webhook_notification") as webhook:
+        trigger_reorder_request_webhook(req.id)
+    call = webhook.run.call_args or webhook.delay.call_args
+    assert call is not None, "the webhook task dispatched neither eagerly nor async"
+    return call[0][1]
+
+
+def test_the_reorder_webhook_announces_a_free_request_as_costing_zero():
+    """BEFORE/AFTER on the CLAIM. Payload: the outbound reorder webhook.
+
+    Discord/Slack were told a request for a donated item had no estimated cost
+    at all, because the payload re-collapsed the real ``Decimal("0.00")`` with
+    ``if request.estimated_cost``.
+    """
+    item = _item("Donated")
+    _link(item, "Charity", unit_cost="0.00", is_primary=True)
+    assert _webhook_payload_for(item)["data"]["estimated_cost"] == 0.0
+
+
+def test_the_reorder_webhook_still_sends_null_for_an_unpriced_request():
+    """CONTROL. A price nobody recorded is still an absence."""
+    item = _item("Unpriced")
+    _link(item, "Acme", unit_cost=None, is_primary=True)
+    assert _webhook_payload_for(item)["data"]["estimated_cost"] is None
+
+
+def test_the_admin_renders_a_free_reorder_request_as_a_real_zero():
+    """BEFORE/AFTER on the CLAIM. Screen: the ReorderRequest admin changelist.
+
+    The em dash means "not known". A request for a donated item is known, and
+    it costs $0.00.
+    """
+    from django.contrib.admin.sites import AdminSite
+
+    from reorder_queue.admin import ReorderRequestAdmin
+    from reorder_queue.models import ReorderRequest
+
+    item = _item("Donated")
+    _link(item, "Charity", unit_cost="0.00", is_primary=True)
+    req = ReorderRequest.objects.create(item=_fresh(item), quantity=6)
+
+    admin = ReorderRequestAdmin(ReorderRequest, AdminSite())
+    assert admin.estimated_cost_display(req) == "$0.00"
+
+
+def test_the_admin_still_dashes_a_reorder_request_it_cannot_cost():
+    """CONTROL. The dash is reserved for the genuine absence."""
+    from django.contrib.admin.sites import AdminSite
+
+    from reorder_queue.admin import ReorderRequestAdmin
+    from reorder_queue.models import ReorderRequest
+
+    item = _item("Unpriced")
+    _link(item, "Acme", unit_cost=None, is_primary=True)
+    req = ReorderRequest.objects.create(item=_fresh(item), quantity=6)
+
+    admin = ReorderRequestAdmin(ReorderRequest, AdminSite())
+    assert admin.estimated_cost_display(req) == "-"
+
+
+def test_the_admin_renders_a_comped_order_line_as_a_real_zero():
+    """BEFORE/AFTER on the CLAIM. Screen: the PurchaseOrderItem admin inline.
+
+    ``PurchaseOrderItem.estimated_cost`` is NON-nullable and returns
+    ``Decimal("0.00")`` for a free line, so the dash there has always meant the
+    wrong thing — the reader kept the derivation from reaching the surface.
+    """
+    from django.contrib.admin.sites import AdminSite
+
+    from reorder_queue.admin import PurchaseOrderItemAdmin
+
+    item = _item("Donated")
+    link = _link(item, "Charity", unit_cost="0.00", is_primary=True)
+    user = User.objects.create_user(username="po-admin", password="pw")
+    order = _draft_for(link.supplier, user)
+    line = PurchaseOrderItem.objects.create(
+        purchase_order=order,
+        item_supplier=link,
+        quantity_ordered=4,
+        unit_cost_ordered=Decimal("0.0000"),
+        order_in_packages=1,
+    )
+
+    admin = PurchaseOrderItemAdmin(PurchaseOrderItem, AdminSite())
+    assert admin.estimated_cost_display(line) == "$0.00"

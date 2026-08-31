@@ -12,7 +12,12 @@ import { useForm } from '@mantine/form';
 import { modals } from '@mantine/modals';
 import React, { useCallback, useEffect, useState } from 'react';
 import WorkspacePage from '../components/landing/WorkspacePage';
-import { assetsAPI, inventoryAPI, reorderAPI } from '../services/api';
+import {
+  ReorderRequestsBySupplierGroup,
+  assetsAPI,
+  inventoryAPI,
+  reorderAPI,
+} from '../services/api';
 import '../styles/AdminDashboard.css';
 import { Asset, InventoryItem, ReorderRequest } from '../types';
 import { formatDateOnly, parseYmd } from '../utils/dates';
@@ -83,7 +88,8 @@ const AdminDashboard: React.FC = () => {
   const [requests, setRequests] = useState<ReorderRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'pending' | 'all'>('pending');
-  const [supplierGroups, setSupplierGroups] = useState<any>(null);
+  const [supplierGroups, setSupplierGroups] =
+    useState<ReorderRequestsBySupplierGroup[] | null>(null);
   const [notCheckedInAssets, setNotCheckedInAssets] = useState<Asset[]>([]);
   const [loadingAssets, setLoadingAssets] = useState(false);
   const [assetStatusFilter, setAssetStatusFilter] = useState<string>('all');
@@ -559,15 +565,24 @@ const AdminDashboard: React.FC = () => {
               </button>
             </div>
             <div className="modal-body">
-              {supplierGroups.map((group: any) => (
+              {supplierGroups.map((group) => (
                 <div key={group.supplier} className="supplier-group">
                   <h3>{group.supplier}</h3>
+                  {/*
+                    The total is the sum of the requests the server COULD
+                    price. When it could not price them all, say so beside the
+                    number rather than letting a bulk-ordering figure read as
+                    complete while it silently omits a line (op-9m2v).
+                  */}
                   <p>
                     {group.item_count} items - Est. Total: $
                     {group.total_estimated_cost.toFixed(2)}
+                    {(group.unpriced_item_count ?? 0) > 0
+                      ? ` + ${group.unpriced_item_count} unpriced`
+                      : ''}
                   </p>
                   <ul>
-                    {group.requests.map((req: any) => (
+                    {group.requests.map((req) => (
                       <li key={req.id}>
                         {req.item_details.name} - Qty: {req.quantity}
                         {req.item_details.supplier_url && (

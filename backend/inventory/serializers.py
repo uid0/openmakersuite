@@ -477,8 +477,14 @@ class SupplierDetailSerializer(SupplierSerializer):
 
             # Calculate summary statistics. Every snapshot that RECORDS a
             # price counts, ``0.00`` included — the summary is what this
-            # supplier has charged, and dropping the free rows would push the
-            # average and the minimum up (op-9m2v).
+            # supplier has charged. These three figures are UNCHANGED from
+            # base, which already spelled this filter
+            # ``if ph.unit_cost is not None``; only the per-record
+            # ``unit_cost`` / ``package_cost`` inside ``trends`` above moved
+            # (``null`` -> ``0.0`` for a recorded zero). Rewritten through the
+            # derivation and pinned so the filter cannot quietly become a
+            # truthiness one, which WOULD push the average and the minimum up
+            # (op-9m2v).
             unit_costs = [
                 float(price.amount)
                 for price in (unit_price_of(ph) for ph in price_history)
@@ -1015,7 +1021,16 @@ class InventoryItemDetailSerializer(InventoryItemSerializer):
         if unit_price_of(latest).is_known and unit_price_of(previous).is_known:
             change_percentage = latest.price_change_percentage
             if change_percentage is None:
-                return {"trend": "no_change", "change_percentage": 0}
+                # No percentage CAN be computed — the prior snapshot is 0.00,
+                # so there is no base to divide by (or the two share a
+                # ``recorded_at`` and there is no prior row). That is not the
+                # same claim as "the price did not move", which arrives here as
+                # a real ``Decimal("0")`` and lands on ``stable`` below. Base
+                # answered ``{"trend": "no_change", "change_percentage": 0}``
+                # and presented an undefined number as a confident zero — the
+                # rule this branch enforces everywhere else, and the answer the
+                # purchasing price-trend endpoint already gives (op-9m2v).
+                return {"trend": "no_data", "change_percentage": None}
             elif change_percentage > 0:
                 trend = "increasing"
             elif change_percentage < 0:

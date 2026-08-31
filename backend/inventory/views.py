@@ -4548,6 +4548,13 @@ class InventoryReportViewSet(viewsets.ViewSet):
                     "total_items",
                     "total_stock",
                     "total_value",
+                    # The count that qualifies the total beside it, carried on
+                    # the CSV as well as on the JSON payload, the UI table and
+                    # the browser-side export in ``csvExport.ts`` (op-9m2v).
+                    # ``total_value`` is ``SUM(stock * COALESCE(unit_cost, 0))``
+                    # and reads as a complete valuation; a spreadsheet is the
+                    # surface most likely to sum it.
+                    "items_without_price",
                     "low_stock_count",
                 ],
             )
@@ -4559,6 +4566,7 @@ class InventoryReportViewSet(viewsets.ViewSet):
                         "total_items": row["total_items"],
                         "total_stock": row["total_stock"],
                         "total_value": f"{row['total_value']:.2f}",
+                        "items_without_price": row["items_without_price"],
                         "low_stock_count": row["low_stock_count"],
                     }
                 )
@@ -4600,7 +4608,15 @@ class InventoryReportViewSet(viewsets.ViewSet):
 
             writer = csv.DictWriter(
                 response_obj,
-                fieldnames=["location_name", "total_items", "total_stock", "total_value"],
+                fieldnames=[
+                    "location_name",
+                    "total_items",
+                    "total_stock",
+                    "total_value",
+                    # See ``stock_by_category`` above — same partial total,
+                    # same honesty count.
+                    "items_without_price",
+                ],
             )
             writer.writeheader()
             for row in data:
@@ -4610,6 +4626,7 @@ class InventoryReportViewSet(viewsets.ViewSet):
                         "total_items": row["total_items"],
                         "total_stock": row["total_stock"],
                         "total_value": f"{row['total_value']:.2f}",
+                        "items_without_price": row["items_without_price"],
                     }
                 )
 

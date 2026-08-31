@@ -101,7 +101,11 @@ def _lead_time_days_by_item(items: list[InventoryItem]) -> dict[Any, Optional[fl
 
     That is a KNOWN and ACCEPTED difference, and it is PERMANENT rather than
     deferred: AGENTS.md, under "The alert-suppression class", says **do NOT**
-    route this through the supplier derivation, and a mutation test pins it.
+    route this through the supplier derivation. Two behavioural tests in
+    ``inventory/tests/test_alert_suppression.py`` pin it and both fail if the
+    orderability filter is reintroduced here:
+    ``test_the_serialized_forecast_keeps_a_dead_vendors_lead_time`` and
+    ``test_an_item_whose_only_supplier_died_reaches_the_report_and_the_digest``.
     ``average_lead_time`` is non-nullable with a default, so ANY link supplies an
     estimate — a discontinued one included — and filtering here would leave an
     item whose only vendor is dead with no lead time at all, dropping it off the

@@ -123,8 +123,12 @@ lead time and are NOT on this derivation, permanently. Both read EVERY link,
 inactive and discontinued included, because "how long does a replacement take to
 arrive" is answered by whoever last shipped one — and routing them through the
 orderability filter drops a dead-vendor item off the demand-forecast report and
-the nightly digest entirely. op-c1ke pins that with a mutation test; see "The
-alert-suppression class" below.
+the nightly digest entirely. op-c1ke pins that with two behavioural tests in
+`inventory/tests/test_alert_suppression.py` —
+`test_the_serialized_forecast_keeps_a_dead_vendors_lead_time` and
+`test_an_item_whose_only_supplier_died_reaches_the_report_and_the_digest`, both
+of which fail if the filter is reintroduced; see "The alert-suppression class"
+below.
 
 The rule is three things, in this order:
 
@@ -235,6 +239,15 @@ derivation or is added to that allowlist with a reason. The allowlist holds only
 the column's own definition, verbatim copies (`PriceHistory`, the payload
 fields) and the write path — never a derivation.
 
+**The gate is BACKEND-ONLY.** It walks `backend/` and nothing else, so a
+frontend reader of `quantity_per_package` is NOT covered and does not fail the
+build. That is precisely how `ScanPage.tsx`'s reorder form kept multiplying by a
+recorded 0 after the backend readers were all moved onto the derivation; it was
+found by review, not by the gate, and is fixed in the page itself. Extending the
+scan to frontend sources is filed as separate follow-up. The "a reader added
+later fails the build" criterion holds for backend readers only — read it that
+way, and do not assume a green suite says anything about `frontend/`.
+
 ### The alert-suppression class: CLOSED (op-c1ke)
 
 A value made honestly `None` gets collapsed by downstream arithmetic or a
@@ -284,8 +297,11 @@ alert, which is exactly op-2rsp round 4's failure: flooding the surface until
 people ignore it suppresses alerts too. `NO_SUPPLIERS` (a data gap) and
 `NONE_ORDERABLE` (unbuyable) point in OPPOSITE directions and must stay apart
 everywhere. Do NOT route `_lead_time_days_by_item` through the supplier
-derivation — a mutation test pins that; it is what dropped a dead-vendor item
-off the demand-forecast report and the nightly digest in round 5.
+derivation — `test_the_serialized_forecast_keeps_a_dead_vendors_lead_time` and
+`test_an_item_whose_only_supplier_died_reaches_the_report_and_the_digest` in
+`inventory/tests/test_alert_suppression.py` pin that, and both fail if the
+filter comes back; it is what dropped a dead-vendor item off the
+demand-forecast report and the nightly digest in round 5.
 
 `current_cases` is nullable on the wire. Every consumer moved in the same commit:
 `InventoryItemSerializer` (`allow_null`), the three web sites that called

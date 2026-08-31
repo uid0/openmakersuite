@@ -13,6 +13,15 @@ READS of the column. A new one anywhere — a new module, or one more in a modul
 already listed — fails until it either goes through the derivation or is added
 here deliberately, with a reason.
 
+**Scope: ``backend/`` ONLY.** This walk stops at the Python tree, so a FRONTEND
+reader of the column is not gated and adding one does not fail the build. The
+criterion "a reader added later that bypasses the derivation fails the build" is
+therefore true of backend readers and no others. It is not a theoretical gap:
+``frontend/src/pages/ScanPage.tsx``'s reorder form went on multiplying by a
+recorded ``0`` after every backend reader had moved onto the derivation, and
+review caught it rather than this test. Extending the scan to frontend sources
+is filed as separate follow-up work.
+
 **What counts as a read**, and why the set is wider than attribute access. A
 derivation can reach this column from Python or from SQL, and ``low_stock_q``
 proves this codebase does write SQL twins of exactly that kind. So the scan

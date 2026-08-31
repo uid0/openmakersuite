@@ -318,6 +318,98 @@ describe('ScanPage', () => {
     });
   });
 
+  // --- A pack size of 0 is not a quantity (op-c1ke) -----------------------
+  // `quantity_per_package: 0` is `pack_size.py`'s PACK_SIZE_RECORDED_ZERO: a
+  // box holding no units. The form used to multiply by it, so asking for 3
+  // packages POSTed a 0-unit request and silently discarded the 3.
+
+  const zeroPackSupplier = {
+    id: 7,
+    supplier_name: 'Zero Pack Vendor',
+    unit_cost: '1.25',
+    package_cost: '0.00',
+    quantity_per_package: 0,
+    is_active: true,
+    average_lead_time: 7,
+  };
+
+  const renderWithSupplier = async (supplier: Record<string, unknown>) => {
+    localStorage.setItem('token', 'test-token');
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({ data: mockItem });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [supplier] },
+    });
+    (api.reorderAPI.createRequest as jest.Mock).mockResolvedValue({
+      data: { id: 1, item: mockItem.id },
+    });
+    await renderWithRouter();
+    await screen.findByText('Test Widget');
+  };
+
+  test('a recorded pack size of 0 is shown as unknown, never as the number 0', async () => {
+    await renderWithSupplier(zeroPackSupplier);
+
+    // Neither the supplier picker nor the package details may print a
+    // confident "0" beside a refusal that says the size is unknown.
+    expect(screen.getByRole('option', { name: /case size unknown/i })).toBeInTheDocument();
+    expect(screen.queryByText(/0 per package/)).not.toBeInTheDocument();
+    expect(screen.getByText(/units per package/i).parentElement).toHaveTextContent(
+      /case size unknown/i
+    );
+  });
+
+  test('the refusal names both the cause and the remedy', async () => {
+    await renderWithSupplier(zeroPackSupplier);
+
+    const refusal = screen.getByRole('alert');
+    // Cause: the row records a pack size of 0 — a box holding no units.
+    expect(refusal).toHaveTextContent(/records a pack size of 0/i);
+    expect(refusal).toHaveTextContent(/box holding no units/i);
+    // Remedy: exactly what pack_size.py prescribes for PACK_SIZE_RECORDED_ZERO.
+    expect(refusal).toHaveTextContent(/correct "Quantity per Package"/i);
+    expect(refusal).toHaveTextContent(/choose a different supplier that records one/i);
+  });
+
+  test('an unknown pack size cannot be submitted and posts nothing', async () => {
+    await renderWithSupplier(zeroPackSupplier);
+
+    const packagesInput = screen.getByLabelText(/number of packages/i);
+    fireEvent.change(packagesInput, { target: { value: '3' } });
+
+    expect(screen.queryByRole('button', { name: /request \d+ units/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /cannot request/i })).toBeDisabled();
+
+    // Submitting the form directly bypasses the disabled button, so the
+    // handler's own guard is what must refuse. The operator's 3 packages must
+    // never become a 0-unit request.
+    fireEvent.submit(screen.getByRole('button', { name: /cannot request/i }).closest('form')!);
+
+    await waitFor(() => {
+      expect(api.reorderAPI.createRequest).not.toHaveBeenCalled();
+    });
+  });
+
+  test('control: a known pack size still computes and submits unchanged', async () => {
+    await renderWithSupplier({ ...zeroPackSupplier, quantity_per_package: 12 });
+
+    const packagesInput = screen.getByLabelText(/number of packages/i);
+    fireEvent.change(packagesInput, { target: { value: '3' } });
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /request 36 units/i }));
+
+    await waitFor(() => {
+      expect(api.reorderAPI.createRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          item: mockItem.id,
+          quantity: 36,
+          package_quantity: 3,
+          preferred_supplier: 7,
+        })
+      );
+    });
+  });
+
   test('auto-submits reorder for non-logged users', async () => {
     // Don't set token to simulate non-logged user
     const itemWithoutPending = { ...mockItem, has_pending_reorder: false };

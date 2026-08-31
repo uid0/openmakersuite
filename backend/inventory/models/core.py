@@ -621,7 +621,9 @@ class InventoryItem(OwnableModel):
         * ``count_mode=each`` — unchanged, and it is what every pre-existing
           item is: case-based items compare ``current_cases`` to
           ``minimum_cases``, everything else ``current_stock`` to
-          ``minimum_stock``, both in base units.
+          ``minimum_stock``, both in base units. A case-based item whose case
+          size is NOT KNOWN has no ``current_cases`` to compare, and is judged
+          in base units instead — see the comment at that branch below.
         * ``by_level`` / ``open_closed`` — whole packs of ``count_level``
           against ``minimum_stock``, which for these modes is a threshold in the
           item's COUNT unit (cases/reams/sealed packs). ``count_mode`` is the

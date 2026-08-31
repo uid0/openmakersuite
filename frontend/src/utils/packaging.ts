@@ -7,9 +7,11 @@
  * packs?" predicate every mode-aware surface branches on.
  *
  * The backend stays the authority — anything these helpers let through is still
- * validated server-side, and `on_hand_display` / `reorder_display` text is
- * rendered by the server. Nothing here converts stock: `current_stock` remains
- * the canonical base-unit count.
+ * validated server-side, and `on_hand_display` / `reorder_display` are the
+ * server's own renderings, which the helpers below prefer where they apply.
+ * Both fields are optional on the wire, so those helpers also carry a client
+ * twin of the server's branch for payloads that omit them. Nothing here
+ * converts stock: `current_stock` remains the canonical base-unit count.
  */
 import { InventoryItem, ItemCountMode, PackagingLevel } from '../types';
 

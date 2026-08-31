@@ -302,10 +302,14 @@ class TestListMetricsQueryBudget:
         # ...and adds the SAME number of queries for 6 items as for 2 — batched,
         # not per-row (an N+1 would make the 6-item delta larger).
         assert metrics_6 - base_6 == metrics_2 - base_2
-        # ...and that constant is exactly the six grouped aggregates the batch
+        # ...and that constant is exactly the five grouped aggregates the batch
         # helper runs: on-order, in-transit, committed-from-usage,
-        # committed-from-template, last PO cost, primary supplier.
-        assert metrics_6 - base_6 == 6
+        # committed-from-template, last PO cost. The supplier selection adds a
+        # SIXTH only when it has to: this list already prefetches
+        # ``item_suppliers__supplier``, and ``select_suppliers_for`` resolves
+        # prefetched items from that cache rather than re-reading identical rows
+        # (op-2rsp). It was six before that.
+        assert metrics_6 - base_6 == 5
 
     def test_default_path_is_unaffected(self, api_client):
         """No param -> no metrics work: same query count for 2 vs 6 items' overhead."""

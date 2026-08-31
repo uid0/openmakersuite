@@ -556,16 +556,52 @@ class InventoryItem(OwnableModel):
                 {"count_level": "Count level must be one of this item's packaging levels."}
             )
 
+    @cached_property
+    def _case_pack_size(self) -> Optional[int]:
+        """Units per package from the FIRST link, or ``None`` if it has none.
+
+        Reads ``item_suppliers`` directly rather than
+        :attr:`primary_item_supplier`, because this asks how many units are in
+        a box already sitting on the shelf — which has nothing to do with who
+        we would buy the next one from. Routing it through the
+        orderability-filtered helper changed a low-stock flag (op-2rsp), and
+        this branch deliberately changes no flag: a dead vendor's recorded pack
+        size still describes the box on the shelf.
+
+        Rows arrive in ``Meta.ordering``, and ONLY the first is consulted —
+        byte-for-byte the row the pre-op-2rsp ``primary_item_supplier``
+        returned. A first row recording ``quantity_per_package`` of 0 therefore
+        yields ``None`` and :attr:`current_cases` falls back to raw base units
+        rather than scanning on to a later link. That fallback is wrong — it
+        reads base units as a case count — but it is BASE's wrongness, and
+        skipping past the zero row would newly flag an item base did not flag.
+        Routed as its own follow-up rather than fixed under a no-flag-change
+        invariant.
+
+        Memoised, so the readers that chain — ``reorder_display`` asks for
+        ``current_cases`` and then ``needs_reorder``, which asks again — cost
+        one query per instance.
+
+        NOTE: pack size still has several readers with no single owner
+        (:attr:`quantity_per_package`, ``item_metrics``'s ``case_size``,
+        ``bridge_case_reorder_to_packaging``), which resolve it through the
+        supplier derivation instead. Giving it ONE named derivation the way
+        "which supplier" got one is known and filed as its own work.
+        """
+        first = next(iter(self.item_suppliers.all()), None)
+        if first is None or not first.quantity_per_package or first.quantity_per_package <= 0:
+            return None
+        return first.quantity_per_package
+
     @property
     def current_cases(self) -> float:
         """Calculate current number of cases/packages in stock."""
         if not self.use_case_based_reorder:
             return 0
 
-        # Get quantity per package from primary supplier
-        primary_supplier = self.primary_item_supplier
-        if primary_supplier and primary_supplier.quantity_per_package > 0:
-            return self.current_stock / primary_supplier.quantity_per_package
+        pack_size = self._case_pack_size
+        if pack_size is not None:
+            return self.current_stock / pack_size
 
         # Fallback to 1 unit per package if no supplier info
         return self.current_stock
@@ -739,15 +775,30 @@ class InventoryItem(OwnableModel):
 
     @cached_property
     def primary_item_supplier(self) -> Optional["ItemSupplier"]:
-        """Preferred supplier relationship for this item — prefetch-friendly.
+        """The supplier relationship to BUY this item through, or ``None``.
 
         Delegates to the named :mod:`inventory.services.supplier_selection`
         service (issue #882) so the selection lives in one place rather than a
-        hidden model query. The chosen row is byte-for-byte the one the previous
-        ``filter(is_primary=True).first() or first()`` returned — the supplier
-        flagged primary with the lowest unit cost, or the cheapest supplier when
-        none is primary — because the service resolves it from
-        ``item_suppliers``' ``Meta.ordering`` (``["-is_primary", "unit_cost"]``).
+        hidden model query. That service applies three things in strict order
+        (op-2rsp):
+
+        1. **Eligibility.** Only ORDERABLE links are candidates — ``is_active``
+           and not ``is_discontinued``. This is a precondition, not a tiebreak.
+        2. **The gate.** An orderable link an operator flagged ``is_primary``
+           wins OUTRIGHT and is never scored.
+        3. **The score.** Otherwise the candidates are ranked on cost AND lead
+           time together, and the best-scoring one wins. It is emphatically NOT
+           "the cheapest": a modest premium that buys a large lead-time saving
+           wins here. ``Meta.ordering`` only supplies the order the candidates
+           arrive in, which settles a tie between otherwise identical rows.
+
+        ``None`` therefore means "no supplier you can buy from", which covers
+        both "no suppliers at all" and "every supplier link is dead". A caller
+        that has to explain that to an operator should ask
+        :func:`~inventory.services.supplier_selection.select_supplier` instead
+        and read the reason; the seven flat compat properties below cannot, so
+        they simply go ``None`` as they already do for an item with no
+        suppliers.
 
         The result rides an ``item_suppliers`` prefetch when the caller set one
         up (the list/detail/reorder read paths all do), so serialising the seven

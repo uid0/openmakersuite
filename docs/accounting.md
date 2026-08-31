@@ -151,7 +151,10 @@ job is reopened.
 
 ### The no-cost warning
 
-`item.unit_cost` is derived from the primary supplier and can be `None`. If a
+`item.unit_cost` is derived from the supplier the item would actually be bought
+through — never an inactive or discontinued link — so it is `None` both for an
+item with no suppliers and for one whose every supplier link is dead. The
+derivation itself is owned by `inventory/services/supplier_selection.py`. If a
 committee is given but there is **no cost on file** (`total_cost` null or `≤ 0`),
 the committee is still recorded on the `UsageLog` (with `unit_cost = None`) but
 **nothing is posted** to the ledger, and the response carries a `warning`:

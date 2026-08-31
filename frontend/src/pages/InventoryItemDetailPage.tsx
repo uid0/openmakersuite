@@ -1048,32 +1048,46 @@ const InventoryItemDetailPage: React.FC = () => {
                     </Text>
                   ) : (
                     <>
-                      {/* With nothing flagged `is_primary`, no row has earned a
-                          Primary badge — say that outright rather than implying
-                          a choice nobody made. The note is deliberately bare on
-                          two counts.
+                      {/* Two notes, and which one shows is decided by whether
+                          anything on this table can actually be bought — not by
+                          whether a Primary badge is on screen. "Nobody flagged
+                          one" and "nothing here is orderable" are different
+                          facts needing different actions from the operator, and
+                          collapsing them into one line is the mistake this
+                          replaces.
 
-                          It names NO selection mechanism, because two exist and
-                          they disagree: the order pad groups under
-                          `primary_item_supplier`, which with nothing flagged is
-                          the cheapest link regardless of whether you can buy
-                          from it, while the recommendations endpoint first drops
-                          inactive and discontinued links and then scores cost
-                          alongside lead time and other factors. Any sentence
-                          naming one is false on the other.
+                          The selection sentence names its mechanism, and must
+                          keep matching it. EVERY backend path now resolves the
+                          supplier through
+                          `inventory.services.supplier_selection`: skip the
+                          links you cannot order through, honour a flagged
+                          primary outright, and otherwise score the rest on
+                          price AND lead time. "Cheapest" would be wrong — the
+                          fallback weighs speed too, so the chosen row is not
+                          always the one with the lowest number in a column on
+                          this very table, and a note claiming otherwise would
+                          be contradicted on screen.
 
-                          It names NO remedy, because the web app has no write
-                          path for `is_primary`: the API client exposes only a
-                          GET and mark_discontinued, and the item form's "Set as
-                          Primary" control mutates local state that its submit
-                          discards. Telling an operator to flag one would name an
-                          action they cannot take. Building that write path is
-                          real work on a public surface and is routed as separate
-                          follow-up, not folded in here. */}
-                      {!supplierLinks.some((link) => link.is_primary) && (
-                        <Text size="sm" c="dimmed" data-testid="no-primary-supplier-note">
-                          No supplier is flagged primary, so the system picks one for you.
+                          It also names a remedy: `is_primary` became writable
+                          from the item form in #1034, and it is a GATE rather
+                          than a bonus, so flagging one really does decide the
+                          answer rather than nudging it. */}
+                      {!supplierLinks.some((link) => link.is_active && !link.is_discontinued) ? (
+                        <Text size="sm" c="orange" data-testid="no-orderable-supplier-note">
+                          No supplier here can be ordered from — every link is inactive or
+                          discontinued. Reactivate one, or add a supplier that still carries this
+                          item, before it can go on a purchase order.
                         </Text>
+                      ) : (
+                        !supplierLinks.some(
+                          (link) => link.is_primary && link.is_active && !link.is_discontinued
+                        ) && (
+                          <Text size="sm" c="dimmed" data-testid="no-primary-supplier-note">
+                            No supplier you can order from is flagged primary, so the system picks
+                            one on price and lead time. Flag one on the item form to decide for
+                            yourself instead.
+                          </Text>
+                        )
                       )}
                       <Table>
                         <Table.Thead>

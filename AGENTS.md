@@ -109,6 +109,120 @@ from "explicitly cleared" give it an `UNCHANGED` sentinel default rather than
 is stated in `ReorderRequestViewSet.mark_ordered`'s docstring and pinned by
 `reorder_queue/tests/test_po_confirm_preserves_expected_delivery_date.py`.
 
+### Which supplier an item is bought from: one derivation, orderable only
+
+`inventory.services.supplier_selection` is the ONE answer to "which supplier for
+this item". Everything else reads it — `InventoryItem.primary_item_supplier` and
+the seven flat compat properties, `item_metrics` (the pinned ScanTTY contract),
+the order pad and the PO-building screens. Do not re-derive it: three copies of
+`ORDER BY -is_primary, unit_cost` had already drifted apart before op-2rsp
+collapsed them.
+
+The forecasts (`component_forecast`, `demand_forecast_engine`) still resolve
+their own lead time and are NOT on this derivation. That is deliberate for now:
+routing them through it moves a reorder point and therefore a flag, and op-2rsp
+ships no flag change. They belong to the deferred piece below.
+
+The rule is three things, in this order:
+
+1. **Eligibility.** Only orderable links are candidates — a link that is not
+   `is_active`, or that is `is_discontinued`, is never the answer. That includes
+   one an operator flagged primary, because `mark_discontinued` deliberately
+   leaves `is_primary` set.
+2. **The gate.** An orderable link flagged primary wins OUTRIGHT and is never
+   scored. A flagged primary is not a term in a sum — any weight can be outbid,
+   and then the operator's explicit choice is merely expensive rather than
+   binding. Do not "fix" a selection problem by adjusting a bonus.
+3. **The score.** Only when nothing orderable is flagged does `score_candidate`
+   rank the candidates on cost and lead time.
+
+Ask `select_supplier` / `select_suppliers_for` when you must explain yourself to
+an operator: they separate `NO_SUPPLIERS` from `NONE_ORDERABLE`, which are
+different facts needing different actions, and flag when the operator's own
+choice was the row that got skipped. `primary_item_supplier` is the same answer
+with the reason dropped.
+
+Filtering happens in Python, on `item_suppliers.all()`, so the prefetch cache
+still serves it — a fresh `.filter()` reintroduces the per-row N+1 that #882
+removed and that `docs/API_LIST_CONTRACT.md` bounds in CI. The cost yardstick
+(`average_orderable_unit_cost`) is computed in Python for the same reason.
+
+**The scoring weights are a product decision, not an implementation detail.**
+They came from the rival rule this replaced and are pinned as they stand;
+`inventory/tests/test_supplier_scoring.py` asserts each one and names five
+places the judgement is questionable (`REPORTED, NOT FIXED`) — most importantly
+that an unpriced supplier can never beat a priced one, because a missing price
+scores like a bad price. Two of the five are the same falsy-guard mistake: a
+`unit_cost` of 0 and an `average_lead_time` of 0 both read as "unknown", so the
+best possible price and the best possible lead time are each graded as the
+worst. Retuning any of them needs a captain decision, and the tests will fail
+until it is deliberate.
+
+`PurchaseOrderViewSet._find_best_supplier` is now a thin delegation, kept for its
+call site's readability. It has no rule of its own.
+
+Aggregates that value stock rather than choose a vendor (`lowest_unit_cost`,
+`total_value`, the report averages) deliberately still read every link.
+
+`InventoryItem.current_cases` is EXCLUDED from this supplier derivation.
+Deriving from the READERS OF A SYMBOL is not the same as deriving from the
+QUESTION BEING ASKED: it reads the helper but asks a different question — how
+many units are in a box on the shelf — which has nothing to do with who we buy
+from. It resolves its pack size from the FIRST link in `Meta.ordering`,
+orderable or not, because a dead vendor's recorded pack size still describes the
+box already on the shelf, and routing it through the orderability filter
+suppressed a low-stock alert.
+
+**Deferred and filed: one named derivation for pack size, the way "which
+supplier" got one.** It still has several readers with no single owner —
+`current_cases` (the first link, orderable or not) versus
+`quantity_per_package`, `item_metrics`'s `case_size` and
+`bridge_case_reorder_to_packaging` (all three the supplier helper) — so they can
+disagree on an item whose links differ. Do that work rather than rediscovering
+the split.
+
+### The alert-suppression class: IDENTIFIED, not fixed
+
+A value made honestly `None` gets collapsed by downstream arithmetic or a
+fallback into a confident, OPTIMISTIC answer — which inverts a boolean and
+suppresses an alert on exactly the item that most needs one. THREE derived
+instances, ALL PREDATING op-2rsp and all still live:
+
+1. `InventoryItem.current_cases` — no usable pack size on the first supplier
+   link falls through to "1 unit per package", so raw base units read as a case
+   count. Reachable for an item with no links at all, and for one whose first
+   link records `quantity_per_package` of 0.
+2. `component_forecast`'s `reorder_point` — `lead_time_days or 0` computes a
+   horizon at a zero-day wait.
+3. `demand_forecast_engine.forecast_item_by_interval` — the same collapse in
+   the demand-forecast report and the nightly reorder digest.
+
+Do not read these as consequences of the orderability filter. op-2rsp briefly
+WIDENED their reachability by routing each through the filtered helper, then
+tried to represent the resulting unknowns honestly; both halves were reverted,
+so every site is back to base and the class is exactly as reachable as it has
+always been. Reverting the supplier derivation would not close any of it.
+
+**The fix was attempted across four review rounds and REVERTED wholesale.** Do
+not simply retry it. Each round's fix opened a new site: making these values
+null reached untyped frontend consumers (`current_cases.toFixed(1)` on the scan
+and item-detail pages), removed a low-stock alert that worked before, and
+re-collapsed `NO_SUPPLIERS` with `NONE_ORDERABLE` at one site while narrowing
+them at another. The blast radius of making a previously-total value nullable —
+across untyped consumers and boolean comparisons — is larger than the
+inconsistency it removes. op-2rsp therefore ships the supplier derivation ONLY,
+and changes no reorder flag anywhere.
+
+The redo is one coherent piece, not three patches: derive and retype EVERY
+consumer first, then represent unknown pack size / lead time / reorder point
+honestly, keeping `NO_SUPPLIERS` (a data gap) and `NONE_ORDERABLE` (unbuyable)
+distinct throughout — flagging the data-gap population regardless of stock
+floods the surface until people ignore it, which suppresses alerts too.
+
+The same falsy-guard root shows up elsewhere and is worth recognising on sight:
+in the scoring's guards, where a missing or zero value reads as "absent" or
+"bad" rather than "unknown", and in `reorder_queue/views.py`'s `unit_cost or 0`.
+
 ### The pre-send boundary: when a PO is still the shop's own document
 
 `PurchaseOrder.PRE_SUPPLIER_STATUSES` is the ONE definition of "the supplier has

@@ -1,13 +1,21 @@
-"""Tests for the named primary-supplier selection service (issue #882).
+"""Tests for the named supplier-selection service (issue #882, op-2rsp).
 
 The service (``inventory.services.supplier_selection``) and the thin
 ``InventoryItem.primary_item_supplier`` shim that delegates to it must:
 
-* select the IDENTICAL row the legacy ``filter(is_primary=True).first() or
-  first()`` chose (primary-first, then cheapest);
+* never hand back a link nobody can order through — inactive or discontinued
+  (op-2rsp), including one an operator flagged primary and later discontinued;
+* treat a flagged primary as a GATE: an orderable link an operator flagged wins
+  outright and is never scored, so their choice cannot be outbid;
+* otherwise rank the orderable candidates by :func:`score_candidate` (cost and
+  lead time) — see ``test_supplier_scoring.py`` for whether it ranks SENSIBLY,
+  which is a separate question from whether it runs;
+* tell "this item has no suppliers" apart from "every supplier is dead", because
+  those are different facts an operator acts on differently;
 * cost ZERO extra queries when ``item_suppliers`` is prefetched (killing the
   per-row N+1 behind the seven flat compat fields), and one query otherwise;
-* resolve a whole page in a single query via the batch helper.
+* resolve a whole page in a single query via the batch helper — and in NO query
+  when the page already carries an ``item_suppliers`` prefetch.
 """
 
 from decimal import Decimal
@@ -18,7 +26,16 @@ from django.test.utils import CaptureQueriesContext
 import pytest
 
 from inventory.models import InventoryItem, ItemSupplier, Supplier
-from inventory.services.supplier_selection import primary_item_supplier, primary_suppliers_for
+from inventory.services.supplier_selection import (
+    BASIS_BEST_SCORED,
+    BASIS_FLAGGED_PRIMARY,
+    NO_SUPPLIERS,
+    NONE_ORDERABLE,
+    primary_item_supplier,
+    primary_suppliers_for,
+    select_supplier,
+    select_suppliers_for,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -37,7 +54,17 @@ def _supplier(name):
     return Supplier.objects.create(name=name, supplier_type=Supplier.SupplierType.LOCAL)
 
 
-def _link(item, name, *, is_primary, unit_cost, quantity_per_package=1):
+def _link(
+    item,
+    name,
+    *,
+    is_primary,
+    unit_cost,
+    quantity_per_package=1,
+    is_active=True,
+    is_discontinued=False,
+    average_lead_time=7,
+):
     return ItemSupplier.objects.create(
         item=item,
         supplier=_supplier(name),
@@ -45,6 +72,9 @@ def _link(item, name, *, is_primary, unit_cost, quantity_per_package=1):
         unit_cost=None if unit_cost is None else Decimal(unit_cost),
         quantity_per_package=quantity_per_package,
         is_primary=is_primary,
+        is_active=is_active,
+        is_discontinued=is_discontinued,
+        average_lead_time=average_lead_time,
     )
 
 
@@ -70,7 +100,8 @@ def test_prefers_the_flagged_primary_over_a_cheaper_non_primary():
     assert primary_item_supplier(item).pk == primary.pk
 
 
-def test_falls_back_to_cheapest_when_none_is_primary():
+def test_falls_back_to_the_cheapest_when_nothing_else_separates_them():
+    """With lead times equal, the score reduces to price and the cheaper wins."""
     item = _item()
     _link(item, "A", is_primary=False, unit_cost="5.00")
     cheapest = _link(item, "B", is_primary=False, unit_cost="1.00")
@@ -97,7 +128,16 @@ def test_among_multiple_primaries_picks_the_cheapest():
     ],
 )
 def test_selection_matches_legacy_query(rows):
-    """For every supplier arrangement, the service picks the legacy row."""
+    """These arrangements still resolve to the row the pre-#882 pair returned.
+
+    Not a general guarantee any more, and deliberately so: every row here shares
+    the default lead time, which is the case where the score reduces to price
+    and therefore agrees with the legacy ``filter(is_primary=True).first() or
+    first()``. Where lead times differ the score can and should disagree — that
+    is the decision the captain took, and ``test_supplier_scoring.py`` pins it.
+    What this test guards is that adopting the score did not disturb the
+    price-only cases, which are the bulk of the catalogue.
+    """
     item = _item()
     for name, is_primary, cost in rows:
         _link(item, name, is_primary=is_primary, unit_cost=cost)
@@ -188,3 +228,186 @@ def test_batch_empty_input_returns_empty_map_without_querying():
     with CaptureQueriesContext(connection) as ctx:
         assert primary_suppliers_for([]) == {}
     assert len(ctx.captured_queries) == 0
+
+
+# ── Orderability: a supplier nobody can buy from is never the choice (op-2rsp) ─
+
+
+@pytest.mark.parametrize(
+    "dead_kwargs",
+    [
+        {"is_discontinued": True},
+        {"is_active": False},
+        {"is_active": False, "is_discontinued": True},
+    ],
+    ids=["discontinued", "inactive", "both"],
+)
+def test_cheapest_link_is_skipped_when_it_cannot_be_ordered(dead_kwargs):
+    """The headline case: the cheapest supplier is one you cannot buy from."""
+    item = _item()
+    _link(item, "DeadCheap", is_primary=False, unit_cost="1.00", **dead_kwargs)
+    live = _link(item, "LiveDear", is_primary=False, unit_cost="9.00")
+    assert primary_item_supplier(item).pk == live.pk
+
+
+def test_flagged_primary_is_skipped_when_it_cannot_be_ordered():
+    """``mark_discontinued`` leaves ``is_primary`` set, so the flag is not enough.
+
+    An operator flags a supplier, then later marks the item discontinued from
+    them. Both flags now stand on the same row; orderability wins.
+    """
+    item = _item()
+    _link(item, "FlaggedDead", is_primary=True, unit_cost="1.00", is_discontinued=True)
+    live = _link(item, "Live", is_primary=False, unit_cost="9.00")
+    choice = select_supplier(item)
+    assert choice.item_supplier.pk == live.pk
+    assert choice.basis == BASIS_BEST_SCORED
+    # The operator DID choose, and their choice was overridden — say so.
+    assert choice.flagged_primary_unorderable is True
+
+
+def test_orderable_flagged_primary_still_beats_a_cheaper_orderable_link():
+    """Narrowing the candidates must not disturb the ranking among them."""
+    item = _item()
+    flagged = _link(item, "Flagged", is_primary=True, unit_cost="5.00")
+    _link(item, "Cheaper", is_primary=False, unit_cost="1.00")
+    choice = select_supplier(item)
+    assert choice.item_supplier.pk == flagged.pk
+    assert choice.basis == BASIS_FLAGGED_PRIMARY
+    assert choice.flagged_primary_unorderable is False
+
+
+def test_filtering_survives_a_prefetch_and_costs_no_query():
+    """The filter runs in Python precisely so the prefetch cache still serves it."""
+    item = _item()
+    _link(item, "DeadCheap", is_primary=False, unit_cost="1.00", is_discontinued=True)
+    live = _link(item, "LiveDear", is_primary=False, unit_cost="9.00")
+    prefetched = InventoryItem.objects.prefetch_related("item_suppliers__supplier").get(pk=item.pk)
+    with CaptureQueriesContext(connection) as ctx:
+        chosen = primary_item_supplier(prefetched)
+        _ = chosen.supplier.name
+    assert chosen.pk == live.pk
+    assert len(ctx.captured_queries) == 0
+
+
+# ── "No suppliers" and "no orderable suppliers" are different facts (rule 4) ──
+
+
+def test_no_suppliers_at_all_is_reported_as_such():
+    choice = select_supplier(_item())
+    assert choice.item_supplier is None
+    assert choice.reason == NO_SUPPLIERS
+    assert bool(choice) is False
+
+
+def test_every_link_dead_is_reported_as_none_orderable_not_as_no_suppliers():
+    item = _item()
+    _link(item, "Dead", is_primary=False, unit_cost="1.00", is_discontinued=True)
+    _link(item, "Off", is_primary=False, unit_cost="2.00", is_active=False)
+    choice = select_supplier(item)
+    assert choice.item_supplier is None
+    assert choice.reason == NONE_ORDERABLE
+    assert choice.reason != NO_SUPPLIERS
+
+
+def test_none_orderable_records_that_a_primary_had_been_flagged():
+    item = _item()
+    _link(item, "FlaggedDead", is_primary=True, unit_cost="1.00", is_discontinued=True)
+    choice = select_supplier(item)
+    assert choice.reason == NONE_ORDERABLE
+    assert choice.flagged_primary_unorderable is True
+
+
+# ── The batch helper answers identically ─────────────────────────────────────
+
+
+def test_batch_skips_unorderable_links_exactly_as_the_single_lookup_does():
+    dead_only = _item("DeadOnly")
+    _link(dead_only, "D1", is_primary=False, unit_cost="1.00", is_discontinued=True)
+
+    mixed = _item("Mixed")
+    _link(mixed, "M-dead", is_primary=True, unit_cost="1.00", is_active=False)
+    mixed_live = _link(mixed, "M-live", is_primary=False, unit_cost="9.00")
+
+    bare = _item("Bare")
+
+    with CaptureQueriesContext(connection) as ctx:
+        batch = select_suppliers_for([dead_only, mixed, bare])
+    assert len(ctx.captured_queries) == 1
+
+    assert batch[dead_only.id].reason == NONE_ORDERABLE
+    assert batch[mixed.id].item_supplier.pk == mixed_live.pk
+    assert batch[bare.id].reason == NO_SUPPLIERS
+
+    # And identical to resolving each item on its own.
+    for it in (dead_only, mixed, bare):
+        single = select_supplier(InventoryItem.objects.get(pk=it.pk))
+        assert single.reason == batch[it.id].reason
+        assert (single.item_supplier and single.item_supplier.pk) == (
+            batch[it.id].item_supplier and batch[it.id].item_supplier.pk
+        )
+
+
+def test_batch_rides_a_prefetch_instead_of_re_reading_the_same_rows():
+    """The list paths that call this already prefetch ``item_suppliers``.
+
+    Re-querying identical rows would be a wasted round-trip on every page, so
+    the batch resolves prefetched items from the cache — the same cache the
+    single lookup uses — and queries only for what is left.
+    """
+    prefetched_item = _item("Prefetched")
+    _link(prefetched_item, "P-dead", is_primary=False, unit_cost="1.00", is_discontinued=True)
+    p_live = _link(prefetched_item, "P-live", is_primary=False, unit_cost="9.00")
+
+    bare_item = _item("NotPrefetched")
+    b_live = _link(bare_item, "B-live", is_primary=False, unit_cost="3.00")
+
+    prefetched = InventoryItem.objects.prefetch_related("item_suppliers__supplier").get(
+        pk=prefetched_item.pk
+    )
+
+    with CaptureQueriesContext(connection) as ctx:
+        only_cached = select_suppliers_for([prefetched])
+    assert len(ctx.captured_queries) == 0
+    assert only_cached[prefetched.id].item_supplier.pk == p_live.pk
+
+    # Mixed page: one query, for the item that has no cache to ride.
+    with CaptureQueriesContext(connection) as ctx:
+        mixed = select_suppliers_for([prefetched, bare_item])
+    assert len(ctx.captured_queries) == 1
+    assert mixed[prefetched.id].item_supplier.pk == p_live.pk
+    assert mixed[bare_item.id].item_supplier.pk == b_live.pk
+
+
+# ── The flat compat properties inherit the filter ────────────────────────────
+
+
+def test_flat_compat_properties_never_quote_an_unorderable_supplier():
+    item = _item()
+    _link(
+        item,
+        "DeadCheap",
+        is_primary=True,
+        unit_cost="1.00",
+        quantity_per_package=99,
+        is_discontinued=True,
+        average_lead_time=1,
+    )
+    _link(item, "LiveDear", is_primary=False, unit_cost="9.00", quantity_per_package=3)
+    fresh = InventoryItem.objects.get(pk=item.pk)
+    assert fresh.supplier.name == "LiveDear"
+    assert fresh.supplier_sku == "LiveDear-sku"
+    assert fresh.unit_cost == Decimal("9.00")
+    assert fresh.quantity_per_package == 3
+    assert fresh.average_lead_time == 7
+
+
+def test_flat_compat_properties_go_none_when_nothing_is_orderable():
+    """The same shape an item with no suppliers has always produced."""
+    item = _item()
+    _link(item, "DeadOnly", is_primary=True, unit_cost="1.00", is_discontinued=True)
+    fresh = InventoryItem.objects.get(pk=item.pk)
+    assert fresh.supplier is None
+    assert fresh.supplier_sku is None
+    assert fresh.unit_cost is None
+    assert fresh.average_lead_time is None

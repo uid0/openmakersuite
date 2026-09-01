@@ -24,10 +24,24 @@ This module turns that usage history into a demand forecast:
   point) without lowering ``on_hand``; only a depleting transition lowers both.
 
 * ``reorder_point = avg_daily_use * lead_time_days + safety_stock`` — the
-  classic reorder trigger. ``lead_time_days`` reuses observed supplier
-  performance from :class:`reorder_queue.models.LeadTimeLog` (falling back to
-  the supplier's estimated ``average_lead_time``), and ``safety_stock`` reuses
-  the item's existing ``minimum_stock`` buffer.
+  classic reorder trigger. ``lead_time_days`` is **the wait at the supplier we
+  would actually buy from** (op-3vqk): observed performance from
+  :class:`reorder_queue.models.LeadTimeLog` against that one link, falling back
+  to that link's estimated ``average_lead_time``. ``safety_stock`` reuses the
+  item's existing ``minimum_stock`` buffer.
+
+  ``lead_time_basis`` on every row says WHOSE wait the number describes, and it
+  is three-valued because these are three different facts (see
+  :func:`lead_times_for`):
+
+  - ``orderable_supplier`` — the link :mod:`inventory.services.supplier_selection`
+    picked. This is the only basis on which ``reorder_point`` is a horizon we
+    can actually order against.
+  - ``unorderable_supplier`` — every link is inactive or discontinued, so the
+    number is read from ALL of them exactly as it was before this rule existed.
+    Real information, about a vendor nobody can buy from. The row STAYS on the
+    report with its lead component intact.
+  - ``no_supplier`` — no link at all, so no lead time is on record.
 
   When NO lead time is known — which, because ``average_lead_time`` is a
   non-nullable column with a default, means only an item carrying no supplier
@@ -42,10 +56,11 @@ The output feeds the inventory + purchasing overview dashboards.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Optional
 
-from django.db.models import Avg, Count
+from django.db.models import Avg, Count, Q
 from django.utils import timezone
 
 from inventory.models import (
@@ -54,6 +69,7 @@ from inventory.models import (
     ItemSupplier,
     SerializedComponent,
 )
+from inventory.services.supplier_selection import NONE_ORDERABLE, select_suppliers_for
 
 # Default trailing window used to estimate the depletion rate.
 DEFAULT_WINDOW_DAYS = 90
@@ -83,69 +99,178 @@ _DEPLETING_ACTIONS = {
 }
 
 
-def _lead_time_days_by_item(items: list[InventoryItem]) -> dict[Any, Optional[float]]:
-    """Resolve each item's lead time in days, batched to avoid N+1 queries.
+#: The lead time is the one recorded against the link
+#: :mod:`inventory.services.supplier_selection` picked — the supplier we would
+#: actually buy from. Only on this basis is ``reorder_point`` a horizon we can
+#: order against.
+LEAD_TIME_FROM_ORDERABLE = "orderable_supplier"
 
-    Prefers the mean of *observed* lead times recorded in
-    ``reorder_queue.LeadTimeLog`` across the item's suppliers; falls back to an
-    estimated ``average_lead_time`` read from ANY link, flagged-primary first;
-    maps to ``None`` when neither is available.
+#: Every one of the item's links is inactive or discontinued. The number is
+#: REAL — it is how long that vendor took — but it describes a supplier nobody
+#: can buy from. Deliberately NOT the same as :data:`LEAD_TIME_UNKNOWN`: this
+#: item has a wait on record and stays on the forecast with its lead component
+#: intact.
+LEAD_TIME_FROM_UNORDERABLE = "unorderable_supplier"
 
-    **This deliberately does NOT share the supplier derivation** in
-    :mod:`inventory.services.supplier_selection`, which every "which supplier"
-    reader uses (op-2rsp). Both branches here read EVERY link, inactive and
-    discontinued included, and neither applies the gate or the score. So this
-    can disagree with :attr:`InventoryItem.average_lead_time` on the same item
-    in the same request: a discontinued flagged-primary link at 45 days beside
-    a live link at 7 gives 45 here and 7 there.
+#: No lead time on record at all — the item carries no supplier link. A DATA
+#: GAP, pointing at a different operator action ("add a supplier") than
+#: :data:`LEAD_TIME_FROM_UNORDERABLE` ("find one that still carries it").
+LEAD_TIME_UNKNOWN = "no_supplier"
 
-    That is a KNOWN and ACCEPTED difference, and it is PERMANENT rather than
-    deferred: AGENTS.md, under "The alert-suppression class", says **do NOT**
-    route this through the supplier derivation. Two behavioural tests in
-    ``inventory/tests/test_alert_suppression.py`` pin it and both fail if the
-    orderability filter is reintroduced here:
+
+@dataclass(frozen=True)
+class LeadTime:
+    """How long a replacement takes — and WHOSE wait that number describes.
+
+    ``basis`` is one of :data:`LEAD_TIME_FROM_ORDERABLE`,
+    :data:`LEAD_TIME_FROM_UNORDERABLE` or :data:`LEAD_TIME_UNKNOWN`. It is a
+    separate field rather than an overload of ``days`` because a 30 we can order
+    against and a 30 nobody can sell us are the same number and different facts;
+    collapsing them is the recurring defect this module's history records.
+    """
+
+    days: Optional[float]
+    basis: str
+
+    @property
+    def known(self) -> bool:
+        """Is there a lead time on record at all? (Says nothing about whose.)"""
+        return self.days is not None
+
+
+#: The answer for an item :func:`lead_times_for` was never asked about.
+_NO_LEAD_TIME = LeadTime(days=None, basis=LEAD_TIME_UNKNOWN)
+
+
+def lead_times_for(items: list[InventoryItem]) -> dict[Any, LeadTime]:
+    """Resolve each item's lead time AND its basis, batched to avoid N+1 queries.
+
+    **The reorder point must be computed from the lead time of the supplier we
+    would actually buy from** (op-3vqk). So the first question asked is the one
+    :mod:`inventory.services.supplier_selection` owns — this does not re-derive
+    it — and the answer branches on what that derivation returns:
+
+    * A chosen link (orderable; the flagged-primary gate, else the score). The
+      lead time is the mean of that ONE link's
+      ``reorder_queue.LeadTimeLog`` rows, falling back to that link's estimated
+      ``average_lead_time``. Basis :data:`LEAD_TIME_FROM_ORDERABLE`. Before this
+      rule, both branches averaged across EVERY link: an item with a flagged
+      30-day primary took its reorder point from a 7-day vendor it will never
+      buy from, understating the trigger roughly fourfold, and then sat below
+      its true reorder point unflagged.
+    * :data:`~inventory.services.supplier_selection.NONE_ORDERABLE` — links
+      exist, every one inactive or discontinued. The lead time is then read from
+      ALL of them, **byte-identically to the pre-op-3vqk rule**: the observed
+      mean across the item's links, else the flagged-primary-first
+      ``average_lead_time``. Basis :data:`LEAD_TIME_FROM_UNORDERABLE`.
+    * :data:`~inventory.services.supplier_selection.NO_SUPPLIERS` — no link, so
+      no estimate exists to read. ``days`` is ``None``, basis
+      :data:`LEAD_TIME_UNKNOWN`.
+
+    **Why the second branch is not simply filtered away, which is the whole
+    reason this function used to bypass the derivation.** ``average_lead_time``
+    is non-nullable with a default, so ANY link supplies an estimate — a
+    discontinued one included. Filtering to orderable links and stopping there
+    would leave an item whose only vendor is dead with no lead time at all, its
+    threshold collapsing to zero days, and it would silently leave the
+    demand-forecast report AND the nightly digest. That is exactly what op-2rsp
+    round 5 did and had to revert. The fix is a PREFERENCE, not a filter: prefer
+    the supplier we can buy from, fall back to what the dead links still know,
+    and say which of the two you did. Two behavioural tests in
+    ``inventory/tests/test_alert_suppression.py`` pin the fallback —
     ``test_the_serialized_forecast_keeps_a_dead_vendors_lead_time`` and
-    ``test_an_item_whose_only_supplier_died_reaches_the_report_and_the_digest``.
-    ``average_lead_time`` is non-nullable with a default, so ANY link supplies an
-    estimate — a discontinued one included — and filtering here would leave an
-    item whose only vendor is dead with no lead time at all, dropping it off the
-    demand-forecast report and the nightly digest. That is exactly what op-2rsp
-    round 5 did. Read that section before changing anything here.
+    ``test_an_item_whose_only_supplier_died_reaches_the_report_and_the_digest``
+    — and both fail if it is turned back into a filter. Read AGENTS.md's
+    "The alert-suppression class" before changing anything here.
+
+    Query budget: one for :func:`select_suppliers_for` (zero when the caller
+    prefetched ``item_suppliers``), one ``LeadTimeLog`` aggregate covering both
+    branches, and one ``ItemSupplier`` scan taken ONLY when some item has links
+    but none orderable.
     """
     # Imported lazily so this module has no hard import-time dependency on the
     # reorder_queue app (mirrors how the rest of inventory references it).
     from reorder_queue.models import LeadTimeLog
 
-    observed = {
-        row["item_supplier__item_id"]: row["avg"]
-        for row in (
-            LeadTimeLog.objects.filter(item_supplier__item__in=items)
-            .values("item_supplier__item_id")
-            .annotate(avg=Avg("actual_lead_time_days"))
-        )
-    }
+    choices = select_suppliers_for(items)
 
-    # Estimated fallback: the flagged-primary link's average_lead_time, or any
-    # link's if none is flagged — orderable or not, and with no ``unit_cost``
-    # tiebreak. NOT ``InventoryItem.average_lead_time``, which resolves through
-    # the shared supplier derivation; see this function's docstring for why the
-    # two are allowed to differ. One query per page.
-    estimated: dict[Any, Any] = {}
-    for row in (
-        ItemSupplier.objects.filter(item__in=items)
-        .order_by("item_id", "-is_primary")
-        .values("item_id", "average_lead_time")
-    ):
-        estimated.setdefault(row["item_id"], row["average_lead_time"])
-
-    resolved: dict[Any, Optional[float]] = {}
+    chosen_link_ids: list[Any] = []
+    unorderable_item_ids: list[Any] = []
     for item in items:
-        obs = observed.get(item.id)
-        if obs is not None:
-            resolved[item.id] = float(obs)
+        choice = choices.get(item.id)
+        if choice is None:
             continue
-        est = estimated.get(item.id)
-        resolved[item.id] = float(est) if est is not None else None
+        if choice.item_supplier is not None:
+            chosen_link_ids.append(choice.item_supplier.id)
+        elif choice.reason == NONE_ORDERABLE:
+            unorderable_item_ids.append(item.id)
+
+    # ONE observed-mean query serving both branches. Grouping by ITEM while
+    # restricting the rows differently per branch is what lets them share it:
+    # a chosen-link item contributes only that link's deliveries, an item with
+    # nothing orderable contributes every link's — which is the pre-op-3vqk
+    # expression, unchanged, for exactly the population that still needs it.
+    predicates = []
+    if chosen_link_ids:
+        predicates.append(Q(item_supplier_id__in=chosen_link_ids))
+    if unorderable_item_ids:
+        predicates.append(Q(item_supplier__item_id__in=unorderable_item_ids))
+
+    observed: dict[Any, Any] = {}
+    if predicates:
+        predicate = predicates[0]
+        for extra in predicates[1:]:
+            predicate |= extra
+        observed = {
+            row["item_supplier__item_id"]: row["avg"]
+            for row in (
+                LeadTimeLog.objects.filter(predicate)
+                .values("item_supplier__item_id")
+                .annotate(avg=Avg("actual_lead_time_days"))
+            )
+        }
+
+    # Estimated fallback for the unbuyable population only: the flagged-primary
+    # link's ``average_lead_time``, or any link's if none is flagged. Carried
+    # over verbatim, ordering included, so an item whose every vendor died keeps
+    # exactly the number it had. The chosen-link population needs no query at
+    # all — the derivation already handed us the row.
+    estimated_unorderable: dict[Any, Any] = {}
+    if unorderable_item_ids:
+        for row in (
+            ItemSupplier.objects.filter(item_id__in=unorderable_item_ids)
+            .order_by("item_id", "-is_primary")
+            .values("item_id", "average_lead_time")
+        ):
+            estimated_unorderable.setdefault(row["item_id"], row["average_lead_time"])
+
+    resolved: dict[Any, LeadTime] = {}
+    for item in items:
+        choice = choices.get(item.id)
+        link = choice.item_supplier if choice is not None else None
+        if link is not None:
+            basis = LEAD_TIME_FROM_ORDERABLE
+            estimate = link.average_lead_time
+        elif choice is not None and choice.reason == NONE_ORDERABLE:
+            basis = LEAD_TIME_FROM_UNORDERABLE
+            estimate = estimated_unorderable.get(item.id)
+        else:
+            resolved[item.id] = _NO_LEAD_TIME
+            continue
+
+        observed_mean = observed.get(item.id)
+        if observed_mean is not None:
+            days: Optional[float] = float(observed_mean)
+        elif estimate is not None:
+            days = float(estimate)
+        else:
+            # Unreachable while ``average_lead_time`` is non-nullable with a
+            # default: a link always supplies an estimate. Spelled out anyway so
+            # that if the column ever becomes nullable the honest answer is "we
+            # have a supplier and no number for it" — NOT the ``no_supplier``
+            # basis, which is a different fact and a different operator action.
+            days = None
+        resolved[item.id] = LeadTime(days=days, basis=basis)
     return resolved
 
 
@@ -262,7 +387,7 @@ def build_component_forecast(
 
     split_by_item = _stock_split_by_item(items)
     depleted_by_item = _depletion_counts(items, window_start, now)
-    lead_time_by_item = _lead_time_days_by_item(items)
+    lead_time_by_item = lead_times_for(items)
 
     rows: list[dict[str, Any]] = []
     for item in items:
@@ -284,7 +409,8 @@ def build_component_forecast(
             days_until_stockout = None
             projected_stockout_date = None
 
-        lead_time_days = lead_time_by_item.get(item.id)
+        lead_time = lead_time_by_item.get(item.id, _NO_LEAD_TIME)
+        lead_time_days = lead_time.days
         safety_stock = item.minimum_stock or 0
         # An UNKNOWN lead time is not a zero-day one (op-c1ke). Spelled
         # ``is None`` rather than ``or 0`` so a genuine zero-day wait — a local
@@ -292,7 +418,7 @@ def build_component_forecast(
         # branch instead of the "we were never told" one. The two produce the
         # same lead component today; they are different facts, and a guard
         # written with ``or`` cannot keep them apart.
-        lead_time_known = lead_time_days is not None
+        lead_time_known = lead_time.known
         lead_component = avg_daily_use * lead_time_days if lead_time_known else 0.0
         # With no lead time the reorder point is a LOWER BOUND — the operator's
         # own safety stock, with the lead component missing rather than
@@ -338,6 +464,13 @@ def build_component_forecast(
                 # a lower bound, not the classic reorder point this module's
                 # docstring describes (op-c1ke).
                 "lead_time_known": lead_time_known,
+                # WHOSE wait ``lead_time_days`` describes (op-3vqk). An
+                # ``unorderable_supplier`` row is NOT incomplete — the lead
+                # component is there and the item is judged on it — but the
+                # vendor behind the number cannot be bought from, which is a
+                # different thing to tell an operator than either a live
+                # supplier or a missing one. See :func:`lead_times_for`.
+                "lead_time_basis": lead_time.basis,
                 "safety_stock": safety_stock,
                 "reorder_point": reorder_point,
                 "needs_reorder": needs_reorder,

@@ -278,8 +278,9 @@ opposite answers about whether an item "left".
 **Where the operator can see the difference, and where they deliberately cannot.**
 `lead_time_basis` is on the serialized-forecast payload and
 `SerializedForecastPanel` words all three in the reorder-point cell: a plain
-number, `N *` with a tooltip naming the unbuyable vendor, and `≥ N` for the
-lower bound. It is **not** on `DemandForecast` — that would be a migration for a
+number, `N *` with a tooltip saying the wait belongs to a discontinued or
+inactive supplier and that a live one has to be found, and `≥ N` for the lower
+bound. It is **not** on `DemandForecast` — that would be a migration for a
 value no surface reads, and the stored row already carries the `lead_time_days`
 its threshold used. So on the demand-forecast report and in the nightly digest an
 unbuyable item's wait is NOT distinguishable from a live one's. Do not write

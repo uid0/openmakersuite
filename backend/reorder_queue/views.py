@@ -3117,11 +3117,20 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
         de-duplication.
 
         What it does NOT decide for itself is settlement. Which lines may still
-        take a receipt (:func:`services.receipt_refusal`) and what the order's
-        status should be afterwards (:func:`services.refresh_receipt_status`)
-        are answered by the same two functions the shared path uses, because a
-        second opinion on either produced orders that could never be closed out
-        and receipts that quietly erased a written-off shortfall.
+        take a receipt (:func:`services.receipt_refusal`), what the order's
+        status should be afterwards (:func:`services.refresh_receipt_status`),
+        and whether this receipt is the delivery that finished a line off
+        (:func:`services.receipt_completed_line`) are answered by the same
+        functions the shared path uses, because a second opinion on any of them
+        produced orders that could never be closed out, receipts that quietly
+        erased a written-off shortfall, and one delivery counted twice.
+
+        **More than the outstanding quantity is accepted**, as it is on
+        ``receive``: what arrived is credited, and the difference comes back as
+        ``quantity_variance``/``receipt_state`` — which ``quantity_remaining``
+        cannot carry, being floored at zero. The pending-quantity guard that
+        used to answer a scanned over-receipt with a 400 is gone; a line
+        ``receipt_refusal`` refuses is still refused, and so is a kit line.
         """
         serializer = BarcodeReceiptSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -3205,19 +3214,6 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Check if we can receive this quantity
-        remaining_quantity = po_item.quantity_pending
-        if quantity_received > remaining_quantity:
-            return Response(
-                {
-                    "error": f"Cannot receive {quantity_received} items. Only {remaining_quantity} remaining to receive.",
-                    "quantity_ordered": po_item.quantity_ordered,
-                    "quantity_already_received": po_item.quantity_received,
-                    "quantity_remaining": remaining_quantity,
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         # Create or get delivery for today
         with transaction.atomic():
             delivery, created = OrderDelivery.objects.get_or_create(
@@ -3250,9 +3246,12 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
 
             services.refresh_receipt_status(purchase_order)
 
-            # Create lead time log if order is complete
-            if po_item.is_fully_received:
+            # Whether THIS receipt is the delivery that finished the line off —
+            # the question a lead-time log answers, and one more the two paths
+            # share rather than each deciding: ``services.receipt_completed_line``.
+            if services.receipt_completed_line(po_item, quantity_received):
                 self._create_lead_time_log(po_item, delivery.delivery_date)
+            if po_item.is_fully_received:
                 # Same auto-close as the ``receive``/``mark-delivered`` paths:
                 # scanning a delivery in must retire the reorder request too.
                 # Shared from the receiving service (like the lead-time log
@@ -3268,6 +3267,14 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
                 "quantity_received": quantity_received,
                 "total_received": po_item.quantity_received,
                 "quantity_remaining": po_item.quantity_pending,
+                # ``quantity_remaining`` is floored at zero, so on its own it
+                # cannot say a receipt went OVER the order. These three are the
+                # same three the worksheet and the line serializer report, so a
+                # scanned over-receipt is described in the words every other
+                # reader already uses.
+                "quantity_variance": po_item.quantity_variance,
+                "receipt_state": po_item.receipt_state,
+                "receipt_state_label": po_item.receipt_state_label,
                 "order_status": purchase_order.status,
                 "updated_inventory_stock": item.current_stock,
             }

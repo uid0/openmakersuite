@@ -342,6 +342,37 @@ def create_lead_time_log(po_item, delivery_date):
     )
 
 
+def receipt_completed_line(po_item, quantity: int) -> bool:
+    """Whether a receipt of ``quantity`` is the one that finished this line off.
+
+    The single answer to "is a lead-time log owed for this receipt?", shared by
+    :func:`receive_delivery` and the inline barcode path
+    (``OrderReceiptViewSet.scan_barcode``) for the same reason those two share
+    :func:`receipt_refusal`: a second opinion on it is a wrong number in
+    supplier performance rather than a visible failure.
+
+    A :class:`~reorder_queue.models.LeadTimeLog` records a TRANSITION — the
+    delivery on which a line *became* fully received — and not a state. Since an
+    over-receipt is recorded rather than refused, a line that already landed can
+    take another box, and asking only whether it is fully received now would
+    count one delivery twice.
+
+    Ask this AFTER the receipt has been added to ``po_item``: the line as it
+    stood before is derived by subtracting this receipt's own ``quantity``, so a
+    caller cannot get the answer wrong by reading a flag at the wrong moment.
+
+    Both halves are read off the line's own derived properties rather than
+    re-compared here. ``quantity_variance`` is already "received minus ordered",
+    so "the over-run is smaller than this receipt" is exactly "this receipt is
+    what carried the line up to its ordered quantity" — and bringing the two
+    quantities together again outside :class:`~reorder_queue.models.PurchaseOrderItem` is
+    the shape :mod:`reorder_queue.settlement_sites` exists to refuse.
+    """
+    if not po_item.is_fully_received:
+        return False
+    return po_item.quantity_variance < quantity
+
+
 def receive_delivery(
     purchase_order,
     line_quantities,
@@ -394,13 +425,6 @@ def receive_delivery(
         for receipt in receipts:
             po_item, quantity = receipt.po_item, receipt.quantity
             resolve_serial_targets(po_item, quantity, receipt.serials)
-
-            # Read BEFORE the quantity moves: the lead-time log records when a
-            # line *became* fully received, which is a transition and not a
-            # state. An over-receipt against a line that was already full is a
-            # second delivery of a line that landed once, and logging it again
-            # would count one delivery twice in supplier performance.
-            was_fully_received = po_item.is_fully_received
 
             delivery_item = DeliveryItem.objects.create(
                 delivery=delivery,
@@ -483,9 +507,9 @@ def receive_delivery(
 
                 post_work_order_material(po_item)
 
+            if receipt_completed_line(po_item, quantity):
+                create_lead_time_log(po_item, delivery.delivery_date)
             if po_item.is_fully_received:
-                if not was_fully_received:
-                    create_lead_time_log(po_item, delivery.delivery_date)
                 # The whole line landed, so whatever reorder request asked for
                 # it is satisfied — close it in the same transaction as the
                 # receipt. A partial receipt leaves it open.

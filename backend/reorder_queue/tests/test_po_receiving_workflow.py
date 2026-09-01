@@ -2158,6 +2158,197 @@ class TestSettlementDecidesStatusOnEveryPath:
 
 
 @pytest.mark.django_db
+class TestScannedOverReceiptMatchesTheDesk:
+    """More than was ordered is recorded and flagged, whichever path took it.
+
+    ``receive`` and ``receipts/scan_barcode/`` are two receive paths onto the
+    same lines, and they used to answer the same delivery differently: the desk
+    recorded the over-receipt and flagged it, the scanner refused it with a 400
+    before writing anything. The scanner is the one an operator holds while
+    standing over the box, so the refusal landed exactly where the goods were.
+    """
+
+    def over_receivable_po(self, supplier, operator, *, ordered=5, upc="0123456789012"):
+        """A sent order whose scanned line can be over-received.
+
+        The second line is load-bearing rather than scenery: an order every line
+        of which has settled leaves ``RECEIVABLE_STATUSES``, and both paths then
+        refuse it at the ORDER — a different question from this one. Keeping a
+        line outstanding holds the order open so the line-level answer is what
+        is under test.
+        """
+        purchase_order = make_po(supplier, operator)
+        item = make_item("Widget", stock=0, supplier=supplier, sku_barcodes={"package_upc": upc})
+        line = add_line(purchase_order, item, ordered)
+        add_line(purchase_order, make_item("Gasket", supplier=supplier), 3)
+        return purchase_order, item, line
+
+    def test_a_scanned_over_receipt_is_recorded_and_flagged(self, client, supplier, operator):
+        purchase_order, item, line = self.over_receivable_po(supplier, operator)
+
+        response = scan_barcode(client, purchase_order, "0123456789012", 7)
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        line.refresh_from_db()
+        item.refresh_from_db()
+        assert line.quantity_received == 7
+        assert line.quantity_variance == 2
+        assert line.receipt_state == PurchaseOrderItem.ReceiptState.OVER_RECEIVED
+        # The stock that actually arrived, not the quantity that was ordered.
+        assert item.current_stock == 7
+
+    def test_the_scan_response_carries_the_difference_it_recorded(self, client, supplier, operator):
+        """``quantity_remaining`` is floored at zero, so it cannot carry a +2.
+
+        A client shown "7 received, 0 remaining" and nothing else has no way to
+        tell an exact delivery from one with two extra units in the box.
+        """
+        purchase_order, _item, line = self.over_receivable_po(supplier, operator)
+
+        response = scan_barcode(client, purchase_order, "0123456789012", 7)
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert response.data["quantity_remaining"] == 0
+        assert response.data["quantity_variance"] == 2
+        assert response.data["receipt_state"] == PurchaseOrderItem.ReceiptState.OVER_RECEIVED
+        assert response.data["receipt_state_label"] == "Over-received"
+
+    def test_the_scanner_and_the_desk_leave_the_same_record(self, client, supplier, operator):
+        """Two orders, the same over-delivery, one entered each way.
+
+        Asserted field by field against each other rather than against literals,
+        so the two paths cannot both drift to the same wrong answer and pass.
+        """
+        scanned_po, scanned_item, scanned_line = self.over_receivable_po(
+            supplier, operator, upc="0123456789012"
+        )
+        keyed_po, keyed_item, keyed_line = self.over_receivable_po(
+            supplier, operator, upc="9876543210987"
+        )
+
+        assert scan_barcode(client, scanned_po, "0123456789012", 7).status_code == (
+            status.HTTP_200_OK
+        )
+        assert (
+            receive(
+                client, keyed_po, [{"purchase_order_item": keyed_line.pk, "quantity_received": 7}]
+            ).status_code
+            == status.HTTP_200_OK
+        )
+
+        scanned_line.refresh_from_db()
+        keyed_line.refresh_from_db()
+        scanned_item.refresh_from_db()
+        keyed_item.refresh_from_db()
+
+        for attribute in (
+            "quantity_received",
+            "quantity_variance",
+            "receipt_state",
+            "is_settled",
+            "is_over_received",
+            "is_fully_received",
+        ):
+            assert getattr(scanned_line, attribute) == getattr(keyed_line, attribute), attribute
+        assert scanned_item.current_stock == keyed_item.current_stock
+
+        # And the order each one leaves behind reads the same way.
+        assert settlement_consistent(scanned_po).status == settlement_consistent(keyed_po).status
+
+    def test_the_worksheet_reads_a_scanned_over_receipt_the_same_way(
+        self, client, supplier, operator
+    ):
+        """The receive screen's own payload, which is what an operator sees next."""
+        scanned_po, _scanned_item, scanned_line = self.over_receivable_po(
+            supplier, operator, upc="0123456789012"
+        )
+        keyed_po, _keyed_item, keyed_line = self.over_receivable_po(
+            supplier, operator, upc="9876543210987"
+        )
+
+        scan_barcode(client, scanned_po, "0123456789012", 7)
+        receive(client, keyed_po, [{"purchase_order_item": keyed_line.pk, "quantity_received": 7}])
+
+        def line_payload(purchase_order, po_item):
+            response = worksheet(client, purchase_order)
+            assert response.status_code == status.HTTP_200_OK, response.data
+            (payload,) = [
+                entry
+                for entry in response.data["lines"]
+                if entry["purchase_order_item"] == po_item.pk
+            ]
+            return payload
+
+        scanned_payload = line_payload(scanned_po, scanned_line)
+        keyed_payload = line_payload(keyed_po, keyed_line)
+
+        for field in (
+            "quantity_received",
+            "quantity_pending",
+            "quantity_variance",
+            "receipt_state",
+            "receipt_state_label",
+            "is_settled",
+        ):
+            assert scanned_payload[field] == keyed_payload[field], field
+        assert scanned_payload["quantity_variance"] == 2
+
+    def test_scanning_a_line_that_already_landed_is_not_a_second_delivery(
+        self, client, supplier, operator
+    ):
+        """Supplier performance counts LeadTimeLog rows, so a second box is not one.
+
+        A lead-time log records the delivery on which a line *became* fully
+        received. Accepting the over-receipt is what makes a second scan against
+        a landed line reachable at all, so the transition has to be read from
+        the receipt rather than from the line's state afterwards.
+        """
+        purchase_order, _item, line = self.over_receivable_po(supplier, operator)
+        purchase_order.sent_at = timezone.now() - timedelta(days=5)
+        purchase_order.save(update_fields=["sent_at"])
+
+        assert scan_barcode(client, purchase_order, "0123456789012", 5).status_code == (
+            status.HTTP_200_OK
+        )
+        assert LeadTimeLog.objects.filter(item_supplier=line.item_supplier).count() == 1
+
+        response = scan_barcode(client, purchase_order, "0123456789012", 2)
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        line.refresh_from_db()
+        assert line.quantity_received == 7
+        assert line.receipt_state == PurchaseOrderItem.ReceiptState.OVER_RECEIVED
+        assert LeadTimeLog.objects.filter(item_supplier=line.item_supplier).count() == 1
+
+    def test_a_line_nothing_more_is_coming_for_is_still_refused_with_its_way_out(
+        self, client, supplier, operator
+    ):
+        """Accepting an over-receipt does not accept a receipt against a write-off.
+
+        ``services.receipt_refusal`` is still the only thing that refuses a line
+        here, and its closed-short answer names the action that reopens it —
+        a refusal with no way forward is the trap this replaced.
+        """
+        purchase_order, item, line = self.over_receivable_po(supplier, operator, ordered=10)
+
+        receive(client, purchase_order, [{"purchase_order_item": line.pk, "quantity_received": 8}])
+        client.post(
+            reverse("purchaseorder-close-short", args=[purchase_order.pk]),
+            {"items": [{"purchase_order_item": line.pk, "reason": "backorder cancelled"}]},
+            format="json",
+        )
+
+        response = scan_barcode(client, purchase_order, "0123456789012", 5)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "reopen-short" in response.data["error"]
+        line.refresh_from_db()
+        item.refresh_from_db()
+        assert line.quantity_received == 8
+        assert item.current_stock == 8
+
+
+@pytest.mark.django_db
 class TestLeadTimeIsLoggedOncePerLine:
     """A line becomes fully received once, so it is logged once.
 

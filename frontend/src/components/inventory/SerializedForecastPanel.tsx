@@ -8,6 +8,15 @@
  *
  * Controls: a trailing-window selector (feeds `window_days`) and a
  * "Low stock only" switch (feeds `low_stock_only`).
+ *
+ * The reorder-point cell words three different lead-time states, because they
+ * ask three different things of an operator (op-3vqk):
+ *   - a live supplier's wait → the plain number;
+ *   - a discontinued/inactive supplier's wait (`lead_time_basis` is
+ *     `unorderable_supplier`) → the number, marked `*`: complete, and about a
+ *     vendor nobody can order from;
+ *   - nothing on record (`lead_time_known` false) → `≥ N`: the safety stock
+ *     alone, an explicit lower bound (op-c1ke).
  */
 import {
   Badge,
@@ -185,6 +194,26 @@ const SerializedForecastPanel: React.FC<Props> = ({
                           ≥ {row.reorder_point}
                         </Text>
                       </Tooltip>
+                    ) : row.lead_time_basis === 'unorderable_supplier' ? (
+                      // A COMPLETE reorder point — the lead component is there
+                      // and the flag beside it is judged on the full number —
+                      // but the wait it allows for belongs to a supplier that
+                      // is discontinued or inactive (op-3vqk). Distinct from
+                      // the branch above: nothing is missing, the vendor is
+                      // simply unbuyable, and the operator's action is to find
+                      // one that still carries the part rather than to fill in
+                      // a blank.
+                      <Tooltip
+                        label={`Allows ${row.lead_time_days} days — the wait recorded for this item's supplier, which is discontinued or inactive. Nothing can be ordered through it; add a supplier that still carries this part.`}
+                      >
+                        <Text
+                          span
+                          c="orange"
+                          data-testid={`serialized-forecast-unorderable-rp-${row.item_id}`}
+                        >
+                          {row.reorder_point} *
+                        </Text>
+                      </Tooltip>
                     ) : (
                       row.reorder_point
                     )}
@@ -210,7 +239,9 @@ const SerializedForecastPanel: React.FC<Props> = ({
       {!loading && !error && rows.length > 0 && (
         <Text size="xs" c="dimmed" mt="xs" data-testid="serialized-forecast-legend">
           Reorder is driven by <b>available</b> (on-hand minus units installed in
-          an asset), not on-hand.
+          an asset), not on-hand. The reorder point allows for the lead time of
+          the supplier we would actually buy from; <b>*</b> marks one read from a
+          supplier that is discontinued or inactive.
         </Text>
       )}
     </Paper>

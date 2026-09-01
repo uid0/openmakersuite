@@ -118,17 +118,21 @@ the order pad and the PO-building screens. Do not re-derive it: three copies of
 `ORDER BY -is_primary, unit_cost` had already drifted apart before op-2rsp
 collapsed them.
 
-The forecasts (`component_forecast`, `demand_forecast_engine`) resolve their own
-lead time and are NOT on this derivation, permanently. Both read EVERY link,
-inactive and discontinued included, because "how long does a replacement take to
-arrive" is answered by whoever last shipped one — and routing them through the
-orderability filter drops a dead-vendor item off the demand-forecast report and
-the nightly digest entirely. op-c1ke pins that with two behavioural tests in
-`inventory/tests/test_alert_suppression.py` —
-`test_the_serialized_forecast_keeps_a_dead_vendors_lead_time` and
-`test_an_item_whose_only_supplier_died_reaches_the_report_and_the_digest`, both
-of which fail if the filter is reintroduced; see "The alert-suppression class"
-below.
+The forecasts ARE on this derivation as of op-3vqk, but as a PREFERENCE rather
+than a filter, and the difference is the whole history of this line.
+`component_forecast.lead_times_for` is the single lead-time resolver for both the
+serialized report and the nightly demand forecast, and it asks `select_suppliers_for`
+first: the chosen link's `LeadTimeLog` mean, else that link's `average_lead_time`.
+Only when the derivation answers `NONE_ORDERABLE` does it fall back to reading
+EVERY link — the pre-op-3vqk expression, verbatim, for exactly the population
+that still needs it. A plain filter here is what op-2rsp round 5 shipped: an item
+whose only vendor is discontinued then has no lead time at all, its threshold
+collapses to zero days, and it silently leaves the demand-forecast report AND the
+nightly digest. `inventory/tests/test_alert_suppression.py` still pins the
+fallback with `test_the_serialized_forecast_keeps_a_dead_vendors_lead_time` and
+`test_an_item_whose_only_supplier_died_reaches_the_report_and_the_digest`, and
+`inventory/tests/test_forecast_lead_time_source.py` pins the preference; see "The
+alert-suppression class" below.
 
 The rule is three things, in this order:
 
@@ -220,6 +224,69 @@ scan to frontend sources is filed as separate follow-up. The "a reader added
 later fails the build" criterion holds for backend readers only — read it that
 way, and do not assume a green suite says anything about `frontend/`.
 
+### Which supplier's wait the reorder point allows for (op-3vqk)
+
+`component_forecast.lead_times_for` is the ONE lead-time resolver, feeding the
+serialized forecast's `reorder_point` and — through `inventory.tasks
+.generate_demand_forecasts` — the stored demand forecast's `needs_reorder`
+threshold and so the nightly digest. The rule, in one sentence: **the reorder
+point must be computed from the lead time of the supplier we would actually buy
+from; and an item with no orderable supplier must still appear on the forecast,
+with its lead time honestly attributed.**
+
+Before this, two resolutions ignored who we buy from: the observed mean averaged
+`LeadTimeLog` across ALL of an item's links, and the estimated fallback took the
+flagged-primary link's `average_lead_time` — or, with nothing flagged, whichever
+row the planner returned first, since the query ordered by `-is_primary` and
+nothing else. An item with a flagged 30-day primary could therefore be costed at
+a 7-day rival's wait, understating its reorder point roughly fourfold and sitting
+below its true trigger unflagged; and the same shape could resolve two ways in
+one request.
+
+It returns a `LeadTime(days, basis)`, and the basis is three-valued because these
+are three facts, not two:
+
+- `orderable_supplier` — the link `select_suppliers_for` picked. The only basis on
+  which `reorder_point` is a horizon anyone can order against.
+- `unorderable_supplier` — links exist, every one inactive or discontinued. The
+  number is REAL and the row keeps its full lead component and its flag; the
+  vendor behind it just cannot be bought from.
+- `no_supplier` — no link, so nothing on record. The only basis where
+  `lead_time_known` is false.
+
+**One alert clears, and it is a STATED EXCEPTION to the "nothing leaves"
+invariant — do not "fix" it back.** Correcting whose wait the threshold uses
+moves flags in BOTH directions, and one direction removes an alert. The shape:
+a live 30-day link beside a discontinued one that once took 60 days. The old
+rule averaged `LeadTimeLog` across every link, so the 60 became the threshold
+and the item was flagged 38 days out; we would actually buy from the 30-day
+link, so it is not yet due within its lead time. It keeps its row on the
+unfiltered demand-forecast report throughout, with the SAME predicted due date
+— only `lead_time_days` (60 → 30) and `needs_reorder` move — and it returns to
+`demand_forecast?low_stock_only=true`, `reorder_alerts` and the nightly digest
+**eight days later**, when the due date comes inside the buyable supplier's
+wait. Nothing is lost, only deferred to the date the real vendor makes true.
+The alternative — flagging on the maximum of the buyable and the on-record wait
+— puts a dead vendor's number back into a live vendor's threshold, which is the
+defect this section exists to remove. Captain's call, taken deliberately.
+
+Note the vocabulary trap while reading the invariant: `test_an_item_whose_only_supplier_died_reaches_the_report_and_the_digest`
+uses "the report" to mean `latest_demand_forecasts(low_stock_only=True)`, the
+FILTERED view — not the unfiltered endpoint. Say which you mean; the two give
+opposite answers about whether an item "left".
+
+**Where the operator can see the difference, and where they deliberately cannot.**
+`lead_time_basis` is on the serialized-forecast payload and
+`SerializedForecastPanel` words all three in the reorder-point cell: a plain
+number, `N *` with a tooltip saying the wait belongs to a discontinued or
+inactive supplier and that a live one has to be found, and `≥ N` for the lower
+bound. It is **not** on `DemandForecast` — that would be a migration for a
+value no surface reads, and the stored row already carries the `lead_time_days`
+its threshold used. So on the demand-forecast report and in the nightly digest an
+unbuyable item's wait is NOT distinguishable from a live one's. Do not write
+anywhere that it is; adding the column and a reader is filed as follow-up
+`oms-demand-forecast-lead-basis`.
+
 ### The alert-suppression class: CLOSED (op-c1ke)
 
 A value made honestly `None` gets collapsed by downstream arithmetic or a
@@ -268,12 +335,14 @@ regardless of what a lead time would have said turns a DATA GAP into a permanent
 alert, which is exactly op-2rsp round 4's failure: flooding the surface until
 people ignore it suppresses alerts too. `NO_SUPPLIERS` (a data gap) and
 `NONE_ORDERABLE` (unbuyable) point in OPPOSITE directions and must stay apart
-everywhere. Do NOT route `_lead_time_days_by_item` through the supplier
-derivation — `test_the_serialized_forecast_keeps_a_dead_vendors_lead_time` and
+everywhere. Do NOT FILTER the lead-time resolver to orderable links —
+`test_the_serialized_forecast_keeps_a_dead_vendors_lead_time` and
 `test_an_item_whose_only_supplier_died_reaches_the_report_and_the_digest` in
-`inventory/tests/test_alert_suppression.py` pin that, and both fail if the
-filter comes back. That function's own docstring carries the rest of the
-reasoning; read it before changing anything there.
+`inventory/tests/test_alert_suppression.py` pin that, and both fail if the filter
+comes back. **Preferring** the orderable link and falling back to every link is a
+different shape and is what the resolver does now; see the section above. That
+function's own docstring carries the rest of the reasoning; read it before
+changing anything there.
 
 `current_cases` is nullable on the wire. Every consumer moved in the same commit:
 `InventoryItemSerializer` (`allow_null`), the three web sites that called

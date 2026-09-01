@@ -473,7 +473,7 @@ class TestKitTasks:
             seen["items"] = list(items)
             return {}
 
-        monkeypatch.setattr(component_forecast, "_lead_time_days_by_item", fake_lead_times)
+        monkeypatch.setattr(component_forecast, "lead_times_for", fake_lead_times)
 
         from inventory.tasks import generate_demand_forecasts
 

@@ -38,6 +38,7 @@ const buildRow = (overrides: Partial<SerializedForecastRow> = {}): SerializedFor
   projected_stockout_date: '2026-08-01',
   lead_time_days: 7,
   lead_time_known: true,
+  lead_time_basis: 'orderable_supplier',
   safety_stock: 2,
   reorder_point: 3,
   needs_reorder: true,
@@ -82,6 +83,37 @@ describe('SerializedForecastPanel', () => {
     expect(marked).toHaveTextContent('\u2265');
   });
 
+  // op-3vqk: a lead time read from a discontinued or inactive supplier is a
+  // COMPLETE reorder point about a vendor nobody can buy from. It must not
+  // read like the live-supplier case (nothing to act on) nor like the
+  // no-supplier case (a lower bound with a blank to fill in).
+  it('marks a reorder point whose lead time comes from an unbuyable supplier', async () => {
+    mockReports.getSerializedForecast.mockResolvedValue({
+      data: [
+        buildRow({
+          item_id: 'dead-vendor',
+          item_name: 'Discontinued blade',
+          lead_time_days: 30,
+          lead_time_known: true,
+          lead_time_basis: 'unorderable_supplier',
+          reorder_point: 5,
+        }),
+      ],
+    } as never);
+
+    renderPanel();
+
+    const marked = await screen.findByTestId(
+      'serialized-forecast-unorderable-rp-dead-vendor',
+    );
+    expect(marked).toHaveTextContent('5');
+    expect(marked).toHaveTextContent('*');
+    // NOT the "we know nothing" wording — the lead component is there.
+    expect(
+      screen.queryByTestId('serialized-forecast-partial-rp-dead-vendor'),
+    ).toBeNull();
+  });
+
   it('quotes a complete reorder point plainly', async () => {
     mockReports.getSerializedForecast.mockResolvedValue({
       data: [buildRow({ item_id: 'has-supplier', reorder_point: 4 })],
@@ -92,6 +124,9 @@ describe('SerializedForecastPanel', () => {
     await screen.findByTestId('serialized-forecast-row-has-supplier');
     expect(
       screen.queryByTestId('serialized-forecast-partial-rp-has-supplier'),
+    ).toBeNull();
+    expect(
+      screen.queryByTestId('serialized-forecast-unorderable-rp-has-supplier'),
     ).toBeNull();
   });
 

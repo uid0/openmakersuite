@@ -199,9 +199,12 @@ def generate_demand_forecasts():
     """
     from django.utils import timezone
 
-    # Reuse the serialized forecast's batched lead-time resolution (observed
-    # LeadTimeLog mean, else the primary supplier's estimate) to avoid N+1.
-    from .services.component_forecast import _lead_time_days_by_item
+    # Reuse the serialized forecast's batched lead-time resolution — the wait
+    # at the supplier we would actually buy from, falling back to what an
+    # item's dead links still know so an unbuyable item keeps its threshold
+    # (op-3vqk). One resolver, so this task and the serialized report can never
+    # disagree about the same item's lead time.
+    from .services.component_forecast import lead_times_for
     from .services.demand_forecast_engine import build_restock_events, forecast_item_by_interval
 
     InventoryItem = apps.get_model("inventory", "InventoryItem")
@@ -219,15 +222,22 @@ def generate_demand_forecasts():
             is_active=True, is_retired=False, is_serialized=False, is_kit=False
         )
     )
-    lead_by_item = _lead_time_days_by_item(items) if items else {}
+    lead_by_item = lead_times_for(items) if items else {}
 
     created = 0
     failed = 0
     for item in items:
         try:
             events = build_restock_events(item, end=end)
+            # ``basis`` is deliberately not persisted: ``DemandForecast`` has
+            # no column for it and no surface reads one, so adding one would be
+            # a migration for a value nobody displays. The stored row keeps
+            # ``lead_time_days`` — the number the threshold used — and an
+            # unbuyable item is flagged on it exactly as before.
             lead = lead_by_item.get(item.id)
-            result = forecast_item_by_interval(item, events, now=now, lead_time_days=lead)
+            result = forecast_item_by_interval(
+                item, events, now=now, lead_time_days=lead.days if lead else None
+            )
             DemandForecast.objects.create(
                 item=item,
                 generated_at=now,

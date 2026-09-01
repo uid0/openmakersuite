@@ -988,6 +988,14 @@ export const serializedComponentsAPI = {
     }),
 };
 
+// Which supplier the `lead_time_days` on a forecast row was read from — see
+// `SerializedForecastRow.lead_time_basis`. Mirrors the backend constants in
+// `inventory/services/component_forecast.py`.
+export type SerializedForecastLeadBasis =
+  | 'orderable_supplier'
+  | 'unorderable_supplier'
+  | 'no_supplier';
+
 // One row per active serialized item from the consumption forecast /
 // low-stock report (InventoryReportViewSet.serialized_forecast).
 export interface SerializedForecastRow {
@@ -1017,6 +1025,20 @@ export interface SerializedForecastRow {
   // `avg_daily_use × lead_time + safety_stock` reorder point. Label it as
   // incomplete rather than quoting it as a horizon.
   lead_time_known: boolean;
+  // WHOSE wait `lead_time_days` describes (op-3vqk). Three states, and they
+  // must not be collapsed into two:
+  //   'orderable_supplier'   — the supplier we would actually buy from. The
+  //                            reorder point is a horizon we can order against.
+  //   'unorderable_supplier' — every supplier link is inactive or discontinued.
+  //                            The number is REAL (that vendor did take this
+  //                            long) but nobody can buy from them. The row is
+  //                            NOT incomplete — it keeps its full lead
+  //                            component and its flag — so say "unbuyable
+  //                            supplier", never "unknown".
+  //   'no_supplier'          — no link at all, so nothing is on record. This is
+  //                            the only basis on which `lead_time_known` is
+  //                            false.
+  lead_time_basis: SerializedForecastLeadBasis;
   safety_stock: number;
   reorder_point: number;
   needs_reorder: boolean;

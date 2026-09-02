@@ -789,8 +789,10 @@ def test_a_same_day_supplier_scores_best_on_speed():
     0 is falsy, so a supplier you can walk to today earned NOTHING on speed
     while a next-day one earned nearly the full 0.3. The best possible lead time
     was graded as the worst. Reachable: the column is a ``PositiveIntegerField``
-    and ``inventory.tasks.update_average_lead_times`` derives it from observed
-    deliveries, which for a local counter pickup is 0 days.
+    an operator sets per link, through the admin or the API, and 0 is what they
+    enter for a local counter pickup. (``inventory.tasks.update_average_lead_times``
+    cannot produce it — its ``if lead_time > 0`` filter drops same-day
+    deliveries before the average is taken.)
 
     Now 0 is the known lead time it is, and takes the whole weight — there is no
     guard at all, because the column is non-null and so there is no absence for

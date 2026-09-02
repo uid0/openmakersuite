@@ -337,7 +337,18 @@ def create_lead_time_log(po_item, delivery_date):
     # ``PositiveIntegerField``, so there is no absence left for a fallback to
     # cover.
     estimated_lead_time = po_item.item_supplier.average_lead_time
-    actual_lead_time = LeadTimeLog.calculate_business_days(order_date, actual_delivery_date)
+    # CALENDAR days, because that is the unit the estimate is already in.
+    # ``estimated_lead_time_days`` is written from ``average_lead_time``, which is
+    # calendar days everywhere in this system, and ``expected_delivery_date`` on
+    # this very row is derived with ``timedelta(days=estimated_lead_time)``.
+    # Measuring the actual in INCLUSIVE business days instead made
+    # ``variance_days`` subtract two different units: a vendor that promised
+    # today and delivered today scored actual 1 against estimated 0, so every
+    # promise kept inside the working week was recorded as a day late. The
+    # ``max`` keeps the clamp the old helper's ``if start_date > end_date``
+    # guard provided, so a delivery recorded before the order date is 0 rather
+    # than negative.
+    actual_lead_time = max((actual_delivery_date - order_date.date()).days, 0)
 
     LeadTimeLog.objects.create(
         item_supplier=po_item.item_supplier,

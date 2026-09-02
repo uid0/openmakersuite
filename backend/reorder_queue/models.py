@@ -1551,12 +1551,12 @@ class LeadTimeLog(models.Model):
     expected_delivery_date = models.DateField(help_text="When delivery was expected")
     actual_delivery_date = models.DateField(help_text="When delivery actually occurred")
 
-    # Lead time calculations (in business days)
+    # Lead time calculations (in calendar days)
     estimated_lead_time_days = models.PositiveIntegerField(
-        help_text="Estimated lead time in business days"
+        help_text="Estimated lead time in calendar days"
     )
     actual_lead_time_days = models.PositiveIntegerField(
-        help_text="Actual lead time in business days"
+        help_text="Actual lead time in calendar days"
     )
     variance_days = models.IntegerField(
         help_text="Difference between actual and estimated (positive = late)"
@@ -1601,30 +1601,6 @@ class LeadTimeLog(models.Model):
     def was_early(self) -> bool:
         """Check if the delivery was early."""
         return self.variance_days < 0
-
-    @classmethod
-    def calculate_business_days(cls, start_date, end_date) -> int:
-        """Calculate business days between two dates (excluding weekends)."""
-        from datetime import timedelta
-
-        if isinstance(start_date, timezone.datetime):
-            start_date = start_date.date()
-        if isinstance(end_date, timezone.datetime):
-            end_date = end_date.date()
-
-        if start_date > end_date:
-            return 0
-
-        business_days = 0
-        current_date = start_date
-
-        while current_date <= end_date:
-            # Monday = 0, Sunday = 6
-            if current_date.weekday() < 5:  # Monday to Friday
-                business_days += 1
-            current_date += timedelta(days=1)
-
-        return business_days
 
     def save(self, *args, **kwargs):
         """Auto-calculate variance when saving."""

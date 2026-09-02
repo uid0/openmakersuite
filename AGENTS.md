@@ -439,12 +439,16 @@ What is worth knowing before you open it:
   purchasing asset X"); the inventory branch was the odd one out. Both messages
   name the two remedies (send `unit_cost`, or price the supplier link), and the
   web form blocks first so the operator is told before the 400.
-- **The supplier scoring is deliberately NOT fixed here.**
-  `score_candidate`'s `if link.unit_cost and average_unit_cost` is the same
-  mistake, so a free supplier can never win on price while its `0.00` still
-  drags the yardstick. Repairing it changes which supplier the system picks,
-  which moves money for a reason that is not "base presented an unknown price as
-  a real number". Captain-reserved, filed as `oms-supplier-scoring-weight-flaws`.
+- **The supplier scoring's half of this is now CLOSED.**
+  `score_candidate`'s `if link.unit_cost and average_unit_cost` was the same
+  mistake — a free supplier could never win on price while its `0.00` still
+  dragged the yardstick. It was captain-reserved, because repairing it changes
+  which supplier the system picks, and the captain has since decided it: the
+  cost term reads through `pricing.unit_price_of`, so a `0.00` is the known
+  price it is, and `test_a_free_supplier_is_priced_at_zero_and_wins_on_it` pins
+  the outcome. Shipped as `oms-supplier-scoring-weight-flaws` — see the
+  supplier-selection note in the falsy-zero section above for the rest of what
+  that branch settled.
 
 `inventory/tests/test_price_single_owner.py` is the build gate, the twin of the
 pack-size one: it walks every non-test module under `backend/` with the AST and

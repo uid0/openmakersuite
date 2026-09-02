@@ -192,9 +192,9 @@ class DeliveryRecord:
         already reports (that one is per supplier where this is per link, so the
         two are different numbers; they should at least be the same
         arithmetic). Paying extra for earliness would pay
-        twice for the same fact: ``inventory.tasks.update_average_lead_times``
-        feeds observed deliveries back into ``average_lead_time``, so a habitually
-        early vendor already collects that on the LEAD-TIME axis. The known cost
+        twice for the same fact: ``average_lead_time`` is the vendor's OWN
+        per-link quoted promise, operator-entered and maintained per link, so a
+        reliably quick vendor already collects its speed on the LEAD-TIME axis. The known cost
         of the unweighted share is that a vendor who was chronically late years
         ago carries it forever; the remedy for that is a window on the query, not
         a decay, and it is filed rather than guessed at here.

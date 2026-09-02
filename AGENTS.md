@@ -172,10 +172,12 @@ of the arithmetic is one sentence: **every term starts at its full weight and is
 discounted only by evidence against that candidate**, so a gap in the data — no
 price on file, no delivery ever recorded — is neither punished nor paid, and the
 winner reports the gap (`SupplierChoice.scored_without_price` /
-`scored_without_history`, on `/items/{id}/metrics/`) rather than leaving an
-operator to infer it from a blank cell. One judgement is still `REPORTED, NOT
-FIXED` there: where the cost cliff sits (150% of the item's average). Retuning it
-needs a captain decision, and the tests fail until it is deliberate.
+`scored_without_history`, reaching `/items/{id}/metrics/` as
+`supplier_scored_without_price` / `supplier_scored_without_history`) rather than
+leaving an operator to infer it from a blank cell. One judgement is still
+`REPORTED, NOT FIXED` there: where the cost cliff sits (150% of the item's
+average). Retuning it needs a captain decision, and the tests fail until it is
+deliberate.
 
 `PurchaseOrderViewSet._find_best_supplier` is now a thin delegation, kept for its
 call site's readability. It has no rule of its own.

@@ -47,6 +47,12 @@ METRICS_FIELDS = {
     "last_po_unit_cost",
     "is_case_based",
     "case_size",
+    # Why Cost / Lead may be blank or unbacked: the supplier scoring does not
+    # punish a missing price or an empty delivery record (op-2rsp), so a
+    # supplier can win carrying one, and the operator is told rather than left
+    # to infer it from a blank cell.
+    "supplier_scored_without_price",
+    "supplier_scored_without_history",
 }
 
 
@@ -305,10 +311,15 @@ class TestListMetricsQueryBudget:
         # ...and that constant is exactly the five grouped aggregates the batch
         # helper runs: on-order, in-transit, committed-from-usage,
         # committed-from-template, last PO cost. The supplier selection adds a
-        # SIXTH only when it has to: this list already prefetches
-        # ``item_suppliers__supplier``, and ``select_suppliers_for`` resolves
-        # prefetched items from that cache rather than re-reading identical rows
-        # (op-2rsp). It was six before that.
+        # SIXTH only when it has to, and it does not have to here for TWO
+        # reasons: this list prefetches through ``item_suppliers_prefetch()``,
+        # so ``select_suppliers_for`` resolves the supplier rows from that cache
+        # rather than re-reading identical rows, AND the delivery record the
+        # performance term needs rides in on that same prefetch's row
+        # annotations. Reverting this list to the bare
+        # ``"item_suppliers__supplier"`` string would still give the right
+        # answer, but only via the grouped-aggregate fallback — a sixth query
+        # (op-2rsp). It was six before the prefetch.
         assert metrics_6 - base_6 == 5
 
     def test_default_path_is_unaffected(self, api_client):

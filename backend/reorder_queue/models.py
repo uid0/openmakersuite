@@ -1537,6 +1537,23 @@ class LeadTimeLog(models.Model):
 
     Records actual delivery performance vs. estimated lead times
     to improve future ordering decisions and supplier evaluation.
+
+    **Two different promises live on this row, and only one of them is scored.**
+    ``estimated_lead_time_days`` is the link's STANDING QUOTE
+    (``ItemSupplier.average_lead_time``), which ``services.receiving`` reads at
+    RECEIPT time — there is no order-time snapshot of it — and ``variance_days``
+    is measured against that and nothing else. ``expected_delivery_date`` is the
+    order's separately confirmed date and is a different fact that no column
+    here scores. So a row whose ``expected_delivery_date`` equals its
+    ``actual_delivery_date`` can still carry a positive ``variance_days``: the
+    vendor met the date it confirmed while missing the lead time it advertises.
+    Pinned by ``test_variance_scores_the_standing_quote_not_the_confirmed_date``.
+
+    That is deliberate. ``inventory.services.supplier_selection`` scores the
+    standing quote on its lead-time axis and uses ``variance_days`` only to
+    discount that same quote by how often the vendor broke it; scoring the
+    discount against a per-order date would let a vendor quote three days,
+    confirm ten, deliver ten, and win on both axes.
     """
 
     item_supplier = models.ForeignKey(
@@ -1551,15 +1568,20 @@ class LeadTimeLog(models.Model):
     expected_delivery_date = models.DateField(help_text="When delivery was expected")
     actual_delivery_date = models.DateField(help_text="When delivery actually occurred")
 
-    # Lead time calculations (in business days)
+    # Lead time calculations (in calendar days)
     estimated_lead_time_days = models.PositiveIntegerField(
-        help_text="Estimated lead time in business days"
+        help_text="Estimated lead time in calendar days"
     )
     actual_lead_time_days = models.PositiveIntegerField(
-        help_text="Actual lead time in business days"
+        help_text="Actual lead time in calendar days"
     )
     variance_days = models.IntegerField(
-        help_text="Difference between actual and estimated (positive = late)"
+        help_text=(
+            "Actual minus estimated lead time, in calendar days (positive = "
+            "later than quoted). Measured against the supplier link's standing "
+            "quoted lead time, NOT against expected_delivery_date, which is the "
+            "order's separately confirmed date and a different fact."
+        )
     )
 
     # Order details
@@ -1601,30 +1623,6 @@ class LeadTimeLog(models.Model):
     def was_early(self) -> bool:
         """Check if the delivery was early."""
         return self.variance_days < 0
-
-    @classmethod
-    def calculate_business_days(cls, start_date, end_date) -> int:
-        """Calculate business days between two dates (excluding weekends)."""
-        from datetime import timedelta
-
-        if isinstance(start_date, timezone.datetime):
-            start_date = start_date.date()
-        if isinstance(end_date, timezone.datetime):
-            end_date = end_date.date()
-
-        if start_date > end_date:
-            return 0
-
-        business_days = 0
-        current_date = start_date
-
-        while current_date <= end_date:
-            # Monday = 0, Sunday = 6
-            if current_date.weekday() < 5:  # Monday to Friday
-                business_days += 1
-            current_date += timedelta(days=1)
-
-        return business_days
 
     def save(self, *args, **kwargs):
         """Auto-calculate variance when saving."""

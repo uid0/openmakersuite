@@ -846,11 +846,13 @@ class InventoryItem(OwnableModel):
            and not ``is_discontinued``. This is a precondition, not a tiebreak.
         2. **The gate.** An orderable link an operator flagged ``is_primary``
            wins OUTRIGHT and is never scored.
-        3. **The score.** Otherwise the candidates are ranked on cost AND lead
-           time together, and the best-scoring one wins. It is emphatically NOT
-           "the cheapest": a modest premium that buys a large lead-time saving
-           wins here. ``Meta.ordering`` only supplies the order the candidates
-           arrive in, which settles a tie between otherwise identical rows.
+        3. **The score.** Otherwise the candidates are ranked on cost, lead time
+           AND delivery record together, and the best-scoring one wins. It is
+           emphatically NOT "the cheapest": a modest premium that buys a large
+           lead-time saving wins here, and neither a missing price nor an empty
+           delivery record is punished. ``Meta.ordering`` only supplies the order
+           the candidates arrive in, which settles a tie between otherwise
+           identical rows.
 
         ``None`` therefore means "no supplier you can buy from", which covers
         both "no suppliers at all" and "every supplier link is dead". A caller
@@ -861,10 +863,13 @@ class InventoryItem(OwnableModel):
         suppliers.
 
         The result rides an ``item_suppliers`` prefetch when the caller set one
-        up (the list/detail/reorder read paths all do), so serialising the seven
-        flat compat fields across a page costs ZERO extra queries instead of an
-        N+1. It is memoised per instance via ``cached_property`` so reading all
-        seven flats touches the database at most once.
+        up (the list/detail/reorder read paths all do, through
+        :func:`~inventory.services.supplier_selection.item_suppliers_prefetch`,
+        which also carries the delivery-record annotations the score reads), so
+        serialising the seven flat compat fields across a page costs ZERO extra
+        queries instead of an N+1. It is memoised per instance via
+        ``cached_property`` so reading all seven flats touches the database at
+        most once.
         """
         from inventory.services.supplier_selection import primary_item_supplier
 

@@ -46,6 +46,7 @@ from django.db import transaction
 from inventory.models import InventoryItem, PackagingLevel
 from inventory.services.pack_size import declares_a_case, order_pack_size
 from inventory.services.packaging import validate_packaging_chain
+from inventory.services.supplier_selection import item_suppliers_prefetch
 
 CASE_LEVEL_NAME = "case"
 
@@ -75,7 +76,7 @@ class Command(BaseCommand):
         items = (
             InventoryItem.objects.filter(use_case_based_reorder=True)
             .select_related("count_level")
-            .prefetch_related("item_suppliers__supplier", "packaging_levels")
+            .prefetch_related(item_suppliers_prefetch(), "packaging_levels")
             .order_by("name", "id")
         )
 

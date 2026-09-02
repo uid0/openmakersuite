@@ -14,7 +14,7 @@ op-2rsp made it the ONLY answer. The rule is three things in strict order:
     2. **The gate.** If an operator flagged one of those primary, it wins
        outright and scoring never runs.
     3. **The score.** Otherwise :func:`score_candidate` ranks the candidates on
-       cost and lead time, and the best scoring one wins.
+       cost, lead time and delivery record, and the best scoring one wins.
 
 **Orderability is not a tiebreak, it is a precondition.** An inactive or
 discontinued link is a supplier nobody can buy from; handing one to a purchase
@@ -36,6 +36,37 @@ because those need different words in front of an operator and different actions
 from them. Callers that only need the row keep using
 :func:`primary_item_supplier`, which is that result with the reason dropped.
 
+**Every term starts at its full weight and is DISCOUNTED by evidence against
+the candidate.** That one sentence is the arithmetic of :func:`score_candidate`
+and it is what makes "a gap in the data must not be punished" precise:
+
+* Cost starts at ``COST_WEIGHT`` and is discounted by how far above the item's
+  average orderable price this vendor quotes, reaching zero at the
+  ``COST_TOLERANCE`` cliff. A vendor at or below that average is not dear, so
+  nothing is discounted.
+* Lead time starts at ``LEAD_TIME_WEIGHT`` and is discounted by how much of the
+  ``MAX_REASONABLE_LEAD_DAYS`` horizon the vendor's quoted wait consumes.
+* Performance starts at ``PERFORMANCE_WEIGHT`` and is discounted by the share of
+  this link's recorded deliveries that arrived LATE.
+
+An absent value is therefore not a bad value: it is an absence of evidence, and
+there is nothing to discount for. **An unpriced candidate scores on cost exactly
+as one priced at the item's average orderable price does, and a candidate with
+no recorded delivery scores on performance exactly as one that has never been
+late does.** Neither is rewarded — every factor is bounded at 1, so no candidate
+can score above its term's full weight and an unknown can never BEAT a known
+value on that axis — and neither is penalised, because the term is not skipped.
+The consequence is deliberate and is a behaviour change: an unpriced supplier
+now outscores, on the cost axis, a rival priced ABOVE the item's average, just
+as a supplier quoting exactly that average does.
+
+**Where the choice turned on an absence, it is said out loud.**
+:class:`SupplierChoice` carries ``scored_without_price`` and
+``scored_without_history`` for the winner, and ``/items/{id}/metrics/`` — the
+payload the web item-detail row and ScanTTY both read — carries them onto the
+wire. An operator seeing a blank cost should not have to infer whether the
+system knew the price and chose anyway.
+
 **History, because it bears on trusting this.** The scoring below came from
 ``reorder_queue.views.PurchaseOrderViewSet._find_best_supplier``, which was a
 second, rival answer to this same question — it filtered orderability but ranked
@@ -53,7 +84,11 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Dict, Iterable, List, Optional
 
+from django.db.models import Count, IntegerField, OuterRef, Prefetch, Q, Subquery, Value
+from django.db.models.functions import Coalesce
+
 from inventory.models import ItemSupplier
+from inventory.services.pricing import unit_price_of
 
 #: No supplier link exists for this item at all — nobody has said where it
 #: comes from. The operator's action is to add one.
@@ -76,26 +111,35 @@ BASIS_BEST_SCORED = "best_scored"
 
 # ── Scoring weights ──────────────────────────────────────────────────────────
 #
-# Carried over UNCHANGED from ``reorder_queue.views``'s ``_find_best_supplier``,
-# which is where this scoring lived while it was one of two rival rules. The
-# captain authorised repairing the scoring and adopting it everywhere, NOT
-# retuning it — what cost or lead time is worth is a separate product question.
-# Two things about these weights are worth a reader's attention; both are
-# reported rather than changed:
+# **These are the weights the code applies.** Each term's factor is bounded to
+# ``[0, 1]`` — cost by an explicit clamp at both ends, lead time because
+# ``average_lead_time`` is a non-negative column and the horizon is the divisor,
+# performance because it is a share of a count of itself — so each contributes
+# AT MOST its weight and a candidate's total score lies in ``[0, 0.8]``.
+# ``test_no_candidate_can_score_above_the_sum_of_the_stated_weights`` is the
+# check. The three weights sum to 0.8 rather than 1.0
+# because the rival rule this came from also carried a ``+0.2`` primary-supplier
+# term; that term is gone — a flagged primary is a GATE, not points — and the
+# remaining weights were deliberately not rescaled, because scaling every score
+# by the same constant cannot change an ordering and rescaling would silently
+# retune the cost/lead-time trade-off these tests pin.
+#
+# Two shape decisions a reader should know, both now stated truthfully:
 #
 # * ``COST_TOLERANCE`` makes the cost term a CLIFF, not a curve. A candidate
 #   priced at or above 150% of the item's average orderable price scores 0 on
-#   cost, and everything past that point is equally bad. Below average the
-#   factor is NOT clamped at 1 either, so a candidate far cheaper than its peers
-#   can contribute more than the nominal 40%.
-# * ``PERFORMANCE_FACTOR * PERFORMANCE_WEIGHT`` is 0.01 — a constant added to
-#   every candidate alike, so it cannot affect an ordering. The comment it
-#   carried called it a "10% weight"; it is 1%, and inert either way until the
-#   ``LeadTimeLog``-driven version it is a placeholder for exists.
+#   cost, and everything past that point is equally bad. The other end IS
+#   clamped: at or below the average the factor is 1, so the term can never
+#   exceed ``COST_WEIGHT``. It is the clamp that makes "an unpriced candidate is
+#   not rewarded" true — without it a bargain could outbid the full weight an
+#   unknown price earns, and awarding the full weight WOULD be a thumb on the
+#   scale. Retuning where the cliff sits stays a product question.
+# * ``PERFORMANCE_WEIGHT`` is a real 10% driven by ``LeadTimeLog`` (see
+#   :func:`delivery_records_for`). It was a constant ``0.01`` added to every
+#   candidate alike — inert, and 1% while its comment claimed 10%.
 COST_WEIGHT = Decimal("0.4")
 LEAD_TIME_WEIGHT = Decimal("0.3")
 PERFORMANCE_WEIGHT = Decimal("0.1")
-PERFORMANCE_FACTOR = Decimal("0.1")
 
 #: Percentage points above the item's average orderable unit cost at which the
 #: cost term reaches zero.
@@ -103,6 +147,64 @@ COST_TOLERANCE = Decimal("50")
 
 #: Lead time (days) at which the lead-time term reaches zero.
 MAX_REASONABLE_LEAD_DAYS = Decimal("30")
+
+
+@dataclass(frozen=True)
+class DeliveryRecord:
+    """One link's delivery history, as the two counts the score needs.
+
+    ``total`` is how many :class:`~reorder_queue.models.LeadTimeLog` rows this
+    link has; ``on_time`` is how many of them arrived no later than the VENDOR'S
+    STANDING QUOTED LEAD TIME — ``ItemSupplier.average_lead_time``, the yardstick
+    because it is the promise the lead-time term scores — and not the order's
+    separately confirmed ``expected_delivery_date`` (``variance_days <= 0``).
+    Both are counts of ROWS, so
+    ``total == 0`` means "nothing has ever been delivered through this link",
+    which is an absence of evidence and not a bad record — see :attr:`factor`.
+    """
+
+    on_time: int = 0
+    total: int = 0
+
+    @property
+    def has_history(self) -> bool:
+        """``True`` when at least one delivery has been recorded for this link."""
+        return self.total > 0
+
+    @property
+    def factor(self) -> Decimal:
+        """The share of recorded deliveries that were not late, in ``[0, 1]``.
+
+        ``1`` when there is no history at all. That is the "do not punish the
+        gap" rule applied to the delivery record, and it follows from what the
+        term MEANS: ``average_lead_time`` is the wait this vendor promises and
+        the lead-time term already scores that promise, so this term exists only
+        to discount the promise by how often the vendor has broken it. A link
+        nobody has ever ordered through has broken nothing, so there is nothing
+        to discount — exactly as an unpriced candidate has no premium to discount
+        for. Scoring it any lower would be discounting a promise for lack of
+        evidence, which is punishing the gap.
+
+        The arithmetic is a plain unweighted share: **every recorded delivery
+        counts the same, however old**, and **arriving early counts exactly as
+        arriving on time, not better**. Both are decisions, not oversights.
+        Recency weighting would introduce a decay constant nobody has data to
+        set, over a handful of orders a year per link. Paying extra for earliness would pay
+        twice for the same fact: ``average_lead_time`` is the vendor's OWN
+        per-link quoted promise, operator-entered and maintained per link, so a
+        reliably quick vendor already collects its speed on the LEAD-TIME axis. The known cost
+        of the unweighted share is that a vendor who was chronically late years
+        ago carries it forever; the remedy for that is a window on the query, not
+        a decay, and it is filed rather than guessed at here.
+        """
+        if not self.has_history:
+            return Decimal(1)
+        return Decimal(self.on_time) / Decimal(self.total)
+
+
+#: The answer for a link with nothing delivered through it yet. Shared so the
+#: common case allocates nothing.
+NO_DELIVERY_HISTORY = DeliveryRecord()
 
 
 @dataclass(frozen=True)
@@ -115,12 +217,22 @@ class SupplierChoice:
     marks the case where an operator DID flag one and it was skipped because it
     cannot be bought from, which reads to them as their choice being ignored
     unless it is said out loud.
+
+    ``scored_without_price`` and ``scored_without_history`` are the same
+    courtesy for the two gaps the SCORING is allowed to shrug off: the winner
+    carries no ``unit_cost``, or no delivery has ever been recorded through it,
+    and it won anyway because neither gap is punished. Both are ``False`` under
+    the gate — a flagged primary is not weighed against anything, so its choice
+    did not turn on what we do or do not know about it — and both describe the
+    WINNER, not the field.
     """
 
     item_supplier: Optional[ItemSupplier] = None
     basis: Optional[str] = None
     reason: Optional[str] = None
     flagged_primary_unorderable: bool = False
+    scored_without_price: bool = False
+    scored_without_history: bool = False
 
     def __bool__(self) -> bool:
         return self.item_supplier is not None
@@ -147,8 +259,227 @@ def average_orderable_unit_cost(candidates: List[ItemSupplier]) -> Optional[Deci
     return sum(costs) / Decimal(len(costs))
 
 
-def score_candidate(link: ItemSupplier, average_unit_cost: Optional[Decimal]) -> Decimal:
+def cost_factor(link: ItemSupplier, average_unit_cost: Optional[Decimal]) -> Decimal:
+    """How much of :data:`COST_WEIGHT` this candidate keeps, in ``[0, 1]``.
+
+    ``1`` means "nothing to discount": the vendor quotes at or below the item's
+    average orderable price, **or nobody has recorded what it quotes at all**.
+    The factor falls to ``0`` at the :data:`COST_TOLERANCE` cliff, 150% of that
+    average.
+
+    The price is read through :func:`inventory.services.pricing.unit_price_of`,
+    the ONE reading of ``unit_cost`` (op-9m2v), so a recorded ``0.00`` — donated
+    stock, a vendor sample, an internal transfer — is the KNOWN price it is and
+    lands at the cheap end of the curve. The guard here used to be
+    ``if link.unit_cost``, which read free as unpriced while
+    :func:`average_orderable_unit_cost` went on counting that ``0.00`` in the
+    yardstick its rivals were measured against: the same row treated as two
+    contradictory things at once, and the best possible price graded as the
+    worst.
+
+    Three separate reasons the curve cannot be evaluated, all of which mean the
+    same thing — no evidence of a premium — and all of which therefore keep the
+    full weight:
+
+    * the candidate records no price;
+    * ``average_unit_cost`` is ``None`` because no candidate records one, so
+      there is no yardstick to measure against;
+    * ``average_unit_cost`` is ``0.00``. That is a KNOWN average and not an
+      absent one (it means every priced candidate is free), but it is an
+      unusable DIVISOR. It is handled by asking the question the division would
+      have answered — is this candidate dearer than its peers? — which for a
+      free peer group is only true of a candidate that charges something.
+
+    That last branch is not hypothetical and not optional: two donated links on
+    one item give an average of exactly ``0.00``, and the truthiness guard this
+    replaces was the only thing standing between that item and a
+    ``ZeroDivisionError``.
+    """
+    price = unit_price_of(link)
+    if not price.is_known or average_unit_cost is None:
+        return Decimal(1)
+    if average_unit_cost == 0:
+        return Decimal(1) if price.amount == 0 else Decimal(0)
+    relative = (price.amount / average_unit_cost - 1) * 100
+    return min(Decimal(1), max(Decimal(0), (COST_TOLERANCE - relative) / COST_TOLERANCE))
+
+
+def lead_time_factor(link: ItemSupplier) -> Decimal:
+    """How much of :data:`LEAD_TIME_WEIGHT` this candidate keeps, in ``[0, 1]``.
+
+    ``1`` for a same-day supplier, falling linearly to ``0`` at
+    :data:`MAX_REASONABLE_LEAD_DAYS`.
+
+    **A lead time of 0 days is a KNOWN lead time.** The guard here used to be
+    ``if link.average_lead_time``, and 0 is falsy, so a vendor you can walk to
+    today earned NOTHING on speed while a next-day one earned nearly the whole
+    weight — the best possible lead time graded as the worst. There is no guard
+    now because there is nothing to guard: ``ItemSupplier.average_lead_time`` is
+    a non-null ``PositiveIntegerField``, so the value is always known and always
+    at least zero, which is exactly why reading 0 as "unknown" was wrong.
+
+    (The column's ``default=7`` does collapse "never measured" into "measured at
+    seven days", but that is a schema-level absence this module cannot see and
+    must not guess at. Reported, not fixed: it needs a nullable column and a
+    decision about what an unmeasured lead time should score.)
+    """
+    return max(
+        Decimal(0),
+        (MAX_REASONABLE_LEAD_DAYS - Decimal(link.average_lead_time)) / MAX_REASONABLE_LEAD_DAYS,
+    )
+
+
+#: Annotation aliases carrying one link's delivery record on the row itself.
+#: Underscored because they are this module's private wiring, not part of
+#: ``ItemSupplier``'s public shape.
+DELIVERIES_TOTAL = "_deliveries_total"
+DELIVERIES_ON_TIME = "_deliveries_on_time"
+
+
+def _delivery_count(*, on_time_only: bool) -> Subquery:
+    """A correlated ``COUNT`` of one link's ``LeadTimeLog`` rows, as a subquery."""
+    # Imported here rather than at module scope: ``reorder_queue.models``
+    # imports ``inventory.models``, and inventory must not depend on the
+    # reorder-queue app at import time to resolve its own supplier question.
+    from reorder_queue.models import LeadTimeLog
+
+    logs = LeadTimeLog.objects.filter(item_supplier=OuterRef("pk"))
+    if on_time_only:
+        # ``<= 0``, not ``< 0``: a variance of exactly zero is a delivery that
+        # landed on the day the vendor's standing quote promised — the best
+        # outcome this column can express, and one more known value a falsy
+        # guard would have read as an absence. Early is as good as on time, not
+        # better; see :attr:`DeliveryRecord.factor`.
+        logs = logs.filter(variance_days__lte=0)
+    return Coalesce(
+        Subquery(
+            # ``order_by()`` clears ``Meta.ordering`` so it cannot contaminate
+            # the GROUP BY and split the count across delivery dates.
+            logs.order_by().values("item_supplier").annotate(n=Count("id")).values("n")[:1],
+            output_field=IntegerField(),
+        ),
+        Value(0),
+    )
+
+
+def delivery_record_annotations() -> Dict[str, Subquery]:
+    """The two annotations that put a link's delivery record on the row.
+
+    Applied to every ``ItemSupplier`` queryset this module builds, and to the
+    prefetch :func:`item_suppliers_prefetch` hands the read paths, so the
+    delivery half of the score arrives in the SAME round-trip as the rows —
+    never as a query per candidate, and never as a page of log rows pulled into
+    memory only to be counted.
+    """
+    return {
+        DELIVERIES_TOTAL: _delivery_count(on_time_only=False),
+        DELIVERIES_ON_TIME: _delivery_count(on_time_only=True),
+    }
+
+
+def item_suppliers_prefetch(lookup: str = "item_suppliers") -> Prefetch:
+    """The ``item_suppliers`` prefetch a read path should use, in one place.
+
+    Replaces the bare ``"item_suppliers__supplier"`` string every list and
+    detail queryset used to carry. It pulls the same rows with the same
+    ``select_related("supplier")`` and the same ``Meta.ordering``, and adds the
+    two delivery-record annotations, so serialising a page still costs ZERO
+    queries here — the property #882 established and the reason this is a
+    prefetch rather than a per-row lookup.
+
+    ``lookup`` is the path to the relation, so a queryset over some OTHER model
+    that reaches items can pass ``"item__item_suppliers"``.
+    """
+    return Prefetch(
+        lookup,
+        queryset=ItemSupplier.objects.select_related("supplier").annotate(
+            **delivery_record_annotations()
+        ),
+    )
+
+
+def delivery_records_for(links: List[ItemSupplier]) -> Dict[int, DeliveryRecord]:
+    """``{link_id: DeliveryRecord}`` for ``links`` — the delivery half of the score.
+
+    "Performance" is defined here, in one sentence: **the share of the
+    deliveries recorded against THIS supplier link that arrived no later than
+    the VENDOR'S STANDING QUOTED LEAD TIME.**
+    ``reorder_queue.models.LeadTimeLog`` is the record and ``variance_days``
+    (``actual_lead_time_days - estimated_lead_time_days``, positive = late) is
+    the column that says so, read as ``<= 0`` because a variance of exactly
+    ``0`` is a delivery that landed on the quoted day.
+
+    The yardstick is the link's standing ``average_lead_time`` — NOT the order's
+    own ``expected_delivery_date``, even when an operator confirmed one — because
+    it is the same promise the lead-time term scores, and this term exists only
+    to discount that promise by how often the vendor broke it. Scoring the
+    discount against a per-order date would decouple the two terms and let a
+    vendor quote three days, confirm ten, deliver ten, and win on BOTH axes.
+
+    **Per LINK, not per supplier.** A supplier-wide rate over
+    ``item_supplier__supplier`` is the broader sample, but it cannot be reached
+    from an item without pulling every log of every item that vendor carries. The
+    per-link record is also the more specific evidence: how this vendor has done
+    on THIS item is the question a purchase asks.
+
+    Query budget, matching the rest of the module: rows carrying the
+    :func:`delivery_record_annotations` — every row this module fetches, and
+    every row a caller prefetched through :func:`item_suppliers_prefetch` — are
+    read straight off the row and cost NOTHING. Anything left over (a caller
+    still prefetching the bare string) is resolved in ONE grouped aggregate for
+    the whole set, never one query per candidate. A link with no rows is absent
+    from that aggregate and gets :data:`NO_DELIVERY_HISTORY`, which is the same
+    answer as "we did not look" — see :attr:`DeliveryRecord.factor`.
+    """
+    from reorder_queue.models import LeadTimeLog
+
+    records: Dict[int, DeliveryRecord] = {}
+    unresolved: List[int] = []
+    for link in links:
+        if hasattr(link, DELIVERIES_TOTAL):
+            records[link.pk] = DeliveryRecord(
+                on_time=getattr(link, DELIVERIES_ON_TIME),
+                total=getattr(link, DELIVERIES_TOTAL),
+            )
+        else:
+            unresolved.append(link.pk)
+
+    if unresolved:
+        counted = {
+            row["item_supplier"]: DeliveryRecord(on_time=row["on_time"], total=row["total"])
+            for row in (
+                LeadTimeLog.objects.filter(item_supplier_id__in=unresolved)
+                .values("item_supplier")
+                .annotate(
+                    total=Count("id"),
+                    on_time=Count("id", filter=Q(variance_days__lte=0)),
+                )
+                .order_by()  # clear Meta ordering so it can't contaminate GROUP BY
+            )
+        }
+        for link_id in unresolved:
+            records[link_id] = counted.get(link_id, NO_DELIVERY_HISTORY)
+    return records
+
+
+def score_candidate(
+    link: ItemSupplier,
+    average_unit_cost: Optional[Decimal],
+    record: Optional[DeliveryRecord] = None,
+) -> Decimal:
     """Score one ORDERABLE, UNFLAGGED candidate. Higher is better.
+
+    Three terms, each starting at its full weight and discounted only by
+    evidence against this candidate, so the total lies in ``[0, 0.8]``:
+    :func:`cost_factor` × :data:`COST_WEIGHT`, :func:`lead_time_factor` ×
+    :data:`LEAD_TIME_WEIGHT`, and the delivery record's
+    :attr:`DeliveryRecord.factor` × :data:`PERFORMANCE_WEIGHT`.
+
+    ``record`` omitted means "no delivery history was looked up", which scores
+    the same as looking it up and finding none — :data:`NO_DELIVERY_HISTORY`,
+    the full performance weight. :func:`_best_scored` always passes one;
+    the default exists so a caller reasoning about cost and lead time alone gets
+    the same answer for every candidate on the axis it did not ask about.
 
     Decimal throughout. The original raised ``TypeError`` on
     ``Decimal * float`` for any candidate priced below 150% of the item's
@@ -163,57 +494,67 @@ def score_candidate(link: ItemSupplier, average_unit_cost: Optional[Decimal]) ->
     of points that a cheap enough rival could outbid. The scoring accordingly
     has no primary-supplier term — under the gate it would be unreachable.
     """
-    score = Decimal(0)
-
-    # Cost (nominal 40%) — cheaper than the item's average orderable price is
-    # better. See COST_TOLERANCE on the cliff and the missing upper clamp.
-    #
-    # REPORTED, NOT FIXED: this guard is truthiness, so a ``unit_cost`` of 0.00
-    # is skipped as "unpriced" — while ``average_orderable_unit_cost`` still
-    # counts that 0.00 as a real price. A free link (donated stock, a sample, an
-    # internal transfer) therefore earns nothing for being free AND drags the
-    # yardstick its rivals are measured against. Pinned by
-    # ``test_a_free_supplier_earns_nothing_for_being_free``; the fix is a weight
-    # and semantics decision the captain reserved.
-    if link.unit_cost and average_unit_cost:
-        relative = (link.unit_cost / average_unit_cost - 1) * 100
-        cost_factor = max(Decimal(0), COST_TOLERANCE - relative) / COST_TOLERANCE
-        score += cost_factor * COST_WEIGHT
-
-    # Lead time (30%) — sooner is better, flat zero at/after 30 days.
-    if link.average_lead_time:
-        lead_time_factor = max(
-            Decimal(0),
-            (MAX_REASONABLE_LEAD_DAYS - Decimal(link.average_lead_time)) / MAX_REASONABLE_LEAD_DAYS,
-        )
-        score += lead_time_factor * LEAD_TIME_WEIGHT
-
-    # Historical performance — a placeholder constant pending LeadTimeLog-driven
-    # scoring. Identical for every candidate, so it shifts no ordering.
-    score += PERFORMANCE_FACTOR * PERFORMANCE_WEIGHT
-
-    return score
+    if record is None:
+        record = NO_DELIVERY_HISTORY
+    return (
+        cost_factor(link, average_unit_cost) * COST_WEIGHT
+        + lead_time_factor(link) * LEAD_TIME_WEIGHT
+        + record.factor * PERFORMANCE_WEIGHT
+    )
 
 
-def _best_scored(candidates: List[ItemSupplier]) -> ItemSupplier:
+def _best_scored(
+    candidates: List[ItemSupplier],
+    records: Optional[Dict[int, DeliveryRecord]] = None,
+) -> ItemSupplier:
     """Highest-scoring candidate; a tie goes to the FIRST one in ``candidates``.
 
     ``candidates`` arrives in ``Meta.ordering`` and ``max`` returns the first
     maximal element, so the answer is a pure function of that order.
 
-    In practice the only reachable tie is between rows identical on price AND
-    lead time: the cost yardstick is the mean of the candidates themselves, so
-    two of them cannot both sit past the 150% cliff, and any third cheap enough
-    to drag the mean down would outscore them. Such rows are interchangeable —
-    "the cheaper one" is not a meaningful tie-break between them — and which one
-    wins is whichever the database returned first. Stable within a query, and
-    deliberately not claimed to be more than that.
+    ``records`` is :func:`delivery_records_for`'s map, resolved here when the
+    caller has not already resolved it for a whole page.
+
+    Ties are now REACHABLE between differently-priced rows, which they were not
+    before: the cost factor is clamped at 1, so every candidate at or below the
+    item's average orderable price earns the identical full weight, and an
+    unpriced candidate earns it too. Those rows are separated by lead time and
+    delivery record; when those match as well there is genuinely nothing to
+    choose between them and the first one wins. That order is
+    ``Meta.ordering`` — ``-is_primary``, then ``unit_cost`` ascending with SQL's
+    NULLs last — so a dead tie between a priced candidate and an unpriced one
+    goes to the priced one, and a dead tie between two priced ones goes to the
+    cheaper. Stable within a query, and deliberately not claimed to be more than
+    that.
     """
     average = average_orderable_unit_cost(candidates)
-    return max(candidates, key=lambda link: score_candidate(link, average))
+    if records is None:
+        records = delivery_records_for(candidates)
+    return max(
+        candidates,
+        key=lambda link: score_candidate(link, average, records.get(link.pk)),
+    )
 
 
-def _choose(links: List[ItemSupplier]) -> SupplierChoice:
+def _scored_candidates(links: List[ItemSupplier]) -> List[ItemSupplier]:
+    """The rows :func:`score_candidate` would actually rank, or ``[]``.
+
+    Empty whenever scoring does not run: no links, nothing orderable, or an
+    orderable link is flagged and takes the gate. It exists so
+    :func:`select_suppliers_for` can pre-resolve exactly the delivery history
+    the scoring is about to read, for a whole page at once, without keeping a
+    second copy of the gate that could drift from :func:`_choose`'s.
+    """
+    candidates = [link for link in links if _orderable(link)]
+    if any(link.is_primary for link in candidates):
+        return []
+    return candidates
+
+
+def _choose(
+    links: List[ItemSupplier],
+    records: Optional[Dict[int, DeliveryRecord]] = None,
+) -> SupplierChoice:
     """Resolve one item's ``ItemSupplier`` rows, already in ``Meta.ordering``.
 
     Two steps, in this order, and the order is the whole point:
@@ -228,6 +569,11 @@ def _choose(links: List[ItemSupplier]) -> SupplierChoice:
     queryset: the callers that matter serialise a whole page and rely on the
     ``item_suppliers`` prefetch cache, and a fresh ``.filter()`` would bypass
     that cache and reintroduce the per-row query #882 removed.
+
+    ``records`` is :func:`delivery_records_for`'s map, passed in by
+    :func:`select_suppliers_for` so a whole page resolves its delivery history
+    in one aggregate; resolved here for a single item otherwise, and not at all
+    when the gate fires or nothing is orderable.
     """
     if not links:
         return SupplierChoice(reason=NO_SUPPLIERS)
@@ -239,15 +585,27 @@ def _choose(links: List[ItemSupplier]) -> SupplierChoice:
 
     # 1. The gate. ``enforce_single_primary`` keeps at most one flagged per item,
     #    and the rows arrive primary-first, so this is the first candidate if any.
+    #    Nothing is looked up for it: the gate weighs nothing, so no gap in what
+    #    we know about it can have decided anything.
     for link in candidates:
         if link.is_primary:
             return SupplierChoice(item_supplier=link, basis=BASIS_FLAGGED_PRIMARY)
 
-    # 2. The score, over candidates none of which is flagged.
+    # 2. The score, over candidates none of which is flagged. The delivery
+    #    records are resolved ONCE for the whole candidate set — off the row
+    #    annotations every queryset here carries, else in a single grouped
+    #    aggregate — and never once per candidate.
+    if records is None:
+        records = delivery_records_for(candidates)
+    winner = _best_scored(candidates, records)
     return SupplierChoice(
-        item_supplier=_best_scored(candidates),
+        item_supplier=winner,
         basis=BASIS_BEST_SCORED,
         flagged_primary_unorderable=flagged_exists,
+        # Said out loud rather than left to be inferred from a blank cost cell:
+        # the winner won WITHOUT one of these, because neither gap is punished.
+        scored_without_price=not unit_price_of(winner).is_known,
+        scored_without_history=not records.get(winner.pk, NO_DELIVERY_HISTORY).has_history,
     )
 
 
@@ -260,20 +618,34 @@ def _prefetched_links(item) -> Optional[List[ItemSupplier]]:
 
 
 def _links_for(item) -> List[ItemSupplier]:
-    """This item's supplier rows in ``Meta.ordering``, riding a prefetch if set."""
+    """This item's supplier rows in ``Meta.ordering``, riding a prefetch if set.
+
+    The delivery-record annotations ride the SAME round-trip as the rows, so an
+    unprefetched read still costs exactly one query — the performance term added
+    no round-trip to this path.
+    """
     prefetched = _prefetched_links(item)
     if prefetched is not None:
         return prefetched
-    return list(item.item_suppliers.select_related("supplier").all())
+    return list(
+        item.item_suppliers.select_related("supplier")
+        .annotate(**delivery_record_annotations())
+        .all()
+    )
 
 
 def select_supplier(item) -> SupplierChoice:
     """Return the :class:`SupplierChoice` for ``item`` — the row AND the reason.
 
     When ``item`` was loaded with ``prefetch_related("item_suppliers")`` this
-    reads the prefetch cache and costs ZERO queries; otherwise it runs a single
-    query, pulling ``supplier`` in the same round-trip so a downstream
-    ``.supplier`` access does not add another.
+    reads the prefetch cache and costs ZERO queries for the rows; otherwise it
+    runs a single query, pulling ``supplier`` in the same round-trip so a
+    downstream ``.supplier`` access does not add another.
+
+    The delivery records behind the performance term ride that same query as
+    annotations, so scoring adds no round-trip of its own — and a caller that
+    prefetched through :func:`item_suppliers_prefetch` still pays nothing at
+    all. Reading a PAGE should go through :func:`select_suppliers_for`.
     """
     return _choose(_links_for(item))
 
@@ -297,17 +669,24 @@ def select_suppliers_for(items: Iterable) -> Dict:
     Every candidate row is pulled, not just the orderable ones: "none orderable"
     can only be told apart from "no suppliers" by seeing the rows that were
     rejected.
+
+    **Delivery history rides the same round-trip**, as two annotations on the
+    supplier rows themselves (:func:`delivery_record_annotations`), so the
+    performance term costs no query of its own. A caller whose prefetch predates
+    :func:`item_suppliers_prefetch` — the bare ``"item_suppliers__supplier"``
+    string — has rows without those annotations, and pays ONE grouped aggregate
+    for the whole page rather than one per item.
     """
     items = list(items)
     if not items:
         return {}
 
-    resolved: Dict = {}
     grouped: Dict = {}
+    pending: Dict = {}
     for item in items:
         prefetched = _prefetched_links(item)
         if prefetched is not None:
-            resolved[item.id] = _choose(prefetched)
+            pending[item.id] = prefetched
         else:
             grouped[item.id] = []
 
@@ -315,11 +694,16 @@ def select_suppliers_for(items: Iterable) -> Dict:
         for link in (
             ItemSupplier.objects.filter(item_id__in=list(grouped))
             .select_related("supplier")
+            .annotate(**delivery_record_annotations())
             .order_by("item", "-is_primary", "unit_cost")
         ):
             grouped[link.item_id].append(link)
-        resolved.update({item_id: _choose(links) for item_id, links in grouped.items()})
-    return resolved
+        pending.update(grouped)
+
+    # One delivery-history lookup for every row the page is going to score.
+    scored = [link for links in pending.values() for link in _scored_candidates(links)]
+    records = delivery_records_for(scored) if scored else {}
+    return {item_id: _choose(links, records) for item_id, links in pending.items()}
 
 
 def primary_item_supplier(item) -> Optional[ItemSupplier]:
@@ -335,7 +719,7 @@ def primary_item_supplier(item) -> Optional[ItemSupplier]:
 
 
 def primary_suppliers_for(items: Iterable) -> Dict:
-    """``{item_id: orderable ItemSupplier | None}`` for ``items`` in ONE query.
+    """``{item_id: orderable ItemSupplier | None}`` for ``items``, batched.
 
     The row half of :func:`select_suppliers_for`, mirroring
     :func:`primary_item_supplier`'s relationship to :func:`select_supplier`.

@@ -325,8 +325,56 @@ def create_lead_time_log(po_item, delivery_date):
     order_date = purchase_order.sent_at
     actual_delivery_date = delivery_date.date() if hasattr(delivery_date, "date") else delivery_date
 
-    estimated_lead_time = po_item.item_supplier.average_lead_time or 14
-    actual_lead_time = LeadTimeLog.calculate_business_days(order_date, actual_delivery_date)
+    # A lead time of 0 days is a KNOWN lead time — a counter pickup from a local
+    # supplier — and this used to be ``or 14``, which silently promised a
+    # fortnight for a same-day vendor. That number is not cosmetic: it becomes
+    # ``estimated_lead_time_days``, so ``variance_days`` (actual − estimated) was
+    # understated by two weeks for exactly those suppliers, and every one of
+    # their deliveries looked early. ``supplier_selection``'s performance term
+    # reads that column to decide who to buy from (op-2rsp) — pinned end to end
+    # by ``test_a_punctual_same_day_vendor_keeps_the_whole_performance_weight_and_wins``
+    # — so a wrong estimate here is a wrong purchase. ``average_lead_time`` is a
+    # non-null ``PositiveIntegerField``, so there is no absence left for a
+    # fallback to cover.
+    estimated_lead_time = po_item.item_supplier.average_lead_time
+    # CALENDAR days, so that both sides of ``variance_days`` are in one unit ON
+    # THIS ROW: ``estimated_lead_time_days`` is written from
+    # ``average_lead_time`` just above, and ``expected_delivery_date`` below is
+    # derived from it with ``timedelta(days=...)``. Measuring the actual in
+    # INCLUSIVE business days instead made the subtraction mix two units — a
+    # vendor that promised today and delivered today scored actual 1 against
+    # estimated 0, so every promise kept inside the working week was recorded as
+    # a day late. Pinned by
+    # ``test_a_promise_kept_exactly_records_no_variance_and_is_not_late``. The
+    # ``max`` clamps a delivery dated before the order to 0 rather than
+    # negative, pinned by
+    # ``test_a_delivery_dated_before_the_order_clamps_to_zero``.
+    #
+    # REPORTED, NOT FIXED: the date the operator is SHOWN is computed from the
+    # same column in the OTHER unit. ``purchase_orders.update_reorder_requests_from_po``
+    # sets ``ReorderRequest.estimated_delivery`` via
+    # ``purchase_orders.add_business_days``. Link quotes 5; PO sent Monday
+    # 2026-03-02; the operator is shown 2026-03-09 (five business days = seven
+    # calendar); the vendor delivers 2026-03-09, exactly the published date; this
+    # row records estimated 5, actual 7, variance +2, ``was_late`` True. So a
+    # delivery that hit the system's own published date is filed two days late
+    # and now discounts that vendor in ``supplier_selection``'s performance term.
+    # This PREDATES this branch — base scored the same delivery +1 through
+    # inclusive business days — and fixing it means moving ``estimated_delivery``
+    # onto calendar days, an operator-visible DATE change not authorised here.
+    #
+    # REPORTED, NOT FIXED: the quote above is read at RECEIPT time, not at order
+    # time, because no order-time snapshot of it exists. So editing
+    # ``average_lead_time`` while an order is in flight retroactively changes how
+    # that completed order is judged. Link quotes 10; PO sent; the quote is
+    # edited down to 2 before the goods arrive; delivery lands on day 8, inside
+    # the quote that was in force when the order went out; the row records
+    # estimated 2, actual 8, variance +6, ``was_late`` True — a kept promise
+    # recorded as broken. The fix is to snapshot the lead time onto
+    # ``PurchaseOrderItem`` when the PO is sent, beside the ``unit_cost_ordered``
+    # snapshot that already exists for price; that is a SCHEMA change and outside
+    # what this branch authorised.
+    actual_lead_time = max((actual_delivery_date - order_date.date()).days, 0)
 
     LeadTimeLog.objects.create(
         item_supplier=po_item.item_supplier,

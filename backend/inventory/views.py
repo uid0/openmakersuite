@@ -135,6 +135,7 @@ from .services.packaging import (
 )
 from .services.pricing import package_price_of, price_float, unit_price_of
 from .services.problem_auto_resolve import resolve_problems_for_work_order
+from .services.supplier_selection import item_suppliers_prefetch
 from .services.work_order_tools import create_work_order_tools
 
 
@@ -564,7 +565,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         InventoryItem.objects.select_related(
             "category", "location", "safety_profile", "count_level"
         )
-        .prefetch_related("item_suppliers__supplier", "packaging_levels")
+        .prefetch_related(item_suppliers_prefetch(), "packaging_levels")
         .all()
     )
 
@@ -622,7 +623,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                 # ``packaging_levels`` + the ``count_level`` join keep the
                 # unit-of-measure fields (op-hzji) off the per-row path: both the
                 # nested chain and ``on_hand_display`` read them from cache.
-                "item_suppliers__supplier",
+                item_suppliers_prefetch(),
                 "packaging_levels",
                 Prefetch(
                     "reorder_requests",
@@ -1013,7 +1014,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                 is_kit=True,
                 kit_components__component=item,
             )
-            .prefetch_related("kit_components", "item_suppliers__supplier")
+            .prefetch_related("kit_components", item_suppliers_prefetch())
             .distinct()
             .order_by("name")
         )
@@ -1771,7 +1772,7 @@ class KitViewSet(viewsets.ModelViewSet):
             .select_related("category", "location", "safety_profile", "count_level")
             .prefetch_related(
                 "kit_components__component",
-                "item_suppliers__supplier",
+                item_suppliers_prefetch(),
                 "packaging_levels",
                 Prefetch(
                     "reorder_requests",

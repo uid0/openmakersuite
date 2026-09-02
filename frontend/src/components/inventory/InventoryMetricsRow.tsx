@@ -83,6 +83,15 @@ const InventoryMetricsRow: React.FC<InventoryMetricsRowProps> = ({ sku, metrics 
     </>
   );
 
+  // What the scoring shrugged off to pick this supplier. The rule does not
+  // punish a missing price (op-2rsp), so a supplier can win carrying one — and a
+  // blank Cost cell would otherwise read as "no supplier" rather than "the
+  // supplier we picked has no price on file". Only the PRICE gap is rendered:
+  // ``supplier_scored_without_history`` stays on the wire for API consumers, but
+  // it is true for nearly every link, so a note carrying it here would say
+  // nothing while crowding out the rarer message.
+  const showSupplierGap = metrics.supplier_scored_without_price;
+
   return (
     <Paper withBorder p="md" radius="md" data-testid="inventory-metrics-row">
       <Group justify="space-between" wrap="wrap" gap="md">
@@ -136,6 +145,11 @@ const InventoryMetricsRow: React.FC<InventoryMetricsRowProps> = ({ sku, metrics 
           tooltip={`${costTooltipBase} — ${TREND_LABEL[metrics.cost_trend]}`}
         />
       </Group>
+      {showSupplierGap && (
+        <Text size="xs" c="dimmed" mt="xs" data-testid="metric-supplier-gaps">
+          Chosen supplier has no price on file — it was picked on what we do know.
+        </Text>
+      )}
     </Paper>
   );
 };

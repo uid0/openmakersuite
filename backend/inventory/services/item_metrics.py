@@ -21,7 +21,7 @@ from django.db.models import Q, Sum
 from inventory.models import MaintenanceMaterial, WorkOrder, WorkOrderMaterialUsage
 from inventory.services.pack_size import pack_size_of
 from inventory.services.pricing import package_price_of, unit_price_of
-from inventory.services.supplier_selection import primary_suppliers_for
+from inventory.services.supplier_selection import select_suppliers_for
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
 
 # PO statuses that count as "on order" (QOO): units committed on a live PO that
@@ -201,7 +201,10 @@ def compute_item_metrics_batch(items):
     stays O(1) in queries rather than O(n): five grouped aggregates (on-order,
     in-transit, committed-from-usage, committed-from-template, last PO cost),
     plus a SIXTH for the supplier selection only when the caller has not
-    prefetched ``item_suppliers`` — the list path has, so it pays five. Every
+    prefetched through ``supplier_selection.item_suppliers_prefetch()`` — a bare
+    ``item_suppliers`` prefetch is not enough, because those rows carry no
+    delivery-record annotations and the grouped aggregate fires anyway. The list
+    path uses the helper, so it pays five. Every
     item id in ``items`` is present in the result (with zeros / ``None`` where
     there is no PO / work-order / supplier data).
     """
@@ -278,13 +281,20 @@ def compute_item_metrics_batch(items):
     # screens quote — and so an inactive or discontinued link never sets the
     # cost or lead time of a row that reads as buyable (op-2rsp). Batched, so
     # the per-item property never fires. (1 query, or ZERO when the caller
-    # already prefetched ``item_suppliers`` — the list path does.)
-    primary_supplier = primary_suppliers_for(items)
+    # already prefetched through ``item_suppliers_prefetch()`` — the list path
+    # does. A bare ``item_suppliers`` prefetch still costs the query, because
+    # those rows carry no delivery-record annotations.)
+    #
+    # ``select_suppliers_for`` rather than ``primary_suppliers_for``: identical
+    # query cost, but it keeps the REASON beside the row, and this payload now
+    # reports two of those reasons (below).
+    supplier_choice = select_suppliers_for(items)
 
     for item in items:
-        supplier = primary_supplier.get(item.id)
+        choice = supplier_choice[item.id]
+        supplier = choice.item_supplier
         # Cost through the ONE price derivation (op-9m2v), fed the row
-        # ``primary_suppliers_for`` already resolved so the query budget below
+        # ``select_suppliers_for`` already resolved so the query budget below
         # is unchanged. No value moves here — this row was already ``None`` for
         # an unpriced or supplier-less item — but it is a READ of the column
         # and belongs on the derivation with every other one, so the next
@@ -294,7 +304,7 @@ def compute_item_metrics_batch(items):
         lead_time_days = supplier.average_lead_time if supplier else None
         # ``case_size`` — units per case from that same link, read through the
         # ONE pack-size derivation (op-c1ke) rather than off the column. Fed the
-        # row ``primary_suppliers_for`` already resolved, so the query budget
+        # row ``select_suppliers_for`` already resolved, so the query budget
         # above is unchanged. It was already ``None`` for an item with no
         # orderable supplier; it is now ``None`` for a link recording
         # ``quantity_per_package`` of 0 as well, because a box holding no units
@@ -323,6 +333,17 @@ def compute_item_metrics_batch(items):
             "last_po_unit_cost": last_po_unit_cost.get(item.id),
             "is_case_based": item.use_case_based_reorder,
             "case_size": case_size,
+            # Why the cost or the speed above may be missing or unbacked. Both
+            # describe the CHOICE, not the item: the scoring picked this
+            # supplier while knowing no price for it, or while it had never
+            # delivered anything. Neither gap is punished by the scoring
+            # (op-2rsp), which is exactly why an operator has to be told — a
+            # blank Cost cell otherwise reads as "no supplier" rather than "we
+            # chose a supplier nobody has priced". Both are ``false`` under the
+            # gate: an operator's own flagged primary was not weighed against
+            # anything, so no gap decided it.
+            "supplier_scored_without_price": choice.scored_without_price,
+            "supplier_scored_without_history": choice.scored_without_history,
         }
 
     return result

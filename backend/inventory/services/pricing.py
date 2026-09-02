@@ -85,16 +85,19 @@ until it either goes through this module or is added to that snapshot
 deliberately. **That gate walks ``backend/`` only** — a frontend reader is not
 covered by it.
 
-**Where this meets the supplier scoring, and why nothing here changes it.**
-``supplier_selection.score_candidate``'s cost term is guarded
-``if link.unit_cost and average_unit_cost``, so a free link earns nothing for
-being free while ``average_orderable_unit_cost`` still counts its ``0.00`` in
-the yardstick its rivals are measured against. That is the same falsy-zero
-mistake this module exists to stop, and it is deliberately NOT fixed here:
-repairing it changes which supplier the system picks, which moves money on
-every surface for a reason that is not "base was presenting an unknown price as
-a real number". It is filed as ``oms-supplier-scoring-weight-flaws`` and pinned
-as-is by ``inventory/tests/test_supplier_scoring.py``.
+**Where this meets the supplier scoring.**
+``supplier_selection.score_candidate``'s cost term used to be guarded
+``if link.unit_cost and average_unit_cost``, so a free link earned nothing for
+being free while ``average_orderable_unit_cost`` went on counting its ``0.00``
+in the yardstick its rivals were measured against — the same falsy-zero mistake
+this module exists to stop, left in place because repairing it changes which
+supplier the system picks and that was the captain's call rather than a defect
+fix. **The captain has since decided it** (``oms-supplier-scoring-weight-flaws``)
+and that term now reads its price through :func:`unit_price_of` like every other
+reader, so a donated link is PRICED AT ZERO in the ranking and wins on it.
+``inventory/tests/test_supplier_scoring.py`` pins the new behaviour, and
+``test_price_single_owner.py``'s allowlist entry for that module dropped from 5
+direct column reads to 3 in the same change.
 """
 
 from dataclasses import dataclass

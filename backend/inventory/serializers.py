@@ -334,7 +334,23 @@ class SupplierDetailSerializer(SupplierSerializer):
             return []
 
     def get_lead_time_analytics(self, obj):
-        """Get lead time analytics for this supplier."""
+        """Get lead time analytics for this supplier.
+
+        REPORTED, NOT FIXED: the ``recent_logs`` block below emits
+        ``expected_delivery_date``, ``actual_delivery_date``, ``variance_days``
+        and ``was_late`` on one object with nothing saying WHICH promise
+        ``was_late`` refers to. ``variance_days`` is measured against the
+        supplier link's standing quoted lead time, not against
+        ``expected_delivery_date`` (see ``LeadTimeLog``), so a vendor that quotes
+        3, has the order confirmed at 10 and delivers on day 10 reaches this
+        payload — and ``frontend/src/pages/SupplierDetailPage.tsx``'s
+        ``LeadTimeChart`` — as ``expected_delivery_date == actual_delivery_date``
+        alongside ``variance_days: 7, was_late: true``, which reads as a
+        contradiction. The variance itself is correct and deliberate; it is the
+        rendering that asserts a bare lateness the row does not support. Naming
+        the yardstick here changes the served API shape, which was not
+        authorised on this branch.
+        """
         try:
             from django.db.models import Avg, Count, Max, Min
 
@@ -1479,6 +1495,14 @@ class InventoryMetricsSerializer(serializers.Serializer):
     )
     is_case_based = serializers.BooleanField()
     case_size = serializers.IntegerField(allow_null=True)  # units per case (quantity_per_package)
+    # Why the Cost / Lead above may be blank or unbacked (op-2rsp). The scoring
+    # neither rewards nor punishes a missing price or an empty delivery record,
+    # so a supplier can win WITH one — and an operator reading a blank Cost cell
+    # would otherwise have to infer whether the system knew the price and chose
+    # anyway. Both are ``false`` when an operator's own flagged primary took the
+    # gate, because nothing was weighed against anything there.
+    supplier_scored_without_price = serializers.BooleanField()
+    supplier_scored_without_history = serializers.BooleanField()
 
 
 class ItemOrderCostSerializer(serializers.Serializer):

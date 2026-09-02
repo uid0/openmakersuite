@@ -384,6 +384,13 @@ export interface InventoryItemMetrics {
   last_po_unit_cost: string | null;
   is_case_based: boolean;
   case_size: number | null; // units per case
+  // Why Cost / Lead above may be blank or unbacked (op-2rsp). The supplier
+  // scoring neither rewards nor punishes a missing price or an empty delivery
+  // record, so a supplier can win WITH one — these say when it did, so a blank
+  // Cost cell is not read as "no supplier". Both are false when an operator's
+  // own flagged primary took the gate.
+  supplier_scored_without_price: boolean;
+  supplier_scored_without_history: boolean;
 }
 
 // Per-item purchase/receipt provenance (op-96uo) — payload of

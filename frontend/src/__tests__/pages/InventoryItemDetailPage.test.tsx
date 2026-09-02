@@ -107,6 +107,8 @@ describe('InventoryItemDetailPage', () => {
     last_po_unit_cost: '15.99',
     is_case_based: false,
     case_size: null,
+    supplier_scored_without_price: false,
+    supplier_scored_without_history: false,
   };
 
   beforeEach(() => {

@@ -233,8 +233,8 @@ def test_with_nothing_flagged_the_scored_winner_sets_the_reorder_point(buyer):
     The pre-op-3vqk estimate ordered by ``-is_primary`` and nothing else, so for
     an item with two unflagged links the answer was whatever the planner
     happened to emit — the same shape could resolve two different ways in one
-    request. The derivation ranks on cost and lead time and is a pure function
-    of the rows.
+    request. The derivation ranks on cost, lead time and delivery record, and is
+    a pure function of the rows.
     """
     now = timezone.now()
     item = _serialized("unflagged-pair", now=now)

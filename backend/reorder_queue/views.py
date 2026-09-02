@@ -40,6 +40,7 @@ from inventory.services.pricing import (
 )
 from inventory.services.supplier_selection import (
     NO_SUPPLIERS,
+    item_suppliers_prefetch,
     primary_item_supplier,
     select_supplier,
 )
@@ -362,8 +363,7 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
             "item", "item__category", "item__location", "item__count_level", "reviewed_by"
         )
         .prefetch_related(
-            "item__item_suppliers__supplier",
-            "item__item_suppliers",
+            item_suppliers_prefetch("item__item_suppliers"),
             # ``item_details`` nests the full item serializer, which now carries
             # the packaging chain (op-hzji) — prefetch it so a page of requests
             # does not cost a query per row.
@@ -580,7 +580,9 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         pending = (
             ReorderRequest.objects.filter(status=ReorderRequest.Status.PENDING)
             .select_related("item", "item__count_level")
-            .prefetch_related("item__item_suppliers__supplier", "item__packaging_levels")
+            .prefetch_related(
+                item_suppliers_prefetch("item__item_suppliers"), "item__packaging_levels"
+            )
         )
 
         # Group by supplier
@@ -744,7 +746,9 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         approved_requests = (
             ReorderRequest.objects.filter(status__in=services.PO_ELIGIBLE_STATUSES)
             .select_related("item", "item__count_level")
-            .prefetch_related("item__item_suppliers__supplier", "item__packaging_levels")
+            .prefetch_related(
+                item_suppliers_prefetch("item__item_suppliers"), "item__packaging_levels"
+            )
         )
 
         # Group each request under its item's primary supplier so the emitted
@@ -996,7 +1000,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             # visibility rules live at the call site.
             InventoryItem.objects.filter(low_stock_q(), is_retired=False, is_kit=False)
             .select_related("category", "location", "count_level")
-            .prefetch_related("item_suppliers__supplier")
+            .prefetch_related(item_suppliers_prefetch())
         )
 
         if not low_stock_items.exists():
@@ -1140,7 +1144,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             )
             .distinct()
             .select_related("category", "location", "count_level")
-            .prefetch_related("item_suppliers__supplier", services.approved_requests_prefetch())
+            .prefetch_related(item_suppliers_prefetch(), services.approved_requests_prefetch())
         )
 
         # Also get items that need reordering (stock at/below the reorder point,
@@ -1155,7 +1159,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             )
             .exclude(id__in=items_with_requests.values_list("id", flat=True))
             .select_related("category", "location", "count_level")
-            .prefetch_related("item_suppliers__supplier", services.approved_requests_prefetch())
+            .prefetch_related(item_suppliers_prefetch(), services.approved_requests_prefetch())
         )
 
         # Combine both sets, prioritizing items with requests
@@ -1329,7 +1333,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     kit_components__component_id__in=low_component_ids,
                 )
                 .distinct()
-                .prefetch_related("kit_components__component", "item_suppliers__supplier")
+                .prefetch_related("kit_components__component", item_suppliers_prefetch())
                 .order_by("name")
             )
             for kit in supplying_kits:
@@ -3334,7 +3338,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
         """Base queryset for transparency data with related objects optimized."""
         return (
             ReorderRequest.objects.select_related("item", "item__category")
-            .prefetch_related("item__item_suppliers__supplier")
+            .prefetch_related(item_suppliers_prefetch("item__item_suppliers"))
             .all()
         )
 

@@ -189,12 +189,7 @@ class DeliveryRecord:
         counts the same, however old**, and **arriving early counts exactly as
         arriving on time, not better**. Both are decisions, not oversights.
         Recency weighting would introduce a decay constant nobody has data to
-        set, over a handful of orders a year per link, and would make the number
-        that decides a purchase computed a different WAY from the unweighted
-        ``variance_days <= 0`` share the supplier screen's ``on_time_percentage``
-        already reports (that one is per supplier where this is per link, so the
-        two are different numbers; they should at least be the same
-        arithmetic). Paying extra for earliness would pay
+        set, over a handful of orders a year per link. Paying extra for earliness would pay
         twice for the same fact: ``average_lead_time`` is the vendor's OWN
         per-link quoted promise, operator-entered and maintained per link, so a
         reliably quick vendor already collects its speed on the LEAD-TIME axis. The known cost
@@ -422,9 +417,8 @@ def delivery_records_for(links: List[ItemSupplier]) -> Dict[int, DeliveryRecord]
     vendor quote three days, confirm ten, deliver ten, and win on BOTH axes.
 
     **Per LINK, not per supplier.** A supplier-wide rate over
-    ``item_supplier__supplier`` is the broader sample, and is what the supplier
-    screen's ``on_time_percentage`` reports, but it cannot be reached from an
-    item without pulling every log of every item that vendor carries. The
+    ``item_supplier__supplier`` is the broader sample, but it cannot be reached
+    from an item without pulling every log of every item that vendor carries. The
     per-link record is also the more specific evidence: how this vendor has done
     on THIS item is the question a purchase asks.
 

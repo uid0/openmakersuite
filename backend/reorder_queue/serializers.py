@@ -1143,22 +1143,7 @@ class AddPurchaseOrderLineSerializer(serializers.Serializer):
 
 
 class LeadTimeLogSerializer(serializers.ModelSerializer):
-    """Serializer for lead time tracking data.
-
-    ``variance_days`` (and the ``was_late`` / ``was_early`` flags derived from
-    it) are measured against the supplier link's STANDING QUOTED lead time,
-    carried on the row as ``estimated_lead_time_days``. They are NOT measured
-    against ``expected_delivery_date``, which this payload also carries: that is
-    the order's separately confirmed date and a different fact. A row whose
-    expected date equals its actual date can therefore still report
-    ``was_late``, meaning the vendor met the date it confirmed for this order
-    while missing the lead time it advertises. ``variance_measured_against``
-    names the yardstick on the wire so a consumer does not have to infer it.
-    """
-
-    #: What ``variance_days`` is measured against, so the two dates on this
-    #: payload cannot be mistaken for the yardstick.
-    VARIANCE_YARDSTICK = "supplier link's standing quoted lead time"
+    """Serializer for lead time tracking data."""
 
     # Related data
     item_details = InventoryItemSerializer(source="item", read_only=True)
@@ -1170,10 +1155,6 @@ class LeadTimeLogSerializer(serializers.ModelSerializer):
     # Calculated fields
     was_late = serializers.BooleanField(read_only=True)
     was_early = serializers.BooleanField(read_only=True)
-    variance_measured_against = serializers.SerializerMethodField()
-
-    def get_variance_measured_against(self, obj) -> str:
-        return self.VARIANCE_YARDSTICK
 
     class Meta:
         model = LeadTimeLog
@@ -1190,7 +1171,6 @@ class LeadTimeLogSerializer(serializers.ModelSerializer):
             "estimated_lead_time_days",
             "actual_lead_time_days",
             "variance_days",
-            "variance_measured_against",
             "quantity_ordered",
             "quantity_received",
             "was_late",

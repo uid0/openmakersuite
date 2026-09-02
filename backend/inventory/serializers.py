@@ -334,7 +334,23 @@ class SupplierDetailSerializer(SupplierSerializer):
             return []
 
     def get_lead_time_analytics(self, obj):
-        """Get lead time analytics for this supplier."""
+        """Get lead time analytics for this supplier.
+
+        REPORTED, NOT FIXED: the ``recent_logs`` block below emits
+        ``expected_delivery_date``, ``actual_delivery_date``, ``variance_days``
+        and ``was_late`` on one object with nothing saying WHICH promise
+        ``was_late`` refers to. ``variance_days`` is measured against the
+        supplier link's standing quoted lead time, not against
+        ``expected_delivery_date`` (see ``LeadTimeLog``), so a vendor that quotes
+        3, has the order confirmed at 10 and delivers on day 10 reaches this
+        payload — and ``frontend/src/pages/SupplierDetailPage.tsx``'s
+        ``LeadTimeChart`` — as ``expected_delivery_date == actual_delivery_date``
+        alongside ``variance_days: 7, was_late: true``, which reads as a
+        contradiction. The variance itself is correct and deliberate; it is the
+        rendering that asserts a bare lateness the row does not support. Naming
+        the yardstick here changes the served API shape, which was not
+        authorised on this branch.
+        """
         try:
             from django.db.models import Avg, Count, Max, Min
 

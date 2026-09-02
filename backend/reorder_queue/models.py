@@ -1540,14 +1540,14 @@ class LeadTimeLog(models.Model):
 
     **Two different promises live on this row, and only one of them is scored.**
     ``estimated_lead_time_days`` is the link's STANDING QUOTE
-    (``ItemSupplier.average_lead_time``) as it stood when the order was placed,
-    and ``variance_days`` is measured against that and nothing else.
-    ``expected_delivery_date`` is the order's separately confirmed date — what
-    the vendor said for THIS order once it had the order in hand — and is a
-    different fact that no column here scores. So a row whose
-    ``expected_delivery_date`` equals its ``actual_delivery_date`` can still
-    carry a positive ``variance_days``: the vendor met the date it confirmed
-    while missing the lead time it advertises.
+    (``ItemSupplier.average_lead_time``), which ``services.receiving`` reads at
+    RECEIPT time — there is no order-time snapshot of it — and ``variance_days``
+    is measured against that and nothing else. ``expected_delivery_date`` is the
+    order's separately confirmed date and is a different fact that no column
+    here scores. So a row whose ``expected_delivery_date`` equals its
+    ``actual_delivery_date`` can still carry a positive ``variance_days``: the
+    vendor met the date it confirmed while missing the lead time it advertises.
+    Pinned by ``test_variance_scores_the_standing_quote_not_the_confirmed_date``.
 
     That is deliberate. ``inventory.services.supplier_selection`` scores the
     standing quote on its lead-time axis and uses ``variance_days`` only to

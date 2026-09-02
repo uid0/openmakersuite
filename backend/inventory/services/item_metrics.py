@@ -201,7 +201,10 @@ def compute_item_metrics_batch(items):
     stays O(1) in queries rather than O(n): five grouped aggregates (on-order,
     in-transit, committed-from-usage, committed-from-template, last PO cost),
     plus a SIXTH for the supplier selection only when the caller has not
-    prefetched ``item_suppliers`` — the list path has, so it pays five. Every
+    prefetched through ``supplier_selection.item_suppliers_prefetch()`` — a bare
+    ``item_suppliers`` prefetch is not enough, because those rows carry no
+    delivery-record annotations and the grouped aggregate fires anyway. The list
+    path uses the helper, so it pays five. Every
     item id in ``items`` is present in the result (with zeros / ``None`` where
     there is no PO / work-order / supplier data).
     """
@@ -278,7 +281,9 @@ def compute_item_metrics_batch(items):
     # screens quote — and so an inactive or discontinued link never sets the
     # cost or lead time of a row that reads as buyable (op-2rsp). Batched, so
     # the per-item property never fires. (1 query, or ZERO when the caller
-    # already prefetched ``item_suppliers`` — the list path does.)
+    # already prefetched through ``item_suppliers_prefetch()`` — the list path
+    # does. A bare ``item_suppliers`` prefetch still costs the query, because
+    # those rows carry no delivery-record annotations.)
     #
     # ``select_suppliers_for`` rather than ``primary_suppliers_for``: identical
     # query cost, but it keeps the REASON beside the row, and this payload now

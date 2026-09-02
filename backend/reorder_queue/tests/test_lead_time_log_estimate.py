@@ -9,17 +9,14 @@ reads to answer "does this vendor keep its word?".
 It used to compute the estimate as ``item_supplier.average_lead_time or 14``.
 ``average_lead_time`` is a non-null ``PositiveIntegerField``, so that fallback
 could only ever fire on a value of **0** — a counter pickup from a local
-supplier, which an operator enters per link through the admin or the API.
-(``inventory.tasks.update_average_lead_times`` cannot write a 0 back: its
-``if lead_time > 0`` filter drops same-day deliveries before the average is
-taken.) The one case the fallback could reach was the one case it got wrong: a
+supplier. The one case the fallback could reach was the one case it got wrong: a
 vendor that promised today was recorded as having promised a fortnight, so every
 delivery it ever made looked two weeks early.
 
 The two columns are also in the SAME unit — calendar days — which they were not
-before. ``estimated_lead_time_days`` comes from ``average_lead_time`` (calendar
-days, and ``expected_delivery_date`` is derived from it with
-``timedelta(days=...)``), while the actual was measured with an inclusive
+before. On this row ``estimated_lead_time_days`` comes from
+``average_lead_time`` and ``expected_delivery_date`` is derived from it with
+``timedelta(days=...)``, while the actual was measured with an inclusive
 business-day count, so ``variance_days`` subtracted two different things and
 every promise kept inside the working week — same-day, next-day, two-day,
 four-day — recorded ``+1`` and read as late. Only spans crossing a weekend
@@ -27,15 +24,15 @@ happened to cancel.
 
 That is not cosmetic. ``inventory.services.supplier_selection``'s performance
 term reads ``variance_days`` to decide who the next purchase order goes to
-(op-2rsp), and the supplier screen's ``on_time_percentage`` reports it, so an
-estimate invented here — or an actual measured in the wrong unit — is a wrong
-purchase and a wrong screen.
+(op-2rsp), which
+``test_a_punctual_same_day_vendor_keeps_the_whole_performance_weight_and_wins``
+below pins end to end — so an estimate invented here, or an actual measured in
+the wrong unit, is a wrong purchase.
 """
 
 from datetime import timedelta
 from decimal import Decimal
 
-from django.contrib.admin.sites import AdminSite
 from django.utils import timezone
 
 import pytest
@@ -46,9 +43,7 @@ from inventory.services.supplier_selection import (
     select_supplier,
 )
 from inventory.tests.factories import InventoryItemFactory, ItemSupplierFactory, SupplierFactory
-from reorder_queue.admin import LeadTimeLogAdmin
 from reorder_queue.models import LeadTimeLog, PurchaseOrder, PurchaseOrderItem
-from reorder_queue.serializers import LeadTimeLogSerializer
 from reorder_queue.services.receiving import create_lead_time_log
 from reorder_queue.tests.factories import UserFactory
 
@@ -301,34 +296,3 @@ def test_variance_scores_the_standing_quote_not_the_confirmed_date():
     assert log.actual_lead_time_days == 10
     assert log.variance_days == 7
     assert log.was_late is True
-
-
-def test_the_operator_facing_renderings_name_the_yardstick():
-    """A bare "7 days late" beside equal expected and actual dates reads as a bug.
-
-    Both surfaces that put ``variance_days`` in front of a human alongside
-    ``expected_delivery_date`` must say what the number is measured against.
-    """
-    log = _confirmed_order_delivered_on_the_confirmed_day()
-
-    rendered = LeadTimeLogAdmin(LeadTimeLog, AdminSite()).variance_display(log)
-    assert "quoted lead time" in rendered
-    assert "7 days late" not in rendered
-
-    payload = LeadTimeLogSerializer(log).data
-    assert payload["variance_days"] == 7
-    assert payload["expected_delivery_date"] == payload["actual_delivery_date"]
-    assert payload["variance_measured_against"] == LeadTimeLogSerializer.VARIANCE_YARDSTICK
-    assert "standing quoted lead time" in payload["variance_measured_against"]
-
-
-def test_a_delivery_inside_the_standing_quote_still_reads_as_such():
-    """The other side: the wording change did not turn every row into a warning."""
-    po_item = _po_item(average_lead_time=10, sent_days_ago=3)
-
-    create_lead_time_log(po_item, po_item.purchase_order.sent_at.date() + timedelta(days=3))
-
-    log = LeadTimeLog.objects.get(purchase_order=po_item.purchase_order)
-    rendered = LeadTimeLogAdmin(LeadTimeLog, AdminSite()).variance_display(log)
-    assert log.variance_days == -7
-    assert "inside the quoted lead time" in rendered

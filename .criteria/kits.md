@@ -144,10 +144,13 @@ Purchasers often buy one supplier SKU that contains several stock items, such as
 - **When** a receiver records a receipt of `1` kit and later a receipt of `2` kits
 - **Then** component stock increases by the first receipt quantity and then by the second receipt quantity without recounting the earlier receipt
 
-### AC-28: Kit over-receipt is rejected before stock changes
-- **Given** a kit purchase-order line with one kit remaining to receive
-- **When** a receiver attempts to receive more than the pending kit quantity
-- **Then** the API returns a validation error and no kit or component stock changes
+### AC-28: Kit over-receipt is accepted and flagged
+
+> **Supersedes the original AC-28, "Kit over-receipt is rejected before stock changes."** The captain replaced rejection with the decision to record what arrived, flag the difference, and never silently round; see `receipt_refusal` in `backend/reorder_queue/services/receiving.py` for the rationale.
+
+- **Given** a kit purchase-order line for two kits with an order-time component snapshot and one kit already received
+- **When** a receiver records a receipt of two more kits
+- **Then** the API returns success, credits each component with two kits' worth from the line's snapshot while leaving kit stock unchanged, and reports three kits received with `quantity_variance=1` and `receipt_state=over_received`
 
 ### AC-29: Legacy empty kit breakdowns do not break physical receiving
 - **Given** a legacy kit purchase-order line with no stored kit snapshot and no current kit component rows

@@ -17,8 +17,13 @@ from rest_framework import status
 
 from inventory.models import MaintenanceItem, MaintenanceMaterial, WorkOrder, WorkOrderMaterialUsage
 from inventory.services.work_order_material_usage import apply_material_usage
-from inventory.tests.factories import AssetFactory, InventoryItemFactory
-from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
+from inventory.tests.factories import (
+    AssetFactory,
+    InventoryItemFactory,
+    ItemSupplierFactory,
+    SupplierFactory,
+)
+from reorder_queue.models import LeadTimeLog, PurchaseOrder, PurchaseOrderItem
 from reorder_queue.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
@@ -37,6 +42,13 @@ CONTRACT_FIELDS = {
     "last_po_unit_cost",
     "is_case_based",
     "case_size",
+    # Why Cost / Lead may be blank or unbacked. The supplier scoring neither
+    # rewards nor punishes a missing price or an empty delivery record
+    # (op-2rsp), so a supplier can win carrying one — and a blank Cost cell
+    # would otherwise read as "no supplier" rather than "the supplier we picked
+    # has no price on file".
+    "supplier_scored_without_price",
+    "supplier_scored_without_history",
 }
 
 BREAKDOWN_FIELDS = {
@@ -53,6 +65,25 @@ _DEFAULT_PO_UNIT_COST = Decimal("1.0000")
 
 def _metrics_url(item):
     return reverse("inventoryitem-metrics", kwargs={"pk": str(item.id)})
+
+
+def _record_delivery(item_supplier, *, variance_days):
+    """One LeadTimeLog against ``item_supplier``, ``variance_days`` late."""
+    estimated = 5
+    ordered_at = timezone.now() - timedelta(days=30)
+    return LeadTimeLog.objects.create(
+        item_supplier=item_supplier,
+        purchase_order=PurchaseOrder.objects.create(
+            supplier=item_supplier.supplier, created_by=UserFactory()
+        ),
+        order_date=ordered_at,
+        expected_delivery_date=(ordered_at + timedelta(days=estimated)).date(),
+        actual_delivery_date=(ordered_at + timedelta(days=estimated + variance_days)).date(),
+        estimated_lead_time_days=estimated,
+        actual_lead_time_days=estimated + variance_days,
+        quantity_ordered=1,
+        quantity_received=1,
+    )
 
 
 def _po_line(
@@ -187,6 +218,75 @@ class TestMetricsEndpointContract:
 
         assert data["reorder_point"] == 9  # RP == reorder_quantity
         assert data["lead_time_days"] == 14  # Lead == average_lead_time
+
+
+class TestSupplierChoiceGaps:
+    """The payload says when the choice was made without a price or a record.
+
+    The supplier scoring neither punishes nor pays for a missing ``unit_cost``
+    or an empty ``LeadTimeLog`` history (op-2rsp), so a supplier carrying one
+    can and does win. ScanTTY and the web item-detail row read this payload, and
+    a blank ``unit_cost`` on its own is ambiguous — "we have no supplier" and
+    "the supplier we picked has no price on file" send an operator to different
+    screens. These two booleans are the difference, and they describe the
+    CHOICE, not the item.
+    """
+
+    def _two_supplier_item(self, *, cheap_cost, quick_cost):
+        item = InventoryItemFactory(image=None, current_stock=1, reorder_quantity=1)
+        item.item_suppliers.all().delete()
+        ItemSupplierFactory(
+            item=item,
+            supplier=SupplierFactory(),
+            unit_cost=cheap_cost,
+            package_cost=None,
+            quantity_per_package=1,
+            average_lead_time=28,
+            is_primary=False,
+        )
+        winner = ItemSupplierFactory(
+            item=item,
+            supplier=SupplierFactory(),
+            unit_cost=quick_cost,
+            package_cost=None,
+            quantity_per_package=1,
+            average_lead_time=1,
+            is_primary=False,
+        )
+        return item, winner
+
+    def test_an_unpriced_winner_is_named_as_one(self, api_client):
+        item, winner = self._two_supplier_item(cheap_cost=Decimal("6.00"), quick_cost=None)
+
+        data = api_client.get(_metrics_url(item)).json()
+
+        assert item.primary_item_supplier.pk == winner.pk
+        assert data["unit_cost"] is None
+        assert data["supplier_scored_without_price"] is True
+        assert data["supplier_scored_without_history"] is True
+
+    def test_a_priced_winner_with_a_delivery_record_is_named_as_neither(self, api_client):
+        item, winner = self._two_supplier_item(
+            cheap_cost=Decimal("6.00"), quick_cost=Decimal("6.00")
+        )
+        _record_delivery(winner, variance_days=0)
+
+        data = api_client.get(_metrics_url(item)).json()
+
+        assert data["unit_cost"] == "6.00"
+        assert data["supplier_scored_without_price"] is False
+        assert data["supplier_scored_without_history"] is False
+
+    def test_a_flagged_primary_reports_neither(self, api_client):
+        """The gate weighed nothing, so no gap decided anything (see the module)."""
+        item = InventoryItemFactory(image=None, current_stock=1, reorder_quantity=1, unit_cost=None)
+
+        data = api_client.get(_metrics_url(item)).json()
+
+        assert item.primary_item_supplier.is_primary is True
+        assert data["unit_cost"] is None
+        assert data["supplier_scored_without_price"] is False
+        assert data["supplier_scored_without_history"] is False
 
 
 class TestQuantityOnOrder:

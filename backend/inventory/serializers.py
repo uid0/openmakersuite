@@ -1479,6 +1479,14 @@ class InventoryMetricsSerializer(serializers.Serializer):
     )
     is_case_based = serializers.BooleanField()
     case_size = serializers.IntegerField(allow_null=True)  # units per case (quantity_per_package)
+    # Why the Cost / Lead above may be blank or unbacked (op-2rsp). The scoring
+    # neither rewards nor punishes a missing price or an empty delivery record,
+    # so a supplier can win WITH one — and an operator reading a blank Cost cell
+    # would otherwise have to infer whether the system knew the price and chose
+    # anyway. Both are ``false`` when an operator's own flagged primary took the
+    # gate, because nothing was weighed against anything there.
+    supplier_scored_without_price = serializers.BooleanField()
+    supplier_scored_without_history = serializers.BooleanField()
 
 
 class ItemOrderCostSerializer(serializers.Serializer):

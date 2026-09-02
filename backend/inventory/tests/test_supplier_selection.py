@@ -31,6 +31,7 @@ from inventory.services.supplier_selection import (
     BASIS_FLAGGED_PRIMARY,
     NO_SUPPLIERS,
     NONE_ORDERABLE,
+    item_suppliers_prefetch,
     primary_item_supplier,
     primary_suppliers_for,
     select_supplier,
@@ -278,16 +279,52 @@ def test_orderable_flagged_primary_still_beats_a_cheaper_orderable_link():
 
 
 def test_filtering_survives_a_prefetch_and_costs_no_query():
-    """The filter runs in Python precisely so the prefetch cache still serves it."""
+    """The filter runs in Python precisely so the prefetch cache still serves it.
+
+    Prefetched through ``item_suppliers_prefetch()`` — the one place a read path
+    is told what to prefetch — so the delivery record behind the performance
+    term arrives on the rows as an annotation rather than as a query of its own.
+    These candidates are UNFLAGGED, so this really does reach the scoring step
+    and really does read that record.
+    """
     item = _item()
     _link(item, "DeadCheap", is_primary=False, unit_cost="1.00", is_discontinued=True)
     live = _link(item, "LiveDear", is_primary=False, unit_cost="9.00")
-    prefetched = InventoryItem.objects.prefetch_related("item_suppliers__supplier").get(pk=item.pk)
+    prefetched = InventoryItem.objects.prefetch_related(item_suppliers_prefetch()).get(pk=item.pk)
     with CaptureQueriesContext(connection) as ctx:
         chosen = primary_item_supplier(prefetched)
         _ = chosen.supplier.name
     assert chosen.pk == live.pk
     assert len(ctx.captured_queries) == 0
+
+
+def test_a_prefetch_without_the_annotations_costs_one_aggregate_not_one_per_row():
+    """A caller still prefetching the bare string is not an N+1, just one query.
+
+    ``item_suppliers_prefetch()`` is what a read path SHOULD use, but a caller
+    that prefetches ``"item_suppliers__supplier"`` by hand still has rows with no
+    delivery-record annotation on them. The fallback resolves the whole page in
+    ONE grouped aggregate — the count must not grow with the number of items.
+    """
+    items = []
+    for i in range(4):
+        it = _item(f"Bare-{i}")
+        _link(it, f"A{i}", is_primary=False, unit_cost="5.00")
+        _link(it, f"B{i}", is_primary=False, unit_cost="6.00")
+        items.append(it)
+
+    def _cost(count):
+        page = list(
+            InventoryItem.objects.filter(pk__in=[it.pk for it in items[:count]]).prefetch_related(
+                "item_suppliers__supplier"
+            )
+        )
+        with CaptureQueriesContext(connection) as ctx:
+            select_suppliers_for(page)
+        return len(ctx.captured_queries)
+
+    assert _cost(2) == 1
+    assert _cost(4) == 1
 
 
 # ── "No suppliers" and "no orderable suppliers" are different facts (rule 4) ──
@@ -362,7 +399,7 @@ def test_batch_rides_a_prefetch_instead_of_re_reading_the_same_rows():
     bare_item = _item("NotPrefetched")
     b_live = _link(bare_item, "B-live", is_primary=False, unit_cost="3.00")
 
-    prefetched = InventoryItem.objects.prefetch_related("item_suppliers__supplier").get(
+    prefetched = InventoryItem.objects.prefetch_related(item_suppliers_prefetch()).get(
         pk=prefetched_item.pk
     )
 

@@ -145,7 +145,7 @@ The rule is three things, in this order:
    and then the operator's explicit choice is merely expensive rather than
    binding. Do not "fix" a selection problem by adjusting a bonus.
 3. **The score.** Only when nothing orderable is flagged does `score_candidate`
-   rank the candidates on cost and lead time.
+   rank the candidates on cost, lead time and delivery record.
 
 Ask `select_supplier` / `select_suppliers_for` when you must explain yourself to
 an operator: they separate `NO_SUPPLIERS` from `NONE_ORDERABLE`, which are
@@ -158,16 +158,24 @@ still serves it — a fresh `.filter()` reintroduces the per-row N+1 that #882
 removed and that `docs/API_LIST_CONTRACT.md` bounds in CI. The cost yardstick
 (`average_orderable_unit_cost`) is computed in Python for the same reason.
 
-**The scoring weights are a product decision, not an implementation detail.**
-They came from the rival rule this replaced and are pinned as they stand;
-`inventory/tests/test_supplier_scoring.py` asserts each one and names five
-places the judgement is questionable (`REPORTED, NOT FIXED`) — most importantly
-that an unpriced supplier can never beat a priced one, because a missing price
-scores like a bad price. Two of the five are the same falsy-guard mistake: a
-`unit_cost` of 0 and an `average_lead_time` of 0 both read as "unknown", so the
-best possible price and the best possible lead time are each graded as the
-worst. Retuning any of them needs a captain decision, and the tests will fail
-until it is deliberate.
+**Prefetch through `supplier_selection.item_suppliers_prefetch()`, never the bare
+`"item_suppliers__supplier"` string.** It pulls the same rows and adds the two
+delivery-record annotations the performance term reads, in the same round-trip.
+A queryset that prefetches the bare string still gets the right answer, but pays
+one extra grouped aggregate per page for it.
+
+**The scoring weights are a product decision, not an implementation detail**, and
+`inventory/tests/test_supplier_scoring.py` is where each one is asserted on
+real-shaped catalogue data. Its module docstring is the current record of what
+was decided and what is still open; read it before touching a weight. The shape
+of the arithmetic is one sentence: **every term starts at its full weight and is
+discounted only by evidence against that candidate**, so a gap in the data — no
+price on file, no delivery ever recorded — is neither punished nor paid, and the
+winner reports the gap (`SupplierChoice.scored_without_price` /
+`scored_without_history`, on `/items/{id}/metrics/`) rather than leaving an
+operator to infer it from a blank cell. One judgement is still `REPORTED, NOT
+FIXED` there: where the cost cliff sits (150% of the item's average). Retuning it
+needs a captain decision, and the tests fail until it is deliberate.
 
 `PurchaseOrderViewSet._find_best_supplier` is now a thin delegation, kept for its
 call site's readability. It has no rule of its own.
@@ -356,9 +364,13 @@ two member-facing pages; that is why the consumer set is DERIVED, not recalled.
 `reorder_queue/views.py`, `unit_cost or Decimal("0.00")` in
 `purchase_orders.create_purchase_order` and `line_entry.default_unit_cost`'s
 `Decimal("0.00")` were the sites this section filed as
-`oms-falsy-zero-money-guards`. See "What a price costs" below. The scoring's own
-falsy guards (`test_supplier_scoring.py`, REPORTED NOT FIXED, retuning reserved
-to the captain) stay open and are named there. `get_expected_delivery_date`'s
+`oms-falsy-zero-money-guards`. See "What a price costs" below. The supplier
+scoring's own falsy guards — a `unit_cost` of 0 and an `average_lead_time` of 0
+both read as "unknown" — were reserved to the captain and are now CLOSED too
+(`oms-supplier-scoring-weight-flaws`; `test_supplier_scoring.py` pins the new
+behaviour, and `receiving.create_lead_time_log`'s `average_lead_time or 14`, the
+guard that wrote a fortnight into a same-day vendor's delivery record, went with
+them). `get_expected_delivery_date`'s
 `and self.average_lead_time` — where a KNOWN zero-day lead time yields no date —
 was filed here as "the same shape", and it is: but it moves a DATE, not a money
 figure, so it was outside the money branch's invariant and is STILL OPEN.

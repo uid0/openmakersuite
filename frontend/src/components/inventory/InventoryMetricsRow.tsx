@@ -83,6 +83,15 @@ const InventoryMetricsRow: React.FC<InventoryMetricsRowProps> = ({ sku, metrics 
     </>
   );
 
+  // What the scoring shrugged off to pick this supplier. The rule does not
+  // punish a missing price or an empty delivery record (op-2rsp), so a supplier
+  // can win carrying one — and a blank Cost cell would otherwise read as "no
+  // supplier" rather than "the supplier we picked has no price on file".
+  const gaps = [
+    metrics.supplier_scored_without_price && 'no price on file',
+    metrics.supplier_scored_without_history && 'no delivery history',
+  ].filter(Boolean) as string[];
+
   return (
     <Paper withBorder p="md" radius="md" data-testid="inventory-metrics-row">
       <Group justify="space-between" wrap="wrap" gap="md">
@@ -136,6 +145,11 @@ const InventoryMetricsRow: React.FC<InventoryMetricsRowProps> = ({ sku, metrics 
           tooltip={`${costTooltipBase} — ${TREND_LABEL[metrics.cost_trend]}`}
         />
       </Group>
+      {gaps.length > 0 && (
+        <Text size="xs" c="dimmed" mt="xs" data-testid="metric-supplier-gaps">
+          Chosen supplier has {gaps.join(' and ')} — it was picked on what we do know.
+        </Text>
+      )}
     </Paper>
   );
 };

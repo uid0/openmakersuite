@@ -89,16 +89,17 @@ ALLOWED: dict[str, tuple[int, str]] = {
         "``lowest_unit_cost`` / ``total_value`` all read the derivation.",
     ),
     "inventory/services/supplier_selection.py": (
-        5,
-        "The scoring's own reads. ``average_orderable_unit_cost`` (2) is "
-        "explicitly ``is not None``; ``Meta``-order ``order_by('unit_cost')`` "
-        "(1) is a row ordering, not a price. The remaining 2 are "
-        "``score_candidate``'s ``if link.unit_cost and average_unit_cost`` — "
-        "REPORTED, NOT FIXED: it is this same falsy-zero mistake, and "
-        "repairing it changes which supplier the system picks, which moves "
-        "money for a reason that is not 'base presented an unknown price as a "
-        "real number'. Captain-reserved, filed as "
-        "oms-supplier-scoring-weight-flaws, pinned by test_supplier_scoring.py.",
+        3,
+        "The yardstick and the row order, and nothing else. "
+        "``average_orderable_unit_cost`` (2) is explicitly ``is not None``, "
+        "exactly as SQL ``AVG`` skips NULLs; ``Meta``-order "
+        "``order_by('unit_cost')`` (1) is a row ordering, not a price. Was 5: "
+        "``score_candidate``'s cost guard used to be "
+        "``if link.unit_cost and average_unit_cost``, this same falsy-zero "
+        "mistake, and it now reads the price through ``unit_price_of`` like "
+        "every other reader (oms-supplier-scoring-weight-flaws). A free link is "
+        "PRICED AT ZERO in the scoring, so it wins on being free instead of "
+        "being graded as the dearest candidate on file.",
     ),
     "inventory/services/suppliers.py": (
         6,

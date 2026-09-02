@@ -325,7 +325,18 @@ def create_lead_time_log(po_item, delivery_date):
     order_date = purchase_order.sent_at
     actual_delivery_date = delivery_date.date() if hasattr(delivery_date, "date") else delivery_date
 
-    estimated_lead_time = po_item.item_supplier.average_lead_time or 14
+    # A lead time of 0 days is a KNOWN lead time — a counter pickup from a local
+    # supplier — and this used to be ``or 14``, which silently promised a
+    # fortnight for a same-day vendor. That number is not cosmetic: it becomes
+    # ``estimated_lead_time_days``, so ``variance_days`` (actual − estimated) was
+    # understated by two weeks for exactly those suppliers, and every one of
+    # their deliveries looked early. ``supplier_selection``'s performance term
+    # reads that column to decide who to buy from (op-2rsp), and the supplier
+    # screen's ``on_time_percentage`` reports it, so a wrong estimate here is a
+    # wrong purchase and a wrong screen. ``average_lead_time`` is a non-null
+    # ``PositiveIntegerField``, so there is no absence left for a fallback to
+    # cover.
+    estimated_lead_time = po_item.item_supplier.average_lead_time
     actual_lead_time = LeadTimeLog.calculate_business_days(order_date, actual_delivery_date)
 
     LeadTimeLog.objects.create(

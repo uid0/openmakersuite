@@ -23,6 +23,8 @@ const buildMetrics = (overrides: Partial<InventoryItemMetrics> = {}): InventoryI
   last_po_unit_cost: '4.0000',
   is_case_based: false,
   case_size: null,
+  supplier_scored_without_price: false,
+  supplier_scored_without_history: false,
   ...overrides,
 });
 
@@ -88,5 +90,46 @@ describe('InventoryMetricsRow', () => {
 
     expect(screen.getByTestId('metric-qc')).toHaveTextContent('2.50');
     expect(screen.getByTestId('metric-qa')).toHaveTextContent('7.50');
+  });
+
+  // The supplier scoring neither punishes nor pays for a missing price or an
+  // empty delivery record (op-2rsp), so a supplier carrying one can win. A
+  // blank Cost cell alone is ambiguous — "no supplier" and "a supplier nobody
+  // has priced" send an operator to different screens — so the row says which.
+  it('says when the chosen supplier has no price on file', () => {
+    renderRow(buildMetrics({ unit_cost: null, supplier_scored_without_price: true }));
+
+    expect(screen.getByTestId('metric-cost')).toHaveTextContent('—');
+    expect(screen.getByTestId('metric-supplier-gaps')).toHaveTextContent(
+      'Chosen supplier has no price on file',
+    );
+  });
+
+  it('says when the chosen supplier has no delivery history', () => {
+    renderRow(buildMetrics({ supplier_scored_without_history: true }));
+
+    expect(screen.getByTestId('metric-supplier-gaps')).toHaveTextContent(
+      'Chosen supplier has no delivery history',
+    );
+  });
+
+  it('names both gaps together when the choice was made without either', () => {
+    renderRow(
+      buildMetrics({
+        unit_cost: null,
+        supplier_scored_without_price: true,
+        supplier_scored_without_history: true,
+      }),
+    );
+
+    expect(screen.getByTestId('metric-supplier-gaps')).toHaveTextContent(
+      'no price on file and no delivery history',
+    );
+  });
+
+  it('says nothing when the choice knew both', () => {
+    renderRow(buildMetrics());
+
+    expect(screen.queryByTestId('metric-supplier-gaps')).not.toBeInTheDocument();
   });
 });

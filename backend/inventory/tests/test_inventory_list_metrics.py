@@ -47,6 +47,12 @@ METRICS_FIELDS = {
     "last_po_unit_cost",
     "is_case_based",
     "case_size",
+    # Why Cost / Lead may be blank or unbacked: the supplier scoring does not
+    # punish a missing price or an empty delivery record (op-2rsp), so a
+    # supplier can win carrying one, and the operator is told rather than left
+    # to infer it from a blank cell.
+    "supplier_scored_without_price",
+    "supplier_scored_without_history",
 }
 
 

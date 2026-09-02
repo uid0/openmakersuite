@@ -13,6 +13,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from inventory.models import InventoryItem
+from inventory.services.supplier_selection import item_suppliers_prefetch
 
 from .serializers import IndexCardBatchSerializer, IndexCardPreviewSerializer, TestSheetSerializer
 from .services import IndexCardRenderer, TestSheetRenderer, build_preview_payload
@@ -51,7 +52,7 @@ class IndexCardBatchGenerateView(APIView):
         # the cache instead of firing a query per card (issue #882).
         items = list(
             InventoryItem.objects.filter(id__in=validated_ids).prefetch_related(
-                "item_suppliers__supplier"
+                item_suppliers_prefetch()
             )
         )
 

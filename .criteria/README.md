@@ -32,3 +32,13 @@ One file per feature: `.criteria/<short-slug>.md`
 - One AC = one test (ideally). If an AC needs multiple tests, split it.
 - Codex writes these. Claude reads and implements. Neither crosses the line.
 - When Claude ships, the PR description references AC-N for each commit/change.
+
+## Superseding a criterion
+
+When a product decision replaces an existing criterion, keep its AC number, replace its normative Given/When/Then contract, and put this note directly below its heading:
+
+```markdown
+> **Supersedes the original AC-N, "<old title>."** <Decision and reason, with a pointer to the authoritative code or document.>
+```
+
+Do not silently edit or delete the old decision: the note must preserve what changed, why it changed, and where the rationale lives without leaving the obsolete behavior as a second normative contract.

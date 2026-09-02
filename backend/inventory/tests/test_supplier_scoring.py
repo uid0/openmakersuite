@@ -140,7 +140,8 @@ def _annotated_record(link):
 
     One rule, two implementations: a correlated subquery on the row and a
     grouped aggregate over the leftovers. They must agree, and the boundary is
-    where two spellings of "no later than promised" would drift first.
+    where two spellings of "no later than the vendor's standing quote" would
+    drift first.
     """
     row = ItemSupplier.objects.annotate(**delivery_record_annotations()).get(pk=link.pk)
     return delivery_records_for([row])[link.pk]
@@ -606,7 +607,9 @@ def test_the_performance_term_is_a_real_ten_percent_of_the_delivery_record():
     scoring that did not exist.
 
     Now it is that scoring: **the share of the deliveries recorded against this
-    supplier link that arrived no later than the order promised.** Asserted by
+    supplier link that arrived no later than the vendor's STANDING QUOTED lead
+    time** — the yardstick because it is the promise the lead-time term scores,
+    not the order's separately confirmed ``expected_delivery_date``. Asserted by
     subtracting each candidate's cost and lead-time contributions, computed here
     independently of the implementation, and checking that what is LEFT OVER is
     the link's on-time share times a tenth. An earlier version of this test
@@ -711,7 +714,8 @@ def test_a_delivery_on_the_promised_day_counts_as_on_time():
     The same falsy-zero shape as a ``unit_cost`` of 0.00 and an
     ``average_lead_time`` of 0, one layer down: a guard spelled
     ``if log.variance_days`` would read a delivery that landed exactly when
-    promised as having no variance recorded. The rule is ``<= 0``.
+    quoted as having no variance recorded. The rule is ``<= 0``, measured
+    against the vendor's standing quote.
 
     Asserted on BOTH implementations of the rule — the row annotation every read
     path rides and the grouped-aggregate fallback — because the boundary is
@@ -740,9 +744,9 @@ def test_arriving_early_counts_as_on_time_and_no_better():
 
     A link that has always been five days early scores the same as one that has
     always landed on the day. Paying extra for earliness would pay twice for the
-    same fact — ``inventory.tasks.update_average_lead_times`` feeds observed
-    deliveries back into ``average_lead_time``, so a habitually early vendor
-    already collects that on the LEAD-TIME axis.
+    same fact — ``average_lead_time`` is the vendor's OWN per-link quoted
+    promise, operator-entered and maintained per link, so a reliably quick
+    vendor already collects its speed on the LEAD-TIME axis.
     """
     item = _item()
     early = _link(item, "Early", cost="5.00", lead=7)

@@ -699,14 +699,27 @@ class LeadTimeLogAdmin(admin.ModelAdmin):
 
     @admin.display(description="Variance")
     def variance_display(self, obj):
-        """Display variance with color coding."""
+        """Display variance with color coding, naming what it is measured against.
+
+        ``variance_days`` is scored against the supplier link's STANDING QUOTED
+        lead time, not against this row's ``expected_delivery_date``, so a
+        delivery that hit the confirmed date can still read as behind the quote.
+        A bare "7 days late" beside an expected date equal to the actual one
+        reads as a contradiction; naming the yardstick makes it a fact.
+        """
         variance = obj.variance_days
         if variance == 0:
-            return mark_safe('<span style="color: green;">✓ On Time</span>')
+            return mark_safe('<span style="color: green;">✓ On the quoted lead time</span>')
         elif variance < 0:
-            return format_html('<span style="color: blue;">⚡ {} days early</span>', abs(variance))
+            return format_html(
+                '<span style="color: blue;">⚡ {} days inside the quoted lead time</span>',
+                abs(variance),
+            )
         else:
-            return format_html('<span style="color: red;">⚠️ {} days late</span>', variance)
+            return format_html(
+                '<span style="color: red;">⚠️ {} days beyond the quoted lead time</span>',
+                variance,
+            )
 
 
 # WebHook Admin

@@ -50,10 +50,26 @@ def _inclusive_business_days(start, end):
     return business_days
 
 
+BATCH_SIZE = 500
+
+
 def _recompute(apps, measure):
     LeadTimeLog = apps.get_model("reorder_queue", "LeadTimeLog")
 
-    updated = []
+    # ``bulk_update`` rather than ``save``: the historical model has no ``save``
+    # override, so variance would not be derived for us anyway, and a
+    # whole-table rewrite through the ORM one row at a time is not worth it on a
+    # column this migration already computes. The batch is FLUSHED INSIDE the
+    # loop rather than accumulated: essentially every pre-existing row is in the
+    # old unit, so collecting them all first would hold O(table) model instances
+    # in a migration that is already holding a transaction open.
+    def flush(batch):
+        if batch:
+            LeadTimeLog.objects.bulk_update(
+                batch, ["actual_lead_time_days", "variance_days"], batch_size=BATCH_SIZE
+            )
+
+    batch = []
     for log in LeadTimeLog.objects.all().iterator():
         actual = measure(_as_date(log.order_date), _as_date(log.actual_delivery_date))
         variance = actual - log.estimated_lead_time_days
@@ -61,16 +77,12 @@ def _recompute(apps, measure):
             continue
         log.actual_lead_time_days = actual
         log.variance_days = variance
-        updated.append(log)
+        batch.append(log)
+        if len(batch) >= BATCH_SIZE:
+            flush(batch)
+            batch = []
 
-    if updated:
-        # ``bulk_update`` rather than ``save``: the historical model has no
-        # ``save`` override, so variance would not be derived for us anyway, and
-        # a whole-table rewrite through the ORM one row at a time is not worth
-        # it on a column this migration already computes.
-        LeadTimeLog.objects.bulk_update(
-            updated, ["actual_lead_time_days", "variance_days"], batch_size=500
-        )
+    flush(batch)
 
 
 def to_calendar_days(apps, schema_editor):

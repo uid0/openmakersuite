@@ -7,8 +7,9 @@ The service (``inventory.services.supplier_selection``) and the thin
   (op-2rsp), including one an operator flagged primary and later discontinued;
 * treat a flagged primary as a GATE: an orderable link an operator flagged wins
   outright and is never scored, so their choice cannot be outbid;
-* otherwise rank the orderable candidates by :func:`score_candidate` (cost and
-  lead time) — see ``test_supplier_scoring.py`` for whether it ranks SENSIBLY,
+* otherwise rank the orderable candidates by :func:`score_candidate` (cost,
+  lead time and delivery record) — see ``test_supplier_scoring.py`` for whether
+  it ranks SENSIBLY,
   which is a separate question from whether it runs;
 * tell "this item has no suppliers" apart from "every supplier is dead", because
   those are different facts an operator acts on differently;

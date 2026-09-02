@@ -419,12 +419,15 @@ def test_against_a_free_peer_group_anything_charged_is_dear():
 def test_a_tie_resolves_to_the_first_candidate_offered():
     """The only ties that can actually arise are between interchangeable rows.
 
-    A tie between DIFFERENTLY priced candidates is not constructible: the cost
-    yardstick is the mean of the candidates themselves, so two of them can never
-    both sit past the 150% cliff, and any third candidate cheap enough to drag
-    the mean down would outscore them both. So a real tie means same price and
-    same lead time — rows with nothing to choose between them, where "the
-    cheaper one" is not a meaningful answer.
+    A tie between DIFFERENTLY priced candidates IS now constructible: the cost
+    factor is clamped at 1, so every candidate at or below the item's average
+    orderable price earns the identical full weight — see
+    ``test_below_the_average_price_stops_separating_candidates_and_speed_decides``,
+    which builds exactly such a tie. A tie therefore means equal cost factor,
+    equal lead time AND equal delivery record — rows with nothing to choose
+    between them, where "the cheaper one" is not a meaningful answer. The order
+    that resolves it is ``Meta.ordering`` — ``-is_primary``, then ``unit_cost``
+    ascending with SQL's NULLs last.
 
     What is worth pinning is that the function is a pure first-maximal-wins over
     the order it is handed, so the resolution is stable rather than accidental.
@@ -455,9 +458,6 @@ def test_the_lead_time_horizon_is_thirty_days():
     average = Decimal("5.00")
     assert score_candidate(at_horizon, average) == score_candidate(beyond, average)
     assert score_candidate(inside, average) > score_candidate(at_horizon, average)
-    # 30 days earns exactly nothing on speed — the whole lead-time weight is
-    # spent inside the horizon, so where the horizon sits decides every trade-off
-    # this scoring makes.
     # 30 days earns exactly nothing on speed, so a candidate sitting there scores
     # only what the other two terms give it: 0.40 cost (unpriced, so nothing to
     # discount) + 0.00 lead + 0.10 performance (no record, nothing to discount).

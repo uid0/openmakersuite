@@ -364,7 +364,6 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         )
         .prefetch_related(
             item_suppliers_prefetch("item__item_suppliers"),
-            "item__item_suppliers",
             # ``item_details`` nests the full item serializer, which now carries
             # the packaging chain (op-hzji) — prefetch it so a page of requests
             # does not cost a query per row.

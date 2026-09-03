@@ -2,6 +2,7 @@
 Integration tests for dashboard API views.
 """
 
+from decimal import Decimal
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -14,6 +15,15 @@ from inventory.tests.factories import InventoryItemFactory
 from reorder_queue.tests.factories import ReorderRequestFactory
 
 User = get_user_model()
+
+
+def _every_value(node):
+    """Every scalar anywhere in a decoded JSON body, for a whole-payload assert."""
+    if isinstance(node, dict):
+        return [value for child in node.values() for value in _every_value(child)]
+    if isinstance(node, list):
+        return [value for child in node for value in _every_value(child)]
+    return [node]
 
 
 @pytest.mark.integration
@@ -144,6 +154,61 @@ class TestDashboardWidgetDataViews:
         inventory = response.json()["inventory"]
         assert inventory["total_items"] == 2  # retired still counted as an item
         assert inventory["low_stock_count"] == 1  # but never as low-stock
+
+    def test_inventory_summary_withholds_the_valuation_from_an_anonymous_caller(
+        self, db, api_client
+    ):
+        """BEFORE/AFTER. The public tile published the makerspace's stock valuation.
+
+        ``get_inventory_summary`` is ``AllowAny`` on a function-based view, so
+        there is no ``get_permissions`` seam to narrow — the gate has to be on
+        the field. Base returned ``total_value`` (10 x $2.00 = 20.0) to a caller
+        with no session; it must not now, in any form a consumer could read as
+        money. ``items_without_price`` goes with it: it counts what the total
+        could not value, so it qualifies nothing once the total is gone.
+
+        The endpoint itself stays public — 200, with every count intact.
+        """
+        InventoryItemFactory(
+            current_stock=10, minimum_stock=1, unit_cost=Decimal("2.00"), quantity_per_package=1
+        )
+
+        response = api_client.get("/api/dashboard/inventory-summary/")
+
+        assert response.status_code == status.HTTP_200_OK
+        body = response.json()
+        inventory = body["inventory"]
+        assert "total_value" not in inventory
+        assert "items_without_price" not in inventory
+        assert inventory["total_value_withheld"] is True
+        # Absent, NOT null and NOT zero — and not under another key either:
+        # the whole body is walked, so a future field that reintroduced the
+        # figure would fail here too.
+        assert 20.0 not in _every_value(body)
+        assert inventory["total_items"] == 1
+        assert inventory["low_stock_count"] == 0
+
+    def test_inventory_summary_still_gives_the_valuation_to_a_logged_in_caller(
+        self, authenticated_client
+    ):
+        """CONTROL. Members and staff read this dashboard; their payload is unchanged.
+
+        Same fixture as the anonymous case above, so the pair isolates the one
+        variable that moved: the session.
+        """
+        client, _user = authenticated_client
+        InventoryItemFactory(
+            current_stock=10, minimum_stock=1, unit_cost=Decimal("2.00"), quantity_per_package=1
+        )
+        InventoryItemFactory(current_stock=5, minimum_stock=1, unit_cost=None)  # no price on file
+
+        response = client.get("/api/dashboard/inventory-summary/")
+
+        assert response.status_code == status.HTTP_200_OK
+        inventory = response.json()["inventory"]
+        assert inventory["total_value"] == 20.0
+        assert inventory["items_without_price"] == 1
+        assert "total_value_withheld" not in inventory
 
     def test_get_pending_reorders_data(self, authenticated_client):
         """Test getting pending reorders data."""

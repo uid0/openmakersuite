@@ -552,23 +552,41 @@ class TestDashboardOverviewSupplierQueryBudget:
     without a prefetch the ItemSupplier table was read once per active item. The
     sum now iterates ``prefetch_related("item_suppliers")``, so that table is
     read exactly once regardless of how many active items exist.
+
+    MUST use a LOGGED-IN client. The valuation is withheld from an anonymous
+    caller and is no longer computed for one, so an anonymous request reads the
+    ItemSupplier table zero times — this guard would pass while covering
+    nothing, which is the failure mode it exists to catch.
     """
 
     _TABLE = "inventory_itemsupplier"
 
-    def test_total_value_sum_does_not_add_a_query_per_item(self, api_client):
+    def test_total_value_sum_does_not_add_a_query_per_item(self, authenticated_client):
+        client, _user = authenticated_client
         url = reverse("inventory_summary")
         for i in range(2):
             InventoryItemFactory(image=None, name=f"dashbudget-a-{i}")
-        _table_query_count(api_client, url, self._TABLE)  # warm caches
-        sup_2 = _table_query_count(api_client, url, self._TABLE)
+        _table_query_count(client, url, self._TABLE)  # warm caches
+        sup_2 = _table_query_count(client, url, self._TABLE)
 
         for i in range(4):  # grow from 2 to 6 active items
             InventoryItemFactory(image=None, name=f"dashbudget-b-{i}")
-        sup_6 = _table_query_count(api_client, url, self._TABLE)
+        sup_6 = _table_query_count(client, url, self._TABLE)
 
         assert sup_2 == sup_6, (sup_2, sup_6)
         assert sup_6 == 1, sup_6  # the single supplier prefetch for the value sum
+
+    def test_an_anonymous_request_does_not_read_the_supplier_table_at_all(self, api_client):
+        """The other half of the gate: no valuation means no supplier walk.
+
+        Pins the reason the guard above had to move to a logged-in client, so a
+        future reader cannot quietly move it back.
+        """
+        url = reverse("inventory_summary")
+        for i in range(3):
+            InventoryItemFactory(image=None, name=f"dashbudget-anon-{i}")
+
+        assert _table_query_count(api_client, url, self._TABLE) == 0
 
 
 class TestFixtureListRefillQueryBudget:

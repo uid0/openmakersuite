@@ -626,15 +626,28 @@ the new payload keys (`unit_cost_state`, `unit_cost_detail`,
 among the endpoints ScanTTY calls at all; and both new write-path refusals
 reach an operator with the full remedy text.
 
-**FILED, NOT DECIDED HERE — the public inventory-summary valuation.**
-`docs/API_PERMISSION_MATRIX.md` records `dashboard/inventory-summary/` as public
-with "Aggregate counts only; no PII or cost data", but `get_inventory_summary`
-publishes `total_value` — an aggregate dollar valuation of all active stock.
-PRE-EXISTING: `total_value` was already there, and this branch only fixed the
-500 on it and added `items_without_price` beside it. Neither the matrix nor the
-endpoint was touched, because the resolution — correct the matrix, or stop
-publishing the valuation anonymously — is a captain decision. ESCALATED AND
-UNDECIDED: this entry is a filing, not a conclusion.
+**DECIDED AND DONE — the public inventory-summary valuation.** Filed by
+`fm/oms-falsy-zero-money-guards` as an escalation; the captain chose to stop
+publishing the valuation anonymously rather than correct the matrix, and
+`fm/oms-public-inventory-valuation` implemented it. `get_inventory_summary`
+stays `AllowAny` — a function-based view has no `get_permissions` seam, so the
+gate is on the FIELD: `total_value` and `items_without_price` are absent for an
+anonymous caller and replaced by `"total_value_withheld": true`; an
+authenticated caller's payload is unchanged. Absent rather than `null`, because
+`null` already means "no price on file" in this payload family and a consumer's
+`?? 0` would render the withheld figure as a real 0.00. The contract and its
+rationale live in `docs/API_PERMISSION_MATRIX.md`'s
+`dashboard/inventory-summary/` row and the view's own docstring.
+
+**STILL OPEN, and deliberately untouched — the rest of the anonymous money
+surface.** In production `REST_FRAMEWORK.DEFAULT_PERMISSION_CLASSES` is
+`IsAuthenticatedOrReadOnly` (`config/settings.py`), so every viewset that does
+not override it serves anonymous GETs. Purchase orders, item and supplier
+costs, price history, asset purchase prices and maintenance estimates all reach
+a caller with no session; `reorders/analytics/transparency/` does so by design.
+The full derivation is in the `fm/oms-public-inventory-valuation` PR body.
+Queued as `oms-anonymous-read-posture` — a captain decision, not an
+implementation one. Do not narrow any of it without that decision.
 
 **FILED, APPROVED, NOT DONE — `log_usage`'s "no unit cost" warning. Recorded so
 the branch's "the derived set AND its deliberate exclusions both reported with

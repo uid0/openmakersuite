@@ -227,7 +227,25 @@ def get_inventory_summary(request):
     """
     Get inventory summary for dashboard display.
 
-    Public endpoint showing overview of inventory status.
+    Public endpoint showing overview of inventory status. The stock counts are
+    public; the stock VALUATION is not.
+
+    ``total_value`` — the summed worth of every active item — and
+    ``items_without_price``, the count that qualifies it, are omitted for an
+    anonymous caller and replaced by ``"total_value_withheld": true``. OMITTED
+    rather than ``null``: ``null`` already means "no price on file" everywhere
+    else in this payload's family (op-9m2v), and a consumer's ``?? 0`` would
+    render the withheld figure as a real 0.00. An absent key cannot be summed
+    or formatted by accident; the boolean says the omission is policy, not an
+    empty inventory.
+
+    ``items_without_price`` goes with it because it is not a standalone fact:
+    it counts what ``total_value`` could not value, so with no total beside it
+    it qualifies nothing. An authenticated caller's payload is unchanged.
+
+    The view stays ``AllowAny``: ``scripts/smoke.sh`` asserts 200 here with no
+    session in its public-endpoint loop, and that still holds. Only the money
+    is gated, not the endpoint.
     """
     try:
         from datetime import timedelta
@@ -255,12 +273,17 @@ def get_inventory_summary(request):
             .count()
         )
 
-        # Total inventory value. lowest_unit_price reads item_suppliers.all(),
-        # so prefetch it for THIS unpaginated sum only (a fresh clone; the
-        # count-only reuses of items_query stay untouched) to avoid a per-item
-        # supplier query — the N+1 the property fix in #882 made cacheable. Not
-        # a Sum annotate (null-cost / Decimal("0") / rounding would differ).
-        # Issue #890.
+        # Total inventory value, for logged-in callers ONLY (see the
+        # docstring). Not computed at all for an anonymous one: the figure it
+        # produces is the thing being withheld, and this is the only loop in
+        # the view that touches every active item — everything else here is a
+        # single aggregate query.
+        #
+        # lowest_unit_price reads item_suppliers.all(), so prefetch it for THIS
+        # unpaginated sum only (a fresh clone; the count-only reuses of
+        # items_query stay untouched) to avoid a per-item supplier query — the
+        # N+1 the property fix in #882 made cacheable. Not a Sum annotate
+        # (null-cost / Decimal("0") / rounding would differ). Issue #890.
         #
         # Summed through PriceRollup rather than over ``item.total_value``
         # (op-9m2v): that property is ``None`` for an item no supplier prices,
@@ -269,10 +292,11 @@ def get_inventory_summary(request):
         # NUMBER is byte-identical to base, which contributed Decimal("0") for
         # those items; ``items_without_price`` beside it is what stops the
         # total reading as a complete valuation.
-        rollup = PriceRollup()
-        for item in items_query.prefetch_related("item_suppliers"):
-            rollup.add(lowest_unit_price(item), item.current_stock)
-        total_value = rollup.amount
+        may_see_valuation = request.user.is_authenticated
+        if may_see_valuation:
+            rollup = PriceRollup()
+            for item in items_query.prefetch_related("item_suppliers"):
+                rollup.add(lowest_unit_price(item), item.current_stock)
 
         # Recently added items (last 30 days)
         thirty_days_ago = timezone.now() - timedelta(days=30)
@@ -294,20 +318,27 @@ def get_inventory_summary(request):
         )
         assets_needing_maintenance = assets_query.filter(status="maintenance").count()
 
+        # Built key-by-key so the authenticated payload keeps the exact shape
+        # AND ordering it had before the gate.
+        inventory = {
+            "total_items": total_items,
+            "low_stock_count": low_stock_items,
+            "items_with_pending_reorders": items_with_reorders,
+        }
+        if may_see_valuation:
+            inventory["total_value"] = float(rollup.amount)
+            # How many active items the total above could NOT value, because no
+            # supplier records a price for them (op-9m2v). The same honesty
+            # count the stock-value reports carry.
+            inventory["items_without_price"] = rollup.unpriced_count
+        else:
+            inventory["total_value_withheld"] = True
+        inventory["recently_added"] = recent_items
+        inventory["low_stock_items"] = list(low_stock_list)
+
         return Response(
             {
-                "inventory": {
-                    "total_items": total_items,
-                    "low_stock_count": low_stock_items,
-                    "items_with_pending_reorders": items_with_reorders,
-                    "total_value": float(total_value),
-                    # How many active items the total above could NOT value,
-                    # because no supplier records a price for them (op-9m2v).
-                    # The same honesty count the stock-value reports carry.
-                    "items_without_price": rollup.unpriced_count,
-                    "recently_added": recent_items,
-                    "low_stock_items": list(low_stock_list),
-                },
+                "inventory": inventory,
                 "assets": {
                     "total_assets": total_assets,
                     "by_status": assets_by_status,

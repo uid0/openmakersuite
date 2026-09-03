@@ -80,9 +80,9 @@ primary. That is a real behaviour change on member-facing surfaces, and on
 ``/metrics/``, which ScanTTY reads.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from django.db.models import Count, IntegerField, OuterRef, Prefetch, Q, Subquery, Value
 from django.db.models.functions import Coalesce
@@ -225,6 +225,15 @@ class SupplierChoice:
     the gate — a flagged primary is not weighed against anything, so its choice
     did not turn on what we do or do not know about it — and both describe the
     WINNER, not the field.
+
+    ``alternatives`` is the REST of the field: every other link that could have
+    been bought from, in the order the candidates arrived. It is here because
+    "which one" and "out of how many" are the same question asked once — a
+    surface that names a single supplier without it presents an item with three
+    sources as an item with one, and a caller that reconstructed the list for
+    itself would need a second copy of the orderability rule to do it. Empty
+    means the winner really was the only option (or there was none): it is
+    never a stand-in for "we did not look".
     """
 
     item_supplier: Optional[ItemSupplier] = None
@@ -233,6 +242,7 @@ class SupplierChoice:
     flagged_primary_unorderable: bool = False
     scored_without_price: bool = False
     scored_without_history: bool = False
+    alternatives: Tuple[ItemSupplier, ...] = field(default_factory=tuple)
 
     def __bool__(self) -> bool:
         return self.item_supplier is not None
@@ -551,6 +561,16 @@ def _scored_candidates(links: List[ItemSupplier]) -> List[ItemSupplier]:
     return candidates
 
 
+def _others(candidates: List[ItemSupplier], winner: ItemSupplier) -> Tuple[ItemSupplier, ...]:
+    """``candidates`` minus the one that won, in the order they arrived.
+
+    Compared by ``pk`` rather than by identity: ``select_suppliers_for`` hands
+    :func:`_choose` rows straight out of a prefetch cache, and the same database
+    row can arrive as two distinct Python objects across prefetches.
+    """
+    return tuple(link for link in candidates if link.pk != winner.pk)
+
+
 def _choose(
     links: List[ItemSupplier],
     records: Optional[Dict[int, DeliveryRecord]] = None,
@@ -589,7 +609,11 @@ def _choose(
     #    we know about it can have decided anything.
     for link in candidates:
         if link.is_primary:
-            return SupplierChoice(item_supplier=link, basis=BASIS_FLAGGED_PRIMARY)
+            return SupplierChoice(
+                item_supplier=link,
+                basis=BASIS_FLAGGED_PRIMARY,
+                alternatives=_others(candidates, link),
+            )
 
     # 2. The score, over candidates none of which is flagged. The delivery
     #    records are resolved ONCE for the whole candidate set — off the row
@@ -606,6 +630,7 @@ def _choose(
         # the winner won WITHOUT one of these, because neither gap is punished.
         scored_without_price=not unit_price_of(winner).is_known,
         scored_without_history=not records.get(winner.pk, NO_DELIVERY_HISTORY).has_history,
+        alternatives=_others(candidates, winner),
     )
 
 

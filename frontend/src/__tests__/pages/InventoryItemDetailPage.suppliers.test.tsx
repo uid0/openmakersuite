@@ -118,6 +118,18 @@ const baseItem = {
   last_counted_at: null,
   days_since_last_count: null,
   suppliers: [] as ReturnType<typeof supplierLink>[],
+  // Which link the API says to buy through, and why (op-3xsp). Named apart
+  // from `supplier_name` above on purpose: the anonymous block reads this one.
+  supplier_choice: {
+    item_supplier_id: 1,
+    supplier_name: 'Derived Supply Co.',
+    basis: 'best_scored' as const,
+    reason: null,
+    flagged_primary_unorderable: false,
+    scored_without_price: false,
+    scored_without_history: false,
+    alternatives: [] as { id: number; supplier_name: string }[],
+  },
 };
 
 const renderWith = (suppliers: unknown[], itemOverrides: Record<string, unknown> = {}) => {
@@ -221,22 +233,90 @@ describe('InventoryItemDetailPage — suppliers card', () => {
     expect(screen.queryByText('Legacy Accessor Co.')).not.toBeInTheDocument();
   });
 
-  it('shows a logged-out visitor the legacy single supplier name and no suppliers card', async () => {
+  it('shows a logged-out visitor one supplier name and no suppliers card', async () => {
     // `/inventory/items/:id` is not behind RequireAuth, so an anonymous visitor
-    // reaches this page. They see exactly what they saw before the card
-    // existed — one name under "Primary Supplier" — and not the sourcing table.
+    // reaches this page. They still see ONE name and not the sourcing table —
+    // widening that is deliberately out of scope here (op-3xsp).
     localStorage.removeItem('token');
     renderWith([
       supplierLink({ id: 1, supplier_name: 'Acme Supplies', is_primary: true }),
       supplierLink({ id: 2, supplier_name: 'Beta Parts' }),
     ]);
 
-    await waitFor(() => expect(screen.getByText('Primary Supplier')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId('anonymous-supplier-block')).toBeInTheDocument()
+    );
 
-    expect(screen.getByText('Legacy Accessor Co.')).toBeInTheDocument();
     expect(screen.queryByTestId('item-suppliers-card')).not.toBeInTheDocument();
     expect(screen.queryByText('Acme Supplies')).not.toBeInTheDocument();
     expect(screen.queryByText('Beta Parts')).not.toBeInTheDocument();
+  });
+
+  it('BEFORE/AFTER: the anonymous block names the derived supplier, not the legacy key', async () => {
+    localStorage.removeItem('token');
+    renderWith([supplierLink({ id: 1, supplier_name: 'Acme Supplies', is_primary: true })]);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('anonymous-supplier-block')).toBeInTheDocument()
+    );
+
+    expect(screen.getByTestId('anonymous-supplier-block')).toHaveTextContent(
+      'Derived Supply Co.'
+    );
+    expect(screen.queryByText('Legacy Accessor Co.')).not.toBeInTheDocument();
+  });
+
+  /**
+   * "Primary Supplier" was a claim the derivation does not make: a primary is a
+   * GATE an operator sets, most items have none, and the name under that
+   * heading was usually the winner of a price/lead-time/delivery score being
+   * labelled as somebody's standing decision.
+   */
+  it('BEFORE/AFTER: does not label a scored pick as the operator’s "Primary Supplier"', async () => {
+    localStorage.removeItem('token');
+    renderWith([supplierLink({ id: 1, supplier_name: 'Acme Supplies', is_primary: false })]);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('anonymous-supplier-block')).toBeInTheDocument()
+    );
+
+    expect(screen.queryByText('Primary Supplier')).not.toBeInTheDocument();
+    expect(screen.getByText('We order this from')).toBeInTheDocument();
+  });
+
+  it('BEFORE/AFTER: tells an anonymous visitor there ARE others, without naming them', async () => {
+    localStorage.removeItem('token');
+    renderWith([supplierLink({ id: 1, supplier_name: 'Acme Supplies' })], {
+      supplier_choice: {
+        ...baseItem.supplier_choice,
+        alternatives: [
+          { id: 2, supplier_name: 'Beta Parts' },
+          { id: 3, supplier_name: 'Gamma Wholesale' },
+        ],
+      },
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('anonymous-supplier-alternatives')).toBeInTheDocument()
+    );
+
+    expect(screen.getByTestId('anonymous-supplier-alternatives')).toHaveTextContent(
+      '2 other suppliers also stock this item.'
+    );
+    // The count, and NOT the names: the sourcing table stays behind the login.
+    expect(screen.queryByText('Beta Parts')).not.toBeInTheDocument();
+    expect(screen.queryByText('Gamma Wholesale')).not.toBeInTheDocument();
+  });
+
+  it('CONTROL: a sole supplier gets no "others" line', async () => {
+    localStorage.removeItem('token');
+    renderWith([supplierLink({ id: 1, supplier_name: 'Acme Supplies' })]);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('anonymous-supplier-block')).toBeInTheDocument()
+    );
+
+    expect(screen.queryByTestId('anonymous-supplier-alternatives')).not.toBeInTheDocument();
   });
 
   it('shows a signed-in visitor the suppliers card instead of the legacy line', async () => {
@@ -249,7 +329,7 @@ describe('InventoryItemDetailPage — suppliers card', () => {
 
     expect(screen.getByText('Acme Supplies')).toBeInTheDocument();
     expect(screen.getByText('Beta Parts')).toBeInTheDocument();
-    expect(screen.queryByText('Primary Supplier')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('anonymous-supplier-block')).not.toBeInTheDocument();
     expect(screen.queryByText('Legacy Accessor Co.')).not.toBeInTheDocument();
   });
 

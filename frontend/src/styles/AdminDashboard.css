@@ -124,6 +124,18 @@
   color: #999;
 }
 
+/* Why the supplier above might need checking before ordering — no price on
+   file, no delivery history, or a flagged primary that was skipped as
+   unbuyable (op-3xsp). Amber rather than grey: it is a prompt to look, not
+   decoration. */
+.item-supplier-note {
+  margin-top: 2px;
+}
+
+.item-supplier-note small {
+  color: #b26a00;
+}
+
 /* Order tracking styles */
 .tracking-info,
 .delivery-info {

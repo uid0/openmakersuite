@@ -3,6 +3,12 @@
  * Functions for exporting data to CSV format
  */
 import { formatDateOnly } from './dates';
+import {
+  SUPPLIER_BASIS_LABELS,
+  alternativeSupplierNames,
+  chosenSupplierName,
+  supplierChoiceNote,
+} from './supplierChoice';
 
 /**
  * A money column, or a blank cell where the server recorded no price.
@@ -92,6 +98,21 @@ export function exportToCSV<T extends Record<string, any>>(
 
 /**
  * Export inventory items to CSV with standard columns
+ *
+ * The `Supplier` column names the link the API says to BUY through, read off
+ * `supplier_choice` (op-3xsp). It used to be the flat `item.supplier_name`,
+ * which is that same winner with the derivation thrown away — so an item with
+ * three suppliers exported as an item with one, and the three qualifiers that
+ * decide whether the name is safe to act on (there were others; the scoring
+ * knew no price for this one; the operator's flagged primary was skipped as
+ * unbuyable) were not in the file at all.
+ *
+ * This is the surface where being wrong is unrecoverable: the file leaves the
+ * system and somebody orders from it, with no screen left to correct. Hence
+ * three columns rather than a footnote — `Other Suppliers` so a single name
+ * never reads as the only option, and `Supplier Chosen By` / `Supplier Caveats`
+ * so a purchaser can see whether to check before ordering. Blank in all three
+ * is the honest reading "one supplier, chosen cleanly".
  */
 export function exportInventoryItemsToCSV(items: any[]): void {
   const headers = [
@@ -104,6 +125,9 @@ export function exportInventoryItemsToCSV(items: any[]): void {
     'Reorder Quantity',
     'Unit Cost',
     'Supplier',
+    'Other Suppliers',
+    'Supplier Chosen By',
+    'Supplier Caveats',
     'Needs Reorder',
     'Is Active',
   ];
@@ -119,7 +143,13 @@ export function exportInventoryItemsToCSV(items: any[]): void {
     // A donated item records a real 0, not an absent price; `|| ''` exported it
     // as a blank cell — the spelling this file uses for "unknown" (op-9m2v).
     'Unit Cost': item.unit_cost ?? '',
-    Supplier: item.supplier_name || '',
+    Supplier: chosenSupplierName(item.supplier_choice) ?? '',
+    'Other Suppliers': alternativeSupplierNames(item.supplier_choice).join('; '),
+    'Supplier Chosen By': SUPPLIER_BASIS_LABELS[item.supplier_choice?.basis] ?? '',
+    // Covers the no-supplier reasons too, so a blank `Supplier` cell says which
+    // of "nobody has said where this comes from" and "everyone we had is dead"
+    // it is, rather than leaving a purchaser to guess.
+    'Supplier Caveats': supplierChoiceNote(item.supplier_choice) ?? '',
     'Needs Reorder': item.needs_reorder ? 'Yes' : 'No',
     'Is Active': item.is_active ? 'Yes' : 'No',
   }));

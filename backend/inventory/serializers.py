@@ -553,17 +553,116 @@ class PackagingLevelSerializer(serializers.ModelSerializer):
         return int(ratio) if ratio.is_integer() else ratio
 
 
+class SupplierChoiceAlternativeSerializer(serializers.Serializer):
+    """One supplier that was on offer and did not win.
+
+    Deliberately just the identity: a surface uses this to say "and two others",
+    or to name them, not to quote a second price. The full row for any of them
+    is in ``suppliers[]`` under the same ``id``.
+    """
+
+    id = serializers.IntegerField()
+    supplier_name = serializers.CharField()
+
+
+class SupplierChoiceSerializer(serializers.Serializer):
+    """Which supplier we would buy this item from, and why that one (op-3xsp).
+
+    The wire form of
+    :class:`~inventory.services.supplier_selection.SupplierChoice`, and the
+    field every surface that NAMES a supplier is meant to read. The flat
+    ``supplier_name`` beside it is the same winner with the derivation thrown
+    away, which is what made "this item has three suppliers" render as "this
+    item's supplier is Acme" on a scan screen, a reorder queue and an exported
+    CSV somebody then ordered from.
+
+    The three honesty fields are the point of the object, not decoration:
+
+    * ``alternatives`` — everything else that could have been bought from. A
+      surface with room says "Acme, or 2 others"; one without at least stops
+      implying there was nothing else.
+    * ``scored_without_price`` / ``scored_without_history`` — the scoring
+      punishes NEITHER gap (see the service), so the winner can have won while
+      nobody knew its price or whether it has ever delivered. An operator
+      reading a blank cost cell cannot tell that from "no supplier at all"
+      unless it is said.
+    * ``flagged_primary_unorderable`` — the operator flagged one and it was
+      skipped as unbuyable, which reads to them as their choice being ignored.
+
+    ``reason`` is set (and ``supplier_name`` null) exactly when there is nothing
+    to buy from: ``no_suppliers`` versus ``none_orderable``, which need
+    different words and different actions from an operator.
+
+    ADDITIVE on the wire: nothing here replaces or renames an existing key, so
+    a client that has never heard of it — ScanTTY decodes item JSON into a
+    struct without ``DisallowUnknownFields`` — is unaffected.
+    """
+
+    # Declared for the shape only — drf-spectacular reads these to build the
+    # OpenAPI schema, and ``to_representation`` below is what actually runs.
+    # No ``source="item_supplier.supplier.name"`` here, because DRF's dotted
+    # source RAISES rather than yielding ``null`` when an intermediate is
+    # ``None`` — and ``item_supplier`` is ``None`` for exactly the case this
+    # object exists to describe.
+    item_supplier_id = serializers.IntegerField(allow_null=True)
+    supplier_name = serializers.CharField(allow_null=True)
+    basis = serializers.CharField(allow_null=True)
+    reason = serializers.CharField(allow_null=True)
+    flagged_primary_unorderable = serializers.BooleanField()
+    scored_without_price = serializers.BooleanField()
+    scored_without_history = serializers.BooleanField()
+    alternatives = SupplierChoiceAlternativeSerializer(many=True)
+
+    def to_representation(self, instance):
+        """Flatten the choice, tolerating the no-supplier case (see above)."""
+        link = instance.item_supplier
+        return {
+            "item_supplier_id": link.id if link else None,
+            "supplier_name": link.supplier.name if link else None,
+            "basis": instance.basis,
+            "reason": instance.reason,
+            "flagged_primary_unorderable": instance.flagged_primary_unorderable,
+            "scored_without_price": instance.scored_without_price,
+            "scored_without_history": instance.scored_without_history,
+            "alternatives": [
+                {"id": other.id, "supplier_name": other.supplier.name}
+                for other in instance.alternatives
+            ],
+        }
+
+
 class InventoryItemSerializer(serializers.ModelSerializer):
     # Primary-supplier compat fields (issue #882). ``supplier_name`` here and the
     # flat ``supplier_sku`` / ``supplier_url`` / ``unit_cost`` / ``package_cost``
     # / ``quantity_per_package`` / ``average_lead_time`` keys listed in
     # ``Meta.fields`` are READ-ONLY legacy accessors for the item's primary
-    # supplier, superseded by the ``suppliers[]`` array (below) and the
-    # ``/metrics/`` (``?with_metrics=1``) endpoint. They are retained because
-    # ScanTTY's detail screen reads all of them and the web reads four; a future
-    # hard-removal needs coordinated ScanTTY + web changes. They resolve through
-    # the prefetch-friendly ``InventoryItem.primary_item_supplier`` so serialising
-    # a page no longer costs a query per row.
+    # supplier, superseded by the ``suppliers[]`` array (below), the
+    # ``supplier_choice`` object (below) and the ``/metrics/``
+    # (``?with_metrics=1``) endpoint. They are retained because ScanTTY's detail
+    # screen reads all seven of them (``internal/tui/inventory_detail.go``) and
+    # the web reads THREE:
+    #
+    #   * ``supplier_url``      — the "View on <supplier>" link on the admin
+    #                             dashboard's by-supplier order pad;
+    #   * ``unit_cost``         — every price rendered as a number rather than
+    #                             as a named supplier's price (op-9m2v);
+    #   * ``average_lead_time`` — the wait quoted beside a supplier the surface
+    #                             has already named from ``supplier_choice``.
+    #
+    # It was FOUR until op-3xsp: ``supplier_name`` had no web reader left once
+    # the scan page, the inventory CSV export, the reorder queue and the item
+    # page's anonymous block moved onto ``supplier_choice``. ScanTTY still reads
+    # it, so it stays. A future hard-removal needs coordinated ScanTTY + web
+    # changes. They resolve through the prefetch-friendly
+    # ``InventoryItem.primary_item_supplier`` so serialising a page no longer
+    # costs a query per row.
+    #
+    # What they cannot say is the reason. A flat name is the winner of a
+    # three-step derivation with the derivation thrown away: it cannot report
+    # that four other suppliers were on offer, that the scoring picked this one
+    # without knowing a price for it, or that the operator's own flagged primary
+    # was skipped as unbuyable. Surfaces that NAME a supplier read
+    # ``supplier_choice`` for exactly that reason (op-3xsp).
     supplier_name = serializers.SerializerMethodField()
     category_name = serializers.CharField(source="category.name", read_only=True)
 
@@ -587,6 +686,19 @@ class InventoryItemSerializer(serializers.ModelSerializer):
 
     # Complete supplier information array
     suppliers = ItemSupplierSerializer(source="item_suppliers", many=True, read_only=True)
+
+    # Which supplier we would buy this item from, AND why that one (op-3xsp).
+    # See :class:`SupplierChoiceSerializer`.
+    supplier_choice = serializers.SerializerMethodField()
+
+    def get_supplier_choice(self, obj):
+        """Serialise ``InventoryItem.supplier_choice``.
+
+        Costs no query beyond the one the flat compat fields already pay: the
+        choice is memoised on the instance, and rides the ``item_suppliers``
+        prefetch every read path here sets up.
+        """
+        return SupplierChoiceSerializer(obj.supplier_choice).data
 
     # Reorder status and tracking fields
     reorder_status = serializers.CharField(read_only=True)
@@ -699,6 +811,8 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "qr_code",
             # Complete supplier array with all details
             "suppliers",
+            # The winner out of that array, and why it won (op-3xsp).
+            "supplier_choice",
             # Reorder status and tracking
             "reorder_status",
             "has_pending_reorder",

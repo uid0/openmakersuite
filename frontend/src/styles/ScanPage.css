@@ -496,3 +496,10 @@
     width: 100%;
   }
 }
+
+/* The supplier line's qualifier — "chosen without a price on file", or the
+   reason there is no supplier at all. Spans the grid because it is a sentence,
+   not a value beside a label (op-3xsp). */
+.info-item.supplier-note {
+  grid-column: 1 / -1;
+}

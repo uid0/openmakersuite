@@ -106,6 +106,51 @@ export interface Location {
   updated_at?: string;
 }
 
+/** One supplier that was on offer for an item and did not win. */
+export interface SupplierChoiceAlternative {
+  /** The `ItemSupplier.id` — look it up in `suppliers[]` for the full row. */
+  id: number;
+  supplier_name: string;
+}
+
+/**
+ * Which supplier the API would buy an item from, and WHY that one (op-3xsp).
+ *
+ * `inventory/services/supplier_selection.py` owns the question; this is its
+ * answer on the wire. Read it — not the flat `supplier_name` — on any surface
+ * that names a supplier, because the flat key is this same winner with
+ * everything that qualifies it dropped.
+ *
+ * `supplier_name` is null exactly when `reason` is set: there is nothing to buy
+ * from, and the two reasons need different words in front of an operator.
+ */
+export interface SupplierChoice {
+  item_supplier_id: number | null;
+  /** The chosen supplier, or null when nothing here can be ordered from. */
+  supplier_name: string | null;
+  /**
+   * `'flagged_primary'` — an operator flagged this one and it won outright;
+   * `'best_scored'` — nothing orderable was flagged, so price, lead time and
+   * delivery record were weighed and this one came top. Null with `reason`.
+   */
+  basis: 'flagged_primary' | 'best_scored' | null;
+  /**
+   * Why there is no supplier: `'no_suppliers'` (nobody has said where this
+   * item comes from) or `'none_orderable'` (every link is inactive or
+   * discontinued). Null when one was chosen. These are different facts needing
+   * different actions, so do not collapse them into one blank.
+   */
+  reason: 'no_suppliers' | 'none_orderable' | null;
+  /** An operator flagged a primary and it was skipped as unbuyable. */
+  flagged_primary_unorderable: boolean;
+  /** The scoring picked the winner while knowing no price for it. */
+  scored_without_price: boolean;
+  /** The scoring picked the winner though nothing has ever been delivered through it. */
+  scored_without_history: boolean;
+  /** Every other link that could have been bought from. Empty means it really was the only one. */
+  alternatives: SupplierChoiceAlternative[];
+}
+
 export interface ItemSupplier {
   id: number;
   item: string;
@@ -318,9 +363,20 @@ export interface InventoryItem {
   // Null flats mean "no supplier you can buy from", which is not the same as
   // "no suppliers" — read `suppliers` to tell those apart. See
   // `inventory/services/supplier_selection.py`.
+  // A surface that NAMES a supplier reads `supplier_choice` below rather than
+  // either of these: the array does not say which link won, and the flat name
+  // does not say what else was on offer or what the choice did not know.
   // Optional because list payloads a caller narrowed may omit it; absent is
   // "we were not told", which is not the same as an empty array.
   suppliers?: ItemSupplier[];
+  // Which of those links the API would buy through, AND why that one (op-3xsp).
+  // The field to read on any surface that NAMES a supplier: the flat
+  // `supplier_name` above is this same winner with the derivation thrown away,
+  // so it cannot say that four other suppliers were on offer, that the scoring
+  // chose this one without knowing a price for it, or that an operator's own
+  // flagged primary was skipped as unbuyable. Optional for the same reason
+  // `suppliers` is, and because a narrowed payload may omit it.
+  supplier_choice?: SupplierChoice;
   // Hazmat fields
   is_hazardous: boolean;
   msds_url: string | null;

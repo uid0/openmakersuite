@@ -45,6 +45,19 @@ describe('ScanPage', () => {
     supplier: null,
     supplier_sku: '',
     supplier_url: '',
+    // The supplier block reads `supplier_choice`, not the flat `supplier_name`
+    // above (op-3xsp). Both are kept on the fixture: the flat keys are
+    // deliberately still served, and several tests below still exercise them.
+    supplier_choice: {
+      item_supplier_id: 1,
+      supplier_name: 'Test Supplier',
+      basis: 'best_scored',
+      reason: null,
+      flagged_primary_unorderable: false,
+      scored_without_price: false,
+      scored_without_history: false,
+      alternatives: [],
+    },
   };
 
   beforeEach(() => {
@@ -98,7 +111,9 @@ describe('ScanPage', () => {
     expect(screen.getByText(/shelf a/i)).toBeInTheDocument();
     expect(screen.getByText(/current stock:/i)).toBeInTheDocument();
     expect(screen.getByText(/reorder quantity:/i)).toBeInTheDocument();
-    expect(screen.getByText(/average lead time:/i)).toBeInTheDocument();
+    // The lead time is the CHOSEN supplier's quoted wait, and the block says so.
+    expect(screen.getByText(/their lead time:/i)).toBeInTheDocument();
+    expect(screen.getByText(/we order this from:/i)).toBeInTheDocument();
   });
 
   // op-c1ke: `current_cases` is null when nothing records how many units a case
@@ -615,7 +630,9 @@ describe('ScanPage', () => {
     await screen.findByText('Test Widget');
   };
 
-  const unitCostRow = () => screen.getByText('Unit Cost:').parentElement as HTMLElement;
+  // The row is now labelled as the CHOSEN supplier's price rather than the
+  // item's (op-3xsp); every op-9m2v assertion below is unchanged.
+  const unitCostRow = () => screen.getByText('Their Unit Cost:').parentElement as HTMLElement;
 
   test('BEFORE/AFTER: a donated item is priced $0.00, not dropped or shown as "0"', async () => {
     await renderItemPriced(0);
@@ -644,5 +661,117 @@ describe('ScanPage', () => {
 
     // The row rendered `${item.unit_cost}` raw, so 5.1 read as "$5.1".
     expect(unitCostRow()).toHaveTextContent('$5.10');
+  });
+
+  // --- One supplier is not THE supplier (op-3xsp) -------------------------
+  // This block rendered `item.supplier_name` — the read-only legacy accessor —
+  // under a bare "Supplier:" label, with the lead time and unit cost beside it
+  // reading as the item's own numbers. An item stocked by three vendors showed
+  // exactly one name and a member had no way to tell there were others, nor
+  // that the choice had been made without a price on file.
+
+  const renderWithChoice = async (choice: Record<string, unknown> | undefined) => {
+    localStorage.setItem('token', 'test-token');
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, supplier_choice: choice },
+    });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+    await renderWithRouter();
+    await screen.findByText('Test Widget');
+  };
+
+  const baseChoice = {
+    item_supplier_id: 1,
+    supplier_name: 'Acme Supplies',
+    basis: 'best_scored',
+    reason: null,
+    flagged_primary_unorderable: false,
+    scored_without_price: false,
+    scored_without_history: false,
+    alternatives: [],
+  };
+
+  test('BEFORE/AFTER: names the derived supplier, not the legacy accessor', async () => {
+    localStorage.setItem('token', 'test-token');
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockItem,
+        // Set apart so the assertion can only pass by reading the right key.
+        supplier_name: 'Legacy Accessor Co.',
+        supplier_choice: { ...baseChoice, supplier_name: 'Derived Supply Co.' },
+      },
+    });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({ data: { results: [] } });
+    await renderWithRouter();
+    await screen.findByText('Test Widget');
+
+    expect(screen.getByTestId('supplier-choice-name')).toHaveTextContent('Derived Supply Co.');
+    expect(screen.queryByText('Legacy Accessor Co.')).not.toBeInTheDocument();
+  });
+
+  test('BEFORE/AFTER: an item with three suppliers does not read as having one', async () => {
+    await renderWithChoice({
+      ...baseChoice,
+      alternatives: [
+        { id: 2, supplier_name: 'Beta Parts' },
+        { id: 3, supplier_name: 'Gamma Wholesale' },
+      ],
+    });
+
+    expect(screen.getByTestId('supplier-choice-alternatives')).toHaveTextContent(
+      'also available from Beta Parts, Gamma Wholesale'
+    );
+  });
+
+  test('a sole supplier gets no phantom alternatives line', async () => {
+    await renderWithChoice(baseChoice);
+
+    expect(screen.queryByTestId('supplier-choice-alternatives')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('supplier-choice-note')).not.toBeInTheDocument();
+  });
+
+  test('a choice made without a price says so beside the blank cost', async () => {
+    await renderWithChoice({ ...baseChoice, scored_without_price: true });
+
+    expect(screen.getByTestId('supplier-choice-note')).toHaveTextContent(
+      'chosen without a price on file'
+    );
+  });
+
+  test('a skipped flagged primary is said out loud', async () => {
+    await renderWithChoice({ ...baseChoice, flagged_primary_unorderable: true });
+
+    expect(screen.getByTestId('supplier-choice-note')).toHaveTextContent(
+      /flagged primary supplier cannot be ordered from/i
+    );
+  });
+
+  test('an item with nothing buyable says which kind of nothing it is', async () => {
+    await renderWithChoice({
+      ...baseChoice,
+      supplier_name: null,
+      item_supplier_id: null,
+      basis: null,
+      reason: 'none_orderable',
+    });
+
+    expect(screen.getByTestId('supplier-choice-note')).toHaveTextContent(
+      /inactive or discontinued/i
+    );
+    // And no supplier name, no lead time and no price are quoted for a vendor
+    // that does not exist — the old block rendered a bare " days" here.
+    expect(screen.queryByTestId('supplier-choice-name')).not.toBeInTheDocument();
+    expect(screen.queryByText('Their Lead Time:')).not.toBeInTheDocument();
+    expect(screen.queryByText('Their Unit Cost:')).not.toBeInTheDocument();
+  });
+
+  test('a payload with no supplier_choice says so rather than inventing one', async () => {
+    await renderWithChoice(undefined);
+
+    expect(screen.getByTestId('supplier-choice-note')).toHaveTextContent(
+      /was not included in this response/i
+    );
   });
 });

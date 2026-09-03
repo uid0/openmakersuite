@@ -151,7 +151,27 @@ Ask `select_supplier` / `select_suppliers_for` when you must explain yourself to
 an operator: they separate `NO_SUPPLIERS` from `NONE_ORDERABLE`, which are
 different facts needing different actions, and flag when the operator's own
 choice was the row that got skipped. `primary_item_supplier` is the same answer
-with the reason dropped.
+with the reason dropped. The memo lives on `InventoryItem.supplier_choice` (the
+whole `SupplierChoice`), and `primary_item_supplier` reads through it, so asking
+for the reason as well as the row is ONE resolution.
+
+**A surface that NAMES a supplier reads `supplier_choice`, never the flat
+`supplier_name` (op-3xsp).** The flat key is the same winner with the derivation
+thrown away: it cannot say what else was on offer, that the scoring knew no price
+for this one, or that the operator's flagged primary was skipped. Reading it made
+an item with three sources render as an item with one on the scan page, the
+reorder queue, the item page's anonymous block and — worst — the inventory CSV
+export, which leaves the system and gets ordered from. `supplier_choice` is on
+`InventoryItemSerializer` (so also on `item_details` and every list row); the web
+words it in ONE place, `frontend/src/utils/supplierChoice.ts`. The seven flat
+compat fields stay: ScanTTY's detail screen reads all of them and the web still
+reads three (`supplier_url`, `unit_cost`, `average_lead_time`) — the serializer
+comment names them, and it is a claim to keep true in both directions.
+
+Reading the same key is not the same question. A form that EDITS one relationship
+(`SupplierRelationshipForm`), a report grouped by the supplier an order actually
+went to (`PurchasingReportPage`, `DeliveriesWidget`), and a scan that matched one
+vendor's barcode are all legitimately singular and are NOT on this rule.
 
 Filtering happens in Python, on `item_suppliers.all()`, so the prefetch cache
 still serves it — a fresh `.filter()` reintroduces the per-row N+1 that #882

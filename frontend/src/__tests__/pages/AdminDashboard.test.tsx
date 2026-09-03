@@ -482,3 +482,120 @@ describe('AdminDashboard — requests by supplier', () => {
     expect(card).not.toHaveTextContent('unpriced');
   });
 });
+
+// --- One supplier is not THE supplier (op-3xsp) ---------------------------
+// The reorder queue is the screen where the ordering decision is taken. Its
+// item cell rendered `item_details.supplier_name` — the read-only legacy
+// accessor — so an item stocked by three vendors showed one name with nothing
+// saying there were others, and the Lead Time column rendered that same
+// supplier's quoted wait as though it were the item's own. Neither said when
+// the choice had been made without a price, or when the operator's own flagged
+// primary had been skipped as unbuyable.
+
+describe('AdminDashboard — which supplier a queued request would go to', () => {
+  const choice = (overrides: Record<string, unknown> = {}) => ({
+    item_supplier_id: 1,
+    supplier_name: 'Acme Supplies',
+    basis: 'best_scored',
+    reason: null,
+    flagged_primary_unorderable: false,
+    scored_without_price: false,
+    scored_without_history: false,
+    alternatives: [],
+    ...overrides,
+  });
+
+  const withChoice = (id: number, supplierChoice: unknown, extra: Record<string, unknown> = {}) => {
+    const request = buildRequest({ id, status: 'pending' });
+    return {
+      ...request,
+      item_details: {
+        ...(request.item_details as any),
+        average_lead_time: 7,
+        supplier_choice: supplierChoice,
+        ...extra,
+      },
+    } as any;
+  };
+
+  const showRow = async (request: unknown) => {
+    mockReorderAPI.getPendingRequests.mockResolvedValue({ data: [request] } as any);
+    renderDashboard();
+    return screen.findByTestId('reorder-row-1');
+  };
+
+  it('BEFORE/AFTER: names the derived supplier, not the legacy accessor', async () => {
+    await showRow(
+      withChoice(1, choice({ supplier_name: 'Derived Supply Co.' }), {
+        // Set apart so the assertion can only pass by reading the right key.
+        supplier_name: 'Legacy Accessor Co.',
+      }),
+    );
+
+    expect(await screen.findByTestId('reorder-supplier-1')).toHaveTextContent(
+      'Derived Supply Co.',
+    );
+    expect(screen.queryByText('Legacy Accessor Co.')).not.toBeInTheDocument();
+  });
+
+  it('BEFORE/AFTER: an item with three suppliers does not read as having one', async () => {
+    await showRow(
+      withChoice(
+        1,
+        choice({
+          alternatives: [
+            { id: 2, supplier_name: 'Beta Parts' },
+            { id: 3, supplier_name: 'Gamma Wholesale' },
+          ],
+        }),
+      ),
+    );
+
+    expect(await screen.findByTestId('reorder-supplier-1')).toHaveTextContent(
+      'Acme Supplies, or 2 others',
+    );
+  });
+
+  it('warns when the choice was made without a price on file', async () => {
+    await showRow(withChoice(1, choice({ scored_without_price: true })));
+
+    expect(await screen.findByTestId('reorder-supplier-note-1')).toHaveTextContent(
+      'chosen without a price on file',
+    );
+  });
+
+  it('warns when the operator’s own flagged primary was skipped as unbuyable', async () => {
+    await showRow(withChoice(1, choice({ flagged_primary_unorderable: true })));
+
+    expect(await screen.findByTestId('reorder-supplier-note-1')).toHaveTextContent(
+      /flagged primary supplier cannot be ordered from/i,
+    );
+  });
+
+  it('CONTROL: a clean single-supplier request carries no warning', async () => {
+    await showRow(withChoice(1, choice()));
+
+    expect(await screen.findByTestId('reorder-supplier-1')).toHaveTextContent('Acme Supplies');
+    expect(screen.queryByTestId('reorder-supplier-note-1')).not.toBeInTheDocument();
+  });
+
+  it('BEFORE/AFTER: quotes no lead time where there is no supplier to quote it from', async () => {
+    await showRow(
+      withChoice(1, choice({ supplier_name: null, item_supplier_id: null, basis: null, reason: 'none_orderable' })),
+    );
+
+    // The cell used to render a bare " days" for an item nothing can be bought
+    // from — a wait attributed to a vendor that does not exist.
+    expect(await screen.findByTestId('reorder-lead-time-1')).toHaveTextContent('—');
+    expect(screen.getByTestId('reorder-lead-time-1')).not.toHaveTextContent('days');
+    expect(screen.getByTestId('reorder-supplier-note-1')).toHaveTextContent(
+      /inactive or discontinued/i,
+    );
+  });
+
+  it('CONTROL: a real supplier still shows its quoted lead time', async () => {
+    await showRow(withChoice(1, choice()));
+
+    expect(await screen.findByTestId('reorder-lead-time-1')).toHaveTextContent('7 days');
+  });
+});

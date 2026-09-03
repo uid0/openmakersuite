@@ -495,7 +495,6 @@ describe('AdminDashboard — requests by supplier', () => {
 describe('AdminDashboard — which supplier a queued request would go to', () => {
   const choice = (overrides: Record<string, unknown> = {}) => ({
     item_supplier_id: 1,
-    supplier_id: 50,
     supplier_name: 'Acme Supplies',
     basis: 'best_scored',
     reason: null,

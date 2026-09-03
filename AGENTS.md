@@ -179,11 +179,11 @@ column attributes nothing and is governed by op-9m2v instead.
 is read; a part number gets PASTED INTO A VENDOR'S ORDER FORM, so an
 unattributed one is actionable-wrong in a way an unattributed price is not.
 `kit.supplier_sku` is the flat accessor — one vendor's part number — and both the
-kit list and the kit form showed it with no vendor beside it. The form was worse:
-it seeded the SKU and the cost while leaving Supplier blank, so saving wrote
-vendor A's part number onto vendor B's relationship. Both now name the vendor,
-and `supplier_choice.supplier_id` (the Supplier FK, not the link pk) exists so a
-vendor picker can pre-fill the supplier the seeded terms belong to.
+kit list and the kit form showed it with no vendor beside it. Both now name the
+vendor. The attribution is READ-ONLY: the kit form's Supplier field is still
+blank until an operator types in it, because pre-filling it would make the save
+guard true after every load and `KitSerializer._apply_supplier_terms` rewrites
+pack size and the primary flag on any request that carries terms.
 
 Filtering happens in Python, on `item_suppliers.all()`, so the prefetch cache
 still serves it — a fresh `.filter()` reintroduces the per-row N+1 that #882

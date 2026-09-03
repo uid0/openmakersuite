@@ -125,14 +125,8 @@ export interface SupplierChoiceAlternative {
  * from, and the two reasons need different words in front of an operator.
  */
 export interface SupplierChoice {
+  /** The chosen `ItemSupplier` link's own pk, matching a row in `suppliers[]`. */
   item_supplier_id: number | null;
-  /**
-   * The `Supplier` FK of the chosen link — NOT `item_supplier_id`, which is the
-   * link's own pk. This is the id a vendor picker is keyed on, so a form can
-   * pre-fill the supplier that the flat `supplier_sku` / `unit_cost` beside it
-   * actually belong to.
-   */
-  supplier_id: number | null;
   /** The chosen supplier, or null when nothing here can be ordered from. */
   supplier_name: string | null;
   /**

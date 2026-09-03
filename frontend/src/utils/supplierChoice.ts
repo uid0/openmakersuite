@@ -71,7 +71,7 @@ export const chosenSupplierName = (choice: SupplierChoice | undefined): string |
 export const supplierChoiceSummary = (choice: SupplierChoice | undefined): string | null => {
   const name = chosenSupplierName(choice);
   if (name === null) return null;
-  const others = choice?.alternatives.length ?? 0;
+  const others = choice?.alternatives?.length ?? 0;
   if (others === 0) return name;
   return others === 1 ? `${name}, or 1 other` : `${name}, or ${others} others`;
 };

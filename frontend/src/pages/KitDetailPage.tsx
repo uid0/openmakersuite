@@ -50,15 +50,6 @@ const KitDetailPage: React.FC = () => {
   const [supplierSku, setSupplierSku] = useState('');
   const [unitCost, setUnitCost] = useState<number | string>('');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  // What the server last said the terms were. `supplier_terms` is a WRITE, and
-  // a destructive one — the serializer upserts the link with is_primary=True
-  // and a default pack size — so the payload carries it only when these three
-  // fields no longer match what was loaded.
-  const [loadedTerms, setLoadedTerms] = useState<{
-    supplierId: number | '';
-    supplierSku: string;
-    unitCost: number | string;
-  }>({ supplierId: '', supplierSku: '', unitCost: '' });
 
   // Scoped mutation state — never a page-level spinner.
   const [saving, setSaving] = useState(false);
@@ -80,25 +71,8 @@ const KitDetailPage: React.FC = () => {
         quantity: row.quantity,
       })),
     );
-    // The SKU and the cost below are ONE vendor's terms — the flat legacy
-    // accessors for the link the API says to buy this kit through. Seeding them
-    // while leaving Supplier blank meant the operator could type a DIFFERENT
-    // vendor's id and save, writing vendor A's part number and price onto
-    // vendor B's relationship: a SKU that gets pasted into an order form, now
-    // attached to the wrong order form. Seed the vendor from the same answer,
-    // so all three fields describe one supplier and changing it is a deliberate
-    // act rather than an unnoticed one (op-3xsp).
-    const nextSupplierId = next.supplier_choice?.supplier_id ?? '';
-    const nextSupplierSku = next.supplier_sku ?? '';
-    const nextUnitCost = next.unit_cost ?? '';
-    setSupplierId(nextSupplierId);
-    setSupplierSku(nextSupplierSku);
-    setUnitCost(nextUnitCost);
-    setLoadedTerms({
-      supplierId: nextSupplierId,
-      supplierSku: nextSupplierSku,
-      unitCost: nextUnitCost,
-    });
+    setSupplierSku(next.supplier_sku ?? '');
+    setUnitCost(next.unit_cost ?? '');
   }, []);
 
   useEffect(() => {
@@ -148,17 +122,6 @@ const KitDetailPage: React.FC = () => {
     setSaving(true);
     setSaveError(null);
 
-    // Seeding Supplier from the derivation made "Supplier is filled in" true
-    // after every load, so a guard on emptiness would send the terms on a save
-    // that only touched the description — and the server's upsert would reset
-    // the pack size to 1, recompute package_cost, promote the link to flagged
-    // primary and log a price change nobody made. Only an actual edit to one
-    // of the three fields is a request to write them.
-    const termsChanged =
-      supplierId !== loadedTerms.supplierId ||
-      supplierSku !== loadedTerms.supplierSku ||
-      String(unitCost) !== String(loadedTerms.unitCost);
-
     const payload = {
       name: name.trim(),
       description,
@@ -167,16 +130,12 @@ const KitDetailPage: React.FC = () => {
         component: row.component,
         quantity: row.quantity,
       })),
-      ...(termsChanged && supplierId && supplierSku
+      ...(supplierId && supplierSku
         ? {
             supplier_terms: {
               supplier: Number(supplierId),
               supplier_sku: supplierSku,
-              // An empty box means nobody has priced this, which is not the
-              // price 0.00 — a recorded zero is a real price (donated stock,
-              // samples). Omit the key rather than assert one; the server
-              // leaves the field alone when it is absent (op-9m2v).
-              ...(unitCost === '' ? {} : { unit_cost: String(unitCost) }),
+              unit_cost: unitCost === '' ? '0' : String(unitCost),
             },
           }
         : {}),
@@ -277,16 +236,20 @@ const KitDetailPage: React.FC = () => {
               What the supplier charges for one kit. This is the price that lands on the
               purchase-order line.
             </Text>
-            {/* Whose terms are on screen. Without it the three fields below are
-                a part number and a price with no vendor attached to them. */}
+            {/* Whose terms are on screen. Without it the SKU and the price
+                below are one vendor's numbers with no vendor attached — and a
+                SKU gets pasted into an order form, so an unattributed one is
+                actionable-wrong in a way an unattributed price is not
+                (op-3xsp). Read-only: naming the vendor does not fill Supplier
+                in, and the field below still starts blank. */}
             {kit?.supplier_choice?.supplier_name && (
               <Text size="sm" c="dimmed" data-testid="kit-supplier-attribution">
                 Showing {kit.supplier_choice.supplier_name}&rsquo;s terms
-                {kit.supplier_choice.alternatives.length > 0 &&
-                  ` — this kit is also stocked by ${kit.supplier_choice.alternatives
+                {(kit.supplier_choice.alternatives?.length ?? 0) > 0 &&
+                  ` — this kit is also stocked by ${(kit.supplier_choice.alternatives ?? [])
                     .map((alternative) => alternative.supplier_name)
                     .join(', ')}`}
-                . Changing Supplier below saves these terms against that vendor instead.
+                . Enter a Supplier below to save these terms against that vendor.
               </Text>
             )}
             <Grid>

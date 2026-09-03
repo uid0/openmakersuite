@@ -20,7 +20,6 @@ import {
 
 const choice = (overrides: Partial<SupplierChoice> = {}): SupplierChoice => ({
   item_supplier_id: 1,
-  supplier_id: 50,
   supplier_name: 'Acme Supplies',
   basis: 'best_scored',
   reason: null,
@@ -74,6 +73,20 @@ describe('supplierChoiceSummary', () => {
 
   it('is null where there is no supplier to name', () => {
     expect(supplierChoiceSummary(choice({ supplier_name: null, reason: 'no_suppliers' }))).toBeNull();
+  });
+
+  /**
+   * A payload without the array is not what the current server sends, but this
+   * reads a wire object rather than a local one, and its siblings here already
+   * tolerate the shape. Throwing would blank the whole cell that called it —
+   * KitListPage's "From" column, the admin dashboard's supplier line — rather
+   * than losing the "or N others" clause it could not compute.
+   */
+  it('still names the supplier when the payload carries no alternatives array', () => {
+    const withoutAlternatives = { ...choice() } as Partial<SupplierChoice>;
+    delete withoutAlternatives.alternatives;
+
+    expect(supplierChoiceSummary(withoutAlternatives as SupplierChoice)).toBe('Acme Supplies');
   });
 });
 

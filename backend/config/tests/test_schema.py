@@ -129,7 +129,6 @@ def test_schema_types_the_inventory_item_supplier_choice(schema_document):
     # them tells a generated client the answer is just a name.
     assert set(choice["properties"]) == {
         "item_supplier_id",
-        "supplier_id",
         "supplier_name",
         "basis",
         "reason",
@@ -139,7 +138,7 @@ def test_schema_types_the_inventory_item_supplier_choice(schema_document):
         "alternatives",
     }
     assert choice["properties"]["supplier_name"]["nullable"] is True
-    assert choice["properties"]["supplier_id"]["nullable"] is True
+    assert choice["properties"]["item_supplier_id"]["nullable"] is True
     assert choice["properties"]["scored_without_price"]["type"] == "boolean"
 
     # The nested declaration has to be reachable too, or "and two others" has

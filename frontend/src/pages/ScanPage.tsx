@@ -4,7 +4,7 @@
  * - Non-logged users: Simple reorder → thanks page
  * - Logged users: Supplier selection with cost optimization
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { checklistsAPI, inventoryAPI, reorderAPI } from '../services/api';
 import '../styles/ScanPage.css';
@@ -191,15 +191,20 @@ const ScanPage: React.FC = () => {
     }
   };
 
-  // Auto-submit reorder for non-logged users (only if no pending request exists).
-  // Attempted at most once per scan: the catch below clears `submitting`, which
-  // is itself a dependency, so without the latch a failed submit re-fires the
-  // effect for as long as the page is open — an offline scanner would hammer
-  // the public endpoint forever instead of being shown the manual form.
-  const autoSubmitAttempted = useRef(false);
+  // Auto-submit reorder for non-logged users (only if no pending request exists)
+  //
+  // KNOWN DEFECT, pre-existing and deliberately out of scope for op-3xsp: the
+  // catch below clears `submitting`, which is itself a dependency, so a failed
+  // submit re-enters this effect for as long as the page is open. Measured in
+  // jsdom against a rejection delayed 5 ms: 19 calls to `reorderAPI.createRequest`
+  // in 150 ms. Latching it to one attempt was tried and reverted — an anonymous
+  // visitor has no manual submit path (`handleSubmitReorder` returns early on
+  // `!isLoggedIn` and the form below is `isLoggedIn`-gated), so a latch trades
+  // the retry storm for a silently dropped reorder. Which of the two is worse
+  // is a product decision this change is not authorised to make.
   useEffect(() => {
     const autoSubmitReorder = async () => {
-      if (!isLoggedIn && item && !submitting && !submitted && !autoSubmitAttempted.current) {
+      if (!isLoggedIn && item && !submitting && !submitted) {
         // Check if item already has a pending reorder request
         if (item.has_pending_reorder) {
           // Don't auto-submit, just set submitted to show the existing request message
@@ -208,7 +213,6 @@ const ScanPage: React.FC = () => {
         }
 
         try {
-          autoSubmitAttempted.current = true;
           setSubmitting(true);
           await reorderAPI.createRequest({
             item: item.id,

@@ -171,8 +171,15 @@ const KitDetailPage: React.FC = () => {
   // through `utils/supplierChoice` so this page words it the way every other
   // supplier surface does, and so it re-derives nothing: the names, their
   // order and the emptiness test are the server's answer, not this page's
-  // (op-3xsp). Only reached inside the `showSupplierTerms` card, which is
-  // signed-in only, so these are the operator readings.
+  // (op-3xsp).
+  //
+  // These are the OPERATOR readings — they name vendors — and `showSupplierAttribution`
+  // is the only thing keeping them off an anonymous screen. That gate does NOT
+  // cover the card: the Purchase terms heading and the Unit cost render for
+  // everyone. It covers exactly three things, and both values below are inside
+  // it at every use — the attribution note, the Supplier input and the Supplier
+  // SKU input. Rendering either one anywhere else in this card publishes the
+  // vendor names to a logged-out visitor.
   const kitSupplierName = chosenSupplierName(kit?.supplier_choice);
   const kitAlternativeText = alternativeSupplierNamesText(kit?.supplier_choice);
 

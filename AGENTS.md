@@ -194,10 +194,26 @@ onto whichever vendor the field names.
 
 **Neither kit route is behind `RequireAuth`, and `KitViewSet` serves reads to
 anyone.** So both surfaces gate on `isAuthenticated`: a logged-out visitor gets
-neither the SKU nor the vendor — the list drops both columns, the form drops the
-whole Purchase terms card. Withholding beats attributing for a viewer we will not
-attribute for, and a count would not have helped: the hazard is a part number
-nobody can trace to a vendor, and a count does not name one.
+neither the SKU nor the vendor. The list drops both columns; the form drops the
+attribution note, the `Supplier` input and the `Supplier SKU` input, and NOTHING
+else — the Purchase terms heading and the kit's Unit cost still render, because
+the boundary is naming a supplier and a price names none. The kit list has always
+shown that same visitor the same unit cost, so the two kit surfaces agree about
+one kit. Withholding beats attributing for a viewer we will not attribute for,
+and a count would not have helped: the hazard is a part number nobody can trace
+to a vendor, and a count does not name one.
+
+Those are gates in the BROWSER. They narrow what a visitor is handed, not what a
+client can fetch — the item endpoints read as `AllowAny`, `KitViewSet` as
+`IsAuthenticatedOrReadOnly`, and `suppliers[]` on the same payload still carries
+every vendor name, SKU, UPC, cost and lead time to an unauthenticated caller.
+That posture predates op-3xsp and is unchanged by it. One thing IS enforced on
+the wire: `SupplierChoiceSerializer.OPERATOR_ONLY_FIELDS` omits `basis` and the
+three caveat flags for an unauthenticated request, because those four are what
+op-3xsp newly put there and they are addressed to whoever maintains the links.
+It omits rather than nulls, fails closed when no `request` is in context, and
+the four are `required=False` so the published schema says so too. Do not
+describe any of the browser gates as if they protected data.
 
 Filtering happens in Python, on `item_suppliers.all()`, so the prefetch cache
 still serves it — a fresh `.filter()` reintroduces the per-row N+1 that #882

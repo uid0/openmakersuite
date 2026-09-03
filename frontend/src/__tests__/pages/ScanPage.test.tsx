@@ -775,12 +775,15 @@ describe('ScanPage', () => {
     );
   });
 
-  // --- The anonymous scanner sees a count, never the list ------------------
+  // --- The anonymous scanner learns nothing about the alternatives ---------
   // This route is not behind RequireAuth. A logged-out visitor always saw ONE
   // supplier name here, with the lead time and the price beside it, and keeps
-  // all three. What they must not gain is the roster of every vendor that
-  // stocks the item: anonymous disclosure was deliberately narrowed on nearby
-  // surfaces, and widening it is not this change's to authorise.
+  // all three — that is the whole of what this route grants them. They must
+  // gain neither the roster of every vendor that stocks the item NOR a count
+  // of it: a count is authorised on the item detail page and nowhere else, and
+  // "exactly what they saw before this branch" carried no sign that any other
+  // vendor existed. Widening anonymous disclosure is not this change's to
+  // authorise, by analogy to a nearby surface or otherwise.
 
   const renderAnonymouslyWithChoice = async (choice: Record<string, unknown>) => {
     localStorage.removeItem('token');
@@ -814,24 +817,29 @@ describe('ScanPage', () => {
     expect(screen.queryByTestId('supplier-choice-alternatives')).not.toBeInTheDocument();
   });
 
-  test('a logged-out scanner is still told there ARE others', async () => {
+  test('BEFORE/AFTER: a logged-out scanner is not told that other vendors exist at all', async () => {
     await renderAnonymouslyWithChoice(threeSuppliers);
 
-    expect(screen.getByTestId('supplier-choice-alternative-count')).toHaveTextContent(
-      '2 other suppliers also stock this item'
+    // Not the names, and not the count that stood in for them either. The
+    // whole supplier block must read as it did before `supplier_choice`
+    // existed: one vendor, its lead time, its price.
+    expect(screen.queryByTestId('supplier-choice-alternative-count')).not.toBeInTheDocument();
+    expect(screen.queryByText(/other supplier/i)).not.toBeInTheDocument();
+    // The whole row, label included — nothing trails the chosen name.
+    expect(screen.getByTestId('supplier-choice-name').textContent).toBe(
+      'We order this from:Acme Supplies'
     );
   });
 
-  test('the count is singular for exactly one other supplier', async () => {
+  test('a logged-out scanner with exactly one other supplier is told nothing either', async () => {
     await renderAnonymouslyWithChoice({
       ...baseChoice,
       alternatives: [{ id: 2, supplier_name: 'Beta Parts' }],
     });
 
-    expect(screen.getByTestId('supplier-choice-alternative-count')).toHaveTextContent(
-      '1 other supplier also stocks this item'
-    );
     expect(screen.queryByText(/Beta Parts/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/also stocks this item/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('supplier-choice-alternative-count')).not.toBeInTheDocument();
   });
 
   // Gating the alternatives must not NARROW what a logged-out visitor already
@@ -850,7 +858,6 @@ describe('ScanPage', () => {
     expect(screen.getByTestId('supplier-choice-alternatives')).toHaveTextContent(
       'also available from Beta Parts, Gamma Wholesale'
     );
-    expect(screen.queryByTestId('supplier-choice-alternative-count')).not.toBeInTheDocument();
   });
 
   // --- The note has an audience too ---------------------------------------

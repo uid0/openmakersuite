@@ -50,7 +50,7 @@ import {
   reorderQuantityLabel,
   reorderThresholdLabel,
 } from '../utils/packaging';
-import { chosenSupplierName } from '../utils/supplierChoice';
+import { anonymousAlternativesNote, chosenSupplierName } from '../utils/supplierChoice';
 
 /**
  * Supplier-section rendering helpers (op-item-suppliers).
@@ -973,18 +973,18 @@ const InventoryItemDetailPage: React.FC = () => {
                       price/lead-time/delivery score being labelled as somebody's
                       standing decision. The count that follows says there are
                       others without naming any of them, so nothing this block
-                      discloses is new. */}
+                      discloses is new — and it is worded by
+                      `utils/supplierChoice`, which is where the decision that
+                      THIS surface alone gets a count is recorded. */}
                   {!isLoggedIn && chosenSupplierName(item.supplier_choice) && (
                     <div data-testid="anonymous-supplier-block">
                       <Text size="sm" fw={500} mb="xs">
                         We order this from
                       </Text>
                       <Text size="sm">{chosenSupplierName(item.supplier_choice)}</Text>
-                      {(item.supplier_choice?.alternatives?.length ?? 0) > 0 && (
+                      {anonymousAlternativesNote(item.supplier_choice) && (
                         <Text size="xs" c="dimmed" data-testid="anonymous-supplier-alternatives">
-                          {item.supplier_choice?.alternatives?.length === 1
-                            ? '1 other supplier also stocks this item.'
-                            : `${item.supplier_choice?.alternatives?.length} other suppliers also stock this item.`}
+                          {anonymousAlternativesNote(item.supplier_choice)}
                         </Text>
                       )}
                     </div>

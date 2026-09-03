@@ -14,7 +14,7 @@ import { promptInput, showError } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 import { reorderQuantityLabel } from '../utils/packaging';
 import {
-  alternativeSupplierNames,
+  alternativeSupplierNamesText,
   chosenSupplierName,
   publicSupplierChoiceNote,
   supplierChoiceNote,
@@ -308,12 +308,15 @@ const ScanPage: React.FC = () => {
   // this page words it the same way the CSV export and the reorder queue do,
   // and so the page owns none of the derivation.
   const supplierName = chosenSupplierName(item?.supplier_choice);
-  const alternativeNames = alternativeSupplierNames(item?.supplier_choice);
-  // This route is public, so the note has an AUDIENCE. A signed-in operator
-  // gets the derivation caveats; a logged-out scanner gets only the fact that
-  // there is nothing to order, worded to name no vendor and describe no link.
-  // The page picks which reader to ask and renders the answer — the wording
-  // itself belongs to `utils/supplierChoice`, not here.
+  // This route is public, so everything the block renders has an AUDIENCE. A
+  // signed-in operator gets the other suppliers by name and the derivation
+  // caveats; a logged-out scanner gets neither — only the fact that there is
+  // nothing to order, worded to name no vendor and describe no link. The page
+  // picks which reader to ask and renders the answer; the wording, the joining
+  // and the emptiness tests all belong to `utils/supplierChoice`, not here.
+  const alternativeText = isLoggedIn
+    ? alternativeSupplierNamesText(item?.supplier_choice)
+    : null;
   const supplierNote = isLoggedIn
     ? supplierChoiceNote(item?.supplier_choice)
     : publicSupplierChoiceNote(item?.supplier_choice);
@@ -510,37 +513,21 @@ const ScanPage: React.FC = () => {
                   <span className="label">We order this from:</span>
                   <span className="value">
                     {supplierName}
-                    {/* The names are SIGNED-IN ONLY. This route is not behind
-                        RequireAuth and serves logged-out QR scanners, who
-                        already saw one supplier name here and keep it, along
-                        with the lead time and the price. Naming every vendor
-                        that stocks the item would widen anonymous disclosure —
-                        which was deliberately narrowed on nearby surfaces very
-                        recently, so widening it here runs against the direction
-                        just set, and is the captain's to authorise rather than
-                        ours. A count says there were others without saying who,
-                        exactly as the item page's anonymous block does. */}
-                    {alternativeNames.length > 0 &&
-                      (isLoggedIn ? (
-                        <span
-                          className="value secondary"
-                          data-testid="supplier-choice-alternatives"
-                        >
-                          {' '}
-                          — also available from {alternativeNames.join(', ')}
-                        </span>
-                      ) : (
-                        <span
-                          className="value secondary"
-                          data-testid="supplier-choice-alternative-count"
-                        >
-                          {' '}
-                          —{' '}
-                          {alternativeNames.length === 1
-                            ? '1 other supplier also stocks this item'
-                            : `${alternativeNames.length} other suppliers also stock this item`}
-                        </span>
-                      ))}
+                    {/* SIGNED-IN ONLY, and with no anonymous substitute. This
+                        route is not behind RequireAuth and serves logged-out QR
+                        scanners, who get the chosen supplier's name, lead time
+                        and price — exactly what they saw before this field
+                        existed, and no indication that any other vendor exists.
+                        Not the roster, and not a count of it either: a count is
+                        authorised on the item detail page and nowhere else, and
+                        widening anonymous disclosure is the requester's to
+                        grant, not a nearby surface's to infer by analogy. */}
+                    {alternativeText !== null && (
+                      <span className="value secondary" data-testid="supplier-choice-alternatives">
+                        {' '}
+                        — also available from {alternativeText}
+                      </span>
+                    )}
                   </span>
                 </div>
 

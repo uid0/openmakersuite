@@ -20,6 +20,7 @@ import WorkspacePage from '../components/landing/WorkspacePage';
 import { isAuthenticated } from '../components/RequireAuth';
 import { kitAPI, inventoryAPI } from '../services/api';
 import { Kit, Supplier } from '../types';
+import { alternativeSupplierNamesText, chosenSupplierName } from '../utils/supplierChoice';
 
 /** Pull a field-addressed message out of the API error envelope. */
 const readError = (err: unknown, fallback: string): string => {
@@ -164,6 +165,15 @@ const KitDetailPage: React.FC = () => {
     }
   };
 
+  // Whose terms the card below is showing, and who else stocks the kit. Read
+  // through `utils/supplierChoice` so this page words it the way every other
+  // supplier surface does, and so it re-derives nothing: the names, their
+  // order and the emptiness test are the server's answer, not this page's
+  // (op-3xsp). Only reached inside the `showSupplierTerms` card, which is
+  // signed-in only, so these are the operator readings.
+  const kitSupplierName = chosenSupplierName(kit?.supplier_choice);
+  const kitAlternativeText = alternativeSupplierNamesText(kit?.supplier_choice);
+
   if (loading) {
     return (
       <WorkspacePage
@@ -254,13 +264,11 @@ const KitDetailPage: React.FC = () => {
                   Supplier here is not a supported way to retarget these terms —
                   the save writes this vendor's SKU and price onto whichever
                   vendor the field names. */}
-              {kit?.supplier_choice?.supplier_name && (
+              {kitSupplierName && (
                 <Text size="sm" c="dimmed" data-testid="kit-supplier-attribution">
-                  Showing {kit.supplier_choice.supplier_name}&rsquo;s terms
-                  {(kit.supplier_choice.alternatives?.length ?? 0) > 0 &&
-                    ` — this kit is also stocked by ${(kit.supplier_choice.alternatives ?? [])
-                      .map((alternative) => alternative.supplier_name)
-                      .join(', ')}`}
+                  Showing {kitSupplierName}&rsquo;s terms
+                  {kitAlternativeText !== null &&
+                    ` — this kit is also stocked by ${kitAlternativeText}`}
                   .
                 </Text>
               )}

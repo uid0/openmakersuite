@@ -8,18 +8,27 @@
  * ranks, filters or picks a link, and nothing below reads `is_active` /
  * `is_discontinued` / `is_primary` to work out what the server already said.
  *
- * Surfaces compose their own sentence around these values, because they cannot
- * share one: a scan row dims the alternatives in a separate span, a CSV puts
- * them in their own column, and a logged-out visitor gets a count instead of
- * the list. What must not be re-derived is the ANSWER, not the punctuation.
+ * Surfaces frame these values in their own layout, because they cannot share
+ * one: a scan row dims the alternatives in a separate span and a CSV puts them
+ * in their own column. What a surface supplies is the label and the container;
+ * every name, count and sentence about the choice comes from here.
  *
- * AUDIENCE lives here too, and is not the caller's to word. `/inventory/scan`
- * is a public QR route, and most of what this field carries is addressed to
- * whoever maintains the supplier links — "your flagged primary supplier cannot
- * be ordered from" means nothing to a member who has no flagged primary and no
- * way to order. So a caller picks {@link supplierChoiceNote} (operator) or
- * {@link publicSupplierChoiceNote} (anonymous) and renders what comes back;
- * it never assembles or trims the wording itself.
+ * AUDIENCE lives here too, and is not the caller's to word. `/inventory/scan`,
+ * `/inventory/items` and both kit routes are reachable logged out, and most of
+ * what this field carries is addressed to whoever maintains the supplier links
+ * — "your flagged primary supplier cannot be ordered from" means nothing to a
+ * member who has no flagged primary and no way to order. So a caller decides
+ * WHO is reading ({@link SupplierAudience}) and asks for that reader's wording
+ * — {@link supplierChoiceNote} / {@link alternativeSupplierNamesText} for an
+ * operator, {@link publicSupplierChoiceNote} / {@link anonymousAlternativesNote}
+ * for a visitor — and renders what comes back. It never assembles, joins,
+ * counts or trims the wording itself.
+ *
+ * What each audience is granted is a decision this module records, not one it
+ * makes: an operator gets the alternatives BY NAME; an anonymous visitor gets
+ * a count on the item detail page and NOTHING about the alternatives anywhere
+ * else, because widening anonymous disclosure is the requester's to authorise.
+ * A surface that wants a count therefore has to ask for one by name.
  *
  * The reason a shared reading is needed at all: the flat `item.supplier_name`
  * key these surfaces used to render is the same winner with the derivation
@@ -30,6 +39,16 @@
  * exported CSV somebody then ordered from.
  */
 import { SupplierChoice } from '../types';
+
+/**
+ * Who is reading a surface, which decides which wording it may render.
+ *
+ * The caller resolves this — a route component from `isAuthenticated()`, a pure
+ * function such as the CSV export from its own caller — and passes it in. This
+ * module never reads auth state, and nothing that takes an audience may guess
+ * one by defaulting.
+ */
+export type SupplierAudience = 'operator' | 'anonymous';
 
 /** What a surface says where the server sent no `supplier_choice` at all. */
 export const SUPPLIER_CHOICE_UNKNOWN = 'Supplier information was not included in this response.';
@@ -109,6 +128,45 @@ export const supplierChoiceSummary = (choice: SupplierChoice | undefined): strin
  */
 export const alternativeSupplierNames = (choice: SupplierChoice | undefined): string[] =>
   (choice?.alternatives ?? []).map((alternative) => alternative.supplier_name);
+
+/**
+ * The other suppliers as one readable run of names — "Beta Parts, Gamma
+ * Wholesale" — or null where there were none.
+ *
+ * FOR OPERATORS. Null rather than an empty string so a caller renders nothing
+ * at all instead of a dangling "also available from"; the caller supplies that
+ * lead-in and the markup around it, and never the joining or the emptiness
+ * test, which is how the same list came to be joined three different ways.
+ *
+ * A public surface asks {@link anonymousAlternativesNote} instead, and gets a
+ * count or nothing — never these names.
+ */
+export const alternativeSupplierNamesText = (choice: SupplierChoice | undefined): string | null => {
+  const names = alternativeSupplierNames(choice);
+  return names.length === 0 ? null : names.join(', ');
+};
+
+/**
+ * How many OTHER suppliers stock this item, in words — "2 other suppliers also
+ * stock this item." — or null where there were none.
+ *
+ * FOR A VISITOR WHO IS NOT SIGNED IN, and granted on ONE surface: the item
+ * detail page. It says there were others without saying who, which is the
+ * furthest anonymous disclosure has been authorised. The scan page is not
+ * granted it — a logged-out scanner sees the chosen name, the lead time and
+ * the price, exactly what they saw before `supplier_choice` existed, and no
+ * indication that any other vendor exists.
+ *
+ * It lives here, rather than in the page, because it was written twice and the
+ * two copies had already drifted apart by a full stop.
+ */
+export const anonymousAlternativesNote = (choice: SupplierChoice | undefined): string | null => {
+  const others = alternativeSupplierNames(choice).length;
+  if (others === 0) return null;
+  return others === 1
+    ? '1 other supplier also stocks this item.'
+    : `${others} other suppliers also stock this item.`;
+};
 
 /**
  * Everything qualifying the choice that an operator has to be told, as

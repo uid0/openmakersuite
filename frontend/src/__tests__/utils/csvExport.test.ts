@@ -67,7 +67,7 @@ describe('CSV Export Utilities', () => {
         },
       ];
 
-      exportInventoryItemsToCSV(items);
+      exportInventoryItemsToCSV(items, 'operator');
 
       expect(document.createElement).toHaveBeenCalledWith('a');
       expect(mockLink.download).toBe('inventory-export.csv');
@@ -87,7 +87,7 @@ describe('CSV Export Utilities', () => {
     it('BEFORE/AFTER: exports a donated item as 0, not as a blank cell', () => {
       exportInventoryItemsToCSV([
         { ...baseItem, name: 'Donated Filament', unit_cost: 0 },
-      ]);
+      ], 'operator');
 
       expect(csvText()).toContain('Donated Filament');
       expect(csvText()).toMatch(/Donated Filament[^\n]*,0,/);
@@ -96,13 +96,13 @@ describe('CSV Export Utilities', () => {
     it('CONTROL: an item nobody priced still exports a blank cell', () => {
       exportInventoryItemsToCSV([
         { ...baseItem, name: 'Unpriced Filament', unit_cost: null },
-      ]);
+      ], 'operator');
 
       expect(csvText()).toMatch(/Unpriced Filament[^\n]*,,/);
     });
 
     it('CONTROL: an ordinary price is unchanged', () => {
-      exportInventoryItemsToCSV([{ ...baseItem, name: 'Priced', unit_cost: 10 }]);
+      exportInventoryItemsToCSV([{ ...baseItem, name: 'Priced', unit_cost: 10 }], 'operator');
 
       expect(csvText()).toMatch(/Priced[^\n]*,10,/);
     });
@@ -148,7 +148,7 @@ describe('CSV Export Utilities', () => {
             supplier_name: 'Legacy Accessor Co.',
             supplier_choice: choice({ supplier_name: 'Derived Supply Co.' }),
           },
-        ]);
+        ], 'operator');
 
         expect(dataRow()).toContain('Derived Supply Co.');
         expect(csvText()).not.toContain('Legacy Accessor Co.');
@@ -166,7 +166,7 @@ describe('CSV Export Utilities', () => {
               ],
             }),
           },
-        ]);
+        ], 'operator');
 
         expect(headerRow()).toContain('Other Suppliers');
         expect(dataRow()).toContain('Beta Parts; Gamma Wholesale');
@@ -175,7 +175,7 @@ describe('CSV Export Utilities', () => {
       it('carries the missing-price qualifier into the file', () => {
         exportInventoryItemsToCSV([
           { ...baseItem, name: 'Unpriced Pick', supplier_choice: choice({ scored_without_price: true }) },
-        ]);
+        ], 'operator');
 
         expect(headerRow()).toContain('Supplier Caveats');
         expect(dataRow()).toContain('chosen without a price on file');
@@ -188,7 +188,7 @@ describe('CSV Export Utilities', () => {
             name: 'Skipped Primary',
             supplier_choice: choice({ flagged_primary_unorderable: true }),
           },
-        ]);
+        ], 'operator');
 
         expect(dataRow()).toContain('flagged primary supplier cannot be ordered from');
       });
@@ -196,7 +196,7 @@ describe('CSV Export Utilities', () => {
       it('says how the supplier was chosen, so a standing decision reads apart from a score', () => {
         exportInventoryItemsToCSV([
           { ...baseItem, name: 'Flagged', supplier_choice: choice({ basis: 'flagged_primary' }) },
-        ]);
+        ], 'operator');
 
         expect(headerRow()).toContain('Supplier Chosen By');
         expect(dataRow()).toContain('flagged primary');
@@ -210,7 +210,7 @@ describe('CSV Export Utilities', () => {
             supplier_name: null,
             supplier_choice: choice({ supplier_name: null, reason: 'none_orderable' }),
           },
-        ]);
+        ], 'operator');
 
         expect(dataRow()).toContain('inactive or discontinued');
       });
@@ -218,13 +218,111 @@ describe('CSV Export Utilities', () => {
       it('CONTROL: a clean single-supplier item exports the name and three blanks', () => {
         exportInventoryItemsToCSV([
           { ...baseItem, name: 'Simple', supplier_choice: choice() },
-        ]);
+        ], 'operator');
 
         // Supplier, then a blank Other Suppliers, then the basis (quoted,
         // because the label itself contains commas), then a blank Caveats.
         expect(dataRow()).toContain(
           'Acme Supplies,,"price, lead time and delivery record",,'
         );
+      });
+    });
+
+    /**
+     * Who the file is written FOR (op-3xsp).
+     *
+     * `/inventory/items` is not behind RequireAuth and its list endpoint is
+     * AllowAny, so the visitor pressing Export may be logged out. The three
+     * columns above hand them a FILE naming every vendor that stocks each item
+     * plus caveats addressed to whoever maintains the links — and a file
+     * cannot be taken back the way a screen can. The `Supplier` column is NOT
+     * part of that: one name was exportable anonymously long before this
+     * branch, and narrowing it here would take away what people already had.
+     */
+    describe('audience', () => {
+      const choice = (overrides: Partial<SupplierChoice> = {}): SupplierChoice => ({
+        item_supplier_id: 1,
+        supplier_name: 'Acme Supplies',
+        basis: 'best_scored',
+        reason: null,
+        flagged_primary_unorderable: false,
+        scored_without_price: false,
+        scored_without_history: false,
+        alternatives: [],
+        ...overrides,
+      });
+
+      const disclosingItem = {
+        ...baseItem,
+        name: 'Three Sources',
+        supplier_choice: choice({
+          flagged_primary_unorderable: true,
+          alternatives: [
+            { id: 2, supplier_name: 'Beta Parts' },
+            { id: 3, supplier_name: 'Gamma Wholesale' },
+          ],
+        }),
+      };
+
+      const headerRow = () => csvText().split('\n')[0];
+      const dataRow = () => csvText().split('\n')[1];
+
+      it('BEFORE/AFTER: an anonymous export has no supplier column beyond the name', () => {
+        exportInventoryItemsToCSV([disclosingItem], 'anonymous');
+
+        expect(headerRow()).not.toContain('Other Suppliers');
+        expect(headerRow()).not.toContain('Supplier Chosen By');
+        expect(headerRow()).not.toContain('Supplier Caveats');
+      });
+
+      it('BEFORE/AFTER: an anonymous export names no vendor but the chosen one', () => {
+        exportInventoryItemsToCSV([disclosingItem], 'anonymous');
+
+        expect(csvText()).not.toContain('Beta Parts');
+        expect(csvText()).not.toContain('Gamma Wholesale');
+        expect(csvText()).not.toMatch(/flagged primary/i);
+        expect(csvText()).not.toMatch(/price, lead time and delivery record/);
+      });
+
+      it('CONTROL: the one supplier name anonymous could always export is still there', () => {
+        exportInventoryItemsToCSV([disclosingItem], 'anonymous');
+
+        expect(headerRow()).toContain('Supplier');
+        expect(dataRow()).toContain('Acme Supplies');
+      });
+
+      it('CONTROL: a signed-in export is unchanged — all four supplier columns', () => {
+        exportInventoryItemsToCSV([disclosingItem], 'operator');
+
+        expect(headerRow()).toContain('Supplier');
+        expect(headerRow()).toContain('Other Suppliers');
+        expect(headerRow()).toContain('Supplier Chosen By');
+        expect(headerRow()).toContain('Supplier Caveats');
+        expect(dataRow()).toContain('Acme Supplies');
+        expect(dataRow()).toContain('Beta Parts; Gamma Wholesale');
+        expect(dataRow()).toMatch(/flagged primary supplier cannot be ordered from/);
+      });
+
+      // The gate is a column gate, not a row gate: an anonymous export must
+      // still be a usable inventory file, not a supplier-shaped hole.
+      it('CONTROL: an anonymous export keeps every non-supplier column', () => {
+        exportInventoryItemsToCSV([disclosingItem], 'anonymous');
+
+        for (const column of [
+          'Name',
+          'SKU',
+          'Category',
+          'Location',
+          'Current Stock',
+          'Minimum Stock',
+          'Reorder Quantity',
+          'Unit Cost',
+          'Needs Reorder',
+          'Is Active',
+        ]) {
+          expect(headerRow()).toContain(column);
+        }
+        expect(dataRow()).toContain('Three Sources');
       });
     });
   });

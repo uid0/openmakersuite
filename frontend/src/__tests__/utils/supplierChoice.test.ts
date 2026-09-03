@@ -12,6 +12,8 @@ import {
   SUPPLIER_BASIS_LABELS,
   SUPPLIER_CHOICE_UNKNOWN,
   alternativeSupplierNames,
+  alternativeSupplierNamesText,
+  anonymousAlternativesNote,
   chosenSupplierName,
   supplierChoiceCaveats,
   publicSupplierChoiceNote,
@@ -101,6 +103,61 @@ describe('alternativeSupplierNames', () => {
 
   it('is empty rather than undefined when the field is absent', () => {
     expect(alternativeSupplierNames(undefined)).toEqual([]);
+  });
+});
+
+/**
+ * The joined list, owned here rather than at three call sites.
+ *
+ * The scan page, the kit card and the CSV each joined `alternatives` for
+ * themselves, so the same list had three separators and three emptiness tests.
+ * Null — not `''` — is what stops a caller rendering a dangling lead-in.
+ */
+describe('alternativeSupplierNamesText', () => {
+  it('reads as one run of names in the server ordering', () => {
+    expect(alternativeSupplierNamesText(choice({ alternatives: others('Beta', 'Gamma') }))).toBe(
+      'Beta, Gamma'
+    );
+  });
+
+  it('is null, not empty, where there were no others', () => {
+    expect(alternativeSupplierNamesText(choice())).toBeNull();
+    expect(alternativeSupplierNamesText(undefined)).toBeNull();
+  });
+});
+
+/**
+ * The anonymous count — how many, never who.
+ *
+ * Written twice before this lived here, and the two copies had already drifted
+ * apart by a full stop. It is granted on the item detail page only; the scan
+ * page asks for nothing, which is why this is a function a surface must call
+ * by name rather than a mode the module applies for it.
+ */
+describe('anonymousAlternativesNote', () => {
+  it('counts the others without naming any of them', () => {
+    const note = anonymousAlternativesNote(choice({ alternatives: others('Beta', 'Gamma') }));
+
+    expect(note).toBe('2 other suppliers also stock this item.');
+    expect(note).not.toContain('Beta');
+    expect(note).not.toContain('Gamma');
+  });
+
+  it('agrees with itself for exactly one other', () => {
+    expect(anonymousAlternativesNote(choice({ alternatives: others('Beta') }))).toBe(
+      '1 other supplier also stocks this item.'
+    );
+  });
+
+  it('is null where there were no others', () => {
+    expect(anonymousAlternativesNote(choice())).toBeNull();
+    expect(anonymousAlternativesNote(undefined)).toBeNull();
+  });
+
+  it('never names the chosen supplier either', () => {
+    expect(anonymousAlternativesNote(choice({ alternatives: others('Beta') }))).not.toContain(
+      'Acme Supplies'
+    );
   });
 });
 

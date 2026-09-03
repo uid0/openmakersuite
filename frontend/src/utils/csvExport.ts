@@ -5,6 +5,7 @@
 import { formatDateOnly } from './dates';
 import {
   SUPPLIER_BASIS_LABELS,
+  SupplierAudience,
   alternativeSupplierNames,
   chosenSupplierName,
   supplierChoiceNote,
@@ -113,8 +114,23 @@ export function exportToCSV<T extends Record<string, any>>(
  * never reads as the only option, and `Supplier Chosen By` / `Supplier Caveats`
  * so a purchaser can see whether to check before ordering. Blank in all three
  * is the honest reading "one supplier, chosen cleanly".
+ *
+ * That unrecoverability cuts both ways, which is why `audience` is a required
+ * argument rather than an option with a default. `/inventory/items` is not
+ * behind RequireAuth and its list endpoint is AllowAny, so a logged-out visitor
+ * can tick rows and press Export; the three columns above would hand them a
+ * FILE naming every vendor that stocks each item, plus caveats addressed to
+ * whoever maintains the links. An anonymous export therefore carries the
+ * pre-`supplier_choice` column set and nothing more — `Supplier`, one name,
+ * exactly what they could already export.
+ *
+ * The audience is the CALLER's to decide: this function stays pure and never
+ * reads auth state. Making the argument required is the point — a new call
+ * site cannot inherit a permissive default by forgetting the question.
  */
-export function exportInventoryItemsToCSV(items: any[]): void {
+export function exportInventoryItemsToCSV(items: any[], audience: SupplierAudience): void {
+  const forOperator = audience === 'operator';
+
   const headers = [
     'Name',
     'SKU',
@@ -125,9 +141,7 @@ export function exportInventoryItemsToCSV(items: any[]): void {
     'Reorder Quantity',
     'Unit Cost',
     'Supplier',
-    'Other Suppliers',
-    'Supplier Chosen By',
-    'Supplier Caveats',
+    ...(forOperator ? ['Other Suppliers', 'Supplier Chosen By', 'Supplier Caveats'] : []),
     'Needs Reorder',
     'Is Active',
   ];
@@ -144,12 +158,16 @@ export function exportInventoryItemsToCSV(items: any[]): void {
     // as a blank cell — the spelling this file uses for "unknown" (op-9m2v).
     'Unit Cost': item.unit_cost ?? '',
     Supplier: chosenSupplierName(item.supplier_choice) ?? '',
-    'Other Suppliers': alternativeSupplierNames(item.supplier_choice).join('; '),
-    'Supplier Chosen By': SUPPLIER_BASIS_LABELS[item.supplier_choice?.basis] ?? '',
-    // Covers the no-supplier reasons too, so a blank `Supplier` cell says which
-    // of "nobody has said where this comes from" and "everyone we had is dead"
-    // it is, rather than leaving a purchaser to guess.
-    'Supplier Caveats': supplierChoiceNote(item.supplier_choice) ?? '',
+    ...(forOperator
+      ? {
+          'Other Suppliers': alternativeSupplierNames(item.supplier_choice).join('; '),
+          'Supplier Chosen By': SUPPLIER_BASIS_LABELS[item.supplier_choice?.basis] ?? '',
+          // Covers the no-supplier reasons too, so a blank `Supplier` cell says
+          // which of "nobody has said where this comes from" and "everyone we
+          // had is dead" it is, rather than leaving a purchaser to guess.
+          'Supplier Caveats': supplierChoiceNote(item.supplier_choice) ?? '',
+        }
+      : {}),
     'Needs Reorder': item.needs_reorder ? 'Yes' : 'No',
     'Is Active': item.is_active ? 'Yes' : 'No',
   }));

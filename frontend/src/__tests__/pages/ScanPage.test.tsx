@@ -852,4 +852,85 @@ describe('ScanPage', () => {
     );
     expect(screen.queryByTestId('supplier-choice-alternative-count')).not.toBeInTheDocument();
   });
+
+  // --- The note has an audience too ---------------------------------------
+  // The three caveats describe the DERIVATION and are addressed to whoever
+  // maintains the supplier links: a logged-out member has no flagged primary,
+  // and cannot order at all. What they keep is the half they can act on —
+  // that there is nothing to order — worded to name no vendor.
+
+  test('BEFORE/AFTER: a logged-out scanner is told none of the operator caveats', async () => {
+    await renderAnonymouslyWithChoice({
+      ...baseChoice,
+      scored_without_price: true,
+      scored_without_history: true,
+      flagged_primary_unorderable: true,
+    });
+
+    expect(screen.queryByTestId('supplier-choice-note')).not.toBeInTheDocument();
+    expect(screen.queryByText(/no price on file/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/delivery history/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/flagged primary/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Before you order/i)).not.toBeInTheDocument();
+  });
+
+  test('CONTROL: the caveated item still shows its supplier, lead time and cost', async () => {
+    await renderAnonymouslyWithChoice({
+      ...baseChoice,
+      scored_without_price: true,
+      flagged_primary_unorderable: true,
+    });
+
+    expect(screen.getByTestId('supplier-choice-name')).toHaveTextContent('Acme Supplies');
+    expect(screen.getByText('Their Lead Time:')).toBeInTheDocument();
+    expect(screen.getByText('Their Unit Cost:')).toBeInTheDocument();
+  });
+
+  test('BEFORE/AFTER: an unorderable item still says so, in the member\'s words', async () => {
+    await renderAnonymouslyWithChoice({
+      ...baseChoice,
+      supplier_name: null,
+      item_supplier_id: null,
+      basis: null,
+      reason: 'none_orderable',
+    });
+
+    const note = screen.getByTestId('supplier-choice-note');
+    expect(note).toHaveTextContent('This item cannot currently be ordered.');
+    // The operator wording describes the LINKS; a member learns none of that.
+    expect(note).not.toHaveTextContent(/inactive|discontinued|flagged|primary/i);
+    expect(note).not.toHaveTextContent(/Acme|Beta|Gamma/);
+  });
+
+  test('an item nobody sourced is told apart from one whose sources are dead', async () => {
+    await renderAnonymouslyWithChoice({
+      ...baseChoice,
+      supplier_name: null,
+      item_supplier_id: null,
+      basis: null,
+      reason: 'no_suppliers',
+    });
+
+    expect(screen.getByTestId('supplier-choice-note')).toHaveTextContent(
+      'No supplier is listed for this item.'
+    );
+  });
+
+  test('a payload missing the field says nothing to a logged-out visitor', async () => {
+    await renderAnonymouslyWithChoice(undefined as unknown as Record<string, unknown>);
+
+    expect(screen.queryByTestId('supplier-choice-note')).not.toBeInTheDocument();
+  });
+
+  test('CONTROL: a signed-in operator still gets every caveat', async () => {
+    await renderWithChoice({
+      ...baseChoice,
+      scored_without_price: true,
+      flagged_primary_unorderable: true,
+    });
+
+    const note = screen.getByTestId('supplier-choice-note');
+    expect(note).toHaveTextContent('chosen without a price on file');
+    expect(note).toHaveTextContent(/flagged primary supplier cannot be ordered from/);
+  });
 });

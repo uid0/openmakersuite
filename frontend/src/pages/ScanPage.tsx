@@ -16,6 +16,7 @@ import { reorderQuantityLabel } from '../utils/packaging';
 import {
   alternativeSupplierNames,
   chosenSupplierName,
+  publicSupplierChoiceNote,
   supplierChoiceNote,
 } from '../utils/supplierChoice';
 
@@ -308,7 +309,14 @@ const ScanPage: React.FC = () => {
   // and so the page owns none of the derivation.
   const supplierName = chosenSupplierName(item?.supplier_choice);
   const alternativeNames = alternativeSupplierNames(item?.supplier_choice);
-  const supplierNote = supplierChoiceNote(item?.supplier_choice);
+  // This route is public, so the note has an AUDIENCE. A signed-in operator
+  // gets the derivation caveats; a logged-out scanner gets only the fact that
+  // there is nothing to order, worded to name no vendor and describe no link.
+  // The page picks which reader to ask and renders the answer — the wording
+  // itself belongs to `utils/supplierChoice`, not here.
+  const supplierNote = isLoggedIn
+    ? supplierChoiceNote(item?.supplier_choice)
+    : publicSupplierChoiceNote(item?.supplier_choice);
 
   if (loading) {
     return (

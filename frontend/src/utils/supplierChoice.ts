@@ -13,6 +13,14 @@
  * them in their own column, and a logged-out visitor gets a count instead of
  * the list. What must not be re-derived is the ANSWER, not the punctuation.
  *
+ * AUDIENCE lives here too, and is not the caller's to word. `/inventory/scan`
+ * is a public QR route, and most of what this field carries is addressed to
+ * whoever maintains the supplier links — "your flagged primary supplier cannot
+ * be ordered from" means nothing to a member who has no flagged primary and no
+ * way to order. So a caller picks {@link supplierChoiceNote} (operator) or
+ * {@link publicSupplierChoiceNote} (anonymous) and renders what comes back;
+ * it never assembles or trims the wording itself.
+ *
  * The reason a shared reading is needed at all: the flat `item.supplier_name`
  * key these surfaces used to render is the same winner with the derivation
  * thrown away. It cannot say that four other suppliers were on offer, that the
@@ -36,6 +44,20 @@ export const SUPPLIER_CHOICE_UNKNOWN = 'Supplier information was not included in
 const NO_SUPPLIER_TEXT: Record<string, string> = {
   no_suppliers: 'No supplier is linked to this item.',
   none_orderable: 'No supplier here can be ordered from — every link is inactive or discontinued.',
+};
+
+/**
+ * The same two facts for a visitor who is not signed in.
+ *
+ * Still two distinct answers, because "we never recorded where this comes from"
+ * and "we did, and none of it can be bought right now" are different things to
+ * be told. What is dropped is the LINK STATE: an anonymous reader learns that
+ * the item cannot be ordered, not how many vendors exist or why each was
+ * rejected. Naming no vendor and describing no link is the whole difference.
+ */
+const PUBLIC_NO_SUPPLIER_TEXT: Record<string, string> = {
+  no_suppliers: 'No supplier is listed for this item.',
+  none_orderable: 'This item cannot currently be ordered.',
 };
 
 /**
@@ -103,7 +125,7 @@ export const alternativeSupplierNames = (choice: SupplierChoice | undefined): st
  *   as their choice being ignored unless it is said out loud.
  */
 export const supplierChoiceCaveats = (choice: SupplierChoice | undefined): string[] => {
-  if (!choice || choice.supplier_name === null) return [];
+  if (!choice || chosenSupplierName(choice) === null) return [];
   const caveats: string[] = [];
   if (choice.scored_without_price) {
     caveats.push('chosen without a price on file');
@@ -121,16 +143,40 @@ export const supplierChoiceCaveats = (choice: SupplierChoice | undefined): strin
  * One line covering whichever of the three states this item is in: no field on
  * the wire, no supplier to buy from, or a supplier with caveats.
  *
- * Returns null for the uneventful case — a supplier was chosen and nothing
- * qualifies it — so a caller can render nothing at all rather than noise.
+ * FOR OPERATORS — a signed-in surface. Returns null for the uneventful case (a
+ * supplier was chosen and nothing qualifies it) so a caller can render nothing
+ * at all rather than noise. A public surface asks
+ * {@link publicSupplierChoiceNote} instead.
  */
 export const supplierChoiceNote = (choice: SupplierChoice | undefined): string | null => {
   if (!choice) return SUPPLIER_CHOICE_UNKNOWN;
-  if (choice.supplier_name === null) {
-    return choice.reason === null
+  if (chosenSupplierName(choice) === null) {
+    const reason = choice.reason ?? null;
+    return reason === null
       ? SUPPLIER_CHOICE_UNKNOWN
-      : (NO_SUPPLIER_TEXT[choice.reason] ?? SUPPLIER_CHOICE_UNKNOWN);
+      : (NO_SUPPLIER_TEXT[reason] ?? SUPPLIER_CHOICE_UNKNOWN);
   }
   const caveats = supplierChoiceCaveats(choice);
   return caveats.length === 0 ? null : caveats.join('; ');
+};
+
+/**
+ * The same line for a visitor who is not signed in — the no-supplier fact only.
+ *
+ * Null wherever a supplier WAS chosen, however it was chosen: the three
+ * caveats report on the derivation and are addressed to whoever maintains the
+ * links, so an anonymous reader gets the chosen name, the lead time and the
+ * price exactly as they did before, and nothing about how that name was
+ * reached. Null too when the field never arrived — "not included in this
+ * response" is diagnostic copy about the payload, not a fact about the item.
+ *
+ * NOT null when there is nothing to buy from, which is the one half a member
+ * can act on. An absent row there would make "we cannot get you this" look
+ * like an ordinary item; stating the absence is the same discipline the rest
+ * of this module keeps.
+ */
+export const publicSupplierChoiceNote = (choice: SupplierChoice | undefined): string | null => {
+  if (!choice || chosenSupplierName(choice) !== null) return null;
+  const reason = choice.reason ?? null;
+  return reason === null ? null : (PUBLIC_NO_SUPPLIER_TEXT[reason] ?? null);
 };

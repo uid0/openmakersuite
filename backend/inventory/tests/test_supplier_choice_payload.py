@@ -336,6 +336,32 @@ def test_the_reorder_queue_carries_the_choice_on_its_nested_item(api):
     assert len(row["item_details"]["supplier_choice"]["alternatives"]) == 1
 
 
+def test_the_kit_endpoints_carry_the_choice_too(api):
+    """The kit list's "From" column and the kit form's attribution note read it.
+
+    ``KitSerializer`` gets the field only by inheriting
+    ``InventoryItemSerializer.Meta.fields``, so a later narrowing of that list —
+    or a Kit-specific ``fields`` override — would blank both surfaces silently.
+    Every frontend test of those two screens mocks ``kitAPI`` with a hand-built
+    payload, so this is the only check that the real endpoints serve the key.
+    """
+    kit = _item("Ink Kit", is_kit=True, current_stock=0)
+    _link(kit, "Acme", unit_cost="1.00")
+    _link(kit, "Beta", unit_cost="4.00")
+
+    detail = api.get(f"/api/inventory/kits/{kit.id}/")
+    listing = api.get("/api/inventory/kits/")
+
+    assert detail.status_code == 200, detail.content
+    assert detail.data["supplier_choice"]["supplier_name"] == "Acme"
+    assert [a["supplier_name"] for a in detail.data["supplier_choice"]["alternatives"]] == ["Beta"]
+
+    assert listing.status_code == 200, listing.content
+    row = next(r for r in listing.data["results"] if r["id"] == str(kit.id))
+    assert row["supplier_choice"]["supplier_name"] == "Acme"
+    assert [a["supplier_name"] for a in row["supplier_choice"]["alternatives"]] == ["Beta"]
+
+
 # ── The legacy fields stay. That is a requirement, not an oversight. ─────────
 
 

@@ -14,6 +14,7 @@ import {
   alternativeSupplierNames,
   chosenSupplierName,
   supplierChoiceCaveats,
+  publicSupplierChoiceNote,
   supplierChoiceNote,
   supplierChoiceSummary,
 } from '../../utils/supplierChoice';
@@ -185,6 +186,74 @@ describe('supplierChoiceNote', () => {
 
   it('says the field was missing rather than inventing an answer', () => {
     expect(supplierChoiceNote(undefined)).toBe(SUPPLIER_CHOICE_UNKNOWN);
+  });
+
+  /**
+   * `chosenSupplierName` reads an ABSENT key as "no supplier" (`?? null`), so a
+   * note that tested `=== null` strictly disagreed with it: the name rendered
+   * blank while the caveats rendered anyway — a qualifier about a supplier no
+   * surface had named. On the CSV export that is a blank `Supplier` cell with
+   * nothing in `Supplier Caveats` to say the field never arrived.
+   */
+  it('reads an absent supplier_name the same way the name reader does', () => {
+    const withoutName = { ...choice() } as Partial<SupplierChoice>;
+    delete withoutName.supplier_name;
+    const noName = withoutName as SupplierChoice;
+
+    expect(chosenSupplierName(noName)).toBeNull();
+    expect(supplierChoiceNote(noName)).toBe(SUPPLIER_CHOICE_UNKNOWN);
+    expect(supplierChoiceCaveats({ ...noName, scored_without_price: true })).toEqual([]);
+  });
+});
+
+/**
+ * `/inventory/scan` is a public QR route. Most of what `supplier_choice`
+ * carries is addressed to whoever maintains the supplier links — a member has
+ * no flagged primary, and cannot order at all — so the audience split lives
+ * here rather than in any page.
+ */
+describe('publicSupplierChoiceNote', () => {
+  it('BEFORE/AFTER: withholds every operator caveat', () => {
+    const note = publicSupplierChoiceNote(
+      choice({
+        scored_without_price: true,
+        scored_without_history: true,
+        flagged_primary_unorderable: true,
+      })
+    );
+
+    expect(note).toBeNull();
+  });
+
+  it('BEFORE/AFTER: still says when there is nothing to order, in two ways', () => {
+    const bare = publicSupplierChoiceNote(choice({ supplier_name: null, reason: 'no_suppliers' }));
+    const dead = publicSupplierChoiceNote(
+      choice({ supplier_name: null, reason: 'none_orderable' })
+    );
+
+    expect(bare).toBe('No supplier is listed for this item.');
+    expect(dead).toBe('This item cannot currently be ordered.');
+    expect(bare).not.toBe(dead);
+  });
+
+  // A refusal a member can act on, without the link state behind it.
+  it('leaks no vendor name and no link state', () => {
+    const dead = publicSupplierChoiceNote(
+      choice({ supplier_name: null, reason: 'none_orderable' })
+    );
+
+    expect(dead).not.toMatch(/inactive|discontinued|flagged|primary|link/i);
+  });
+
+  it('stays silent about a payload that never carried the field', () => {
+    expect(publicSupplierChoiceNote(undefined)).toBeNull();
+    expect(publicSupplierChoiceNote(choice({ supplier_name: null, reason: null }))).toBeNull();
+  });
+
+  it('CONTROL: the operator reading is unchanged', () => {
+    expect(supplierChoiceNote(choice({ flagged_primary_unorderable: true }))).toContain(
+      'flagged primary supplier cannot be ordered from'
+    );
   });
 });
 

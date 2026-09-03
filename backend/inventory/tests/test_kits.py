@@ -15,7 +15,7 @@ import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from inventory.models import InventoryItem, KitComponent
+from inventory.models import InventoryItem, KitComponent, PriceHistory
 
 from .factories import InventoryItemFactory, ItemSupplierFactory, SupplierFactory
 
@@ -555,26 +555,150 @@ class TestKitSupplierTermsPricing:
     and has to stay tellable apart from "nobody has priced this".
     """
 
-    def test_omitted_unit_cost_leaves_an_existing_price_alone(self, staff_client, eufy_kit):
+    def test_editing_the_sku_rewrites_the_sku_and_nothing_else(self, staff_client, eufy_kit):
+        """The whole row after a one-field terms edit, not just the field edited.
+
+        An operator fixing a typo in the kit's supplier SKU is not redefining
+        the relationship. Asserting only the SKU and the price would pass while
+        the request silently reset the pack size, promoted the link to flagged
+        primary and logged a price change nobody made — so every field the
+        request did not mention is pinned here.
+        """
         supplier = SupplierFactory()
         link = ItemSupplierFactory(
             item=eufy_kit,
             supplier=supplier,
+            supplier_sku="ACME-INK-9",
             quantity_per_package=25,
             unit_cost=Decimal("2.00"),
             package_cost=Decimal("50.00"),
+            is_primary=False,
         )
+        history_before = PriceHistory.objects.filter(item_supplier=link).count()
 
         response = staff_client.patch(
             reverse("kit-detail", args=[eufy_kit.pk]),
-            {"supplier_terms": {"supplier": supplier.pk, "supplier_sku": "RETAGGED"}},
+            {"supplier_terms": {"supplier": supplier.pk, "supplier_sku": "ACME-INK-10"}},
             format="json",
         )
 
         assert response.status_code == status.HTTP_200_OK, response.data
         link.refresh_from_db()
-        assert link.supplier_sku == "RETAGGED"
+        assert link.supplier_sku == "ACME-INK-10"
+        assert link.quantity_per_package == 25
         assert link.unit_cost == Decimal("2.00")
+        assert link.package_cost == Decimal("50.00")
+        assert link.is_primary is False
+        assert PriceHistory.objects.filter(item_supplier=link).count() == history_before
+
+    def test_editing_the_sku_does_not_demote_the_operators_flagged_primary(
+        self, staff_client, eufy_kit
+    ):
+        """The demotion is invisible from the edited row, so it is checked here.
+
+        ``enforce_single_primary`` clears the flag on every sibling whenever the
+        saved row is primary, so forcing the edited link primary would take the
+        operator's standing decision away without saying so.
+        """
+        acme, beta = SupplierFactory(), SupplierFactory()
+        edited = ItemSupplierFactory(
+            item=eufy_kit, supplier=acme, supplier_sku="ACME-INK-9", is_primary=False
+        )
+        flagged = ItemSupplierFactory(item=eufy_kit, supplier=beta, is_primary=True)
+
+        response = staff_client.patch(
+            reverse("kit-detail", args=[eufy_kit.pk]),
+            {"supplier_terms": {"supplier": acme.pk, "supplier_sku": "ACME-INK-10"}},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        edited.refresh_from_db()
+        flagged.refresh_from_db()
+        assert edited.supplier_sku == "ACME-INK-10"
+        assert edited.is_primary is False
+        assert flagged.is_primary is True
+
+    def test_creating_a_kit_with_terms_still_flags_a_buyable_primary(
+        self, staff_client, ink_components
+    ):
+        """CONTROL: the create-time conveniences survive.
+
+        A kit with no ``ItemSupplier`` cannot reach a purchase order at all, so
+        the link a create mints is deliberately pack-size-1 and flagged primary.
+        Only the UPDATE branch had to stop doing it.
+        """
+        supplier = SupplierFactory()
+
+        response = staff_client.post(
+            reverse("kit-list"),
+            kit_payload(
+                ink_components,
+                supplier_terms={
+                    "supplier": supplier.pk,
+                    "supplier_sku": "T3200",
+                    "unit_cost": "89.99",
+                },
+            ),
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED, response.data
+        link = InventoryItem.objects.get(pk=response.data["id"]).item_suppliers.get(
+            supplier=supplier
+        )
+        assert link.quantity_per_package == 1
+        assert link.is_primary is True
+        assert link.unit_cost == Decimal("89.99")
+
+    def test_a_terms_edit_that_does_send_a_price_still_records_it(self, staff_client, eufy_kit):
+        """CONTROL: narrowing the write must not stop a real price edit."""
+        supplier = SupplierFactory()
+        link = ItemSupplierFactory(
+            item=eufy_kit,
+            supplier=supplier,
+            quantity_per_package=25,
+            unit_cost=None,
+            package_cost=None,
+            is_primary=False,
+        )
+        history_before = PriceHistory.objects.filter(item_supplier=link).count()
+
+        response = staff_client.patch(
+            reverse("kit-detail", args=[eufy_kit.pk]),
+            {"supplier_terms": {"supplier": supplier.pk, "unit_cost": "3.00"}},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        link.refresh_from_db()
+        assert link.unit_cost == Decimal("3.00")
+        assert PriceHistory.objects.filter(item_supplier=link).count() == history_before + 1
+        # Still not the request's business to decide these.
+        assert link.quantity_per_package == 25
+        assert link.is_primary is False
+
+    def test_the_ordinary_endpoint_still_promotes_a_link_to_primary(self, staff_client, eufy_kit):
+        """CONTROL: flagging a primary is still possible, just not implicitly.
+
+        The kit terms path no longer promotes as a side effect, so the explicit
+        route has to keep working or the capability is gone.
+        """
+        acme, beta = SupplierFactory(), SupplierFactory()
+        promoted = ItemSupplierFactory(item=eufy_kit, supplier=acme, is_primary=False)
+        incumbent = ItemSupplierFactory(item=eufy_kit, supplier=beta, is_primary=True)
+
+        response = staff_client.patch(
+            reverse("itemsupplier-detail", args=[promoted.pk]),
+            {"is_primary": True},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        promoted.refresh_from_db()
+        incumbent.refresh_from_db()
+        assert promoted.is_primary is True
+        assert incumbent.is_primary is False
 
     def test_omitted_unit_cost_creates_an_unpriced_link_not_a_free_one(
         self, staff_client, eufy_kit
@@ -612,11 +736,11 @@ class TestKitSupplierTermsPricing:
         assert link.unit_cost == Decimal("0.00")
 
     def test_a_save_that_carries_no_terms_does_not_disturb_the_link(self, staff_client, eufy_kit):
-        """The other half of the same guarantee, from the server's side.
+        """The other half of the same guarantee, from the client's side.
 
-        ``_apply_supplier_terms`` upserts with ``is_primary=True`` and a default
-        pack size of 1, so a payload that mentions the terms at all rewrites
-        them. A save that only edits the description must not mention them.
+        The kit form only sends ``supplier_terms`` when the operator actually
+        changed the vendor, the SKU or the cost, so a save that edits the
+        description alone must not mention them at all.
         """
         supplier = SupplierFactory()
         link = ItemSupplierFactory(

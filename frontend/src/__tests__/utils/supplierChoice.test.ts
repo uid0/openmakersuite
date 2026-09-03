@@ -16,7 +16,6 @@ import {
   supplierChoiceCaveats,
   supplierChoiceNote,
   supplierChoiceSummary,
-  supplierChoiceWithAlternatives,
 } from '../../utils/supplierChoice';
 
 const choice = (overrides: Partial<SupplierChoice> = {}): SupplierChoice => ({
@@ -75,18 +74,6 @@ describe('supplierChoiceSummary', () => {
 
   it('is null where there is no supplier to name', () => {
     expect(supplierChoiceSummary(choice({ supplier_name: null, reason: 'no_suppliers' }))).toBeNull();
-  });
-});
-
-describe('supplierChoiceWithAlternatives', () => {
-  it('names the others outright where a surface has room for them', () => {
-    expect(
-      supplierChoiceWithAlternatives(choice({ alternatives: others('Beta', 'Gamma') }))
-    ).toBe('Acme Supplies (also available from Beta, Gamma)');
-  });
-
-  it('adds no parenthetical when there was nothing else', () => {
-    expect(supplierChoiceWithAlternatives(choice())).toBe('Acme Supplies');
   });
 });
 

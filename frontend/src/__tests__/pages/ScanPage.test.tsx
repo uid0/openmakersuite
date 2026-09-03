@@ -786,14 +786,18 @@ describe('ScanPage', () => {
 
   const renderAnonymouslyWithChoice = async (choice: Record<string, unknown>) => {
     localStorage.removeItem('token');
-    // A failed auto-submit is the settled anonymous state that renders the
-    // item block — the catch sets `submitting` back to false.
+    // A failed auto-submit is the one anonymous state that renders the item
+    // block: `has_pending_reorder` short-circuits to the "already requested"
+    // screen, and a successful submit redirects to /thanks. It settles because
+    // the auto-submit is latched to a single attempt, so the page stops here
+    // instead of re-firing the effect every time the catch clears `submitting`.
     (api.reorderAPI.createRequest as jest.Mock).mockRejectedValue(new Error('offline'));
     (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
       data: { ...mockItem, supplier_choice: choice },
     });
     await renderWithRouter();
     await screen.findByText('Test Widget');
+    expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(1);
   };
 
   const threeSuppliers = {
@@ -803,6 +807,34 @@ describe('ScanPage', () => {
       { id: 3, supplier_name: 'Gamma Wholesale' },
     ],
   };
+
+  /**
+   * The catch clears `submitting`, and `submitting` is a dependency of the
+   * effect that set it, so a failed auto-submit used to re-enter itself for as
+   * long as the page stayed open — an offline scanner POSTing the public
+   * reorder endpoint on a loop while the manual form sat in front of them.
+   */
+  test('BEFORE/AFTER: a failed auto-submit is attempted once, not retried forever', async () => {
+    localStorage.removeItem('token');
+    // Rejected on a later tick, the way a real network failure arrives: the
+    // pending render commits in between, so `submitting` genuinely goes true
+    // and back to false and the effect's dependencies really do change.
+    (api.reorderAPI.createRequest as jest.Mock).mockImplementation(
+      () => new Promise((_resolve, reject) => setTimeout(() => reject(new Error('offline')), 5))
+    );
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({ data: mockItem });
+
+    await renderWithRouter();
+    await screen.findByText('Test Widget');
+    // Give the effect every chance to re-enter itself before counting.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(1);
+    // And the manual form the catch exists to reveal is on screen.
+    expect(
+      await screen.findByText(/automatically submitting a reorder request/i)
+    ).toBeInTheDocument();
+  });
 
   test('BEFORE/AFTER: a logged-out scanner is not told who the other vendors are', async () => {
     await renderAnonymouslyWithChoice(threeSuppliers);

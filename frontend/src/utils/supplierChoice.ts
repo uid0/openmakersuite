@@ -2,10 +2,16 @@
  * The web's one reading of `InventoryItem.supplier_choice` (op-3xsp).
  *
  * `inventory/services/supplier_selection.py` decides WHICH supplier an item is
- * bought from; this file decides how that answer is WORDED, once, for every
- * surface that names a supplier. Neither half is re-derived here: nothing below
+ * bought from; this file is the single place that READS that answer for the web
+ * — which name is the chosen one, which others were on offer, and which caveats
+ * an operator has to be told. Neither half is re-derived here: nothing below
  * ranks, filters or picks a link, and nothing below reads `is_active` /
  * `is_discontinued` / `is_primary` to work out what the server already said.
+ *
+ * Surfaces compose their own sentence around these values, because they cannot
+ * share one: a scan row dims the alternatives in a separate span, a CSV puts
+ * them in their own column, and a logged-out visitor gets a count instead of
+ * the list. What must not be re-derived is the ANSWER, not the punctuation.
  *
  * The reason a shared reading is needed at all: the flat `item.supplier_name`
  * key these surfaces used to render is the same winner with the derivation
@@ -68,22 +74,6 @@ export const supplierChoiceSummary = (choice: SupplierChoice | undefined): strin
   const others = choice?.alternatives.length ?? 0;
   if (others === 0) return name;
   return others === 1 ? `${name}, or 1 other` : `${name}, or ${others} others`;
-};
-
-/**
- * The chosen supplier with the others NAMED — "Acme (also available from B, C)".
- *
- * The expanded form, for a surface with room to show several. Where a surface
- * can honestly show several it should, and a CSV row or a detail block can.
- */
-export const supplierChoiceWithAlternatives = (
-  choice: SupplierChoice | undefined
-): string | null => {
-  const name = chosenSupplierName(choice);
-  if (name === null) return null;
-  const others = choice?.alternatives ?? [];
-  if (others.length === 0) return name;
-  return `${name} (also available from ${others.map((a) => a.supplier_name).join(', ')})`;
 };
 
 /**

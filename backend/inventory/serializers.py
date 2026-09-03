@@ -1250,6 +1250,26 @@ class KitComponentSerializer(serializers.ModelSerializer):
         return value
 
 
+class KitSupplierTermsSerializer(serializers.Serializer):
+    """The purchase terms a kit create or update can carry inline.
+
+    Typed rather than a bare ``DictField`` because these values reach
+    ``ItemSupplier.save()``, which derives one cost field from the other in
+    PYTHON: an un-coerced ``"3.00"`` from JSON multiplied by a pack size of 25
+    yields the string ``"3.003.00..."``, not a price. Every field is optional —
+    ``_apply_supplier_terms`` writes only the keys the request actually carried,
+    so an absent key means "leave this alone" and is not the same as null.
+    """
+
+    supplier = serializers.IntegerField(required=False, allow_null=True)
+    supplier_sku = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    supplier_url = serializers.URLField(required=False, allow_blank=True)
+    unit_cost = serializers.DecimalField(
+        max_digits=10, decimal_places=2, required=False, allow_null=True
+    )
+    average_lead_time = serializers.IntegerField(min_value=0, required=False)
+
+
 class KitSerializer(InventoryItemSerializer):
     """A kit SKU and its bill of materials (op-8n0).
 
@@ -1262,7 +1282,7 @@ class KitSerializer(InventoryItemSerializer):
 
     components = KitComponentSerializer(source="kit_components", many=True, required=False)
     component_count = serializers.SerializerMethodField()
-    supplier_terms = serializers.DictField(write_only=True, required=False)
+    supplier_terms = KitSupplierTermsSerializer(write_only=True, required=False)
 
     class Meta(InventoryItemSerializer.Meta):
         fields = InventoryItemSerializer.Meta.fields + [
@@ -1382,6 +1402,16 @@ class KitSerializer(InventoryItemSerializer):
         than the item. Folding the terms into the kit create keeps "define a
         kit" a single request; the generic ``/item-suppliers/`` endpoint still
         works for editing them afterwards.
+
+        A pack size of 1 and the primary flag are CREATE-time conveniences, so
+        they ride ``create_defaults`` and never reach an existing link. On an
+        update this writes only the keys the request actually carried: the kit
+        form seeds Supplier from the derivation, so an operator correcting a
+        typo in the SKU sends terms for a relationship they never chose to
+        redefine, and applying the conveniences there would reset the pack size,
+        have ``ItemSupplier.save()`` recompute ``package_cost`` off it, demote
+        whichever sibling the operator had flagged, and log a price change
+        nobody made.
         """
         if not terms:
             return
@@ -1395,12 +1425,11 @@ class KitSerializer(InventoryItemSerializer):
             for key in ("supplier_sku", "supplier_url", "unit_cost", "average_lead_time")
             if key in terms
         }
-        defaults.setdefault("quantity_per_package", 1)
-        defaults["is_primary"] = True
         ItemSupplier.objects.update_or_create(
             item=instance,
             supplier_id=supplier_id,
             defaults=defaults,
+            create_defaults={**defaults, "quantity_per_package": 1, "is_primary": True},
         )
 
     def create(self, validated_data):

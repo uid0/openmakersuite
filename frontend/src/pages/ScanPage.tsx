@@ -4,7 +4,7 @@
  * - Non-logged users: Simple reorder → thanks page
  * - Logged users: Supplier selection with cost optimization
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { checklistsAPI, inventoryAPI, reorderAPI } from '../services/api';
 import '../styles/ScanPage.css';
@@ -191,10 +191,15 @@ const ScanPage: React.FC = () => {
     }
   };
 
-  // Auto-submit reorder for non-logged users (only if no pending request exists)
+  // Auto-submit reorder for non-logged users (only if no pending request exists).
+  // Attempted at most once per scan: the catch below clears `submitting`, which
+  // is itself a dependency, so without the latch a failed submit re-fires the
+  // effect for as long as the page is open — an offline scanner would hammer
+  // the public endpoint forever instead of being shown the manual form.
+  const autoSubmitAttempted = useRef(false);
   useEffect(() => {
     const autoSubmitReorder = async () => {
-      if (!isLoggedIn && item && !submitting && !submitted) {
+      if (!isLoggedIn && item && !submitting && !submitted && !autoSubmitAttempted.current) {
         // Check if item already has a pending reorder request
         if (item.has_pending_reorder) {
           // Don't auto-submit, just set submitted to show the existing request message
@@ -203,6 +208,7 @@ const ScanPage: React.FC = () => {
         }
 
         try {
+          autoSubmitAttempted.current = true;
           setSubmitting(true);
           await reorderAPI.createRequest({
             item: item.id,

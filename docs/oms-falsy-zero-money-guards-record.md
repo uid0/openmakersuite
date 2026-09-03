@@ -63,7 +63,11 @@ complete, and it was twice not:
   number is deliberately unchanged.
 - Public dashboard tile (`GET /api/dashboard/inventory-summary/`) —
   `total_value`: a 500 -> base's exact number, plus a new
-  `items_without_price` beside it.
+  `items_without_price` beside it. SUPERSEDED for an anonymous caller:
+  `fm/oms-public-inventory-valuation` withheld both keys from a caller with no
+  session, so this bullet describes the authenticated payload only. The current
+  contract is the `dashboard/inventory-summary/` row of
+  [`API_PERMISSION_MATRIX.md`](API_PERMISSION_MATRIX.md).
 - Admin dashboard "Requests by Supplier" modal (`GET
   /api/reorders/requests/by_supplier/`) — gained `unpriced_item_count` /
   `estimated_total_is_partial`; the total itself is unchanged.

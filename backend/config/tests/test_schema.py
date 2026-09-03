@@ -101,3 +101,50 @@ def test_schema_endpoint_serves_yaml(api_client):
     parsed = yaml.safe_load(body)
     assert parsed["openapi"].startswith("3.")
     assert "/api/inventory/items/" in parsed["paths"]
+
+
+def test_schema_types_the_inventory_item_supplier_choice(schema_document):
+    """``supplier_choice`` reaches the OpenAPI document as a typed object.
+
+    ``InventoryItemSerializer.supplier_choice`` is a ``SerializerMethodField``,
+    which drf-spectacular renders as an untyped, propertyless blob unless the
+    getter is annotated. ``SupplierChoiceSerializer``'s declared fields exist
+    for the schema alone — ``to_representation`` is fully overridden, so they
+    never run — and a client generating a model off this document is the only
+    consumer they have. Without the annotation those declarations are dead and
+    the comment above them describes something the code does not do.
+    """
+    schemas = schema_document["components"]["schemas"]
+    supplier_choice = schemas["InventoryItem"]["properties"]["supplier_choice"]
+
+    # Spectacular wraps a $ref that carries sibling keywords (readOnly) in allOf.
+    refs = [entry["$ref"] for entry in supplier_choice.get("allOf", []) if "$ref" in entry]
+    if "$ref" in supplier_choice:
+        refs.append(supplier_choice["$ref"])
+    assert refs == ["#/components/schemas/SupplierChoice"], supplier_choice
+
+    choice = schemas["SupplierChoice"]
+    assert choice["type"] == "object"
+    # The honesty fields are the point of the object; a document that omits
+    # them tells a generated client the answer is just a name.
+    assert set(choice["properties"]) == {
+        "item_supplier_id",
+        "supplier_id",
+        "supplier_name",
+        "basis",
+        "reason",
+        "flagged_primary_unorderable",
+        "scored_without_price",
+        "scored_without_history",
+        "alternatives",
+    }
+    assert choice["properties"]["supplier_name"]["nullable"] is True
+    assert choice["properties"]["supplier_id"]["nullable"] is True
+    assert choice["properties"]["scored_without_price"]["type"] == "boolean"
+
+    # The nested declaration has to be reachable too, or "and two others" has
+    # no documented shape.
+    assert choice["properties"]["alternatives"]["items"] == {
+        "$ref": "#/components/schemas/SupplierChoiceAlternative"
+    }
+    assert set(schemas["SupplierChoiceAlternative"]["properties"]) == {"id", "supplier_name"}

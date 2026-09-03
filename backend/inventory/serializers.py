@@ -8,6 +8,7 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 # The asset's breaker/disconnect FKs live on facilities.AssetSiteRequirements
@@ -600,6 +601,11 @@ class SupplierChoiceSerializer(serializers.Serializer):
 
     # Declared for the shape only — drf-spectacular reads these to build the
     # OpenAPI schema, and ``to_representation`` below is what actually runs.
+    # The reading is not automatic: ``supplier_choice`` is a
+    # ``SerializerMethodField``, which spectacular types as an untyped object
+    # unless the getter carries ``@extend_schema_field(SupplierChoiceSerializer)``
+    # — so that decorator is what makes the sentence above true, and
+    # ``config/tests/test_schema.py`` asserts the generated document says so.
     # No ``source="item_supplier.supplier.name"`` here, because DRF's dotted
     # source RAISES rather than yielding ``null`` when an intermediate is
     # ``None`` — and ``item_supplier`` is ``None`` for exactly the case this
@@ -697,6 +703,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     # See :class:`SupplierChoiceSerializer`.
     supplier_choice = serializers.SerializerMethodField()
 
+    @extend_schema_field(SupplierChoiceSerializer)
     def get_supplier_choice(self, obj):
         """Serialise ``InventoryItem.supplier_choice``.
 

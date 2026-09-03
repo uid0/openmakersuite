@@ -492,12 +492,37 @@ const ScanPage: React.FC = () => {
                   <span className="label">We order this from:</span>
                   <span className="value">
                     {supplierName}
-                    {alternativeNames.length > 0 && (
-                      <span className="value secondary" data-testid="supplier-choice-alternatives">
-                        {' '}
-                        — also available from {alternativeNames.join(', ')}
-                      </span>
-                    )}
+                    {/* The names are SIGNED-IN ONLY. This route is not behind
+                        RequireAuth and serves logged-out QR scanners, who
+                        already saw one supplier name here and keep it, along
+                        with the lead time and the price. Naming every vendor
+                        that stocks the item would widen anonymous disclosure —
+                        which was deliberately narrowed on nearby surfaces very
+                        recently, so widening it here runs against the direction
+                        just set, and is the captain's to authorise rather than
+                        ours. A count says there were others without saying who,
+                        exactly as the item page's anonymous block does. */}
+                    {alternativeNames.length > 0 &&
+                      (isLoggedIn ? (
+                        <span
+                          className="value secondary"
+                          data-testid="supplier-choice-alternatives"
+                        >
+                          {' '}
+                          — also available from {alternativeNames.join(', ')}
+                        </span>
+                      ) : (
+                        <span
+                          className="value secondary"
+                          data-testid="supplier-choice-alternative-count"
+                        >
+                          {' '}
+                          —{' '}
+                          {alternativeNames.length === 1
+                            ? '1 other supplier also stocks this item'
+                            : `${alternativeNames.length} other suppliers also stock this item`}
+                        </span>
+                      ))}
                   </span>
                 </div>
 

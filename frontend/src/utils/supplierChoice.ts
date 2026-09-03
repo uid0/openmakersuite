@@ -86,7 +86,15 @@ export const supplierChoiceWithAlternatives = (
   return `${name} (also available from ${others.map((a) => a.supplier_name).join(', ')})`;
 };
 
-/** The other suppliers' names, in the order the server ranked them. */
+/**
+ * The other suppliers' names, in the order they arrived.
+ *
+ * NOT a ranked runner-up order. The server preserves candidate arrival order,
+ * which is `ItemSupplier.Meta.ordering` — `-is_primary`, then `unit_cost`
+ * ascending — and never re-sorts the losers by score. The CSV's "Other
+ * Suppliers" column and the scan page's "also available from" line both render
+ * this list, and neither may present it as "the next best".
+ */
 export const alternativeSupplierNames = (choice: SupplierChoice | undefined): string[] =>
   (choice?.alternatives ?? []).map((alternative) => alternative.supplier_name);
 

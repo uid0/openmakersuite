@@ -50,6 +50,15 @@ const KitDetailPage: React.FC = () => {
   const [supplierSku, setSupplierSku] = useState('');
   const [unitCost, setUnitCost] = useState<number | string>('');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  // What the server last said the terms were. `supplier_terms` is a WRITE, and
+  // a destructive one — the serializer upserts the link with is_primary=True
+  // and a default pack size — so the payload carries it only when these three
+  // fields no longer match what was loaded.
+  const [loadedTerms, setLoadedTerms] = useState<{
+    supplierId: number | '';
+    supplierSku: string;
+    unitCost: number | string;
+  }>({ supplierId: '', supplierSku: '', unitCost: '' });
 
   // Scoped mutation state — never a page-level spinner.
   const [saving, setSaving] = useState(false);
@@ -79,9 +88,17 @@ const KitDetailPage: React.FC = () => {
     // attached to the wrong order form. Seed the vendor from the same answer,
     // so all three fields describe one supplier and changing it is a deliberate
     // act rather than an unnoticed one (op-3xsp).
-    setSupplierId(next.supplier_choice?.supplier_id ?? '');
-    setSupplierSku(next.supplier_sku ?? '');
-    setUnitCost(next.unit_cost ?? '');
+    const nextSupplierId = next.supplier_choice?.supplier_id ?? '';
+    const nextSupplierSku = next.supplier_sku ?? '';
+    const nextUnitCost = next.unit_cost ?? '';
+    setSupplierId(nextSupplierId);
+    setSupplierSku(nextSupplierSku);
+    setUnitCost(nextUnitCost);
+    setLoadedTerms({
+      supplierId: nextSupplierId,
+      supplierSku: nextSupplierSku,
+      unitCost: nextUnitCost,
+    });
   }, []);
 
   useEffect(() => {
@@ -131,6 +148,17 @@ const KitDetailPage: React.FC = () => {
     setSaving(true);
     setSaveError(null);
 
+    // Seeding Supplier from the derivation made "Supplier is filled in" true
+    // after every load, so a guard on emptiness would send the terms on a save
+    // that only touched the description — and the server's upsert would reset
+    // the pack size to 1, recompute package_cost, promote the link to flagged
+    // primary and log a price change nobody made. Only an actual edit to one
+    // of the three fields is a request to write them.
+    const termsChanged =
+      supplierId !== loadedTerms.supplierId ||
+      supplierSku !== loadedTerms.supplierSku ||
+      String(unitCost) !== String(loadedTerms.unitCost);
+
     const payload = {
       name: name.trim(),
       description,
@@ -139,12 +167,16 @@ const KitDetailPage: React.FC = () => {
         component: row.component,
         quantity: row.quantity,
       })),
-      ...(supplierId && supplierSku
+      ...(termsChanged && supplierId && supplierSku
         ? {
             supplier_terms: {
               supplier: Number(supplierId),
               supplier_sku: supplierSku,
-              unit_cost: unitCost === '' ? '0' : String(unitCost),
+              // An empty box means nobody has priced this, which is not the
+              // price 0.00 — a recorded zero is a real price (donated stock,
+              // samples). Omit the key rather than assert one; the server
+              // leaves the field alone when it is absent (op-9m2v).
+              ...(unitCost === '' ? {} : { unit_cost: String(unitCost) }),
             },
           }
         : {}),

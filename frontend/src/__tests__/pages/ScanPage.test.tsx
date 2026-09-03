@@ -776,4 +776,78 @@ describe('ScanPage', () => {
       /was not included in this response/i
     );
   });
+
+  // --- The anonymous scanner sees a count, never the list ------------------
+  // This route is not behind RequireAuth. A logged-out visitor always saw ONE
+  // supplier name here, with the lead time and the price beside it, and keeps
+  // all three. What they must not gain is the roster of every vendor that
+  // stocks the item: anonymous disclosure was deliberately narrowed on nearby
+  // surfaces, and widening it is not this change's to authorise.
+
+  const renderAnonymouslyWithChoice = async (choice: Record<string, unknown>) => {
+    localStorage.removeItem('token');
+    // A failed auto-submit is the settled anonymous state that renders the
+    // item block — the catch sets `submitting` back to false.
+    (api.reorderAPI.createRequest as jest.Mock).mockRejectedValue(new Error('offline'));
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, supplier_choice: choice },
+    });
+    await renderWithRouter();
+    await screen.findByText('Test Widget');
+  };
+
+  const threeSuppliers = {
+    ...baseChoice,
+    alternatives: [
+      { id: 2, supplier_name: 'Beta Parts' },
+      { id: 3, supplier_name: 'Gamma Wholesale' },
+    ],
+  };
+
+  test('BEFORE/AFTER: a logged-out scanner is not told who the other vendors are', async () => {
+    await renderAnonymouslyWithChoice(threeSuppliers);
+
+    expect(screen.queryByText(/Beta Parts/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Gamma Wholesale/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('supplier-choice-alternatives')).not.toBeInTheDocument();
+  });
+
+  test('a logged-out scanner is still told there ARE others', async () => {
+    await renderAnonymouslyWithChoice(threeSuppliers);
+
+    expect(screen.getByTestId('supplier-choice-alternative-count')).toHaveTextContent(
+      '2 other suppliers also stock this item'
+    );
+  });
+
+  test('the count is singular for exactly one other supplier', async () => {
+    await renderAnonymouslyWithChoice({
+      ...baseChoice,
+      alternatives: [{ id: 2, supplier_name: 'Beta Parts' }],
+    });
+
+    expect(screen.getByTestId('supplier-choice-alternative-count')).toHaveTextContent(
+      '1 other supplier also stocks this item'
+    );
+    expect(screen.queryByText(/Beta Parts/)).not.toBeInTheDocument();
+  });
+
+  // Gating the alternatives must not NARROW what a logged-out visitor already
+  // had: the chosen supplier's own name, its lead time and its unit cost.
+  test('CONTROL: the chosen supplier, lead time and cost stay visible anonymously', async () => {
+    await renderAnonymouslyWithChoice(threeSuppliers);
+
+    expect(screen.getByTestId('supplier-choice-name')).toHaveTextContent('Acme Supplies');
+    expect(screen.getByText('Their Lead Time:')).toBeInTheDocument();
+    expect(screen.getByText('Their Unit Cost:')).toBeInTheDocument();
+  });
+
+  test('CONTROL: a signed-in operator still gets the names', async () => {
+    await renderWithChoice(threeSuppliers);
+
+    expect(screen.getByTestId('supplier-choice-alternatives')).toHaveTextContent(
+      'also available from Beta Parts, Gamma Wholesale'
+    );
+    expect(screen.queryByTestId('supplier-choice-alternative-count')).not.toBeInTheDocument();
+  });
 });

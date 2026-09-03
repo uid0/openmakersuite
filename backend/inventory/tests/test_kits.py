@@ -541,3 +541,101 @@ def test_kit_list_query_count_is_bounded(
     with django_assert_max_num_queries(12):
         response = anon_client.get(reverse("kit-list"), {"page_size": 100})
     assert response.status_code == status.HTTP_200_OK
+
+
+@pytest.mark.django_db
+class TestKitSupplierTermsPricing:
+    """An omitted ``unit_cost`` is not the price zero (op-9m2v, op-3xsp).
+
+    ``supplier_terms`` is how the kit form writes one vendor's terms. The form
+    seeds Supplier, Supplier SKU and Unit cost from the derived choice, and the
+    cost box is EMPTY whenever that link carries no price — so "the operator
+    did not type a price" has to reach the server as an absent key rather than
+    as ``"0"``. A recorded 0.00 is a real price (donated stock, a free sample)
+    and has to stay tellable apart from "nobody has priced this".
+    """
+
+    def test_omitted_unit_cost_leaves_an_existing_price_alone(self, staff_client, eufy_kit):
+        supplier = SupplierFactory()
+        link = ItemSupplierFactory(
+            item=eufy_kit,
+            supplier=supplier,
+            quantity_per_package=25,
+            unit_cost=Decimal("2.00"),
+            package_cost=Decimal("50.00"),
+        )
+
+        response = staff_client.patch(
+            reverse("kit-detail", args=[eufy_kit.pk]),
+            {"supplier_terms": {"supplier": supplier.pk, "supplier_sku": "RETAGGED"}},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        link.refresh_from_db()
+        assert link.supplier_sku == "RETAGGED"
+        assert link.unit_cost == Decimal("2.00")
+
+    def test_omitted_unit_cost_creates_an_unpriced_link_not_a_free_one(
+        self, staff_client, eufy_kit
+    ):
+        supplier = SupplierFactory()
+
+        response = staff_client.patch(
+            reverse("kit-detail", args=[eufy_kit.pk]),
+            {"supplier_terms": {"supplier": supplier.pk, "supplier_sku": "NEW-SKU"}},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        link = eufy_kit.item_suppliers.get(supplier=supplier)
+        assert link.unit_cost is None
+        assert link.package_cost is None
+
+    def test_a_price_typed_as_zero_is_still_recorded(self, staff_client, eufy_kit):
+        supplier = SupplierFactory()
+
+        response = staff_client.patch(
+            reverse("kit-detail", args=[eufy_kit.pk]),
+            {
+                "supplier_terms": {
+                    "supplier": supplier.pk,
+                    "supplier_sku": "DONATED",
+                    "unit_cost": "0",
+                }
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        link = eufy_kit.item_suppliers.get(supplier=supplier)
+        assert link.unit_cost == Decimal("0.00")
+
+    def test_a_save_that_carries_no_terms_does_not_disturb_the_link(self, staff_client, eufy_kit):
+        """The other half of the same guarantee, from the server's side.
+
+        ``_apply_supplier_terms`` upserts with ``is_primary=True`` and a default
+        pack size of 1, so a payload that mentions the terms at all rewrites
+        them. A save that only edits the description must not mention them.
+        """
+        supplier = SupplierFactory()
+        link = ItemSupplierFactory(
+            item=eufy_kit,
+            supplier=supplier,
+            quantity_per_package=25,
+            unit_cost=Decimal("2.00"),
+            package_cost=Decimal("50.00"),
+            is_primary=False,
+        )
+
+        response = staff_client.patch(
+            reverse("kit-detail", args=[eufy_kit.pk]),
+            {"description": "Now with a longer description"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        link.refresh_from_db()
+        assert link.quantity_per_package == 25
+        assert link.package_cost == Decimal("50.00")
+        assert link.is_primary is False

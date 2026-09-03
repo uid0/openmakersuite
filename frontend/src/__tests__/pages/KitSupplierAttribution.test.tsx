@@ -14,7 +14,7 @@
  * The SKU itself is unchanged in both places. What is new is the attribution.
  */
 import { MantineProvider } from '@mantine/core';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 import KitDetailPage from '../../pages/KitDetailPage';
@@ -172,5 +172,129 @@ describe('the kit form supplier terms', () => {
 
     expect(screen.getByTestId('kit-supplier')).toHaveValue('');
     expect(screen.queryByTestId('kit-supplier-attribution')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Seeding Supplier changed what a SAVE means, not just what the form shows.
+ *
+ * `supplier_terms` is a write, and a destructive one: `_apply_supplier_terms`
+ * upserts the link with `is_primary=True` and a default `quantity_per_package`
+ * of 1, and `ItemSupplier.save()` then recomputes `package_cost` and logs a
+ * price change. A guard that asked "is Supplier filled in?" was true after
+ * every load once the field was seeded, so editing the description alone reset
+ * a pack size of 25 to 1 and promoted a scored pick to somebody's standing
+ * decision — silently, and with no way for the operator to undo it.
+ */
+describe('what a kit save writes to the supplier link', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const renderFormFor = async (kit: Record<string, unknown>) => {
+    (inventoryAPI.listSuppliers as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { results: [{ id: 50, name: 'Acme Supplies' }, { id: 51, name: 'Beta Parts' }] },
+    });
+    (kitAPI.getKit as ReturnType<typeof vi.fn>).mockResolvedValue({ data: kit });
+    (kitAPI.updateKit as ReturnType<typeof vi.fn>).mockResolvedValue({ data: kit });
+    render(
+      <MantineProvider>
+        <MemoryRouter initialEntries={['/inventory/kits/k1']}>
+          <Routes>
+            <Route path="/inventory/kits/:kitId" element={<KitDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('kit-supplier')).toHaveValue('50'));
+  };
+
+  const save = async () => {
+    fireEvent.click(screen.getByTestId('kit-save'));
+    await waitFor(() => expect(kitAPI.updateKit).toHaveBeenCalledTimes(1));
+    return (kitAPI.updateKit as ReturnType<typeof vi.fn>).mock.calls[0][1] as Record<
+      string,
+      unknown
+    >;
+  };
+
+  const KIT_WITH_TERMS = {
+    ...KIT,
+    components: [{ id: 'c1', component: 'i1', component_name: 'Ink', quantity: 2 }],
+    supplier_choice: choice(),
+  };
+
+  it('BEFORE/AFTER: an unrelated edit sends no supplier terms at all', async () => {
+    await renderFormFor(KIT_WITH_TERMS);
+
+    fireEvent.change(screen.getByTestId('kit-description'), {
+      target: { value: 'Now with a longer description' },
+    });
+    const payload = await save();
+
+    expect(payload.description).toBe('Now with a longer description');
+    expect(payload).not.toHaveProperty('supplier_terms');
+  });
+
+  it('BEFORE/AFTER: saving a freshly loaded kit untouched writes no terms', async () => {
+    await renderFormFor(KIT_WITH_TERMS);
+
+    expect(await save()).not.toHaveProperty('supplier_terms');
+  });
+
+  it('CONTROL: pointing the terms at another vendor still writes them', async () => {
+    await renderFormFor(KIT_WITH_TERMS);
+
+    fireEvent.change(screen.getByTestId('kit-supplier'), { target: { value: '51' } });
+    const payload = await save();
+
+    expect(payload.supplier_terms).toEqual({
+      supplier: 51,
+      supplier_sku: 'ACME-INK-9',
+      unit_cost: '42',
+    });
+  });
+
+  it('CONTROL: editing the SKU alone still writes the terms', async () => {
+    await renderFormFor(KIT_WITH_TERMS);
+
+    fireEvent.change(screen.getByTestId('kit-supplier-sku'), { target: { value: 'ACME-INK-10' } });
+    const payload = await save();
+
+    expect(payload.supplier_terms).toMatchObject({ supplier: 50, supplier_sku: 'ACME-INK-10' });
+  });
+
+  it('CONTROL: editing the cost alone still writes the terms', async () => {
+    await renderFormFor(KIT_WITH_TERMS);
+
+    fireEvent.change(screen.getByTestId('kit-unit-cost'), { target: { value: '43' } });
+    const payload = await save();
+
+    expect(payload.supplier_terms).toMatchObject({ supplier: 50, unit_cost: '43' });
+  });
+
+  /**
+   * op-9m2v: a recorded 0.00 is a KNOWN price — donated stock, a free sample —
+   * and has to stay tellable apart from "nobody has priced this". The chosen
+   * link's flat `unit_cost` is null when it carries no price, so the box loads
+   * empty; the payload must not turn that into the number zero.
+   */
+  it('BEFORE/AFTER: an unpriced link stays unpriced through a save', async () => {
+    await renderFormFor({ ...KIT_WITH_TERMS, unit_cost: null });
+
+    fireEvent.change(screen.getByTestId('kit-supplier-sku'), { target: { value: 'ACME-INK-11' } });
+    const payload = await save();
+
+    expect(payload.supplier_terms).toEqual({ supplier: 50, supplier_sku: 'ACME-INK-11' });
+    expect(payload.supplier_terms).not.toHaveProperty('unit_cost');
+  });
+
+  it('CONTROL: a price the operator actually typed as zero is still sent', async () => {
+    await renderFormFor({ ...KIT_WITH_TERMS, unit_cost: null });
+
+    fireEvent.change(screen.getByTestId('kit-unit-cost'), { target: { value: '0' } });
+    const payload = await save();
+
+    expect(payload.supplier_terms).toMatchObject({ unit_cost: '0' });
   });
 });

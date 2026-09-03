@@ -17,8 +17,10 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import KitComponentEditor, { KitComponentDraft } from '../components/inventory/KitComponentEditor';
 import WorkspacePage from '../components/landing/WorkspacePage';
+import { isAuthenticated } from '../components/RequireAuth';
 import { kitAPI, inventoryAPI } from '../services/api';
 import { Kit, Supplier } from '../types';
+import { alternativeSupplierNamesText, chosenSupplierName } from '../utils/supplierChoice';
 
 /** Pull a field-addressed message out of the API error envelope. */
 const readError = (err: unknown, fallback: string): string => {
@@ -50,6 +52,15 @@ const KitDetailPage: React.FC = () => {
   const [supplierSku, setSupplierSku] = useState('');
   const [unitCost, setUnitCost] = useState<number | string>('');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  // This route carries no `RequireAuth` and `KitViewSet` serves reads to
+  // anyone, so a logged-out visitor lands here. What they are not shown is the
+  // VENDOR and that vendor's part number: a SKU shown without the vendor it
+  // belongs to gets pasted into the wrong order form, and naming the vendor is
+  // the disclosure this branch is not authorised to widen (op-3xsp). The
+  // kit's own unit cost is not in that set — a price is a number that came
+  // from a supplier, not the naming of one, and the kit list shows it to the
+  // same visitor one click earlier.
+  const [showSupplierAttribution] = useState<boolean>(isAuthenticated);
 
   // Scoped mutation state — never a page-level spinner.
   const [saving, setSaving] = useState(false);
@@ -156,6 +167,22 @@ const KitDetailPage: React.FC = () => {
     }
   };
 
+  // Whose terms the card below is showing, and who else stocks the kit. Read
+  // through `utils/supplierChoice` so this page words it the way every other
+  // supplier surface does, and so it re-derives nothing: the names, their
+  // order and the emptiness test are the server's answer, not this page's
+  // (op-3xsp).
+  //
+  // These are the OPERATOR readings — they name vendors — and `showSupplierAttribution`
+  // is the only thing keeping them off an anonymous screen. That gate does NOT
+  // cover the card: the Purchase terms heading and the Unit cost render for
+  // everyone. It covers exactly three things, and both values below are inside
+  // it at every use — the attribution note, the Supplier input and the Supplier
+  // SKU input. Rendering either one anywhere else in this card publishes the
+  // vendor names to a logged-out visitor.
+  const kitSupplierName = chosenSupplierName(kit?.supplier_choice);
+  const kitAlternativeText = alternativeSupplierNamesText(kit?.supplier_choice);
+
   if (loading) {
     return (
       <WorkspacePage
@@ -236,37 +263,68 @@ const KitDetailPage: React.FC = () => {
               What the supplier charges for one kit. This is the price that lands on the
               purchase-order line.
             </Text>
+            {/* Whose terms are on screen. Without it the SKU below is one
+                vendor's part number with no vendor attached — and a SKU gets
+                pasted into an order form, so an unattributed one is
+                actionable-wrong in a way an unattributed price is not
+                (op-3xsp). It ATTRIBUTES and nothing more: it does not fill
+                Supplier in, and it does not describe how to write. Changing
+                Supplier here is not a supported way to retarget these terms —
+                the save writes this vendor's SKU and price onto whichever
+                vendor the field names. */}
+            {showSupplierAttribution && kitSupplierName && (
+              <Text size="sm" c="dimmed" data-testid="kit-supplier-attribution">
+                Showing {kitSupplierName}&rsquo;s terms
+                {kitAlternativeText !== null &&
+                  ` — this kit is also stocked by ${kitAlternativeText}`}
+                .
+              </Text>
+            )}
             <Grid>
-              <Grid.Col span={{ base: 12, sm: 4 }}>
-                <TextInput
-                  label="Supplier"
-                  placeholder="Supplier id"
-                  value={supplierId === '' ? '' : String(supplierId)}
-                  onChange={(event) => {
-                    const next = event.currentTarget.value;
-                    setSupplierId(next === '' ? '' : Number(next));
-                  }}
-                  disabled={saving}
-                  list="kit-supplier-options"
-                  data-testid="kit-supplier"
-                />
-                <datalist id="kit-supplier-options">
-                  {suppliers.map((supplier) => (
-                    <option key={supplier.id} value={supplier.id}>
-                      {supplier.name}
-                    </option>
-                  ))}
-                </datalist>
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, sm: 4 }}>
-                <TextInput
-                  label="Supplier SKU"
-                  value={supplierSku}
-                  onChange={(event) => setSupplierSku(event.currentTarget.value)}
-                  disabled={saving}
-                  data-testid="kit-supplier-sku"
-                />
-              </Grid.Col>
+              {/* SIGNED-IN ONLY, and only these two. Neither route here is
+                  behind RequireAuth and KitViewSet serves reads publicly, so a
+                  logged-out visitor reaches this card — and the boundary this
+                  change draws is NAMING a supplier, with the kit SKU as the one
+                  explicit exception because it is traceable to a vendor. The
+                  Supplier box names one (its datalist lists every vendor by
+                  name); the SKU is that vendor's part number. Unit cost is
+                  neither: it is a number that came from a supplier, which the
+                  kit LIST has always shown anonymously, so withholding it here
+                  would make the two kit screens disagree about the same kit. */}
+              {showSupplierAttribution && (
+                <>
+                  <Grid.Col span={{ base: 12, sm: 4 }}>
+                    <TextInput
+                      label="Supplier"
+                      placeholder="Supplier id"
+                      value={supplierId === '' ? '' : String(supplierId)}
+                      onChange={(event) => {
+                        const next = event.currentTarget.value;
+                        setSupplierId(next === '' ? '' : Number(next));
+                      }}
+                      disabled={saving}
+                      list="kit-supplier-options"
+                      data-testid="kit-supplier"
+                    />
+                    <datalist id="kit-supplier-options">
+                      {suppliers.map((supplier) => (
+                        <option key={supplier.id} value={supplier.id}>
+                          {supplier.name}
+                        </option>
+                      ))}
+                    </datalist>
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, sm: 4 }}>
+                    <TextInput
+                      label="Supplier SKU"
+                      value={supplierSku}
+                      onChange={(event) => setSupplierSku(event.currentTarget.value)}
+                      disabled={saving}
+                      data-testid="kit-supplier-sku"
+                    />
+                  </Grid.Col>
+                </>
+              )}
               <Grid.Col span={{ base: 12, sm: 4 }}>
                 <NumberInput
                   label="Unit cost"

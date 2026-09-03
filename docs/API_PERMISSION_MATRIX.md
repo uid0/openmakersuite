@@ -93,7 +93,7 @@ below are public.
 | POST | `inventory/work-orders/<id>/upload/` | public | Upload a completed paper work-order PDF for ingest. | Required: PDF is signed by AcroForm field; rate-limit per-IP. |
 | GET  | `inventory/health/` | public | Inventory app health summary. | Not required. |
 | any  | `inventory/kits/...` (CRUD) | member-rw | `IsAuthenticatedOrReadOnly` — kit SKUs are a facade over the `is_kit=True` slice of `InventoryItem` (op-8n0), so they read as publicly as the items they contain and write requires login. The bill of materials is nested-writable on the kit; there is deliberately no `kit-components/` route. |
-| any  | `inventory/items/...` (CRUD) | member-rw | `IsAuthenticatedOrReadOnly` — list/retrieve open to anonymous callers, write requires login. Staff-level gating is enforced inside `perform_create/_update/_destroy` via `_check_staff()`. |
+| any  | `inventory/items/...` (CRUD) | member-rw | No class-level `permission_classes`; `InventoryItemViewSet.get_permissions` returns `AllowAny` for the public actions (`list`, `retrieve`, `metrics`, `low_stock` and the rest of that list) and `IsAuthenticated` for everything else — so list/retrieve are open to anonymous callers and write requires login. The YAML snapshots the declared attribute and so records the settings default for these actions; `get_permissions` is what governs. Staff-level gating is enforced inside `perform_create/_update/_destroy` via `_check_staff()`. |
 | GET  | `inventory/items/<id>/stock_history/` | member | `IsAuthenticated` on `stock_history` (op-izy5) — weekly `StockLevelSnapshot` series plus reorder-request and cycle-count (`StockReconciliation`) event overlays and the reorder-point/desired thresholds, powering the item Stock-History chart. Auth-required (unlike the public `metrics`/`retrieve` reads) because it surfaces reorder + reconciliation history. | Not required (read). |
 | POST | `inventory/items/<id>/pack-container/` | member | `IsAuthenticated` on `pack_container` (op-ev14) — the two container moves of an `open_closed` item: `{"transition": "open"}` breaks into a sealed pack (stock down one pack's base units, open tally up one, a `UsageLog` written) and `{"transition": "finish"}` retires the emptied one (open tally down one, stock untouched). Auth-required rather than following the public `log_usage` path, since it is a new capability and `log_usage` remains the anonymous way to record consumption. 400 for a non-`open_closed` item, no sealed pack left, or no open pack. | Not required (mutates one item's own stock; no cross-item effects). |
 | GET  | `inventory/items/<id>/purchase_history/` | member | `IsAuthenticated` on `purchase_history` (op-96uo) — the item's order + receipt provenance: one `order_costs` row per `PurchaseOrderItem` (unit cost the order was placed at) and one `deliveries` row per `DeliveryItem` (tracking number, carrier, quantity, receipt notes). Auth-required (unlike the public `metrics`/`retrieve` reads) because it surfaces supplier pricing and shipment history. | Not required (read). |
@@ -115,6 +115,44 @@ below are public.
 | any  | `inventory/serialized-components/...` (CRUD + `receive/install/remove/consume/retire/dispose` + `scan_receive`) | staff-or-sig-admin | `IsAuthenticatedOrStaffSigAdminWrite` on `SerializedComponentViewSet` — any authenticated user can read; staff and SIG leaders create/update/delete and drive lifecycle transitions. Transitions are validated against the item's `serial_tracking_mode` and each writes a `ComponentUsageEvent`. `scan_receive` (POST, detail=False) idempotently create-and-receives a scanned serial (no PO required) so batch web/ScanTTY scanning tolerates double-scans. |
 | GET  | `inventory/component-usage-events/...` | member | `IsAuthenticatedOrStaffSigAdminWrite` on the read-only `ComponentUsageEventViewSet` — authenticated read of the per-unit usage/audit log (written as a side effect of lifecycle actions). |
 | GET  | `inventory/reports/inventory/...` (`stock_by_category`, `reorder_frequency`, `value_by_location`, `serialized_forecast`, `export`) | member | `IsAuthenticated` on `InventoryReportViewSet` — read-only analytics. `serialized_forecast` is the mode-aware consumption forecast + low-stock report for serialized components (consumables deplete on `consume`; reusables only on `retire`/`dispose`), exposing `avg_daily_use`, `days_until_stockout`, and `reorder_point` for the inventory + purchasing overview dashboards. The lead time is the wait at the supplier we would actually buy from (`LeadTimeLog` against that link, else its `average_lead_time`), falling back to every link when none is orderable so an item whose vendors all died keeps its threshold (op-3vqk). Each row carries `lead_time_known` — `false` only for an item with no supplier link, where `reorder_point` is the safety stock alone, a lower bound rather than a full horizon — and `lead_time_basis` (`orderable_supplier` / `unorderable_supplier` / `no_supplier`) saying whose wait the number describes. |
+
+### Field-level withholding: `supplier_choice` (op-3xsp)
+
+`supplier_choice` is served by `InventoryItemSerializer`, so it appears on
+EVERY path that renders an item or a kit: `inventory/items/` (list),
+`inventory/items/<id>/`, `inventory/kits/` (list), `inventory/kits/<id>/`,
+and the nested `item_details` on the reorder-queue payloads.
+
+`SupplierChoiceSerializer` OMITS four keys from an unauthenticated caller on
+all of them — `basis`, `flagged_primary_unorderable`, `scored_without_price`
+and `scored_without_history` — because they describe HOW the derivation reached
+its answer and are addressed to whoever maintains the supplier links. Omitted
+rather than nulled: a null `scored_without_price` is a claim about the item, an
+absent one is a statement about the reader. The four are declared
+`required=False`, so the published OpenAPI document says they are optional.
+`supplier_name`, `item_supplier_id`, `reason` and `alternatives` are served to
+everyone — every name in `alternatives` is already in `suppliers[]` on the same
+payload, so hiding one while the other sits beside it would look like a
+protection and be none.
+
+The audience is decided from `context["request"]` and FAILS CLOSED: a serializer
+built without context serves the narrow form. A view that hand-builds
+`InventoryItemSerializer` (or anything nesting it, such as
+`ReorderRequestSerializer`) MUST pass `self.get_serializer_context()`, or it
+silently hands an operator the anonymous view — a real defect fixed in
+`reorder_queue/views.py` when this field shipped.
+
+**Every other anonymous protection around supplier attribution is CLIENT-SIDE
+ONLY.** The React gates on the item, scan and kit pages narrow what a visitor is
+handed, not what a client can fetch: `InventoryItemViewSet.get_permissions`
+returns `AllowAny` for `list`/`retrieve` (the class default snapshotted in the
+YAML never governs those reads) and `KitViewSet` is `IsAuthenticatedOrReadOnly`,
+so both serve reads to anonymous callers, and `suppliers[]` on the same payload
+still carries every vendor name, SKU, UPC, cost and lead time to an
+unauthenticated caller. That posture predates op-3xsp, is documented in-code at
+`InventoryItemDetailPage.tsx` as a deliberately partial gate, and is not closed
+here. Do not describe those browser gates as if they protected data.
+
 
 ## Membership (`/api/membership/`)
 

@@ -45,6 +45,19 @@ describe('ScanPage', () => {
     supplier: null,
     supplier_sku: '',
     supplier_url: '',
+    // The supplier block reads `supplier_choice`, not the flat `supplier_name`
+    // above (op-3xsp). Both are kept on the fixture: the flat keys are
+    // deliberately still served, and several tests below still exercise them.
+    supplier_choice: {
+      item_supplier_id: 1,
+      supplier_name: 'Test Supplier',
+      basis: 'best_scored',
+      reason: null,
+      flagged_primary_unorderable: false,
+      scored_without_price: false,
+      scored_without_history: false,
+      alternatives: [],
+    },
   };
 
   beforeEach(() => {
@@ -98,7 +111,9 @@ describe('ScanPage', () => {
     expect(screen.getByText(/shelf a/i)).toBeInTheDocument();
     expect(screen.getByText(/current stock:/i)).toBeInTheDocument();
     expect(screen.getByText(/reorder quantity:/i)).toBeInTheDocument();
-    expect(screen.getByText(/average lead time:/i)).toBeInTheDocument();
+    // The lead time is the CHOSEN supplier's quoted wait, and the block says so.
+    expect(screen.getByText(/their lead time:/i)).toBeInTheDocument();
+    expect(screen.getByText(/we order this from:/i)).toBeInTheDocument();
   });
 
   // op-c1ke: `current_cases` is null when nothing records how many units a case
@@ -615,7 +630,9 @@ describe('ScanPage', () => {
     await screen.findByText('Test Widget');
   };
 
-  const unitCostRow = () => screen.getByText('Unit Cost:').parentElement as HTMLElement;
+  // The row is now labelled as the CHOSEN supplier's price rather than the
+  // item's (op-3xsp); every op-9m2v assertion below is unchanged.
+  const unitCostRow = () => screen.getByText('Their Unit Cost:').parentElement as HTMLElement;
 
   test('BEFORE/AFTER: a donated item is priced $0.00, not dropped or shown as "0"', async () => {
     await renderItemPriced(0);
@@ -644,5 +661,283 @@ describe('ScanPage', () => {
 
     // The row rendered `${item.unit_cost}` raw, so 5.1 read as "$5.1".
     expect(unitCostRow()).toHaveTextContent('$5.10');
+  });
+
+  // --- One supplier is not THE supplier (op-3xsp) -------------------------
+  // This block rendered `item.supplier_name` — the read-only legacy accessor —
+  // under a bare "Supplier:" label, with the lead time and unit cost beside it
+  // reading as the item's own numbers. An item stocked by three vendors showed
+  // exactly one name and a member had no way to tell there were others, nor
+  // that the choice had been made without a price on file.
+
+  const renderWithChoice = async (choice: Record<string, unknown> | undefined) => {
+    localStorage.setItem('token', 'test-token');
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, supplier_choice: choice },
+    });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+    await renderWithRouter();
+    await screen.findByText('Test Widget');
+  };
+
+  const baseChoice = {
+    item_supplier_id: 1,
+    supplier_name: 'Acme Supplies',
+    basis: 'best_scored',
+    reason: null,
+    flagged_primary_unorderable: false,
+    scored_without_price: false,
+    scored_without_history: false,
+    alternatives: [],
+  };
+
+  test('BEFORE/AFTER: names the derived supplier, not the legacy accessor', async () => {
+    localStorage.setItem('token', 'test-token');
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockItem,
+        // Set apart so the assertion can only pass by reading the right key.
+        supplier_name: 'Legacy Accessor Co.',
+        supplier_choice: { ...baseChoice, supplier_name: 'Derived Supply Co.' },
+      },
+    });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({ data: { results: [] } });
+    await renderWithRouter();
+    await screen.findByText('Test Widget');
+
+    expect(screen.getByTestId('supplier-choice-name')).toHaveTextContent('Derived Supply Co.');
+    expect(screen.queryByText('Legacy Accessor Co.')).not.toBeInTheDocument();
+  });
+
+  test('BEFORE/AFTER: an item with three suppliers does not read as having one', async () => {
+    await renderWithChoice({
+      ...baseChoice,
+      alternatives: [
+        { id: 2, supplier_name: 'Beta Parts' },
+        { id: 3, supplier_name: 'Gamma Wholesale' },
+      ],
+    });
+
+    expect(screen.getByTestId('supplier-choice-alternatives')).toHaveTextContent(
+      'also available from Beta Parts, Gamma Wholesale'
+    );
+  });
+
+  test('a sole supplier gets no phantom alternatives line', async () => {
+    await renderWithChoice(baseChoice);
+
+    expect(screen.queryByTestId('supplier-choice-alternatives')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('supplier-choice-note')).not.toBeInTheDocument();
+  });
+
+  test('a choice made without a price says so beside the blank cost', async () => {
+    await renderWithChoice({ ...baseChoice, scored_without_price: true });
+
+    expect(screen.getByTestId('supplier-choice-note')).toHaveTextContent(
+      'chosen without a price on file'
+    );
+  });
+
+  test('a skipped flagged primary is said out loud', async () => {
+    await renderWithChoice({ ...baseChoice, flagged_primary_unorderable: true });
+
+    expect(screen.getByTestId('supplier-choice-note')).toHaveTextContent(
+      /flagged primary supplier cannot be ordered from/i
+    );
+  });
+
+  test('an item with nothing buyable says which kind of nothing it is', async () => {
+    await renderWithChoice({
+      ...baseChoice,
+      supplier_name: null,
+      item_supplier_id: null,
+      basis: null,
+      reason: 'none_orderable',
+    });
+
+    expect(screen.getByTestId('supplier-choice-note')).toHaveTextContent(
+      /inactive or discontinued/i
+    );
+    // And no supplier name, no lead time and no price are quoted for a vendor
+    // that does not exist — the old block rendered a bare " days" here.
+    expect(screen.queryByTestId('supplier-choice-name')).not.toBeInTheDocument();
+    expect(screen.queryByText('Their Lead Time:')).not.toBeInTheDocument();
+    expect(screen.queryByText('Their Unit Cost:')).not.toBeInTheDocument();
+  });
+
+  test('a payload with no supplier_choice says so rather than inventing one', async () => {
+    await renderWithChoice(undefined);
+
+    expect(screen.getByTestId('supplier-choice-note')).toHaveTextContent(
+      /was not included in this response/i
+    );
+  });
+
+  // --- The anonymous scanner learns nothing about the alternatives ---------
+  // This route is not behind RequireAuth. A logged-out visitor always saw ONE
+  // supplier name here, with the lead time and the price beside it, and keeps
+  // all three — that is the whole of what this route grants them. They must
+  // gain neither the roster of every vendor that stocks the item NOR a count
+  // of it: a count is authorised on the item detail page and nowhere else, and
+  // "exactly what they saw before this branch" carried no sign that any other
+  // vendor existed. Widening anonymous disclosure is not this change's to
+  // authorise, by analogy to a nearby surface or otherwise.
+
+  const renderAnonymouslyWithChoice = async (choice: Record<string, unknown>) => {
+    localStorage.removeItem('token');
+    // A failed auto-submit is the ONLY anonymous state that renders the item
+    // block: `has_pending_reorder` short-circuits to the "already requested"
+    // screen, and a successful submit redirects to /thanks. It does not settle
+    // — the retry loop documented on the effect in ScanPage.tsx keeps running
+    // underneath these assertions until the component unmounts. That loop is a
+    // pre-existing defect being filed separately; nothing below asserts on it.
+    (api.reorderAPI.createRequest as jest.Mock).mockRejectedValue(new Error('offline'));
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, supplier_choice: choice },
+    });
+    await renderWithRouter();
+    await screen.findByText('Test Widget');
+  };
+
+  const threeSuppliers = {
+    ...baseChoice,
+    alternatives: [
+      { id: 2, supplier_name: 'Beta Parts' },
+      { id: 3, supplier_name: 'Gamma Wholesale' },
+    ],
+  };
+
+  test('BEFORE/AFTER: a logged-out scanner is not told who the other vendors are', async () => {
+    await renderAnonymouslyWithChoice(threeSuppliers);
+
+    expect(screen.queryByText(/Beta Parts/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Gamma Wholesale/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('supplier-choice-alternatives')).not.toBeInTheDocument();
+  });
+
+  test('BEFORE/AFTER: a logged-out scanner is not told that other vendors exist at all', async () => {
+    await renderAnonymouslyWithChoice(threeSuppliers);
+
+    // Not the names, and not the count that stood in for them either. The
+    // whole supplier block must read as it did before `supplier_choice`
+    // existed: one vendor, its lead time, its price.
+    expect(screen.queryByTestId('supplier-choice-alternative-count')).not.toBeInTheDocument();
+    expect(screen.queryByText(/other supplier/i)).not.toBeInTheDocument();
+    // The whole row, label included — nothing trails the chosen name.
+    expect(screen.getByTestId('supplier-choice-name').textContent).toBe(
+      'We order this from:Acme Supplies'
+    );
+  });
+
+  test('a logged-out scanner with exactly one other supplier is told nothing either', async () => {
+    await renderAnonymouslyWithChoice({
+      ...baseChoice,
+      alternatives: [{ id: 2, supplier_name: 'Beta Parts' }],
+    });
+
+    expect(screen.queryByText(/Beta Parts/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/also stocks this item/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('supplier-choice-alternative-count')).not.toBeInTheDocument();
+  });
+
+  // Gating the alternatives must not NARROW what a logged-out visitor already
+  // had: the chosen supplier's own name, its lead time and its unit cost.
+  test('CONTROL: the chosen supplier, lead time and cost stay visible anonymously', async () => {
+    await renderAnonymouslyWithChoice(threeSuppliers);
+
+    expect(screen.getByTestId('supplier-choice-name')).toHaveTextContent('Acme Supplies');
+    expect(screen.getByText('Their Lead Time:')).toBeInTheDocument();
+    expect(screen.getByText('Their Unit Cost:')).toBeInTheDocument();
+  });
+
+  test('CONTROL: a signed-in operator still gets the names', async () => {
+    await renderWithChoice(threeSuppliers);
+
+    expect(screen.getByTestId('supplier-choice-alternatives')).toHaveTextContent(
+      'also available from Beta Parts, Gamma Wholesale'
+    );
+  });
+
+  // --- The note has an audience too ---------------------------------------
+  // The three caveats describe the DERIVATION and are addressed to whoever
+  // maintains the supplier links: a logged-out member has no flagged primary,
+  // and cannot order at all. What they keep is the half they can act on —
+  // that there is nothing to order — worded to name no vendor.
+
+  test('BEFORE/AFTER: a logged-out scanner is told none of the operator caveats', async () => {
+    await renderAnonymouslyWithChoice({
+      ...baseChoice,
+      scored_without_price: true,
+      scored_without_history: true,
+      flagged_primary_unorderable: true,
+    });
+
+    expect(screen.queryByTestId('supplier-choice-note')).not.toBeInTheDocument();
+    expect(screen.queryByText(/no price on file/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/delivery history/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/flagged primary/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Before you order/i)).not.toBeInTheDocument();
+  });
+
+  test('CONTROL: the caveated item still shows its supplier, lead time and cost', async () => {
+    await renderAnonymouslyWithChoice({
+      ...baseChoice,
+      scored_without_price: true,
+      flagged_primary_unorderable: true,
+    });
+
+    expect(screen.getByTestId('supplier-choice-name')).toHaveTextContent('Acme Supplies');
+    expect(screen.getByText('Their Lead Time:')).toBeInTheDocument();
+    expect(screen.getByText('Their Unit Cost:')).toBeInTheDocument();
+  });
+
+  test('BEFORE/AFTER: an unorderable item still says so, in the member\'s words', async () => {
+    await renderAnonymouslyWithChoice({
+      ...baseChoice,
+      supplier_name: null,
+      item_supplier_id: null,
+      basis: null,
+      reason: 'none_orderable',
+    });
+
+    const note = screen.getByTestId('supplier-choice-note');
+    expect(note).toHaveTextContent('This item cannot currently be ordered.');
+    // The operator wording describes the LINKS; a member learns none of that.
+    expect(note).not.toHaveTextContent(/inactive|discontinued|flagged|primary/i);
+    expect(note).not.toHaveTextContent(/Acme|Beta|Gamma/);
+  });
+
+  test('an item nobody sourced is told apart from one whose sources are dead', async () => {
+    await renderAnonymouslyWithChoice({
+      ...baseChoice,
+      supplier_name: null,
+      item_supplier_id: null,
+      basis: null,
+      reason: 'no_suppliers',
+    });
+
+    expect(screen.getByTestId('supplier-choice-note')).toHaveTextContent(
+      'No supplier is listed for this item.'
+    );
+  });
+
+  test('a payload missing the field says nothing to a logged-out visitor', async () => {
+    await renderAnonymouslyWithChoice(undefined as unknown as Record<string, unknown>);
+
+    expect(screen.queryByTestId('supplier-choice-note')).not.toBeInTheDocument();
+  });
+
+  test('CONTROL: a signed-in operator still gets every caveat', async () => {
+    await renderWithChoice({
+      ...baseChoice,
+      scored_without_price: true,
+      flagged_primary_unorderable: true,
+    });
+
+    const note = screen.getByTestId('supplier-choice-note');
+    expect(note).toHaveTextContent('chosen without a price on file');
+    expect(note).toHaveTextContent(/flagged primary supplier cannot be ordered from/);
   });
 });

@@ -151,7 +151,33 @@ Ask `select_supplier` / `select_suppliers_for` when you must explain yourself to
 an operator: they separate `NO_SUPPLIERS` from `NONE_ORDERABLE`, which are
 different facts needing different actions, and flag when the operator's own
 choice was the row that got skipped. `primary_item_supplier` is the same answer
-with the reason dropped.
+with the reason dropped. The memo lives on `InventoryItem.supplier_choice` (the
+whole `SupplierChoice`), and `primary_item_supplier` reads through it, so asking
+for the reason as well as the row is ONE resolution.
+
+**A surface that NAMES a supplier reads `supplier_choice`, never the flat
+`supplier_name` (op-3xsp).** The flat key is the same winner with the derivation
+thrown away: it cannot say what else was on offer, that the scoring knew no price
+for this one, or that the operator's flagged primary was skipped — which is how
+an item with three sources came to render as an item with one on the scan page,
+the reorder queue, the item page and the CSV export that leaves the system and
+gets ordered from.
+
+The boundary is NAMING a supplier, not showing a number that came from one, so a
+price column attributes nothing and is governed by op-9m2v instead. A SKU is the
+one exception, and not a close call: a part number gets PASTED INTO A VENDOR'S
+ORDER FORM, so an unattributed one is actionable-wrong in a way an unattributed
+price is not. Reading the same key is not always the same question either — a
+form that EDITS one relationship, a report grouped by the supplier an order
+ACTUALLY went to, and a scan that matched one vendor's barcode are legitimately
+singular and are NOT on this rule.
+
+The seven flat compat fields stay. The `InventoryItemSerializer` comment names
+each remaining reader with the surface it lives on and is the record of who
+still needs them; check it there rather than restating it here. The web words
+the whole choice in ONE place, `frontend/src/utils/supplierChoice.ts`. What any
+of it exposes to an unauthenticated caller is in
+`docs/API_PERMISSION_MATRIX.md`.
 
 Filtering happens in Python, on `item_suppliers.all()`, so the prefetch cache
 still serves it — a fresh `.filter()` reintroduces the per-row N+1 that #882

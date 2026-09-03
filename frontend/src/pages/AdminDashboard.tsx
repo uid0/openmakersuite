@@ -22,6 +22,11 @@ import '../styles/AdminDashboard.css';
 import { Asset, InventoryItem, ReorderRequest } from '../types';
 import { formatDateOnly, parseYmd } from '../utils/dates';
 import { promptInput, showError, showSuccess } from '../utils/dialogs';
+import {
+  chosenSupplierName,
+  supplierChoiceNote,
+  supplierChoiceSummary,
+} from '../utils/supplierChoice';
 
 interface UpdateTrackingValues {
   trackingNumber: string;
@@ -394,6 +399,13 @@ const AdminDashboard: React.FC = () => {
               ) : (
                 requests.map((request) => {
                   const rowPending = isRowPending(request.id);
+                  // The supplier this request would be ordered from, out of
+                  // however many the item has, and whatever qualifies that
+                  // answer (op-3xsp). Read once per row through the web's one
+                  // reading of `supplier_choice`.
+                  const supplierChoice = request.item_details.supplier_choice;
+                  const supplierLine = supplierChoiceSummary(supplierChoice);
+                  const supplierNote = supplierChoiceNote(supplierChoice);
                   return (
                   <tr
                     key={request.id}
@@ -412,9 +424,26 @@ const AdminDashboard: React.FC = () => {
                         )}
                         <div>
                           <div className="item-name">{request.item_details.name}</div>
-                          {request.item_details.supplier_name && (
-                            <div className="item-supplier">
-                              {request.item_details.supplier_name}
+                          {/* This line was the flat `supplier_name`, which
+                              named one supplier and said nothing about the
+                              other four — on the screen where the ordering
+                              decision is actually taken. The summary adds "or
+                              N others"; the note adds why the choice might
+                              need checking before it is approved. */}
+                          {supplierLine && (
+                            <div
+                              className="item-supplier"
+                              data-testid={`reorder-supplier-${request.id}`}
+                            >
+                              {supplierLine}
+                            </div>
+                          )}
+                          {supplierNote && (
+                            <div
+                              className="item-supplier-note"
+                              data-testid={`reorder-supplier-note-${request.id}`}
+                            >
+                              <small>{supplierNote}</small>
                             </div>
                           )}
 
@@ -491,7 +520,16 @@ const AdminDashboard: React.FC = () => {
                         ? `$${parseFloat(request.estimated_cost).toFixed(2)}`
                         : '-'}
                     </td>
-                    <td>{request.item_details.average_lead_time} days</td>
+                    {/* Lead Time is the CHOSEN supplier's quoted wait, not the
+                        item's — the flat `average_lead_time` rendered it as an
+                        item fact, and " days" with nothing before it whenever
+                        there was no supplier to buy from. It is now shown only
+                        beside a supplier the server actually named (op-3xsp). */}
+                    <td data-testid={`reorder-lead-time-${request.id}`}>
+                      {chosenSupplierName(supplierChoice) === null
+                        ? '—'
+                        : `${request.item_details.average_lead_time} days`}
+                    </td>
                     <td>
                       <div className="action-buttons">
                         {request.status === 'pending' && (

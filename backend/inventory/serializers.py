@@ -8,6 +8,7 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 # The asset's breaker/disconnect FKs live on facilities.AssetSiteRequirements
@@ -329,7 +330,7 @@ class SupplierDetailSerializer(SupplierSerializer):
                 .prefetch_related("work_order__asset_problems", "items__owning_group")
                 .order_by("-order_date")[:50]
             )
-            return PurchaseOrderSerializer(orders, many=True).data
+            return PurchaseOrderSerializer(orders, many=True, context=self.context).data
         except ImportError:
             return []
 
@@ -553,17 +554,197 @@ class PackagingLevelSerializer(serializers.ModelSerializer):
         return int(ratio) if ratio.is_integer() else ratio
 
 
+class SupplierChoiceAlternativeSerializer(serializers.Serializer):
+    """One supplier that was on offer and did not win.
+
+    Deliberately just the identity: a surface uses this to say "and two others",
+    or to name them, not to quote a second price. The full row for any of them
+    is in ``suppliers[]`` under the same ``id``.
+    """
+
+    id = serializers.IntegerField()
+    supplier_name = serializers.CharField()
+
+
+class SupplierChoiceSerializer(serializers.Serializer):
+    """Which supplier we would buy this item from, and why that one (op-3xsp).
+
+    The wire form of
+    :class:`~inventory.services.supplier_selection.SupplierChoice`, and the
+    field every surface that NAMES a supplier is meant to read. The flat
+    ``supplier_name`` beside it is the same winner with the derivation thrown
+    away, which is what made "this item has three suppliers" render as "this
+    item's supplier is Acme" on a scan screen, a reorder queue and an exported
+    CSV somebody then ordered from.
+
+    The three honesty fields are the point of the object, not decoration:
+
+    * ``alternatives`` — everything else that could have been bought from. A
+      surface with room says "Acme, or 2 others"; one without at least stops
+      implying there was nothing else.
+    * ``scored_without_price`` / ``scored_without_history`` — the scoring
+      punishes NEITHER gap (see the service), so the winner can have won while
+      nobody knew its price or whether it has ever delivered. An operator
+      reading a blank cost cell cannot tell that from "no supplier at all"
+      unless it is said.
+    * ``flagged_primary_unorderable`` — the operator flagged one and it was
+      skipped as unbuyable, which reads to them as their choice being ignored.
+
+    ``reason`` is set (and ``supplier_name`` null) exactly when there is nothing
+    to buy from: ``no_suppliers`` versus ``none_orderable``, which need
+    different words and different actions from an operator.
+
+    ADDITIVE on the wire: nothing here replaces or renames an existing key, so
+    a client that has never heard of it — ScanTTY decodes item JSON into a
+    struct without ``DisallowUnknownFields`` — is unaffected.
+
+    NOT THE SAME OBJECT FOR EVERYONE. ``InventoryItemViewSet`` declares no
+    ``permission_classes`` at all — its ``get_permissions`` returns
+    ``AllowAny`` for the public actions (``list``, ``retrieve``, ``metrics``,
+    ``low_stock`` and the rest of that list) — and ``KitViewSet`` sets
+    ``permission_classes = [IsAuthenticatedOrReadOnly]``. So either one serves
+    a read to an anonymous caller: this renders for logged-out callers too, and
+    the four keys in
+    :attr:`OPERATOR_ONLY_FIELDS` are OMITTED for them — see that attribute for
+    which and why. Omitted, not nulled: a null ``scored_without_price`` is a
+    claim about the item, an absent one is a statement about the reader.
+    """
+
+    # Declared for the shape only — drf-spectacular reads these to build the
+    # OpenAPI schema, and ``to_representation`` below is what actually runs.
+    # The reading is not automatic: ``supplier_choice`` is a
+    # ``SerializerMethodField``, which spectacular types as an untyped object
+    # unless the getter carries ``@extend_schema_field(SupplierChoiceSerializer)``
+    # — so that decorator is what makes the sentence above true, and
+    # ``config/tests/test_schema.py`` asserts the generated document says so.
+    # No ``source="item_supplier.supplier.name"`` here, because DRF's dotted
+    # source RAISES rather than yielding ``null`` when an intermediate is
+    # ``None`` — and ``item_supplier`` is ``None`` for exactly the case this
+    # object exists to describe.
+    item_supplier_id = serializers.IntegerField(allow_null=True)
+    supplier_name = serializers.CharField(allow_null=True)
+    reason = serializers.CharField(allow_null=True)
+    alternatives = SupplierChoiceAlternativeSerializer(many=True)
+    # ``required=False`` is not about writes — this serializer is read-only and
+    # ``to_representation`` is fully overridden. It is what makes the published
+    # schema tell the truth: these four keys are ABSENT from an unauthenticated
+    # response, so a generated client must treat them as optional. A document
+    # promising a field the server does not always send is the same defect this
+    # object exists to close.
+    basis = serializers.CharField(allow_null=True, required=False)
+    flagged_primary_unorderable = serializers.BooleanField(required=False)
+    scored_without_price = serializers.BooleanField(required=False)
+    scored_without_history = serializers.BooleanField(required=False)
+
+    #: Keys served only to a signed-in caller.
+    #:
+    #: These four describe HOW the derivation reached its answer, and they are
+    #: addressed to whoever maintains the supplier links: "your flagged primary
+    #: cannot be ordered from" means nothing to a member who has no flagged
+    #: primary and no way to order. The web already withholds them from a
+    #: logged-out visitor on every surface; without this they were still one
+    #: network-tab glance away, which makes those gates a courtesy rather than a
+    #: boundary.
+    #:
+    #: Deliberately NOT here: ``supplier_name``, ``item_supplier_id``,
+    #: ``reason`` and ``alternatives``. Every supplier name in ``alternatives``
+    #: is already in ``suppliers[]`` on this same payload, alongside its SKU,
+    #: UPCs, cost and lead time, and that array predates this field. Hiding one
+    #: while the other sits beside it would look like a protection and be none.
+    OPERATOR_ONLY_FIELDS = (
+        "basis",
+        "flagged_primary_unorderable",
+        "scored_without_price",
+        "scored_without_history",
+    )
+
+    def _serves_operator_detail(self) -> bool:
+        """Whether this render may carry the derivation metadata.
+
+        FAILS CLOSED. A serializer with no ``request`` in context — a shell, a
+        management command, a nested render somebody built by hand — has not
+        proven anybody is authenticated, so it gets the restricted form.
+        """
+        user = getattr(self.context.get("request"), "user", None)
+        return bool(user and user.is_authenticated)
+
+    def to_representation(self, instance):
+        """Flatten the choice, tolerating the no-supplier case (see above)."""
+        link = instance.item_supplier
+        data = {
+            "item_supplier_id": link.id if link else None,
+            "supplier_name": link.supplier.name if link else None,
+            "basis": instance.basis,
+            "reason": instance.reason,
+            "flagged_primary_unorderable": instance.flagged_primary_unorderable,
+            "scored_without_price": instance.scored_without_price,
+            "scored_without_history": instance.scored_without_history,
+            "alternatives": [
+                {"id": other.id, "supplier_name": other.supplier.name}
+                for other in instance.alternatives
+            ],
+        }
+        if not self._serves_operator_detail():
+            for field in self.OPERATOR_ONLY_FIELDS:
+                data.pop(field)
+        return data
+
+
 class InventoryItemSerializer(serializers.ModelSerializer):
     # Primary-supplier compat fields (issue #882). ``supplier_name`` here and the
     # flat ``supplier_sku`` / ``supplier_url`` / ``unit_cost`` / ``package_cost``
     # / ``quantity_per_package`` / ``average_lead_time`` keys listed in
     # ``Meta.fields`` are READ-ONLY legacy accessors for the item's primary
-    # supplier, superseded by the ``suppliers[]`` array (below) and the
-    # ``/metrics/`` (``?with_metrics=1``) endpoint. They are retained because
-    # ScanTTY's detail screen reads all of them and the web reads four; a future
-    # hard-removal needs coordinated ScanTTY + web changes. They resolve through
-    # the prefetch-friendly ``InventoryItem.primary_item_supplier`` so serialising
-    # a page no longer costs a query per row.
+    # supplier, superseded by the ``suppliers[]`` array (below), the
+    # ``supplier_choice`` object (below) and the ``/metrics/``
+    # (``?with_metrics=1``) endpoint. They are retained because ScanTTY's detail
+    # screen reads all seven of them (``internal/tui/inventory_detail.go``) and
+    # the web reads FOUR. Each reader below was confirmed by opening the call
+    # site: a read only counts here when the object is an ``InventoryItem`` (or
+    # ``Kit``) payload from THIS serializer. Reads off an ``ItemSupplier`` row
+    # (``suppliers[]``, ``SupplierRelationshipForm``) are that row's own
+    # columns, and the order pad's look-alike keys are built per
+    # ``item_supplier`` in ``reorder_queue/views.py:by_supplier`` — neither is
+    # this field.
+    #
+    #   * ``supplier_sku``      — the kit list's SKU cell and the "From" column
+    #                             that attributes it (``KitListPage.tsx``), and
+    #                             the kit form's SKU box (``KitDetailPage.tsx``,
+    #                             ``applyKit``). ``KitSerializer`` subclasses
+    #                             this one, so ``kit.supplier_sku`` IS the flat
+    #                             accessor. Both are gated to signed-in viewers,
+    #                             which changes who may see it, not who reads it;
+    #   * ``supplier_url``      — the "View on <supplier>" link on the admin
+    #                             dashboard's by-supplier order pad
+    #                             (``AdminDashboard.tsx``, via
+    #                             ``request.item_details``);
+    #   * ``unit_cost``         — every price rendered as a number rather than
+    #                             as a named supplier's price (op-9m2v): the
+    #                             item detail card and its cost widget, the
+    #                             inventory list and table, the kit list and kit
+    #                             form, the scan page's cost row, the inventory
+    #                             CSV export, and the work order material picker;
+    #   * ``average_lead_time`` — the wait quoted beside a supplier the surface
+    #                             has already named from ``supplier_choice``:
+    #                             the scan page's info block and the admin
+    #                             dashboard's Lead Time column.
+    #
+    # ``supplier_name`` had no web reader left after op-3xsp — the scan page,
+    # the inventory CSV export, the reorder queue and the item page's anonymous
+    # block all moved onto ``supplier_choice``. ``package_cost`` and
+    # ``quantity_per_package`` have none either; the web reads those off
+    # ``suppliers[]`` and the order pad. ScanTTY still reads all seven, so they
+    # all stay. A future hard-removal needs coordinated ScanTTY + web changes.
+    # They resolve through the prefetch-friendly
+    # ``InventoryItem.primary_item_supplier`` so serialising a page no longer
+    # costs a query per row.
+    #
+    # What they cannot say is the reason. A flat name is the winner of a
+    # three-step derivation with the derivation thrown away: it cannot report
+    # that four other suppliers were on offer, that the scoring picked this one
+    # without knowing a price for it, or that the operator's own flagged primary
+    # was skipped as unbuyable. Surfaces that NAME a supplier read
+    # ``supplier_choice`` for exactly that reason (op-3xsp).
     supplier_name = serializers.SerializerMethodField()
     category_name = serializers.CharField(source="category.name", read_only=True)
 
@@ -587,6 +768,36 @@ class InventoryItemSerializer(serializers.ModelSerializer):
 
     # Complete supplier information array
     suppliers = ItemSupplierSerializer(source="item_suppliers", many=True, read_only=True)
+
+    # Which supplier we would buy this item from, AND why that one (op-3xsp).
+    # See :class:`SupplierChoiceSerializer`.
+    #
+    # THIS SERIALIZER NEEDS ``context``. The audience for the four operator-only
+    # keys is read off ``context["request"].user`` and FAILS CLOSED, so anything
+    # that builds this serializer — or any serializer that nests it, however
+    # deep — by hand rather than through ``get_serializer()`` must pass
+    # ``context=self.get_serializer_context()`` (a view) or ``context=self.context``
+    # (a parent serializer's method field). Omitting it does not raise: it
+    # quietly hands an authenticated operator the anonymous view, dropping the
+    # very caveats this field exists to deliver. DRF supplies context to a
+    # DECLARED nested field automatically; the hand-built call is the one to
+    # watch.
+    supplier_choice = serializers.SerializerMethodField()
+
+    @extend_schema_field(SupplierChoiceSerializer)
+    def get_supplier_choice(self, obj):
+        """Serialise ``InventoryItem.supplier_choice``.
+
+        Costs no query beyond the one the flat compat fields already pay: the
+        choice is memoised on the instance, and rides the ``item_suppliers``
+        prefetch every read path here sets up.
+
+        ``context`` is forwarded because the nested serializer decides its own
+        AUDIENCE from ``request.user`` — a hand-built instance carries none, and
+        :meth:`SupplierChoiceSerializer._serves_operator_detail` fails closed,
+        so dropping this argument silently restricts every caller.
+        """
+        return SupplierChoiceSerializer(obj.supplier_choice, context=self.context).data
 
     # Reorder status and tracking fields
     reorder_status = serializers.CharField(read_only=True)
@@ -699,6 +910,8 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "qr_code",
             # Complete supplier array with all details
             "suppliers",
+            # The winner out of that array, and why it won (op-3xsp).
+            "supplier_choice",
             # Reorder status and tracking
             "reorder_status",
             "has_pending_reorder",

@@ -834,6 +834,23 @@ class InventoryItem(OwnableModel):
         return link.supplier if link else None
 
     @cached_property
+    def supplier_choice(self):
+        """The whole answer from :mod:`inventory.services.supplier_selection`.
+
+        :attr:`primary_item_supplier` is this with everything but the row thrown
+        away. The memo lives HERE rather than there so that a caller who needs
+        the reason — why this link, what else was on offer, whether the scoring
+        knew a price for it — pays nothing extra for asking: reading the seven
+        flat compat properties and reading the reason beside them is one
+        resolution, not two. Returns a
+        :class:`~inventory.services.supplier_selection.SupplierChoice`, which is
+        falsey when there is no supplier to buy from.
+        """
+        from inventory.services.supplier_selection import select_supplier
+
+        return select_supplier(self)
+
+    @property
     def primary_item_supplier(self) -> Optional["ItemSupplier"]:
         """The supplier relationship to BUY this item through, or ``None``.
 
@@ -867,13 +884,11 @@ class InventoryItem(OwnableModel):
         :func:`~inventory.services.supplier_selection.item_suppliers_prefetch`,
         which also carries the delivery-record annotations the score reads), so
         serialising the seven flat compat fields across a page costs ZERO extra
-        queries instead of an N+1. It is memoised per instance via
-        ``cached_property`` so reading all seven flats touches the database at
-        most once.
+        queries instead of an N+1. It is memoised per instance through
+        :attr:`supplier_choice` so reading all seven flats touches the database
+        at most once.
         """
-        from inventory.services.supplier_selection import primary_item_supplier
-
-        return primary_item_supplier(self)
+        return self.supplier_choice.item_supplier
 
     @property
     def supplier(self) -> Optional[Supplier]:

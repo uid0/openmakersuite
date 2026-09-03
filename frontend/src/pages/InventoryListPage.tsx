@@ -24,6 +24,7 @@ import { IconDownload, IconQrcode, IconSearch, IconSortAscending, IconSortDescen
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
+import { isAuthenticated } from '../components/RequireAuth';
 import { indexCardsAPI, inventoryAPI } from '../services/api';
 import { Category, InventoryItem, Location } from '../types';
 import { exportInventoryItemsToCSV } from '../utils/csvExport';
@@ -269,7 +270,13 @@ const InventoryListPage: React.FC = () => {
     try {
       const selected = items.filter((item) => selectedItems.has(item.id));
       const itemsToExport = selected.length > 0 ? selected : await fetchAllMatchingItems();
-      exportInventoryItemsToCSV(itemsToExport);
+      // This route is not behind RequireAuth and its list endpoint is AllowAny,
+      // so whoever pressed Export may be logged out. The export is a pure
+      // function that cannot look, so the audience is decided HERE, off the
+      // same `isAuthenticated` signal the other gated supplier surfaces use,
+      // and read at press time rather than at mount so a sign-in mid-visit is
+      // not exported against (op-3xsp).
+      exportInventoryItemsToCSV(itemsToExport, isAuthenticated() ? 'operator' : 'anonymous');
     } catch (err) {
       console.error('Error exporting items:', err);
       showError('Failed to export items. Please try again.');

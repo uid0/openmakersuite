@@ -13,6 +13,12 @@ import { formatDateOnly } from '../utils/dates';
 import { promptInput, showError } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 import { reorderQuantityLabel } from '../utils/packaging';
+import {
+  alternativeSupplierNamesText,
+  chosenSupplierName,
+  publicSupplierChoiceNote,
+  supplierChoiceNote,
+} from '../utils/supplierChoice';
 
 /** The page's one phrasing for a pack size it cannot count with. */
 const PACK_SIZE_UNKNOWN = '— (case size unknown)';
@@ -187,6 +193,16 @@ const ScanPage: React.FC = () => {
   };
 
   // Auto-submit reorder for non-logged users (only if no pending request exists)
+  //
+  // KNOWN DEFECT, pre-existing and deliberately out of scope for op-3xsp: the
+  // catch below clears `submitting`, which is itself a dependency, so a failed
+  // submit re-enters this effect for as long as the page is open. Measured in
+  // jsdom against a rejection delayed 5 ms: 19 calls to `reorderAPI.createRequest`
+  // in 150 ms. Latching it to one attempt was tried and reverted — an anonymous
+  // visitor has no manual submit path (`handleSubmitReorder` returns early on
+  // `!isLoggedIn` and the form below is `isLoggedIn`-gated), so a latch trades
+  // the retry storm for a silently dropped reorder. Which of the two is worse
+  // is a product decision this change is not authorised to make.
   useEffect(() => {
     const autoSubmitReorder = async () => {
       if (!isLoggedIn && item && !submitting && !submitted) {
@@ -286,6 +302,24 @@ const ScanPage: React.FC = () => {
   // cannot print a confident number beside a refusal that says it has none.
   const selectedPackSize = selectedSupplier ? packSizeOf(selectedSupplier) : null;
   const packSizeUnknown = selectedSupplier !== null && selectedPackSize === null;
+
+  // The supplier the SERVER says this item is bought from, and everything
+  // qualifying that answer (op-3xsp). Read through `utils/supplierChoice` so
+  // this page words it the same way the CSV export and the reorder queue do,
+  // and so the page owns none of the derivation.
+  const supplierName = chosenSupplierName(item?.supplier_choice);
+  // This route is public, so everything the block renders has an AUDIENCE. A
+  // signed-in operator gets the other suppliers by name and the derivation
+  // caveats; a logged-out scanner gets neither — only the fact that there is
+  // nothing to order, worded to name no vendor and describe no link. The page
+  // picks which reader to ask and renders the answer; the wording, the joining
+  // and the emptiness tests all belong to `utils/supplierChoice`, not here.
+  const alternativeText = isLoggedIn
+    ? alternativeSupplierNamesText(item?.supplier_choice)
+    : null;
+  const supplierNote = isLoggedIn
+    ? supplierChoiceNote(item?.supplier_choice)
+    : publicSupplierChoiceNote(item?.supplier_choice);
 
   if (loading) {
     return (
@@ -465,22 +499,59 @@ const ScanPage: React.FC = () => {
               </>
             )}
 
-            <div className="info-item">
-              <span className="label">Average Lead Time:</span>
-              <span className="value">{item.average_lead_time} days</span>
-            </div>
+            {/* Supplier, lead time and unit cost are ONE supplier's facts, so
+                they are labelled as that supplier's and read off
+                `supplier_choice` rather than the flat legacy keys (op-3xsp).
+                The flats gave a bare name, and this block rendered it as
+                "Supplier: Acme" for an item stocked by three — with the lead
+                time and the price beside it reading as the item's own numbers.
+                Every sentence below comes from the server's own answer; nothing
+                here ranks or filters links. */}
+            {supplierName && (
+              <>
+                <div className="info-item" data-testid="supplier-choice-name">
+                  <span className="label">We order this from:</span>
+                  <span className="value">
+                    {supplierName}
+                    {/* SIGNED-IN ONLY, and with no anonymous substitute. This
+                        route is not behind RequireAuth and serves logged-out QR
+                        scanners, who get the chosen supplier's name, lead time
+                        and price — exactly what they saw before this field
+                        existed, and no indication that any other vendor exists.
+                        Not the roster, and not a count of it either: a count is
+                        authorised on the item detail page and nowhere else, and
+                        widening anonymous disclosure is the requester's to
+                        grant, not a nearby surface's to infer by analogy. */}
+                    {alternativeText !== null && (
+                      <span className="value secondary" data-testid="supplier-choice-alternatives">
+                        {' '}
+                        — also available from {alternativeText}
+                      </span>
+                    )}
+                  </span>
+                </div>
 
-            {item.supplier_name && (
-              <div className="info-item">
-                <span className="label">Supplier:</span>
-                <span className="value">{item.supplier_name}</span>
-              </div>
+                <div className="info-item">
+                  <span className="label">Their Lead Time:</span>
+                  <span className="value">{item.average_lead_time} days</span>
+                </div>
+
+                <div className="info-item">
+                  <span className="label">Their Unit Cost:</span>
+                  <span className="value">{money(item.unit_cost)}</span>
+                </div>
+              </>
             )}
 
-            <div className="info-item">
-              <span className="label">Unit Cost:</span>
-              <span className="value">{money(item.unit_cost)}</span>
-            </div>
+            {/* Last, because it QUALIFIES the three rows above — or, where
+                there is no supplier at all, replaces them and says which kind
+                of nothing this is. */}
+            {supplierNote && (
+              <div className="info-item supplier-note" data-testid="supplier-choice-note">
+                <span className="label">{supplierName ? 'Before you order:' : 'Supplier:'}</span>
+                <span className="value secondary">{supplierNote}</span>
+              </div>
+            )}
           </div>
 
           {item.needs_reorder && (

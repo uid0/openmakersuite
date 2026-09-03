@@ -598,9 +598,10 @@ class SupplierChoiceSerializer(serializers.Serializer):
     a client that has never heard of it — ScanTTY decodes item JSON into a
     struct without ``DisallowUnknownFields`` — is unaffected.
 
-    NOT THE SAME OBJECT FOR EVERYONE. ``/api/inventory/items/`` reads as
-    ``AllowAny`` and ``KitViewSet`` as ``IsAuthenticatedOrReadOnly``, so this
-    renders for logged-out callers too, and the four keys in
+    NOT THE SAME OBJECT FOR EVERYONE. ``InventoryItemViewSet`` and
+    ``KitViewSet`` are both ``IsAuthenticatedOrReadOnly``, so either one serves
+    a read to an anonymous caller: this renders for logged-out callers too, and
+    the four keys in
     :attr:`OPERATOR_ONLY_FIELDS` are OMITTED for them — see that attribute for
     which and why. Omitted, not nulled: a null ``scored_without_price`` is a
     claim about the item, an absent one is a statement about the reader.

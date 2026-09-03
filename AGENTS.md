@@ -204,9 +204,10 @@ and a count would not have helped: the hazard is a part number nobody can trace
 to a vendor, and a count does not name one.
 
 Those are gates in the BROWSER. They narrow what a visitor is handed, not what a
-client can fetch — the item endpoints read as `AllowAny`, `KitViewSet` as
-`IsAuthenticatedOrReadOnly`, and `suppliers[]` on the same payload still carries
-every vendor name, SKU, UPC, cost and lead time to an unauthenticated caller.
+client can fetch — `InventoryItemViewSet` and `KitViewSet` are both
+`IsAuthenticatedOrReadOnly`, so either one serves a read to an anonymous
+caller, and `suppliers[]` on the same payload still carries every vendor name,
+SKU, UPC, cost and lead time to an unauthenticated caller.
 That posture predates op-3xsp and is unchanged by it. One thing IS enforced on
 the wire: `SupplierChoiceSerializer.OPERATOR_ONLY_FIELDS` omits `basis` and the
 three caveat flags for an unauthenticated request, because those four are what

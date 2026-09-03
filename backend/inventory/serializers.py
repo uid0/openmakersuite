@@ -330,7 +330,7 @@ class SupplierDetailSerializer(SupplierSerializer):
                 .prefetch_related("work_order__asset_problems", "items__owning_group")
                 .order_by("-order_date")[:50]
             )
-            return PurchaseOrderSerializer(orders, many=True).data
+            return PurchaseOrderSerializer(orders, many=True, context=self.context).data
         except ImportError:
             return []
 
@@ -767,6 +767,17 @@ class InventoryItemSerializer(serializers.ModelSerializer):
 
     # Which supplier we would buy this item from, AND why that one (op-3xsp).
     # See :class:`SupplierChoiceSerializer`.
+    #
+    # THIS SERIALIZER NEEDS ``context``. The audience for the four operator-only
+    # keys is read off ``context["request"].user`` and FAILS CLOSED, so anything
+    # that builds this serializer — or any serializer that nests it, however
+    # deep — by hand rather than through ``get_serializer()`` must pass
+    # ``context=self.get_serializer_context()`` (a view) or ``context=self.context``
+    # (a parent serializer's method field). Omitting it does not raise: it
+    # quietly hands an authenticated operator the anonymous view, dropping the
+    # very caveats this field exists to deliver. DRF supplies context to a
+    # DECLARED nested field automatically; the hand-built call is the one to
+    # watch.
     supplier_choice = serializers.SerializerMethodField()
 
     @extend_schema_field(SupplierChoiceSerializer)

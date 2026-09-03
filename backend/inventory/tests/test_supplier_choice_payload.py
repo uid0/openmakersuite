@@ -32,7 +32,12 @@ from inventory.services.supplier_selection import (
     NONE_ORDERABLE,
     select_supplier,
 )
-from reorder_queue.models import LeadTimeLog, PurchaseOrder, ReorderRequest
+from reorder_queue.models import (
+    LeadTimeLog,
+    PurchaseOrder,
+    PurchaseOrderItem,
+    ReorderRequest,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -595,3 +600,161 @@ def test_a_serializer_with_no_request_in_context_fails_closed():
 
     assert OPERATOR_ONLY_KEYS.isdisjoint(data), data
     assert data["supplier_name"] == "Contextless Acme"
+
+
+# ── The gate fails CLOSED, so a hand-built serializer must carry the request ──
+#
+# The audience is read off ``context["request"]``, and a serializer built by
+# hand has none. That is the right default — a shell or a management command
+# has proven nothing about who is asking — but it makes every hand-built render
+# a place where an OPERATOR silently receives the anonymous view. It does not
+# raise; a caveated choice simply arrives looking clean, which is the exact
+# silence op-3xsp exists to remove.
+#
+# Every endpoint below is ``IsAuthenticated``, so every caller reaching it is an
+# operator, and each one builds its serializer outside ``get_serializer()``.
+# They are asserted through the routed API rather than by constructing a
+# serializer, because the defect is precisely that the hand-built path differed
+# from the routed one.
+
+
+def _po_line_for(api, purchaser, name):
+    """A draft PO line for a caveated item, on the supplier the choice picked."""
+    item = _caveated_item(name)
+    chosen = item.supplier_choice.item_supplier
+    order = PurchaseOrder.objects.create(supplier=chosen.supplier, created_by=purchaser)
+    line = PurchaseOrderItem.objects.create(
+        purchase_order=order,
+        item_supplier=chosen,
+        quantity_ordered=2,
+        unit_cost_ordered=Decimal("1.00"),
+        notes="",
+    )
+    return order, line, item
+
+
+def test_the_by_supplier_order_pad_tells_an_operator_the_caveats(api):
+    """The bulk-ordering surface, and the one an operator sizes an order from.
+
+    It builds ``ReorderRequestSerializer`` per row rather than through
+    ``get_serializer()``, so it was handing a signed-in purchaser a choice with
+    no caveats on it — no "chosen without a price on file", no "your flagged
+    primary was skipped".
+    """
+    item = _caveated_item("Padded")
+    ReorderRequest.objects.create(item=item, quantity=3, requested_by="member")
+
+    response = api.get("/api/reorders/requests/by_supplier/")
+
+    assert response.status_code == 200, response.content
+    rows = [row for group in response.data for row in group["requests"]]
+    assert rows, response.data
+    choice = rows[0]["item_details"]["supplier_choice"]
+    assert OPERATOR_ONLY_KEYS <= set(choice), choice
+    assert choice["flagged_primary_unorderable"] is True
+    assert choice["scored_without_price"] is True
+
+
+def test_the_authenticated_create_response_tells_an_operator_the_caveats(api):
+    """The richer shape a signed-in caller gets back from POSTing a request."""
+    item = _caveated_item("Created")
+
+    response = api.post(
+        "/api/reorders/requests/",
+        {"item": str(item.id), "quantity": 2, "requested_by": "member"},
+        format="json",
+    )
+
+    assert response.status_code in (200, 201), response.content
+    choice = response.data["item_details"]["supplier_choice"]
+    assert OPERATOR_ONLY_KEYS <= set(choice), choice
+    assert choice["flagged_primary_unorderable"] is True
+
+
+def test_adding_a_purchase_order_line_tells_an_operator_the_caveats(api, purchaser):
+    order, _, item = _po_line_for(api, purchaser, "Added")
+    order.items.all().delete()
+    chosen = item.supplier_choice.item_supplier
+
+    response = api.post(
+        f"/api/reorders/purchase-orders/{order.id}/items/",
+        {"item_supplier": str(chosen.id), "quantity": 2, "unit_cost": "1.00"},
+        format="json",
+    )
+
+    assert response.status_code in (200, 201), response.content
+    choice = response.data["line_item"]["item_details"]["supplier_choice"]
+    assert OPERATOR_ONLY_KEYS <= set(choice), choice
+
+
+def test_updating_a_purchase_order_line_tells_an_operator_the_caveats(api, purchaser):
+    order, line, _ = _po_line_for(api, purchaser, "Updated")
+
+    response = api.patch(
+        f"/api/reorders/purchase-orders/{order.id}/items/{line.id}/",
+        {"quantity": 5},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.content
+    choice = response.data["item_details"]["supplier_choice"]
+    assert OPERATOR_ONLY_KEYS <= set(choice), choice
+
+
+def test_voiding_a_purchase_order_line_tells_an_operator_the_caveats(api, purchaser):
+    order, line, _ = _po_line_for(api, purchaser, "Voided")
+
+    response = api.post(
+        f"/api/reorders/purchase-orders/{order.id}/items/{line.id}/void/",
+        {"reason": "discontinued"},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.content
+    choice = response.data["item_details"]["supplier_choice"]
+    assert OPERATOR_ONLY_KEYS <= set(choice), choice
+
+
+def test_a_suppliers_recent_orders_tell_an_operator_the_caveats(api, purchaser):
+    """Found by sweeping for the pattern, not named in the report.
+
+    ``SupplierDetailSerializer.get_purchase_orders`` builds
+    ``PurchaseOrderSerializer`` inside a method field, which reaches
+    ``item_details`` two serializers down — the same hand-built render, in a
+    serializer rather than a view.
+    """
+    order, _, item = _po_line_for(api, purchaser, "Recent")
+
+    response = api.get(f"/api/inventory/suppliers/{order.supplier.id}/")
+
+    assert response.status_code == 200, response.content
+    orders = response.data["purchase_orders"]
+    lines = [line for entry in orders for line in entry["items"]]
+    choice = next(
+        line["item_details"]["supplier_choice"]
+        for line in lines
+        if line["item_details"]["id"] == str(item.id)
+    )
+    assert OPERATOR_ONLY_KEYS <= set(choice), choice
+
+
+def test_an_anonymous_caller_on_a_public_supplier_page_still_gets_the_narrow_view(
+    anon, api, purchaser
+):
+    """CONTROL: forwarding context did not widen anything.
+
+    ``SupplierViewSet`` is ``IsAuthenticatedOrReadOnly``, so this page reads
+    publicly. Passing the request through changes what an OPERATOR sees; an
+    anonymous caller resolves to the same restricted form the missing context
+    used to produce for everybody.
+    """
+    order, _, _ = _po_line_for(api, purchaser, "PublicRecent")
+
+    response = anon.get(f"/api/inventory/suppliers/{order.supplier.id}/")
+
+    assert response.status_code == 200, response.content
+    lines = [line for entry in response.data["purchase_orders"] for line in entry["items"]]
+    for line in lines:
+        choice = line["item_details"]["supplier_choice"]
+        assert OPERATOR_ONLY_KEYS.isdisjoint(choice), choice
+        assert PUBLIC_KEYS <= set(choice), choice

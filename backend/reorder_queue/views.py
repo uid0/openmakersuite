@@ -468,7 +468,9 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         # keep the existing richer response.
         instance = ReorderRequest.objects.get(id=serializer.instance.id)
         if user.is_authenticated:
-            output_serializer = ReorderRequestSerializer(instance)
+            output_serializer = ReorderRequestSerializer(
+                instance, context=self.get_serializer_context()
+            )
         else:
             output_serializer = ReorderRequestCreateSerializer(instance)
 
@@ -588,6 +590,10 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         # Group by supplier
         suppliers = {}
         rollups = {}
+        # Built ONCE, not per row: ``item_details.supplier_choice`` decides which
+        # audience it serves from ``context["request"]`` and fails closed, so a
+        # hand-built serializer without it hands an operator the anonymous view.
+        serializer_context = self.get_serializer_context()
         for req in pending:
             supplier_name = req.item.supplier.name if req.item.supplier else "No Supplier"
             supplier_type = req.item.supplier.supplier_type if req.item.supplier else "other"
@@ -602,7 +608,9 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
                 }
                 rollups[supplier_name] = PriceRollup()
 
-            suppliers[supplier_name]["requests"].append(ReorderRequestSerializer(req).data)
+            suppliers[supplier_name]["requests"].append(
+                ReorderRequestSerializer(req, context=serializer_context).data
+            )
             suppliers[supplier_name]["item_count"] += 1
             rollups[supplier_name].add(order_unit_price(req.item), req.quantity)
 
@@ -2349,7 +2357,9 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         return Response(
             {
                 "created": created,
-                "line_item": PurchaseOrderItemSerializer(line_item).data,
+                "line_item": PurchaseOrderItemSerializer(
+                    line_item, context=self.get_serializer_context()
+                ).data,
                 "match": match,
                 "purchase_order": PurchaseOrderSerializer(
                     refreshed, context=self.get_serializer_context()
@@ -2699,7 +2709,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         from .serializers import PurchaseOrderItemSerializer
 
-        serializer = PurchaseOrderItemSerializer(line_item)
+        serializer = PurchaseOrderItemSerializer(line_item, context=self.get_serializer_context())
         return Response(serializer.data)
 
     def _destroy_item(self, request, purchase_order, line_item):
@@ -2868,7 +2878,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         from .serializers import PurchaseOrderItemSerializer
 
-        serializer = PurchaseOrderItemSerializer(line_item)
+        serializer = PurchaseOrderItemSerializer(line_item, context=self.get_serializer_context())
         return Response(serializer.data)
 
     @action(detail=True, methods=["post"])

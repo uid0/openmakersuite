@@ -597,6 +597,13 @@ class SupplierChoiceSerializer(serializers.Serializer):
     ADDITIVE on the wire: nothing here replaces or renames an existing key, so
     a client that has never heard of it — ScanTTY decodes item JSON into a
     struct without ``DisallowUnknownFields`` — is unaffected.
+
+    NOT THE SAME OBJECT FOR EVERYONE. ``/api/inventory/items/`` reads as
+    ``AllowAny`` and ``KitViewSet`` as ``IsAuthenticatedOrReadOnly``, so this
+    renders for logged-out callers too, and the four keys in
+    :attr:`OPERATOR_ONLY_FIELDS` are OMITTED for them — see that attribute for
+    which and why. Omitted, not nulled: a null ``scored_without_price`` is a
+    claim about the item, an absent one is a statement about the reader.
     """
 
     # Declared for the shape only — drf-spectacular reads these to build the
@@ -612,17 +619,55 @@ class SupplierChoiceSerializer(serializers.Serializer):
     # object exists to describe.
     item_supplier_id = serializers.IntegerField(allow_null=True)
     supplier_name = serializers.CharField(allow_null=True)
-    basis = serializers.CharField(allow_null=True)
     reason = serializers.CharField(allow_null=True)
-    flagged_primary_unorderable = serializers.BooleanField()
-    scored_without_price = serializers.BooleanField()
-    scored_without_history = serializers.BooleanField()
     alternatives = SupplierChoiceAlternativeSerializer(many=True)
+    # ``required=False`` is not about writes — this serializer is read-only and
+    # ``to_representation`` is fully overridden. It is what makes the published
+    # schema tell the truth: these four keys are ABSENT from an unauthenticated
+    # response, so a generated client must treat them as optional. A document
+    # promising a field the server does not always send is the same defect this
+    # object exists to close.
+    basis = serializers.CharField(allow_null=True, required=False)
+    flagged_primary_unorderable = serializers.BooleanField(required=False)
+    scored_without_price = serializers.BooleanField(required=False)
+    scored_without_history = serializers.BooleanField(required=False)
+
+    #: Keys served only to a signed-in caller.
+    #:
+    #: These four describe HOW the derivation reached its answer, and they are
+    #: addressed to whoever maintains the supplier links: "your flagged primary
+    #: cannot be ordered from" means nothing to a member who has no flagged
+    #: primary and no way to order. The web already withholds them from a
+    #: logged-out visitor on every surface; without this they were still one
+    #: network-tab glance away, which makes those gates a courtesy rather than a
+    #: boundary.
+    #:
+    #: Deliberately NOT here: ``supplier_name``, ``item_supplier_id``,
+    #: ``reason`` and ``alternatives``. Every supplier name in ``alternatives``
+    #: is already in ``suppliers[]`` on this same payload, alongside its SKU,
+    #: UPCs, cost and lead time, and that array predates this field. Hiding one
+    #: while the other sits beside it would look like a protection and be none.
+    OPERATOR_ONLY_FIELDS = (
+        "basis",
+        "flagged_primary_unorderable",
+        "scored_without_price",
+        "scored_without_history",
+    )
+
+    def _serves_operator_detail(self) -> bool:
+        """Whether this render may carry the derivation metadata.
+
+        FAILS CLOSED. A serializer with no ``request`` in context — a shell, a
+        management command, a nested render somebody built by hand — has not
+        proven anybody is authenticated, so it gets the restricted form.
+        """
+        user = getattr(self.context.get("request"), "user", None)
+        return bool(user and user.is_authenticated)
 
     def to_representation(self, instance):
         """Flatten the choice, tolerating the no-supplier case (see above)."""
         link = instance.item_supplier
-        return {
+        data = {
             "item_supplier_id": link.id if link else None,
             "supplier_name": link.supplier.name if link else None,
             "basis": instance.basis,
@@ -635,6 +680,10 @@ class SupplierChoiceSerializer(serializers.Serializer):
                 for other in instance.alternatives
             ],
         }
+        if not self._serves_operator_detail():
+            for field in self.OPERATOR_ONLY_FIELDS:
+                data.pop(field)
+        return data
 
 
 class InventoryItemSerializer(serializers.ModelSerializer):
@@ -727,8 +776,13 @@ class InventoryItemSerializer(serializers.ModelSerializer):
         Costs no query beyond the one the flat compat fields already pay: the
         choice is memoised on the instance, and rides the ``item_suppliers``
         prefetch every read path here sets up.
+
+        ``context`` is forwarded because the nested serializer decides its own
+        AUDIENCE from ``request.user`` — a hand-built instance carries none, and
+        :meth:`SupplierChoiceSerializer._serves_operator_detail` fails closed,
+        so dropping this argument silently restricts every caller.
         """
-        return SupplierChoiceSerializer(obj.supplier_choice).data
+        return SupplierChoiceSerializer(obj.supplier_choice, context=self.context).data
 
     # Reorder status and tracking fields
     reorder_status = serializers.CharField(read_only=True)

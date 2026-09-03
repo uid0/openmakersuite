@@ -314,6 +314,61 @@ describe('publicSupplierChoiceNote', () => {
   });
 });
 
+/**
+ * An unauthenticated payload does not carry the four derivation keys at all —
+ * the server OMITS `basis`, `flagged_primary_unorderable`,
+ * `scored_without_price` and `scored_without_history` for a logged-out caller
+ * (`SupplierChoiceSerializer.OPERATOR_ONLY_FIELDS`).
+ *
+ * The public reading has to be blind to that difference, or the gate turns into
+ * a rendering bug: an absent key must never become a rendered caveat, and it
+ * must never silently change what an anonymous visitor is shown.
+ */
+describe('a payload with the operator-only keys omitted', () => {
+  const restricted = (overrides: Partial<SupplierChoice> = {}): SupplierChoice => {
+    const full = choice(overrides);
+    const {
+      basis: _basis,
+      flagged_primary_unorderable: _flagged,
+      scored_without_price: _price,
+      scored_without_history: _history,
+      ...rest
+    } = full;
+    return rest as SupplierChoice;
+  };
+
+  it('reads the same publicly as the same choice with the keys present and false', () => {
+    const withNames = { alternatives: others('Beta', 'Gamma') };
+
+    expect(chosenSupplierName(restricted(withNames))).toBe(
+      chosenSupplierName(choice(withNames))
+    );
+    expect(anonymousAlternativesNote(restricted(withNames))).toBe(
+      anonymousAlternativesNote(choice(withNames))
+    );
+    expect(publicSupplierChoiceNote(restricted(withNames))).toBe(
+      publicSupplierChoiceNote(choice(withNames))
+    );
+    expect(supplierChoiceSummary(restricted(withNames))).toBe(
+      supplierChoiceSummary(choice(withNames))
+    );
+  });
+
+  it('grows no caveat out of a key that was never sent', () => {
+    expect(supplierChoiceCaveats(restricted())).toEqual([]);
+    expect(supplierChoiceNote(restricted())).toBeNull();
+  });
+
+  it('still tells the two no-supplier reasons apart', () => {
+    expect(publicSupplierChoiceNote(restricted({ supplier_name: null, reason: 'no_suppliers' }))).toBe(
+      publicSupplierChoiceNote(choice({ supplier_name: null, reason: 'no_suppliers' }))
+    );
+    expect(
+      publicSupplierChoiceNote(restricted({ supplier_name: null, reason: 'none_orderable' }))
+    ).toBe(publicSupplierChoiceNote(choice({ supplier_name: null, reason: 'none_orderable' })));
+  });
+});
+
 describe('SUPPLIER_BASIS_LABELS', () => {
   it('tells an operator decision apart from a system score', () => {
     expect(SUPPLIER_BASIS_LABELS.flagged_primary).toBe('flagged primary');

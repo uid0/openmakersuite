@@ -141,6 +141,17 @@ def test_schema_types_the_inventory_item_supplier_choice(schema_document):
     assert choice["properties"]["item_supplier_id"]["nullable"] is True
     assert choice["properties"]["scored_without_price"]["type"] == "boolean"
 
+    # The four derivation keys are OMITTED for an unauthenticated caller
+    # (``SupplierChoiceSerializer.OPERATOR_ONLY_FIELDS``), so a document that
+    # promised them always-present would hand a generated client a non-optional
+    # field the server does not always send. The other four are unconditional.
+    assert set(choice.get("required", [])) == {
+        "item_supplier_id",
+        "supplier_name",
+        "reason",
+        "alternatives",
+    }, choice.get("required")
+
     # The nested declaration has to be reachable too, or "and two others" has
     # no documented shape.
     assert choice["properties"]["alternatives"]["items"] == {

@@ -130,24 +130,33 @@ export interface SupplierChoice {
   /** The chosen supplier, or null when nothing here can be ordered from. */
   supplier_name: string | null;
   /**
-   * `'flagged_primary'` — an operator flagged this one and it won outright;
-   * `'best_scored'` — nothing orderable was flagged, so price, lead time and
-   * delivery record were weighed and this one came top. Null with `reason`.
-   */
-  basis: 'flagged_primary' | 'best_scored' | null;
-  /**
    * Why there is no supplier: `'no_suppliers'` (nobody has said where this
    * item comes from) or `'none_orderable'` (every link is inactive or
    * discontinued). Null when one was chosen. These are different facts needing
    * different actions, so do not collapse them into one blank.
    */
   reason: 'no_suppliers' | 'none_orderable' | null;
+  /**
+   * SIGNED-IN ONLY — the four keys below are ABSENT from an unauthenticated
+   * response, not null (`SupplierChoiceSerializer.OPERATOR_ONLY_FIELDS`). They
+   * describe how the derivation reached its answer and are addressed to
+   * whoever maintains the supplier links.
+   *
+   * Optional here so the type says what the wire does. Every public reading in
+   * `utils/supplierChoice` must behave identically whether a key is absent or
+   * `false`, so an unauthenticated payload can never grow a rendered caveat.
+   *
+   * `'flagged_primary'` — an operator flagged this one and it won outright;
+   * `'best_scored'` — nothing orderable was flagged, so price, lead time and
+   * delivery record were weighed and this one came top. Null with `reason`.
+   */
+  basis?: 'flagged_primary' | 'best_scored' | null;
   /** An operator flagged a primary and it was skipped as unbuyable. */
-  flagged_primary_unorderable: boolean;
+  flagged_primary_unorderable?: boolean;
   /** The scoring picked the winner while knowing no price for it. */
-  scored_without_price: boolean;
+  scored_without_price?: boolean;
   /** The scoring picked the winner though nothing has ever been delivered through it. */
-  scored_without_history: boolean;
+  scored_without_history?: boolean;
   /** Every other link that could have been bought from. Empty means it really was the only one. */
   alternatives: SupplierChoiceAlternative[];
 }

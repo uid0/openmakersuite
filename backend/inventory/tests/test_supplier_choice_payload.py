@@ -458,3 +458,140 @@ def test_the_choice_adds_no_per_row_query_to_a_listed_page(api, django_assert_nu
 
     assert len(response.data["results"]) == 10
     assert all(row["supplier_choice"]["supplier_name"] for row in response.data["results"])
+
+
+# ── The derivation metadata has an AUDIENCE, enforced on the wire ────────────
+#
+# Every other anonymous protection on this branch is client-side: a page
+# withholds the caveats, the alternative names, the kit SKU. Those narrow what a
+# VISITOR IS HANDED and not what a CLIENT CAN FETCH, because the item endpoints
+# read as ``AllowAny`` and the kit endpoints as ``IsAuthenticatedOrReadOnly``.
+# The four keys below are the ones this branch newly put on that public wire, so
+# they are the ones it closes. What stays open stays open deliberately:
+# ``alternatives`` names nobody who is not already named in ``suppliers[]`` on
+# the same response, and that array predates this work.
+
+OPERATOR_ONLY_KEYS = {
+    "basis",
+    "flagged_primary_unorderable",
+    "scored_without_price",
+    "scored_without_history",
+}
+PUBLIC_KEYS = {"item_supplier_id", "supplier_name", "reason", "alternatives"}
+
+
+@pytest.fixture
+def anon():
+    return APIClient()
+
+
+def _caveated_item(name, **item_kwargs):
+    """An item whose choice sets every caveat there is to leak.
+
+    The flagged primary is dead, so it is skipped; of the two orderable links
+    the unpriced one wins on lead time and has never delivered — which is all
+    three caveats at once, plus a non-empty ``alternatives``.
+    """
+    item = _item(name, **item_kwargs)
+    _link(item, f"{name} Flagged", unit_cost="1.00", is_primary=True, is_active=False)
+    _link(item, f"{name} Acme", unit_cost=None, lead=3)
+    _link(item, f"{name} Beta", unit_cost="9.00", lead=4)
+    return item
+
+
+def test_an_anonymous_item_read_carries_no_derivation_metadata(anon):
+    item = _caveated_item("Detail")
+
+    response = anon.get(f"/api/inventory/items/{item.id}/")
+
+    assert response.status_code == 200, response.content
+    choice = response.data["supplier_choice"]
+    assert OPERATOR_ONLY_KEYS.isdisjoint(choice), choice
+    assert PUBLIC_KEYS <= set(choice), choice
+
+
+def test_an_anonymous_item_read_still_names_the_supplier_and_the_others(anon):
+    """The gate closes the derivation detail, not the vendor roster.
+
+    ``suppliers[]`` on this same response already lists every one of these
+    names. Hiding ``alternatives`` while that array sits beside it would look
+    like a protection and be none.
+    """
+    item = _caveated_item("Roster")
+
+    response = anon.get(f"/api/inventory/items/{item.id}/")
+
+    choice = response.data["supplier_choice"]
+    assert choice["supplier_name"] == "Roster Acme"
+    assert [a["supplier_name"] for a in choice["alternatives"]] == ["Roster Beta"]
+    assert choice["reason"] is None
+    assert choice["item_supplier_id"] is not None
+
+
+def test_an_anonymous_list_read_carries_no_derivation_metadata(anon):
+    """The CSV export pages the LIST endpoint, and it is `AllowAny` too."""
+    item = _caveated_item("Listed")
+
+    response = anon.get("/api/inventory/items/")
+
+    assert response.status_code == 200, response.content
+    choice = next(r for r in response.data["results"] if r["id"] == str(item.id))["supplier_choice"]
+    assert OPERATOR_ONLY_KEYS.isdisjoint(choice), choice
+    assert choice["supplier_name"] == "Listed Acme"
+
+
+def test_an_anonymous_kit_read_carries_no_derivation_metadata(anon):
+    """``KitSerializer`` subclasses ``InventoryItemSerializer`` — confirmed, not assumed."""
+    kit = _caveated_item("Kitted", is_kit=True, current_stock=0)
+
+    detail = anon.get(f"/api/inventory/kits/{kit.id}/")
+    listing = anon.get("/api/inventory/kits/")
+
+    assert detail.status_code == 200, detail.content
+    assert OPERATOR_ONLY_KEYS.isdisjoint(detail.data["supplier_choice"])
+    assert detail.data["supplier_choice"]["supplier_name"] == "Kitted Acme"
+
+    assert listing.status_code == 200, listing.content
+    row = next(r for r in listing.data["results"] if r["id"] == str(kit.id))
+    assert OPERATOR_ONLY_KEYS.isdisjoint(row["supplier_choice"])
+
+
+def test_a_signed_in_item_read_still_carries_every_caveat(api):
+    """CONTROL: the gate is about the READER, not about dropping the fields."""
+    item = _caveated_item("Operator")
+
+    choice, _ = _choice(api, item)
+
+    assert OPERATOR_ONLY_KEYS <= set(choice), choice
+    assert choice["basis"] == BASIS_BEST_SCORED
+    assert choice["flagged_primary_unorderable"] is True
+    assert choice["scored_without_price"] is True
+    assert choice["scored_without_history"] is True
+
+
+def test_a_signed_in_kit_read_still_carries_every_caveat(api):
+    kit = _caveated_item("OperatorKit", is_kit=True, current_stock=0)
+
+    detail = api.get(f"/api/inventory/kits/{kit.id}/")
+    listing = api.get("/api/inventory/kits/")
+
+    assert OPERATOR_ONLY_KEYS <= set(detail.data["supplier_choice"])
+    row = next(r for r in listing.data["results"] if r["id"] == str(kit.id))
+    assert OPERATOR_ONLY_KEYS <= set(row["supplier_choice"])
+
+
+def test_a_serializer_with_no_request_in_context_fails_closed():
+    """A render nobody authenticated is a render that gets the restricted form.
+
+    Management commands, shells and hand-built nested renders carry no
+    ``request``. Defaulting those to the operator view would make the gate
+    depend on every future call site remembering to pass context.
+    """
+    from inventory.serializers import SupplierChoiceSerializer
+
+    item = _caveated_item("Contextless")
+
+    data = SupplierChoiceSerializer(item.supplier_choice).data
+
+    assert OPERATOR_ONLY_KEYS.isdisjoint(data), data
+    assert data["supplier_name"] == "Contextless Acme"

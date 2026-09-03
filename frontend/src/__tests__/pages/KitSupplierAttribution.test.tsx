@@ -14,7 +14,9 @@
  *
  * Neither kit route is behind `RequireAuth` and `KitViewSet` serves reads to
  * anyone, so both screens gate on a token: a logged-out visitor gets neither
- * the SKU nor the vendor. The describes below sign in, because the columns
+ * the SKU nor the vendor. The kit's own unit cost is NOT in that set — a price
+ * is a number that came from a supplier, not the naming of one — and both
+ * screens keep showing it. The describes below sign in, because the columns
  * they exist to test are the signed-in ones.
  */
 import { MantineProvider } from '@mantine/core';
@@ -263,16 +265,26 @@ describe('what a logged-out visitor sees on the kit surfaces', () => {
     expect(screen.getByText('Active')).toBeInTheDocument();
   });
 
-  it('BEFORE/AFTER: the kit form shows a logged-out visitor no terms at all', async () => {
+  it('BEFORE/AFTER: the kit form shows a logged-out visitor no SKU and no vendor', async () => {
     await renderFormAnonymously();
 
     expect(screen.queryByTestId('kit-supplier-sku')).not.toBeInTheDocument();
     expect(screen.queryByTestId('kit-supplier')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('kit-unit-cost')).not.toBeInTheDocument();
     expect(screen.queryByTestId('kit-supplier-attribution')).not.toBeInTheDocument();
-    expect(screen.queryByText('Purchase terms')).not.toBeInTheDocument();
+    expect(screen.queryByText('ACME-INK-9')).not.toBeInTheDocument();
     expect(screen.queryByText(/Acme Supplies/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Beta Parts/)).not.toBeInTheDocument();
+  });
+
+  // The boundary is NAMING a supplier, not showing a number that came from one.
+  // The kit list has always shown this same visitor the same $42.00 one click
+  // earlier; withholding it here would make the two screens disagree about one
+  // kit, and it is not disclosure the acceptance record asks to narrow.
+  it('CONTROL: the kit form still shows a logged-out visitor the unit cost', async () => {
+    await renderFormAnonymously();
+
+    expect(screen.getByTestId('kit-unit-cost')).toHaveValue('$42');
+    expect(screen.getByText('Purchase terms')).toBeInTheDocument();
   });
 
   it('CONTROL: a signed-in operator still sees both on both screens', async () => {

@@ -605,6 +605,11 @@ class SupplierChoiceSerializer(serializers.Serializer):
     # ``None`` — and ``item_supplier`` is ``None`` for exactly the case this
     # object exists to describe.
     item_supplier_id = serializers.IntegerField(allow_null=True)
+    # The Supplier FK, not the link pk. A surface that has to PRE-FILL a vendor
+    # (the kit form's supplier select) needs the id the dropdown is keyed on,
+    # and looking it up client-side would mean a second reading of the answer
+    # the server has already given.
+    supplier_id = serializers.IntegerField(allow_null=True)
     supplier_name = serializers.CharField(allow_null=True)
     basis = serializers.CharField(allow_null=True)
     reason = serializers.CharField(allow_null=True)
@@ -618,6 +623,7 @@ class SupplierChoiceSerializer(serializers.Serializer):
         link = instance.item_supplier
         return {
             "item_supplier_id": link.id if link else None,
+            "supplier_id": link.supplier_id if link else None,
             "supplier_name": link.supplier.name if link else None,
             "basis": instance.basis,
             "reason": instance.reason,

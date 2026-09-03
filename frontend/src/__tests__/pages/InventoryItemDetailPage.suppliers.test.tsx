@@ -122,6 +122,7 @@ const baseItem = {
   // from `supplier_name` above on purpose: the anonymous block reads this one.
   supplier_choice: {
     item_supplier_id: 1,
+    supplier_id: 50,
     supplier_name: 'Derived Supply Co.',
     basis: 'best_scored' as const,
     reason: null,

@@ -14,6 +14,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import { kitAPI } from '../services/api';
 import { Kit } from '../types';
+import { supplierChoiceNote, supplierChoiceSummary } from '../utils/supplierChoice';
 
 const KitListPage: React.FC = () => {
   const navigate = useNavigate();
@@ -88,6 +89,7 @@ const KitListPage: React.FC = () => {
               <Table.Tr>
                 <Table.Th scope="col">Kit</Table.Th>
                 <Table.Th scope="col">Supplier SKU</Table.Th>
+                <Table.Th scope="col">From</Table.Th>
                 <Table.Th scope="col">Unit cost</Table.Th>
                 <Table.Th scope="col">Components</Table.Th>
                 <Table.Th scope="col">Status</Table.Th>
@@ -101,7 +103,25 @@ const KitListPage: React.FC = () => {
                       {kit.name}
                     </Anchor>
                   </Table.Td>
-                  <Table.Td>{kit.supplier_sku || '—'}</Table.Td>
+                  {/* A SKU gets pasted into a vendor's order form, so an
+                      UNATTRIBUTED one is actionable-wrong: this column is the
+                      flat legacy `supplier_sku`, which is one particular
+                      vendor's part number for the kit, and the table named no
+                      vendor at all. Paste it at the wrong supplier and you have
+                      ordered the wrong thing. The SKU is unchanged; what is new
+                      is saying whose it is (op-3xsp). */}
+                  <Table.Td data-testid={`kit-supplier-sku-${kit.id}`}>
+                    {kit.supplier_sku || '—'}
+                  </Table.Td>
+                  <Table.Td data-testid={`kit-supplier-${kit.id}`}>
+                    {kit.supplier_sku
+                      ? (supplierChoiceSummary(kit.supplier_choice) ?? (
+                          <Text c="dimmed" size="sm">
+                            {supplierChoiceNote(kit.supplier_choice)}
+                          </Text>
+                        ))
+                      : '—'}
+                  </Table.Td>
                   <Table.Td>
                     {kit.unit_cost != null ? `$${kit.unit_cost.toFixed(2)}` : '—'}
                   </Table.Td>

@@ -50,6 +50,7 @@ describe('ScanPage', () => {
     // deliberately still served, and several tests below still exercise them.
     supplier_choice: {
       item_supplier_id: 1,
+      supplier_id: 50,
       supplier_name: 'Test Supplier',
       basis: 'best_scored',
       reason: null,
@@ -684,6 +685,7 @@ describe('ScanPage', () => {
 
   const baseChoice = {
     item_supplier_id: 1,
+    supplier_id: 50,
     supplier_name: 'Acme Supplies',
     basis: 'best_scored',
     reason: null,

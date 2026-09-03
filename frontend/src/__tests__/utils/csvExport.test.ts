@@ -122,6 +122,7 @@ describe('CSV Export Utilities', () => {
     describe('supplier columns', () => {
       const choice = (overrides: Partial<SupplierChoice> = {}): SupplierChoice => ({
         item_supplier_id: 1,
+        supplier_id: 50,
         supplier_name: 'Acme Supplies',
         basis: 'best_scored',
         reason: null,

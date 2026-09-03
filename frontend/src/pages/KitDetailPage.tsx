@@ -71,6 +71,15 @@ const KitDetailPage: React.FC = () => {
         quantity: row.quantity,
       })),
     );
+    // The SKU and the cost below are ONE vendor's terms — the flat legacy
+    // accessors for the link the API says to buy this kit through. Seeding them
+    // while leaving Supplier blank meant the operator could type a DIFFERENT
+    // vendor's id and save, writing vendor A's part number and price onto
+    // vendor B's relationship: a SKU that gets pasted into an order form, now
+    // attached to the wrong order form. Seed the vendor from the same answer,
+    // so all three fields describe one supplier and changing it is a deliberate
+    // act rather than an unnoticed one (op-3xsp).
+    setSupplierId(next.supplier_choice?.supplier_id ?? '');
     setSupplierSku(next.supplier_sku ?? '');
     setUnitCost(next.unit_cost ?? '');
   }, []);
@@ -236,6 +245,18 @@ const KitDetailPage: React.FC = () => {
               What the supplier charges for one kit. This is the price that lands on the
               purchase-order line.
             </Text>
+            {/* Whose terms are on screen. Without it the three fields below are
+                a part number and a price with no vendor attached to them. */}
+            {kit?.supplier_choice?.supplier_name && (
+              <Text size="sm" c="dimmed" data-testid="kit-supplier-attribution">
+                Showing {kit.supplier_choice.supplier_name}&rsquo;s terms
+                {kit.supplier_choice.alternatives.length > 0 &&
+                  ` — this kit is also stocked by ${kit.supplier_choice.alternatives
+                    .map((alternative) => alternative.supplier_name)
+                    .join(', ')}`}
+                . Changing Supplier below saves these terms against that vendor instead.
+              </Text>
+            )}
             <Grid>
               <Grid.Col span={{ base: 12, sm: 4 }}>
                 <TextInput

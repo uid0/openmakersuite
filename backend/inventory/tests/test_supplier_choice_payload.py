@@ -167,6 +167,40 @@ def test_payload_names_the_supplier_the_system_would_buy_from(api):
     assert data["supplier_name"] == "LiveDear"
 
 
+def test_payload_carries_the_supplier_fk_not_only_the_link_pk(api):
+    """A form that PRE-FILLS a vendor picker needs the id it is keyed on.
+
+    ``item_supplier_id`` is the link's own pk and is not what a supplier select
+    holds. The kit form seeds its Supplier field from ``supplier_id`` so the
+    vendor on screen is the one the flat ``supplier_sku`` and ``unit_cost``
+    beside it actually belong to; resolving it client-side would be a second
+    reading of an answer the server has already given.
+    """
+    item = _item("Keyed")
+    # Push the Supplier sequence ahead of the ItemSupplier one, so the two ids
+    # genuinely differ and the assertion below cannot pass by coincidence.
+    for filler in range(3):
+        Supplier.objects.create(name=f"Filler{filler}", supplier_type=Supplier.SupplierType.LOCAL)
+    link = _link(item, "Acme", unit_cost="1.00")
+
+    choice, _ = _choice(api, item)
+
+    assert choice["item_supplier_id"] == link.pk
+    assert choice["supplier_id"] == link.supplier_id
+    # The two are different numbers, so a caller cannot substitute one for the
+    # other and happen to be right.
+    assert choice["supplier_id"] != choice["item_supplier_id"]
+
+
+def test_the_supplier_fk_is_null_when_there_is_no_vendor_to_prefill(api):
+    item = _item("Unkeyed")
+    _link(item, "Gone", unit_cost="1.00", is_discontinued=True)
+
+    choice, _ = _choice(api, item)
+
+    assert choice["supplier_id"] is None
+
+
 def test_payload_names_the_other_suppliers_so_one_name_is_not_the_only_name(api):
     item = _item("Anchor")
     _link(item, "Acme", unit_cost="1.00", lead=2)

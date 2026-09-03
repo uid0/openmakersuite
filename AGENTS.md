@@ -158,63 +158,26 @@ for the reason as well as the row is ONE resolution.
 **A surface that NAMES a supplier reads `supplier_choice`, never the flat
 `supplier_name` (op-3xsp).** The flat key is the same winner with the derivation
 thrown away: it cannot say what else was on offer, that the scoring knew no price
-for this one, or that the operator's flagged primary was skipped. Reading it made
-an item with three sources render as an item with one on the scan page, the
-reorder queue, the item page's anonymous block and — worst — the inventory CSV
-export, which leaves the system and gets ordered from. `supplier_choice` is on
-`InventoryItemSerializer` (so also on `item_details` and every list row); the web
-words it in ONE place, `frontend/src/utils/supplierChoice.ts`. The seven flat
-compat fields stay: ScanTTY's detail screen reads all of them and the web still
-reads four (`supplier_sku`, `supplier_url`, `unit_cost`, `average_lead_time`) —
-the serializer comment names each reader with the surface it lives on, and it is
-a claim to keep true in both directions. Count a reader only where the object is
-an `InventoryItem`/`Kit` payload from that serializer: `suppliers[]` rows and the
-order pad's look-alike keys (built per `item_supplier` in `by_supplier`) are
-different fields that happen to share a name.
+for this one, or that the operator's flagged primary was skipped — which is how
+an item with three sources came to render as an item with one on the scan page,
+the reorder queue, the item page and the CSV export that leaves the system and
+gets ordered from.
 
-Reading the same key is not the same question. A form that EDITS one relationship
-(`SupplierRelationshipForm`), a report grouped by the supplier an order actually
-went to (`PurchasingReportPage`, `DeliveriesWidget`), and a scan that matched one
-vendor's barcode are all legitimately singular and are NOT on this rule. The
-boundary is NAMING a supplier, not showing a number that came from one: a price
-column attributes nothing and is governed by op-9m2v instead.
+The boundary is NAMING a supplier, not showing a number that came from one, so a
+price column attributes nothing and is governed by op-9m2v instead. A SKU is the
+one exception, and not a close call: a part number gets PASTED INTO A VENDOR'S
+ORDER FORM, so an unattributed one is actionable-wrong in a way an unattributed
+price is not. Reading the same key is not always the same question either — a
+form that EDITS one relationship, a report grouped by the supplier an order
+ACTUALLY went to, and a scan that matched one vendor's barcode are legitimately
+singular and are NOT on this rule.
 
-**A SKU is the exception to that boundary, and it is not a close call.** A price
-is read; a part number gets PASTED INTO A VENDOR'S ORDER FORM, so an
-unattributed one is actionable-wrong in a way an unattributed price is not.
-`kit.supplier_sku` is the flat accessor — one vendor's part number — and both the
-kit list and the kit form showed it with no vendor beside it. Both now name the
-vendor. The attribution is READ-ONLY: the kit form's Supplier field is still
-blank until an operator types in it, because pre-filling it would make the save
-guard true after every load and `KitSerializer._apply_supplier_terms` rewrites
-pack size and the primary flag on any request that carries terms. The copy
-attributes and stops there — it must never tell an operator to change Supplier
-to retarget the terms, because the save would write this vendor's SKU and price
-onto whichever vendor the field names.
-
-**Neither kit route is behind `RequireAuth`, and `KitViewSet` serves reads to
-anyone.** So both surfaces gate on `isAuthenticated`: a logged-out visitor gets
-neither the SKU nor the vendor. The list drops both columns; the form drops the
-attribution note, the `Supplier` input and the `Supplier SKU` input, and NOTHING
-else — the Purchase terms heading and the kit's Unit cost still render, because
-the boundary is naming a supplier and a price names none. The kit list has always
-shown that same visitor the same unit cost, so the two kit surfaces agree about
-one kit. Withholding beats attributing for a viewer we will not attribute for,
-and a count would not have helped: the hazard is a part number nobody can trace
-to a vendor, and a count does not name one.
-
-Those are gates in the BROWSER. They narrow what a visitor is handed, not what a
-client can fetch — `InventoryItemViewSet` and `KitViewSet` are both
-`IsAuthenticatedOrReadOnly`, so either one serves a read to an anonymous
-caller, and `suppliers[]` on the same payload still carries every vendor name,
-SKU, UPC, cost and lead time to an unauthenticated caller.
-That posture predates op-3xsp and is unchanged by it. One thing IS enforced on
-the wire: `SupplierChoiceSerializer.OPERATOR_ONLY_FIELDS` omits `basis` and the
-three caveat flags for an unauthenticated request, because those four are what
-op-3xsp newly put there and they are addressed to whoever maintains the links.
-It omits rather than nulls, fails closed when no `request` is in context, and
-the four are `required=False` so the published schema says so too. Do not
-describe any of the browser gates as if they protected data.
+The seven flat compat fields stay. The `InventoryItemSerializer` comment names
+each remaining reader with the surface it lives on and is the record of who
+still needs them; check it there rather than restating it here. The web words
+the whole choice in ONE place, `frontend/src/utils/supplierChoice.ts`. What any
+of it exposes to an unauthenticated caller is in
+`docs/API_PERMISSION_MATRIX.md`.
 
 Filtering happens in Python, on `item_suppliers.all()`, so the prefetch cache
 still serves it — a fresh `.filter()` reintroduces the per-row N+1 that #882

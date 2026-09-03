@@ -116,6 +116,44 @@ below are public.
 | GET  | `inventory/component-usage-events/...` | member | `IsAuthenticatedOrStaffSigAdminWrite` on the read-only `ComponentUsageEventViewSet` — authenticated read of the per-unit usage/audit log (written as a side effect of lifecycle actions). |
 | GET  | `inventory/reports/inventory/...` (`stock_by_category`, `reorder_frequency`, `value_by_location`, `serialized_forecast`, `export`) | member | `IsAuthenticated` on `InventoryReportViewSet` — read-only analytics. `serialized_forecast` is the mode-aware consumption forecast + low-stock report for serialized components (consumables deplete on `consume`; reusables only on `retire`/`dispose`), exposing `avg_daily_use`, `days_until_stockout`, and `reorder_point` for the inventory + purchasing overview dashboards. The lead time is the wait at the supplier we would actually buy from (`LeadTimeLog` against that link, else its `average_lead_time`), falling back to every link when none is orderable so an item whose vendors all died keeps its threshold (op-3vqk). Each row carries `lead_time_known` — `false` only for an item with no supplier link, where `reorder_point` is the safety stock alone, a lower bound rather than a full horizon — and `lead_time_basis` (`orderable_supplier` / `unorderable_supplier` / `no_supplier`) saying whose wait the number describes. |
 
+### Field-level withholding: `supplier_choice` (op-3xsp)
+
+`supplier_choice` is served by `InventoryItemSerializer`, so it appears on
+EVERY path that renders an item or a kit: `inventory/items/` (list),
+`inventory/items/<id>/`, `inventory/kits/` (list), `inventory/kits/<id>/`,
+and the nested `item_details` on the reorder-queue payloads.
+
+`SupplierChoiceSerializer` OMITS four keys from an unauthenticated caller on
+all of them — `basis`, `flagged_primary_unorderable`, `scored_without_price`
+and `scored_without_history` — because they describe HOW the derivation reached
+its answer and are addressed to whoever maintains the supplier links. Omitted
+rather than nulled: a null `scored_without_price` is a claim about the item, an
+absent one is a statement about the reader. The four are declared
+`required=False`, so the published OpenAPI document says they are optional.
+`supplier_name`, `item_supplier_id`, `reason` and `alternatives` are served to
+everyone — every name in `alternatives` is already in `suppliers[]` on the same
+payload, so hiding one while the other sits beside it would look like a
+protection and be none.
+
+The audience is decided from `context["request"]` and FAILS CLOSED: a serializer
+built without context serves the narrow form. A view that hand-builds
+`InventoryItemSerializer` (or anything nesting it, such as
+`ReorderRequestSerializer`) MUST pass `self.get_serializer_context()`, or it
+silently hands an operator the anonymous view — a real defect fixed in
+`reorder_queue/views.py` when this field shipped.
+
+**Every other anonymous protection around supplier attribution is CLIENT-SIDE
+ONLY.** The React gates on the item, scan and kit pages narrow what a visitor is
+handed, not what a client can fetch: `InventoryItemViewSet.get_permissions`
+returns `AllowAny` for `list`/`retrieve` (the class default snapshotted in the
+YAML never governs those reads) and `KitViewSet` is `IsAuthenticatedOrReadOnly`,
+so both serve reads to anonymous callers, and `suppliers[]` on the same payload
+still carries every vendor name, SKU, UPC, cost and lead time to an
+unauthenticated caller. That posture predates op-3xsp, is documented in-code at
+`InventoryItemDetailPage.tsx` as a deliberately partial gate, and is not closed
+here. Do not describe those browser gates as if they protected data.
+
+
 ## Membership (`/api/membership/`)
 
 | Method | Path | Class | Notes |

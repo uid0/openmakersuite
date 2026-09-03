@@ -308,6 +308,30 @@ describe('InventoryItemDetailPage — suppliers card', () => {
     expect(screen.queryByText('Gamma Wholesale')).not.toBeInTheDocument();
   });
 
+  /**
+   * This route is public, so a payload shape the page did not expect blanks the
+   * block for the very visitors it exists to serve. `supplier_choice` without
+   * an `alternatives` array threw before the guard — the same shape the shared
+   * reader in `utils/supplierChoice.ts` already tolerates.
+   */
+  it('still names the supplier when the choice carries no alternatives array', async () => {
+    localStorage.removeItem('token');
+    const choiceWithoutAlternatives = { ...baseItem.supplier_choice };
+    delete (choiceWithoutAlternatives as { alternatives?: unknown }).alternatives;
+    renderWith([supplierLink({ id: 1, supplier_name: 'Acme Supplies' })], {
+      supplier_choice: choiceWithoutAlternatives,
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('anonymous-supplier-block')).toBeInTheDocument()
+    );
+
+    expect(screen.getByTestId('anonymous-supplier-block')).toHaveTextContent(
+      'Derived Supply Co.'
+    );
+    expect(screen.queryByTestId('anonymous-supplier-alternatives')).not.toBeInTheDocument();
+  });
+
   it('CONTROL: a sole supplier gets no "others" line', async () => {
     localStorage.removeItem('token');
     renderWith([supplierLink({ id: 1, supplier_name: 'Acme Supplies' })]);

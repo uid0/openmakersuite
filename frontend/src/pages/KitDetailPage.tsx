@@ -17,6 +17,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import KitComponentEditor, { KitComponentDraft } from '../components/inventory/KitComponentEditor';
 import WorkspacePage from '../components/landing/WorkspacePage';
+import { isAuthenticated } from '../components/RequireAuth';
 import { kitAPI, inventoryAPI } from '../services/api';
 import { Kit, Supplier } from '../types';
 
@@ -50,6 +51,13 @@ const KitDetailPage: React.FC = () => {
   const [supplierSku, setSupplierSku] = useState('');
   const [unitCost, setUnitCost] = useState<number | string>('');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  // This route carries no `RequireAuth` and `KitViewSet` serves reads to
+  // anyone, so a logged-out visitor lands here. Purchase terms are one
+  // vendor's part number and price, and a SKU shown without the vendor it
+  // belongs to gets pasted into the wrong order form — so for a viewer who
+  // cannot save them anyway, the whole card is withheld rather than shown
+  // unattributed (op-3xsp).
+  const [showSupplierTerms] = useState<boolean>(isAuthenticated);
 
   // Scoped mutation state — never a page-level spinner.
   const [saving, setSaving] = useState(false);
@@ -229,74 +237,79 @@ const KitDetailPage: React.FC = () => {
           </Stack>
         </Card>
 
-        <Card withBorder padding="lg">
-          <Stack gap="md">
-            <Title order={4}>Purchase terms</Title>
-            <Text size="sm" c="dimmed">
-              What the supplier charges for one kit. This is the price that lands on the
-              purchase-order line.
-            </Text>
-            {/* Whose terms are on screen. Without it the SKU and the price
-                below are one vendor's numbers with no vendor attached — and a
-                SKU gets pasted into an order form, so an unattributed one is
-                actionable-wrong in a way an unattributed price is not
-                (op-3xsp). Read-only: naming the vendor does not fill Supplier
-                in, and the field below still starts blank. */}
-            {kit?.supplier_choice?.supplier_name && (
-              <Text size="sm" c="dimmed" data-testid="kit-supplier-attribution">
-                Showing {kit.supplier_choice.supplier_name}&rsquo;s terms
-                {(kit.supplier_choice.alternatives?.length ?? 0) > 0 &&
-                  ` — this kit is also stocked by ${(kit.supplier_choice.alternatives ?? [])
-                    .map((alternative) => alternative.supplier_name)
-                    .join(', ')}`}
-                . Enter a Supplier below to save these terms against that vendor.
+        {showSupplierTerms && (
+          <Card withBorder padding="lg">
+            <Stack gap="md">
+              <Title order={4}>Purchase terms</Title>
+              <Text size="sm" c="dimmed">
+                What the supplier charges for one kit. This is the price that lands on the
+                purchase-order line.
               </Text>
-            )}
-            <Grid>
-              <Grid.Col span={{ base: 12, sm: 4 }}>
-                <TextInput
-                  label="Supplier"
-                  placeholder="Supplier id"
-                  value={supplierId === '' ? '' : String(supplierId)}
-                  onChange={(event) => {
-                    const next = event.currentTarget.value;
-                    setSupplierId(next === '' ? '' : Number(next));
-                  }}
-                  disabled={saving}
-                  list="kit-supplier-options"
-                  data-testid="kit-supplier"
-                />
-                <datalist id="kit-supplier-options">
-                  {suppliers.map((supplier) => (
-                    <option key={supplier.id} value={supplier.id}>
-                      {supplier.name}
-                    </option>
-                  ))}
-                </datalist>
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, sm: 4 }}>
-                <TextInput
-                  label="Supplier SKU"
-                  value={supplierSku}
-                  onChange={(event) => setSupplierSku(event.currentTarget.value)}
-                  disabled={saving}
-                  data-testid="kit-supplier-sku"
-                />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, sm: 4 }}>
-                <NumberInput
-                  label="Unit cost"
-                  prefix="$"
-                  decimalScale={2}
-                  value={unitCost}
-                  onChange={setUnitCost}
-                  disabled={saving}
-                  data-testid="kit-unit-cost"
-                />
-              </Grid.Col>
-            </Grid>
-          </Stack>
-        </Card>
+              {/* Whose terms are on screen. Without it the SKU and the price
+                  below are one vendor's numbers with no vendor attached — and a
+                  SKU gets pasted into an order form, so an unattributed one is
+                  actionable-wrong in a way an unattributed price is not
+                  (op-3xsp). It ATTRIBUTES and nothing more: it does not fill
+                  Supplier in, and it does not describe how to write. Changing
+                  Supplier here is not a supported way to retarget these terms —
+                  the save writes this vendor's SKU and price onto whichever
+                  vendor the field names. */}
+              {kit?.supplier_choice?.supplier_name && (
+                <Text size="sm" c="dimmed" data-testid="kit-supplier-attribution">
+                  Showing {kit.supplier_choice.supplier_name}&rsquo;s terms
+                  {(kit.supplier_choice.alternatives?.length ?? 0) > 0 &&
+                    ` — this kit is also stocked by ${(kit.supplier_choice.alternatives ?? [])
+                      .map((alternative) => alternative.supplier_name)
+                      .join(', ')}`}
+                  .
+                </Text>
+              )}
+              <Grid>
+                <Grid.Col span={{ base: 12, sm: 4 }}>
+                  <TextInput
+                    label="Supplier"
+                    placeholder="Supplier id"
+                    value={supplierId === '' ? '' : String(supplierId)}
+                    onChange={(event) => {
+                      const next = event.currentTarget.value;
+                      setSupplierId(next === '' ? '' : Number(next));
+                    }}
+                    disabled={saving}
+                    list="kit-supplier-options"
+                    data-testid="kit-supplier"
+                  />
+                  <datalist id="kit-supplier-options">
+                    {suppliers.map((supplier) => (
+                      <option key={supplier.id} value={supplier.id}>
+                        {supplier.name}
+                      </option>
+                    ))}
+                  </datalist>
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 4 }}>
+                  <TextInput
+                    label="Supplier SKU"
+                    value={supplierSku}
+                    onChange={(event) => setSupplierSku(event.currentTarget.value)}
+                    disabled={saving}
+                    data-testid="kit-supplier-sku"
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 4 }}>
+                  <NumberInput
+                    label="Unit cost"
+                    prefix="$"
+                    decimalScale={2}
+                    value={unitCost}
+                    onChange={setUnitCost}
+                    disabled={saving}
+                    data-testid="kit-unit-cost"
+                  />
+                </Grid.Col>
+              </Grid>
+            </Stack>
+          </Card>
+        )}
 
         <Card withBorder padding="lg">
           <Stack gap="md">

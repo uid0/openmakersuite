@@ -646,20 +646,43 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     # ``supplier_choice`` object (below) and the ``/metrics/``
     # (``?with_metrics=1``) endpoint. They are retained because ScanTTY's detail
     # screen reads all seven of them (``internal/tui/inventory_detail.go``) and
-    # the web reads THREE:
+    # the web reads FOUR. Each reader below was confirmed by opening the call
+    # site: a read only counts here when the object is an ``InventoryItem`` (or
+    # ``Kit``) payload from THIS serializer. Reads off an ``ItemSupplier`` row
+    # (``suppliers[]``, ``SupplierRelationshipForm``) are that row's own
+    # columns, and the order pad's look-alike keys are built per
+    # ``item_supplier`` in ``reorder_queue/views.py:by_supplier`` — neither is
+    # this field.
     #
+    #   * ``supplier_sku``      — the kit list's SKU cell and the "From" column
+    #                             that attributes it (``KitListPage.tsx``), and
+    #                             the kit form's SKU box (``KitDetailPage.tsx``,
+    #                             ``applyKit``). ``KitSerializer`` subclasses
+    #                             this one, so ``kit.supplier_sku`` IS the flat
+    #                             accessor. Both are gated to signed-in viewers,
+    #                             which changes who may see it, not who reads it;
     #   * ``supplier_url``      — the "View on <supplier>" link on the admin
-    #                             dashboard's by-supplier order pad;
+    #                             dashboard's by-supplier order pad
+    #                             (``AdminDashboard.tsx``, via
+    #                             ``request.item_details``);
     #   * ``unit_cost``         — every price rendered as a number rather than
-    #                             as a named supplier's price (op-9m2v);
+    #                             as a named supplier's price (op-9m2v): the
+    #                             item detail card and its cost widget, the
+    #                             inventory list and table, the kit list and kit
+    #                             form, the scan page's cost row, the inventory
+    #                             CSV export, and the work order material picker;
     #   * ``average_lead_time`` — the wait quoted beside a supplier the surface
-    #                             has already named from ``supplier_choice``.
+    #                             has already named from ``supplier_choice``:
+    #                             the scan page's info block and the admin
+    #                             dashboard's Lead Time column.
     #
-    # It was FOUR until op-3xsp: ``supplier_name`` had no web reader left once
-    # the scan page, the inventory CSV export, the reorder queue and the item
-    # page's anonymous block moved onto ``supplier_choice``. ScanTTY still reads
-    # it, so it stays. A future hard-removal needs coordinated ScanTTY + web
-    # changes. They resolve through the prefetch-friendly
+    # ``supplier_name`` had no web reader left after op-3xsp — the scan page,
+    # the inventory CSV export, the reorder queue and the item page's anonymous
+    # block all moved onto ``supplier_choice``. ``package_cost`` and
+    # ``quantity_per_package`` have none either; the web reads those off
+    # ``suppliers[]`` and the order pad. ScanTTY still reads all seven, so they
+    # all stay. A future hard-removal needs coordinated ScanTTY + web changes.
+    # They resolve through the prefetch-friendly
     # ``InventoryItem.primary_item_supplier`` so serialising a page no longer
     # costs a query per row.
     #

@@ -165,8 +165,12 @@ export, which leaves the system and gets ordered from. `supplier_choice` is on
 `InventoryItemSerializer` (so also on `item_details` and every list row); the web
 words it in ONE place, `frontend/src/utils/supplierChoice.ts`. The seven flat
 compat fields stay: ScanTTY's detail screen reads all of them and the web still
-reads three (`supplier_url`, `unit_cost`, `average_lead_time`) — the serializer
-comment names them, and it is a claim to keep true in both directions.
+reads four (`supplier_sku`, `supplier_url`, `unit_cost`, `average_lead_time`) —
+the serializer comment names each reader with the surface it lives on, and it is
+a claim to keep true in both directions. Count a reader only where the object is
+an `InventoryItem`/`Kit` payload from that serializer: `suppliers[]` rows and the
+order pad's look-alike keys (built per `item_supplier` in `by_supplier`) are
+different fields that happen to share a name.
 
 Reading the same key is not the same question. A form that EDITS one relationship
 (`SupplierRelationshipForm`), a report grouped by the supplier an order actually
@@ -183,7 +187,17 @@ kit list and the kit form showed it with no vendor beside it. Both now name the
 vendor. The attribution is READ-ONLY: the kit form's Supplier field is still
 blank until an operator types in it, because pre-filling it would make the save
 guard true after every load and `KitSerializer._apply_supplier_terms` rewrites
-pack size and the primary flag on any request that carries terms.
+pack size and the primary flag on any request that carries terms. The copy
+attributes and stops there — it must never tell an operator to change Supplier
+to retarget the terms, because the save would write this vendor's SKU and price
+onto whichever vendor the field names.
+
+**Neither kit route is behind `RequireAuth`, and `KitViewSet` serves reads to
+anyone.** So both surfaces gate on `isAuthenticated`: a logged-out visitor gets
+neither the SKU nor the vendor — the list drops both columns, the form drops the
+whole Purchase terms card. Withholding beats attributing for a viewer we will not
+attribute for, and a count would not have helped: the hazard is a part number
+nobody can trace to a vendor, and a count does not name one.
 
 Filtering happens in Python, on `item_suppliers.all()`, so the prefetch cache
 still serves it — a fresh `.filter()` reintroduces the per-row N+1 that #882

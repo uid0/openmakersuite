@@ -357,7 +357,13 @@ export interface InventoryItem {
   // pricing and lead time. This is the supplier source of truth; the flat
   // `supplier_name` / `supplier_sku` / `supplier_url` / `average_lead_time`
   // keys above are read-only legacy accessors for the ONE link the API says to
-  // buy through, and are superseded by this array. That link is never one you
+  // buy through, and are superseded by this array. Four of the seven still have
+  // web readers — `supplier_sku` (the kit list and kit form), `supplier_url`
+  // (the admin dashboard's order-pad link), `unit_cost` (every price rendered
+  // as a number) and `average_lead_time` (the scan page and the dashboard's
+  // Lead Time column); `supplier_name`, `package_cost` and `quantity_per_package`
+  // have none. A read off an `ItemSupplier` row below is that row's OWN column,
+  // not one of these. That link is never one you
   // cannot order from (inactive or discontinued links are skipped outright);
   // among the rest, a link the operator flagged primary wins, and otherwise the
   // API weighs price AND lead time together — it is not simply the cheapest.

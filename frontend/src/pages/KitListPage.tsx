@@ -12,6 +12,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import WorkspacePage from '../components/landing/WorkspacePage';
+import { isAuthenticated } from '../components/RequireAuth';
 import { kitAPI } from '../services/api';
 import { Kit } from '../types';
 import { supplierChoiceNote, supplierChoiceSummary } from '../utils/supplierChoice';
@@ -19,6 +20,13 @@ import { supplierChoiceNote, supplierChoiceSummary } from '../utils/supplierChoi
 const KitListPage: React.FC = () => {
   const navigate = useNavigate();
   const [kits, setKits] = useState<Kit[]>([]);
+  // `/inventory/kits` carries no `RequireAuth` and `KitViewSet` serves reads to
+  // anyone, so a logged-out visitor lands here. The supplier SKU is one
+  // vendor's part number and the column beside it is the only thing saying
+  // whose — for a viewer we will not attribute it for, show neither rather
+  // than an unattributed part number that gets pasted into an order form
+  // (op-3xsp).
+  const [showSupplierColumns] = useState<boolean>(isAuthenticated);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -88,8 +96,8 @@ const KitListPage: React.FC = () => {
             <Table.Thead>
               <Table.Tr>
                 <Table.Th scope="col">Kit</Table.Th>
-                <Table.Th scope="col">Supplier SKU</Table.Th>
-                <Table.Th scope="col">From</Table.Th>
+                {showSupplierColumns && <Table.Th scope="col">Supplier SKU</Table.Th>}
+                {showSupplierColumns && <Table.Th scope="col">From</Table.Th>}
                 <Table.Th scope="col">Unit cost</Table.Th>
                 <Table.Th scope="col">Components</Table.Th>
                 <Table.Th scope="col">Status</Table.Th>
@@ -110,18 +118,22 @@ const KitListPage: React.FC = () => {
                       vendor at all. Paste it at the wrong supplier and you have
                       ordered the wrong thing. The SKU is unchanged; what is new
                       is saying whose it is (op-3xsp). */}
-                  <Table.Td data-testid={`kit-supplier-sku-${kit.id}`}>
-                    {kit.supplier_sku || '—'}
-                  </Table.Td>
-                  <Table.Td data-testid={`kit-supplier-${kit.id}`}>
-                    {kit.supplier_sku
-                      ? (supplierChoiceSummary(kit.supplier_choice) ?? (
-                          <Text c="dimmed" size="sm">
-                            {supplierChoiceNote(kit.supplier_choice)}
-                          </Text>
-                        ))
-                      : '—'}
-                  </Table.Td>
+                  {showSupplierColumns && (
+                    <Table.Td data-testid={`kit-supplier-sku-${kit.id}`}>
+                      {kit.supplier_sku || '—'}
+                    </Table.Td>
+                  )}
+                  {showSupplierColumns && (
+                    <Table.Td data-testid={`kit-supplier-${kit.id}`}>
+                      {kit.supplier_sku
+                        ? (supplierChoiceSummary(kit.supplier_choice) ?? (
+                            <Text c="dimmed" size="sm">
+                              {supplierChoiceNote(kit.supplier_choice)}
+                            </Text>
+                          ))
+                        : '—'}
+                    </Table.Td>
+                  )}
                   <Table.Td>
                     {kit.unit_cost != null ? `$${kit.unit_cost.toFixed(2)}` : '—'}
                   </Table.Td>

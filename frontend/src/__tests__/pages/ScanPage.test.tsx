@@ -784,10 +784,12 @@ describe('ScanPage', () => {
 
   const renderAnonymouslyWithChoice = async (choice: Record<string, unknown>) => {
     localStorage.removeItem('token');
-    // A failed auto-submit is the one anonymous state that renders the item
+    // A failed auto-submit is the ONLY anonymous state that renders the item
     // block: `has_pending_reorder` short-circuits to the "already requested"
-    // screen, and a successful submit redirects to /thanks. Measured to settle
-    // with an instantly-rejecting mock, which is why it is used here.
+    // screen, and a successful submit redirects to /thanks. It does not settle
+    // — the retry loop documented on the effect in ScanPage.tsx keeps running
+    // underneath these assertions until the component unmounts. That loop is a
+    // pre-existing defect being filed separately; nothing below asserts on it.
     (api.reorderAPI.createRequest as jest.Mock).mockRejectedValue(new Error('offline'));
     (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
       data: { ...mockItem, supplier_choice: choice },

@@ -308,8 +308,9 @@ class InventoryItem(OwnableModel):
         # ("Number of cases/packages to reorder when stock is low") claimed a use
         # the code does not make: ``base_reorder_quantity`` — the one derivation
         # every filing path uses, from the QR-scan page to the purchase-order pad
-        # — routes a legacy case-based item through its ``each`` branch and reads
-        # ``reorder_quantity``, never this column. The two are independent, and
+        # — routes a legacy case-based item with no packaging chain of its own
+        # through its ``each`` branch and reads ``reorder_quantity``; no branch of
+        # it reads this column, ever. The two are independent, and
         # ``test_reorder_filing.py::TestLegacyCaseBasedItemsAreRecordedAsTheyBehave``
         # pins the divergence with numbers on it. Closing it would change what
         # is ordered for live items and is a separate decision; until it is

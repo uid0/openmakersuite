@@ -495,9 +495,11 @@ because what it turned out to be is worth knowing; 2 and 3 are still open:
    `order_quantity`; only the anonymous auto-submit reads the filing pair.
 
    ONE PART OF IT IS STILL OPEN and is the captain's, not an implementer's. For
-   a LEGACY `use_case_based_reorder` item the two halves are separate columns:
-   `reorder_cases` sizes how the reorder amount is PRESENTED and reaches no
-   ordering path; `reorder_quantity` sizes what is ORDERED
+   a LEGACY `use_case_based_reorder` item with a known case size and no
+   packaging chain of its own — `counts_in_packs` is tested first everywhere, so
+   a BRIDGED item reads `reorder_quantity` on both halves — the two halves are
+   separate columns: `reorder_cases` sizes how the reorder amount is PRESENTED
+   and reaches no ordering path; `reorder_quantity` sizes what is ORDERED
    (`base_reorder_quantity` routes these items through its `each` branch, which
    `packaging.py`'s module docstring records as deliberate preservation). So an
    operator's "Reorder Cases: 4" does not reach the order. Closing it — reading

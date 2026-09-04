@@ -434,9 +434,18 @@ def reorder_display(item: "InventoryItem") -> dict:
 
     The two agree for an ``each`` item, differ by the pack size for a
     pack-counting one (3 cases ↔ 36 bottles), and differ outright for a legacy
-    ``use_case_based_reorder`` item, whose ordering path reads
-    ``reorder_quantity`` while its display reads ``reorder_cases`` — see
-    :func:`base_reorder_quantity`, which owns that behaviour.
+    ``use_case_based_reorder`` item with a KNOWN case size and no packaging
+    chain of its own — the one shape whose display reads ``reorder_cases``
+    while its ordering path reads ``reorder_quantity``. The branch below is the
+    exact rule, and it is narrower than "legacy" twice over. A case-based item
+    whose case size is unknown names both halves in base units
+    (``TestLegacyCaseBasedItemsAreRecordedAsTheyBehave``), and
+    ``counts_in_packs`` is tested FIRST, so an item carrying both the legacy
+    flag and a packaging chain — what ``bridge_case_reorder_to_packaging``
+    leaves behind, since it sets ``count_level`` and deliberately keeps the
+    legacy columns — reads ``reorder_quantity`` on both halves and
+    ``reorder_cases`` on neither. See :func:`base_reorder_quantity`, which owns
+    the ordering half.
     """
     threshold, unit = reorder_threshold(item)
     current_cases = None if counts_in_packs(item) else item.current_cases

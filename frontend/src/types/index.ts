@@ -1030,6 +1030,12 @@ export interface LowStockAlert {
   name: string;
   current: number;
   minimum: number;
+  /**
+   * BASE units — the server's `base_reorder_quantity`, not the raw
+   * `reorder_quantity` column — because `MaintenanceDashboard` POSTs it
+   * verbatim as a `ReorderRequest.quantity`. See `check_material_stock`'s
+   * docstring, which owns the contract.
+   */
   reorder_qty: number;
 }
 

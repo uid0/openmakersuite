@@ -337,20 +337,24 @@ class SupplierDetailSerializer(SupplierSerializer):
     def get_lead_time_analytics(self, obj):
         """Get lead time analytics for this supplier.
 
-        REPORTED, NOT FIXED: the ``recent_logs`` block below emits
-        ``expected_delivery_date``, ``actual_delivery_date``, ``variance_days``
-        and ``was_late`` on one object with nothing saying WHICH promise
-        ``was_late`` refers to. ``variance_days`` is measured against the
-        supplier link's standing quoted lead time, not against
-        ``expected_delivery_date`` (see ``LeadTimeLog``), so a vendor that quotes
-        3, has the order confirmed at 10 and delivers on day 10 reaches this
-        payload — and ``frontend/src/pages/SupplierDetailPage.tsx``'s
-        ``LeadTimeChart`` — as ``expected_delivery_date == actual_delivery_date``
-        alongside ``variance_days: 7, was_late: true``, which reads as a
-        contradiction. The variance itself is correct and deliberate; it is the
-        rendering that asserts a bare lateness the row does not support. Naming
-        the yardstick here changes the served API shape, which was not
-        authorised on this branch.
+        ``variance_days``, ``was_late``, ``average_variance`` and
+        ``on_time_percentage`` are all measured against the supplier link's
+        standing quoted lead time, never against ``expected_delivery_date`` (see
+        ``LeadTimeLog``). That used to reach this payload — and
+        ``frontend/src/pages/SupplierDetailPage.tsx``'s ``LeadTimeChart`` —
+        unnamed, so a vendor that quotes 3, has the order confirmed at 10 and
+        delivers on day 10 arrived as ``expected_delivery_date ==
+        actual_delivery_date`` alongside ``variance_days: 7, was_late: true``
+        and read as a contradiction.
+
+        Two ADDED keys settle it, both derived from ``LeadTimeLog`` so this
+        payload cannot name a different promise than the admin does:
+        ``variance_measured_against`` states the yardstick once for the whole
+        block, and each row's ``met_confirmed_date`` carries the other promise —
+        ``true`` when the goods arrived by the date the operator confirmed on the
+        order, ``null`` when no date was confirmed there. Nothing was renamed or
+        removed, so every existing consumer is untouched. Pinned by
+        ``test_lead_time_yardstick_is_named.py``.
         """
         try:
             from django.db.models import Avg, Count, Max, Min
@@ -368,6 +372,9 @@ class SupplierDetailSerializer(SupplierSerializer):
                     "average_variance": None,
                     "total_orders": 0,
                     "on_time_percentage": None,
+                    # Present on the empty block too, so a consumer can read the
+                    # yardstick without it appearing and vanishing with the data.
+                    "variance_measured_against": LeadTimeLog.VARIANCE_YARDSTICK,
                 }
 
             stats = logs.aggregate(
@@ -397,6 +404,10 @@ class SupplierDetailSerializer(SupplierSerializer):
                 "on_time_percentage": (
                     float(on_time_percentage) if on_time_percentage is not None else None
                 ),
+                # What every variance and rate above and below is measured
+                # against, said once for the whole block instead of repeated on
+                # each row: it is the same for all of them.
+                "variance_measured_against": LeadTimeLog.VARIANCE_YARDSTICK,
                 "recent_logs": [
                     {
                         "item_name": log.item_supplier.item.name,
@@ -407,8 +418,14 @@ class SupplierDetailSerializer(SupplierSerializer):
                         "actual_lead_time_days": log.actual_lead_time_days,
                         "variance_days": log.variance_days,
                         "was_late": log.was_late,
+                        # The other promise, which varies per row and which
+                        # nothing here scores: ``null`` where the order carries
+                        # no confirmed date to judge against.
+                        "met_confirmed_date": log.met_confirmed_date,
                     }
-                    for log in logs.order_by("-actual_delivery_date")[:10]
+                    for log in logs.order_by("-actual_delivery_date").select_related(
+                        "purchase_order", "item_supplier__item"
+                    )[:10]
                 ],
             }
         except ImportError:

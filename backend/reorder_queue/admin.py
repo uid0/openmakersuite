@@ -43,16 +43,24 @@ from .settlement_signals import settlement_batch
 
 
 class DeliveryPerformanceFilter(admin.SimpleListFilter):
-    """Custom filter for delivery performance based on variance_days."""
+    """Filter the lead-time log by ``variance_days``, naming its yardstick.
 
-    title = "delivery performance"
+    "Late" here means later than :attr:`LeadTimeLog.VARIANCE_YARDSTICK`, not
+    later than the date the operator confirmed on the order — a row can be in
+    the "late" bucket having arrived on the agreed day. The title and every
+    choice therefore say "quoted lead time" rather than a bare early/on-time/
+    late, pinned by ``test_the_delivery_performance_filter_names_the_yardstick``.
+    """
+
+    title = f"delivery vs. {LeadTimeLog.VARIANCE_YARDSTICK_LABEL}"
     parameter_name = "performance"
 
     def lookups(self, request, model_admin):
+        label = LeadTimeLog.VARIANCE_YARDSTICK_LABEL
         return (
-            ("early", "Early Delivery"),
-            ("on_time", "On Time"),
-            ("late", "Late Delivery"),
+            ("early", f"Inside {label}"),
+            ("on_time", f"On {label}"),
+            ("late", f"Over {label}"),
         )
 
     def queryset(self, request, queryset):
@@ -664,7 +672,10 @@ class LeadTimeLogAdmin(admin.ModelAdmin):
         "purchase_order",
         "order_date",
         "actual_delivery_date",
-        "estimated_lead_time_days",
+        # Not the raw field: its verbose name is "Estimated lead time days",
+        # which leaves the reader to guess that the "quoted lead time" named by
+        # ``variance_display`` two columns over is this same number.
+        "quoted_lead_time_display",
         "actual_lead_time_days",
         "variance_display",
         "quantity_received",
@@ -672,7 +683,7 @@ class LeadTimeLogAdmin(admin.ModelAdmin):
     list_filter = [
         "actual_delivery_date",
         "item_supplier__supplier",
-        DeliveryPerformanceFilter,  # Custom filter for early/on-time/late delivery
+        DeliveryPerformanceFilter,  # Early / on-time / late vs. the quoted lead time
     ]
     search_fields = [
         "item_supplier__item__name",
@@ -682,12 +693,34 @@ class LeadTimeLogAdmin(admin.ModelAdmin):
     readonly_fields = [
         "item_name",
         "supplier_name",
-        "was_late",
-        "was_early",
+        # ``was_late`` / ``was_early`` are deliberately NOT listed: on a change
+        # form they render as a bare "Was late: True" that names no yardstick,
+        # which is the defect. ``variance_display`` and
+        # ``confirmed_date_display`` carry the same two facts and say what each
+        # is measured against.
+        "variance_display",
+        "confirmed_date_display",
         "variance_days",
         "recorded_at",
     ]
     date_hierarchy = "actual_delivery_date"
+
+    def get_queryset(self, request):
+        """Join what every row of this changelist reads.
+
+        ``variance_display`` reaches through ``purchase_order`` for the
+        confirmed date and ``item_name`` / ``supplier_name`` through
+        ``item_supplier``; without this each row costs its own queries.
+        """
+        return (
+            super()
+            .get_queryset(request)
+            .select_related(
+                "purchase_order",
+                "item_supplier__item",
+                "item_supplier__supplier",
+            )
+        )
 
     @admin.display(description="Item")
     def item_name(self, obj):
@@ -697,16 +730,61 @@ class LeadTimeLogAdmin(admin.ModelAdmin):
     def supplier_name(self, obj):
         return obj.supplier.name
 
-    @admin.display(description="Variance")
+    @admin.display(
+        description=f"{LeadTimeLog.VARIANCE_YARDSTICK_LABEL.capitalize()} (days)",
+        ordering="estimated_lead_time_days",
+    )
+    def quoted_lead_time_display(self, obj):
+        """The yardstick itself, under the name every other surface calls it."""
+        return obj.estimated_lead_time_days
+
+    @admin.display(description="Confirmed date")
+    def confirmed_date_display(self, obj):
+        """The operator's own promise, on its own row of the change form.
+
+        Says outright when the order carries no confirmed date rather than
+        showing this row's quote-derived ``expected_delivery_date`` as though
+        somebody had agreed to it. Pinned by
+        ``test_the_change_form_says_when_no_confirmed_date_was_agreed``.
+        """
+        confirmed = obj.confirmed_delivery_date
+        if confirmed is None:
+            return mark_safe(
+                '<span style="color: gray;">No delivery date was confirmed on this order</span>'
+            )
+        if obj.met_confirmed_date:
+            return format_html(
+                '<span style="color: green;">✓ Met the confirmed date {}</span>', confirmed
+            )
+        return format_html(
+            '<span style="color: red;">⚠️ Missed the confirmed date {}</span>', confirmed
+        )
+
+    @admin.display(description=f"Vs. {LeadTimeLog.VARIANCE_YARDSTICK_LABEL}")
     def variance_display(self, obj):
-        """Display variance with color coding."""
+        """Both promises in one cell, each naming what it is measured against.
+
+        The first line is the scored number and says the yardstick out loud —
+        never a bare "N days late", because ``variance_days`` is measured
+        against the supplier link's standing quote and a row can carry +7 having
+        arrived on the day the operator agreed. The second line is that other
+        promise, so the operator sees the vendor missed its advertised lead time
+        AND kept the date on the order, which are different things to chase.
+        Pinned by ``test_a_kept_confirmed_date_is_not_rendered_as_simply_late``.
+        """
+        label = LeadTimeLog.VARIANCE_YARDSTICK_LABEL
         variance = obj.variance_days
         if variance == 0:
-            return mark_safe('<span style="color: green;">✓ On Time</span>')
+            headline = format_html('<span style="color: green;">✓ On {}</span>', label)
         elif variance < 0:
-            return format_html('<span style="color: blue;">⚡ {} days early</span>', abs(variance))
+            headline = format_html(
+                '<span style="color: blue;">⚡ {} days inside {}</span>', abs(variance), label
+            )
         else:
-            return format_html('<span style="color: red;">⚠️ {} days late</span>', variance)
+            headline = format_html(
+                '<span style="color: red;">⚠️ {} days over {}</span>', variance, label
+            )
+        return format_html("{}<br>{}", headline, self.confirmed_date_display(obj))
 
 
 # WebHook Admin

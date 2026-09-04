@@ -3086,6 +3086,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 # Lead time metrics
                 "average_lead_time_days": lead_time_data["avg_lead_time"] or 0,
                 "on_time_delivery_rate": on_time_rate,
+                "variance_measured_against": LeadTimeLog.VARIANCE_YARDSTICK,
             }
         )
 
@@ -3419,6 +3420,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
                         "on_time_delivery_rate": on_time_rate,
                         "early_delivery_rate": early_rate,
                         "late_delivery_rate": late_rate,
+                        "variance_measured_against": LeadTimeLog.VARIANCE_YARDSTICK,
                         "total_order_value": total_value,
                         "damage_rate": damage_rate,
                         "last_order_date": last_order_date,
@@ -3437,8 +3439,14 @@ class AnalyticsViewSet(viewsets.ViewSet):
         """Get lead time trends over the past 6 months."""
         six_months_ago = timezone.now() - timedelta(days=180)
 
-        # Get lead time data by month
-        from django.db.models import Extract
+        # Get lead time data by month. ``Extract`` lives in
+        # ``django.db.models.functions`` and has never been re-exported from
+        # ``django.db.models``, so importing it from there raised ImportError on
+        # every call and this whole report answered 500 — including ScanTTY's
+        # "Lead-time trends" tab, which mirrors it. Nothing covered the endpoint,
+        # so nothing caught it; ``test_the_reorders_analytics_payloads_name_the_yardstick``
+        # now calls it.
+        from django.db.models.functions import Extract
 
         monthly_data = (
             LeadTimeLog.objects.filter(actual_delivery_date__gte=six_months_ago.date())
@@ -3466,6 +3474,10 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     "average_variance_days": round(data["avg_variance"], 1),
                     "total_deliveries": data["total_deliveries"],
                     "on_time_delivery_rate": round(on_time_rate, 1),
+                    # Both of those are against the standing quote, not against
+                    # the confirmed dates. Added, never renamed — ScanTTY decodes
+                    # this row by field name.
+                    "variance_measured_against": LeadTimeLog.VARIANCE_YARDSTICK,
                 }
             )
 
@@ -4231,6 +4243,11 @@ class PurchasingReportViewSet(viewsets.ViewSet):
                     "avg_actual_lead_time": round(item["avg_actual_lead_time"] or 0, 1),
                     "avg_variance": round(item["avg_variance"] or 0, 1),
                     "on_time_rate": round(on_time_rate, 1),
+                    # ``avg_variance`` and ``on_time_rate`` are both measured
+                    # against the supplier link's standing quote, not against the
+                    # dates confirmed on the orders. Added, never renamed — see
+                    # ``LeadTimeLog.VARIANCE_YARDSTICK``.
+                    "variance_measured_against": LeadTimeLog.VARIANCE_YARDSTICK,
                 }
             )
 
@@ -4405,19 +4422,34 @@ class PurchasingReportViewSet(viewsets.ViewSet):
                 'attachment; filename="purchasing_lead_time_analysis.csv"'
             )
 
-            writer = csv.DictWriter(
-                response_obj,
-                fieldnames=[
-                    "supplier_name",
-                    "item_name",
-                    "total_orders",
-                    "avg_estimated_lead_time",
-                    "avg_actual_lead_time",
-                    "avg_variance",
-                    "on_time_rate",
-                ],
+            fieldnames = [
+                "supplier_name",
+                "item_name",
+                "total_orders",
+                "avg_estimated_lead_time",
+                "avg_actual_lead_time",
+                "avg_variance",
+                "on_time_rate",
+            ]
+            writer = csv.DictWriter(response_obj, fieldnames=fieldnames)
+            # A header row a person reads, not the dict keys. "avg_variance" and
+            # "on_time_rate" name no yardstick, and both are measured against the
+            # supplier link's standing quoted lead time rather than the delivery
+            # dates confirmed on the orders — a spreadsheet reading these as
+            # missed agreed dates would chase the wrong vendors. The dict keys
+            # below are untouched, so the row values are unchanged. Pinned by
+            # ``test_the_lead_time_csv_header_names_the_yardstick``.
+            writer.writerow(
+                {
+                    "supplier_name": "Supplier",
+                    "item_name": "Item Name",
+                    "total_orders": "Total Orders",
+                    "avg_estimated_lead_time": "Avg Quoted Lead Time (days)",
+                    "avg_actual_lead_time": "Avg Actual Lead Time (days)",
+                    "avg_variance": "Avg Variance vs. Quoted Lead Time (days)",
+                    "on_time_rate": "Within Quoted Lead Time (%)",
+                }
             )
-            writer.writeheader()
             for row in data:
                 writer.writerow(
                     {

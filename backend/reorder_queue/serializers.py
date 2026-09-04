@@ -1208,13 +1208,32 @@ class OrderMetricsSerializer(serializers.Serializer):
     orders_created_this_week = serializers.IntegerField()
     orders_received_this_week = serializers.IntegerField()
 
-    # Lead time metrics
+    # Lead time metrics. "On time" is against the supplier link's standing
+    # quoted lead time, NOT against the dates confirmed on the orders — see
+    # ``LeadTimeLog``. ``variance_measured_against`` says so in the payload so a
+    # reader of the rate never has to guess which promise it scores.
     average_lead_time_days = serializers.FloatField()
-    on_time_delivery_rate = serializers.FloatField()  # Percentage
+    on_time_delivery_rate = serializers.FloatField(
+        help_text=(
+            "Percentage of deliveries that arrived within the supplier link's "
+            "standing quoted lead time. Not a rate against the delivery dates "
+            "confirmed on the orders."
+        )
+    )
+    variance_measured_against = serializers.CharField(
+        help_text="What on_time_delivery_rate is measured against."
+    )
 
 
 class SupplierPerformanceSerializer(serializers.Serializer):
-    """Serializer for supplier performance metrics."""
+    """Serializer for supplier performance metrics.
+
+    Every delivery rate here is measured against the supplier link's standing
+    quoted lead time, never against the dates confirmed on the orders — see
+    ``LeadTimeLog``. A supplier can sit in ``late_delivery_rate`` having hit
+    every date its operator agreed to, so the rates are served beside
+    ``variance_measured_against`` rather than as bare lateness.
+    """
 
     supplier_id = serializers.IntegerField()
     supplier_name = serializers.CharField()
@@ -1224,11 +1243,23 @@ class SupplierPerformanceSerializer(serializers.Serializer):
     completed_orders = serializers.IntegerField()
     active_orders = serializers.IntegerField()
 
-    # Delivery performance
+    # Delivery performance, all three rates against the standing quoted lead time
     average_lead_time_days = serializers.FloatField()
-    on_time_delivery_rate = serializers.FloatField()
-    early_delivery_rate = serializers.FloatField()
-    late_delivery_rate = serializers.FloatField()
+    on_time_delivery_rate = serializers.FloatField(
+        help_text="Percentage of deliveries inside the standing quoted lead time."
+    )
+    early_delivery_rate = serializers.FloatField(
+        help_text="Percentage of deliveries that beat the standing quoted lead time."
+    )
+    late_delivery_rate = serializers.FloatField(
+        help_text=(
+            "Percentage of deliveries that ran past the standing quoted lead "
+            "time. Not a rate of missed confirmed delivery dates."
+        )
+    )
+    variance_measured_against = serializers.CharField(
+        help_text="What the three delivery rates above are measured against."
+    )
 
     # Financial metrics
     total_order_value = serializers.DecimalField(max_digits=15, decimal_places=2)

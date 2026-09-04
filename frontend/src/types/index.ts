@@ -39,6 +39,10 @@ export interface SupplierAgreement {
 export interface SupplierDetail extends Supplier {
   items?: ItemSupplier[];
   purchase_orders?: any[]; // PurchaseOrder type from reorder_queue
+  // Every variance and rate in this block is measured against the supplier
+  // link's standing quoted lead time, never against the delivery dates
+  // confirmed on the orders — `variance_measured_against` says which, and each
+  // row's `met_confirmed_date` carries that other promise.
   lead_time_analytics?: {
     average_lead_time: number | null;
     min_lead_time: number | null;
@@ -46,6 +50,7 @@ export interface SupplierDetail extends Supplier {
     average_variance: number | null;
     total_orders: number;
     on_time_percentage: number | null;
+    variance_measured_against?: string;
     recent_logs?: Array<{
       item_name: string;
       order_date: string;
@@ -54,7 +59,10 @@ export interface SupplierDetail extends Supplier {
       estimated_lead_time_days: number;
       actual_lead_time_days: number;
       variance_days: number;
+      /** Later than the QUOTE. Can be `true` on a row that hit the agreed date. */
       was_late: boolean;
+      /** Met the operator's confirmed date; `null` when none was confirmed. */
+      met_confirmed_date?: boolean | null;
     }>;
   };
   price_trends?: {
@@ -1741,10 +1749,14 @@ export interface PurchasingLeadTimeAnalysis {
   supplier_name: string;
   item_name: string;
   total_orders: number;
+  /** The supplier link's standing quote — the yardstick, not an order estimate. */
   avg_estimated_lead_time: number;
   avg_actual_lead_time: number;
+  /** Against `avg_estimated_lead_time`, not against the confirmed delivery dates. */
   avg_variance: number;
+  /** Share of deliveries inside the quote, not the share that hit agreed dates. */
   on_time_rate: number;
+  variance_measured_against?: string;
 }
 
 export interface PurchasingPriceTrends {

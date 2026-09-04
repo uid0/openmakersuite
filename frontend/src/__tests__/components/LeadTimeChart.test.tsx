@@ -45,9 +45,9 @@ describe('LeadTimeChart', () => {
     );
 
     expect(screen.getByText('Average Lead Time')).toBeInTheDocument();
-    expect(screen.getByText('On-Time Percentage')).toBeInTheDocument();
+    expect(screen.getByText('Within Quoted Lead Time')).toBeInTheDocument();
     expect(screen.getByText('Min / Max Lead Time')).toBeInTheDocument();
-    expect(screen.getByText('Average Variance')).toBeInTheDocument();
+    expect(screen.getByText('Avg Variance vs. Quoted Lead Time')).toBeInTheDocument();
   });
 
   it('displays correct statistics values', () => {
@@ -69,7 +69,7 @@ describe('LeadTimeChart', () => {
       </MantineProvider>
     );
 
-    expect(screen.getByText('Lead Time Comparison (Recent Orders)')).toBeInTheDocument();
+    expect(screen.getByText('Quoted vs. Actual Lead Time (Recent Orders)')).toBeInTheDocument();
   });
 
   it('displays empty state when no data', () => {

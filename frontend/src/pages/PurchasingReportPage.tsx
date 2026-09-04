@@ -335,16 +335,24 @@ const PurchasingReportPage: React.FC = () => {
                         Total Orders
                       </Table.Th>
                       <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('avg_estimated_lead_time')}>
-                        Avg Est. Lead Time (days)
+                        Avg Quoted Lead Time (days)
                       </Table.Th>
                       <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('avg_actual_lead_time')}>
                         Avg Actual Lead Time (days)
                       </Table.Th>
+                      {/*
+                        Both of these are measured against the supplier link's
+                        standing quoted lead time, never against the delivery
+                        dates confirmed on the orders — a supplier can sit at a
+                        low rate here having hit every date it agreed to. The
+                        headers say the yardstick so nobody chases a vendor for
+                        the wrong broken promise.
+                      */}
                       <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('avg_variance')}>
-                        Avg Variance (days)
+                        Avg Variance vs. Quoted (days)
                       </Table.Th>
                       <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('on_time_rate')}>
-                        On-Time Rate (%)
+                        Within Quoted Lead Time (%)
                       </Table.Th>
                     </Table.Tr>
                   </Table.Thead>

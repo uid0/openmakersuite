@@ -1554,6 +1554,14 @@ class LeadTimeLog(models.Model):
     discount that same quote by how often the vendor broke it; scoring the
     discount against a per-order date would let a vendor quote three days,
     confirm ten, deliver ten, and win on both axes.
+
+    Because the number is right and only the rendering could lie, the display
+    rule lives here rather than in each surface: no screen, payload or export
+    may show ``variance_days``, ``was_late`` or any rate derived from them
+    without naming :attr:`VARIANCE_YARDSTICK`, and per-row surfaces show
+    :attr:`met_confirmed_date` beside it so a vendor over its quote that hit the
+    agreed date is not read as simply late. The surfaces holding to that are
+    pinned by ``test_lead_time_yardstick_is_named.py``.
     """
 
     item_supplier = models.ForeignKey(
@@ -1591,6 +1599,20 @@ class LeadTimeLog(models.Model):
     # Metadata
     recorded_at = models.DateTimeField(auto_now_add=True)
 
+    #: The machine name of what ``variance_days`` — and every rate derived from
+    #: it — is measured against. Every surface that shows one of those numbers
+    #: reads its yardstick from here instead of spelling out a promise of its
+    #: own, so the admin, the two supplier-analytics payloads and the purchasing
+    #: report cannot drift into naming three different things. Served in the
+    #: analytics payloads as ``variance_measured_against``; pinned by
+    #: ``test_every_variance_payload_names_the_same_yardstick``.
+    VARIANCE_YARDSTICK = "quoted_lead_time"
+
+    #: The same yardstick in the words a person reads. Used by the admin and by
+    #: the web labels; pinned alongside the machine name by
+    #: ``test_the_yardstick_label_is_the_machine_name_in_words``.
+    VARIANCE_YARDSTICK_LABEL = "quoted lead time"
+
     class Meta:
         ordering = ["-actual_delivery_date"]
         indexes = [
@@ -1616,13 +1638,54 @@ class LeadTimeLog(models.Model):
 
     @property
     def was_late(self) -> bool:
-        """Check if the delivery was late."""
+        """Later than the STANDING QUOTE — never "late" on its own.
+
+        The yardstick is :attr:`VARIANCE_YARDSTICK`, not
+        :attr:`confirmed_delivery_date`, so this can be ``True`` on a row that
+        arrived on the day the operator agreed. No surface may render it as a
+        bare lateness: every one of them names the yardstick and shows
+        :attr:`met_confirmed_date` beside it.
+        """
         return self.variance_days > 0
 
     @property
     def was_early(self) -> bool:
-        """Check if the delivery was early."""
+        """Inside the standing quote. Same yardstick as :attr:`was_late`."""
         return self.variance_days < 0
+
+    @property
+    def confirmed_delivery_date(self):
+        """The date the OPERATOR confirmed on the order, or ``None``.
+
+        This row's own ``expected_delivery_date`` cannot answer that:
+        :func:`~reorder_queue.services.receiving.create_lead_time_log` falls back
+        to ``order_date + the standing quote`` when the purchase order carries no
+        confirmed date, and a date derived from the quote is not a promise
+        anybody agreed to. Calling that fallback "the confirmed date" would
+        assert a second promise the row does not hold — the same false claim the
+        yardstick naming exists to stop — so the answer comes off the purchase
+        order, which is the only place an operator's confirmation is recorded,
+        and is ``None`` when there is none.
+
+        Pinned by ``test_a_log_with_no_confirmed_date_on_the_order_says_so``.
+        """
+        return self.purchase_order.expected_delivery_date
+
+    @property
+    def met_confirmed_date(self):
+        """Did the goods arrive by the date the operator confirmed?
+
+        ``None`` when the order carries no confirmed date, so callers can say
+        "not confirmed" rather than guessing between met and missed. This is the
+        OTHER promise on the row and nothing scores it — it exists so a reader
+        of :attr:`was_late` can see that a vendor over its quote may still have
+        hit the date they agreed. Pinned by
+        ``test_a_kept_confirmed_date_shows_as_met_beside_a_broken_quote``.
+        """
+        confirmed = self.confirmed_delivery_date
+        if confirmed is None:
+            return None
+        return self.actual_delivery_date <= confirmed
 
     def save(self, *args, **kwargs):
         """Auto-calculate variance when saving."""

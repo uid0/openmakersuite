@@ -12,7 +12,14 @@ The reorder workflow has been significantly enhanced to prevent duplicate reques
 - **Status Display**: Shows current status, quantity, requester, and expected delivery dates
 
 ### 2. **Expected Delivery Date Calculation**
-- **Automatic Calculation**: Uses order date + average lead time to calculate expected delivery
+- **Automatic Calculation**: The date the operator confirmed on the purchase
+  order wins; only when the order carries none is the supplier link's quoted
+  lead time used, counted in BUSINESS days from the send date. Those are two
+  different promises — see `LeadTimeLog` — and the fallback is not plain
+  addition. Both branches are pinned by
+  `test_the_shown_delivery_date_prefers_the_confirmed_date_over_the_quote` and
+  `test_the_quote_fallback_counts_BUSINESS_days_not_calendar_days` in
+  `backend/reorder_queue/tests/test_lead_time_yardstick_is_named.py`.
 - **TV Dashboard Display**: Shows countdown ("Expected in 5 days", "Expected tomorrow", etc.)
 - **Visual Indicators**: Different colors and styling for different reorder statuses
 
@@ -94,7 +101,8 @@ item.reorder_status                 # Status property: needs_order/pending/appro
 ### Scenario 3: Order Placed
 1. Admin approves request and marks as ordered
 2. Status changes to `ordered`
-3. Expected delivery calculated: `order_date + lead_time`
+3. Expected delivery calculated: the order's confirmed `expected_delivery_date`
+   if it has one, else `add_business_days(order_date, average_lead_time)`
 4. TV Dashboard shows "ORDERED - Expected in X days"
 
 ### Scenario 4: Item Delivered

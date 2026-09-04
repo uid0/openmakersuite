@@ -214,6 +214,11 @@ class SupplierViewSet(viewsets.ModelViewSet):
                     "on_time_percentage": (
                         float(on_time_percentage) if on_time_percentage is not None else None
                     ),
+                    # Same yardstick, same key, same source constant as the
+                    # supplier-detail block in ``inventory.serializers`` — these
+                    # two endpoints serve the same numbers and must not name two
+                    # different promises.
+                    "variance_measured_against": LeadTimeLog.VARIANCE_YARDSTICK,
                 }
 
             # Price trends

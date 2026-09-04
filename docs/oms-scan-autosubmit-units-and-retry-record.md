@@ -202,7 +202,6 @@ kits and legacy `use_case_based_reorder` materials this predicate alerts on
 today, so it removes warnings as well as adding them. It is routed as its own
 task with a pointer comment at the line.
 
-
 ## Cross-project
 
 ScanTTY was checked against its REAL remote default branch (`uid0/scantty` main

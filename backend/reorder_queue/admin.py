@@ -695,11 +695,11 @@ class LeadTimeLogAdmin(admin.ModelAdmin):
         "supplier_name",
         # ``was_late`` / ``was_early`` are deliberately NOT listed: on a change
         # form they render as a bare "Was late: True" that names no yardstick,
-        # which is the defect. ``variance_display`` and
-        # ``confirmed_date_display`` carry the same two facts and say what each
-        # is measured against.
+        # which is the defect. ``variance_display`` carries both facts and says
+        # what each is measured against — including the confirmed-date verdict,
+        # which is why ``confirmed_date_display`` is not listed here as well: it
+        # would render the same verdict a second time one row below.
         "variance_display",
-        "confirmed_date_display",
         "variance_days",
         "recorded_at",
     ]
@@ -740,12 +740,13 @@ class LeadTimeLogAdmin(admin.ModelAdmin):
 
     @admin.display(description="Confirmed date")
     def confirmed_date_display(self, obj):
-        """The operator's own promise, on its own row of the change form.
+        """The operator's own promise, rendered as the second line of the cell.
 
         Says outright when the order carries no confirmed date rather than
         showing this row's quote-derived ``expected_delivery_date`` as though
-        somebody had agreed to it. Pinned by
-        ``test_the_change_form_says_when_no_confirmed_date_was_agreed``.
+        somebody had agreed to it. Reached through ``variance_display`` rather
+        than listed in ``readonly_fields``, so the verdict appears once. Pinned
+        by ``test_the_change_form_says_when_no_confirmed_date_was_agreed``.
         """
         confirmed = obj.confirmed_delivery_date
         if confirmed is None:

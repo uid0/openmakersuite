@@ -178,13 +178,28 @@ def test_the_change_form_says_when_no_confirmed_date_was_agreed():
     assert "No delivery date was confirmed" in _admin().confirmed_date_display(log)
 
 
-def test_the_change_form_never_offers_a_bare_was_late_field():
-    """``was_late`` renders as "Was late: True", which names no yardstick."""
-    admin = _admin()
+def test_the_change_form_never_renders_a_bare_was_late_row(client, admin_user):
+    """``was_late`` renders as "Was late: True", which names no yardstick.
 
-    assert "was_late" not in admin.readonly_fields
-    assert "was_early" not in admin.readonly_fields
-    assert "confirmed_date_display" in admin.readonly_fields
+    Rendered through the admin client rather than read off ``readonly_fields``:
+    the class attribute is not what a reader sees, and a later
+    ``get_readonly_fields()`` override putting the bare field back for some users
+    would leave an attribute check green while the defect is on the screen again.
+    """
+    log = _kept_promise_broken_quote()
+    client.force_login(admin_user)
+
+    response = client.get(reverse("admin:reorder_queue_leadtimelog_change", args=[log.pk]))
+
+    assert response.status_code == 200
+    html = response.content.decode()
+    assert "Was late" not in html
+    assert "Was early" not in html
+    # What stands in their place, naming the promise each scores.
+    assert "7 days over quoted lead time" in html
+    # Exactly once: the verdict is the second line of the variance cell, so
+    # listing ``confirmed_date_display`` as its own row would repeat it.
+    assert html.count("Met the confirmed date") == 1
 
 
 def test_the_delivery_performance_filter_names_the_yardstick():
@@ -199,13 +214,24 @@ def test_the_delivery_performance_filter_names_the_yardstick():
     assert "quoted lead time" in DeliveryPerformanceFilter.title
 
 
-def test_the_changelist_calls_the_quote_column_the_quote():
-    """So "N days over quoted lead time" lines up with a column of that name."""
-    admin = _admin()
+def test_the_changelist_calls_the_quote_column_the_quote(client, admin_user):
+    """So "N days over quoted lead time" lines up with a column of that name.
 
-    assert "quoted_lead_time_display" in admin.list_display
-    assert "estimated_lead_time_days" not in admin.list_display
-    assert "Quoted lead time" in admin.quoted_lead_time_display.__func__.short_description
+    The header a person reads, taken off the rendered page — "Estimated lead
+    time days" left them to guess that the column two over was the same number.
+    """
+    log = _kept_promise_broken_quote()
+    client.force_login(admin_user)
+
+    response = client.get(reverse("admin:reorder_queue_leadtimelog_changelist"))
+
+    assert response.status_code == 200
+    html = response.content.decode()
+    assert "Quoted lead time (days)" in html
+    assert "Estimated lead time days" not in html
+    # And the cell that phrase has to line up with, on the same page.
+    assert "7 days over quoted lead time" in html
+    assert str(log.estimated_lead_time_days) in html
 
 
 # ── the served payloads (S4, S9, S10, S11) ───────────────────────────────────

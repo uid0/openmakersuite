@@ -775,6 +775,13 @@ class LeadTimeLogAdmin(admin.ModelAdmin):
         """
         label = LeadTimeLog.VARIANCE_YARDSTICK_LABEL
         variance = obj.variance_days
+        if variance is None:
+            # The add form binds an unsaved row: nothing has been scored yet, and
+            # no promise can be reported on it. Returning before
+            # ``confirmed_date_display`` matters — that reaches
+            # ``purchase_order``, which an unsaved row does not have, and a
+            # nested raise here is not one Django's readonly rendering catches.
+            return "—"
         if variance == 0:
             headline = format_html('<span style="color: green;">✓ On {}</span>', label)
         elif variance < 0:

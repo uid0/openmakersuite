@@ -15,11 +15,32 @@
  * the date to chase on rather than just the word.
  */
 import { MantineProvider } from '@mantine/core';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import React from 'react';
 import LeadTimeChart, {
   LeadTimeTooltip,
   confirmedDatePhrase,
 } from '../../components/LeadTimeChart';
+
+// `ResponsiveContainer` measures its parent, and every box in jsdom is 0x0, so
+// the chart would lay out to nothing and draw no bars. Giving it a fixed size is
+// what lets the mount-level test below drive a real hover through recharts and
+// reach whatever tooltip the chart is actually wired to.
+vi.mock('recharts', async () => {
+  const actual = await vi.importActual<typeof import('recharts')>('recharts');
+  return {
+    ...actual,
+    ResponsiveContainer: ({
+      children,
+    }: {
+      children: React.ReactElement<{ width?: number; height?: number }>;
+    }) => (
+      <div style={{ width: 800, height: 400 }}>
+        {React.cloneElement(children, { width: 800, height: 400 })}
+      </div>
+    ),
+  };
+});
 
 /** Quote 3, confirm day 10, deliver day 10: over the quote, on the agreed day. */
 const keptPromiseBrokenQuote = {
@@ -80,6 +101,26 @@ describe('lead-time labels name the yardstick', () => {
     renderChart();
 
     expect(screen.getByText('Quoted vs. Actual Lead Time (Recent Orders)')).toBeInTheDocument();
+  });
+});
+
+describe('the chart is wired to the tooltip that names both promises', () => {
+  it('shows the yardstick line and the confirmed-date verdict on hover', async () => {
+    // Not a direct render of `LeadTimeTooltip`: dropping `content={...}` from
+    // the chart's `<Tooltip>` falls back to recharts' default, which shows only
+    // the bar values — the yardstick line and the confirmed-date verdict both
+    // vanish from the real screen while a direct-render test stays green.
+    const { container } = renderChart();
+
+    const wrapper = container.querySelector('.recharts-wrapper');
+    expect(wrapper).not.toBeNull();
+    fireEvent.mouseOver(wrapper!, { clientX: 400, clientY: 200 });
+    fireEvent.mouseMove(wrapper!, { clientX: 400, clientY: 200 });
+
+    await waitFor(() => {
+      expect(screen.getByText(/\+7 days vs\. quoted lead time/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText('Met the confirmed delivery date 2026-03-11')).toBeInTheDocument();
   });
 });
 

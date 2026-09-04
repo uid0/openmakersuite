@@ -1667,8 +1667,14 @@ class LeadTimeLog(models.Model):
         order, which is the only place an operator's confirmation is recorded,
         and is ``None`` when there is none.
 
+        ``None`` on a row with no purchase order at all — an unsaved instance,
+        as the admin add form binds — rather than raising, so a caller reading
+        this on an empty row gets the same honest "nothing was confirmed".
+
         Pinned by ``test_a_log_with_no_confirmed_date_on_the_order_says_so``.
         """
+        if self.purchase_order_id is None:
+            return None
         return self.purchase_order.expected_delivery_date
 
     @property

@@ -21,6 +21,7 @@ back to a bare lateness, and they fail if two surfaces start naming two differen
 promises.
 """
 
+import re
 from datetime import timedelta
 from decimal import Decimal
 
@@ -214,13 +215,28 @@ def test_the_delivery_performance_filter_names_the_yardstick():
     assert "quoted lead time" in DeliveryPerformanceFilter.title
 
 
+def _changelist_cell(html, field):
+    """The text of one changelist column's cell.
+
+    Django writes each ``list_display`` entry into ``<td class="field-NAME">``,
+    which is the markup the admin's own templates and CSS are built on. Reading
+    the value out of its own column is the point: a bare ``"37" in html`` passes
+    on a page that never rendered the column at all.
+    """
+    match = re.search(rf'<t[dh] class="field-{field}"[^>]*>(.*?)</t[dh]>', html, re.S)
+    assert match is not None, f"no cell rendered for column {field}"
+    return re.sub(r"<[^>]+>", "", match.group(1)).strip()
+
+
 def test_the_changelist_calls_the_quote_column_the_quote(client, admin_user):
     """So "N days over quoted lead time" lines up with a column of that name.
 
     The header a person reads, taken off the rendered page — "Estimated lead
     time days" left them to guess that the column two over was the same number.
     """
-    log = _kept_promise_broken_quote()
+    # A quote no incidental number on the page shares, read back out of its own
+    # cell: 37 quoted, delivered on day 44, so the row is 7 over.
+    log = _delivery(quoted=37, confirmed_after=44, delivered_after=44)
     client.force_login(admin_user)
 
     response = client.get(reverse("admin:reorder_queue_leadtimelog_changelist"))
@@ -229,9 +245,37 @@ def test_the_changelist_calls_the_quote_column_the_quote(client, admin_user):
     html = response.content.decode()
     assert "Quoted lead time (days)" in html
     assert "Estimated lead time days" not in html
-    # And the cell that phrase has to line up with, on the same page.
-    assert "7 days over quoted lead time" in html
-    assert str(log.estimated_lead_time_days) in html
+    assert _changelist_cell(html, "quoted_lead_time_display") == str(log.estimated_lead_time_days)
+    # And the cell that column's name has to line up with, on the same page.
+    assert "7 days over quoted lead time" in _changelist_cell(html, "variance_display")
+
+
+def test_an_unsaved_row_confirms_nothing_rather_than_raising():
+    """No order attached means no operator confirmation to report."""
+    assert LeadTimeLog().confirmed_delivery_date is None
+    assert LeadTimeLog().met_confirmed_date is None
+
+
+def test_the_admin_add_form_renders_before_anything_has_been_scored(client, admin_user):
+    """An unsaved row has no variance and no order, and the page must still open.
+
+    ``variance_display`` is a readonly field, and Django renders readonly fields
+    on the ADD view too, against an unsaved ``LeadTimeLog`` whose
+    ``variance_days`` is ``None`` and which has no ``purchase_order``. Comparing
+    that ``None`` raised ``TypeError`` and the page answered 500 — a screen that
+    does not render says nothing about any promise at all.
+    """
+    client.force_login(admin_user)
+
+    response = client.get(reverse("admin:reorder_queue_leadtimelog_add"))
+
+    assert response.status_code == 200
+    # No verdict is claimed about a row nothing has been recorded against yet.
+    html = response.content.decode()
+    assert "over quoted lead time" not in html
+    assert "inside quoted lead time" not in html
+    assert "Met the confirmed date" not in html
+    assert "Missed the confirmed date" not in html
 
 
 # ── the served payloads (S4, S9, S10, S11) ───────────────────────────────────

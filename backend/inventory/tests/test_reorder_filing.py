@@ -78,6 +78,23 @@ def _case_item(**kwargs):
     )
 
 
+def _bridged_case_item(case_size=12, **kwargs):
+    """A BRIDGED item — the legacy case columns AND a packaging chain at once.
+
+    What ``bridge_case_reorder_to_packaging`` leaves behind: it writes the
+    two-rung chain and points ``count_mode``/``count_level`` at the case rung
+    while deliberately KEEPING ``use_case_based_reorder`` and its columns. The
+    item form can produce the same shape by hand. The bridge copies
+    ``reorder_cases`` into ``reorder_quantity``, so the two agree the moment it
+    runs; they are set apart here because nothing keeps them in step afterwards
+    and the columns are what the shape has to be pinned against.
+    """
+    kwargs.setdefault("use_case_based_reorder", True)
+    kwargs.setdefault("minimum_cases", 2)
+    kwargs.setdefault("reorder_cases", 4)
+    return _pack_item(case_size=case_size, **kwargs)
+
+
 def _every_item_shape():
     """One item of each shape ``reorder_display`` branches on, freshly built."""
     return {
@@ -276,12 +293,13 @@ class TestLegacyCaseBasedItemsAreRecordedAsTheyBehave:
     edit. ``order_quantity`` reports what is actually filed either way, which is
     what lets the scan page stay honest while the columns disagree.
 
-    ``InventoryItem.reorder_cases``'s ``help_text`` is worded off THIS class: it
-    says the column sizes how the reorder amount is PRESENTED, reaches no
-    ordering path, and names ``reorder_quantity`` as the one a reorder actually
-    orders. It used to say "Number of cases/packages to reorder when stock is
-    low", which promised a use no code makes. Whether to
-    close the divergence instead — by having ``base_reorder_quantity`` read
+    ``InventoryItem.reorder_cases``'s ``help_text`` is worded off THIS class,
+    clause for clause: "never affects what is ordered" is the first test below,
+    and "only for an item whose counting mode gives this column meaning" is the
+    other two — an unknown case size and the BRIDGED shape are the counting
+    modes that give it none. It used to say "Number of cases/packages to reorder
+    when stock is low", which promised a use no code makes. Whether to close the
+    divergence instead — by having ``base_reorder_quantity`` read
     ``reorder_cases × order_pack_size`` for these items — changes what is ordered
     for live items and is routed to the captain as its own decision.
     """
@@ -306,6 +324,31 @@ class TestLegacyCaseBasedItemsAreRecordedAsTheyBehave:
         assert display["unit"] == "unit"
         assert display["reorder_quantity"] == 40
         assert display["order_quantity"] == 40
+
+    def test_a_bridged_item_reads_reorder_quantity_on_both_halves(self):
+        """COUNTING MODE, not the legacy flag, decides whether ``reorder_cases`` means anything.
+
+        ``counts_in_packs`` is tested first in ``reorder_display`` and in
+        ``base_reorder_quantity``, so an item carrying the legacy flag AND a
+        packaging chain reads ``reorder_quantity`` twice and ``reorder_cases``
+        never — the display in PACKS, the order in base units at the pack size.
+        This is the shape the ``help_text``'s "only for an item whose counting
+        mode gives this column meaning" clause excludes, and the one where the
+        old wording ("a reorder orders 'Reorder quantity', in base units") was
+        wrong by the pack factor.
+        """
+        item = _bridged_case_item(
+            case_size=12, current_stock=36, minimum_stock=2, reorder_quantity=3, reorder_cases=4
+        )
+
+        display = reorder_display(item)
+
+        assert counts_in_packs(item) is True
+        assert display["unit"] == "case"
+        assert display["reorder_quantity"] == 3  # reorder_quantity, in packs
+        assert display["reorder_quantity"] != item.reorder_cases  # ...and never this column
+        assert display["order_quantity"] == 3 * item.count_level.base_units == 36
+        assert display["order_text"] == "3 cases (36 bottles)"
 
 
 class TestTheFiledQuantityIsBaseUnitsEndToEnd:

@@ -308,19 +308,28 @@ class InventoryItem(OwnableModel):
         # ("Number of cases/packages to reorder when stock is low") claimed a use
         # the code does not make: ``base_reorder_quantity`` — the one derivation
         # every filing path uses, from the QR-scan page to the purchase-order pad
-        # — routes a legacy case-based item with no packaging chain of its own
-        # through its ``each`` branch and reads ``reorder_quantity``; no branch of
-        # it reads this column, ever. The two are independent, and
+        # — has no branch that reads this column, ever.
+        #
+        # The help text states a PRINCIPLE and names no screen, because which
+        # surface reads which column is exactly what drifts. Two facts sit
+        # behind it. Ordering never reads this column. And whether PRESENTATION
+        # reads it is decided by the item's COUNTING MODE, not by
+        # ``use_case_based_reorder``: ``reorder_display`` tests
+        # ``counts_in_packs`` first, so a BRIDGED item — the legacy flag plus a
+        # packaging chain, which ``bridge_case_reorder_to_packaging``
+        # deliberately leaves behind — reads ``reorder_quantity`` on both
+        # halves and this column on neither. Only a legacy case-based item with
+        # a known case size and no chain of its own has its display sized here,
+        # and for it ``base_reorder_quantity`` still orders ``reorder_quantity``
+        # in base units while a bridged item orders that times the pack size.
         # ``test_reorder_filing.py::TestLegacyCaseBasedItemsAreRecordedAsTheyBehave``
-        # pins the divergence with numbers on it. Closing it would change what
-        # is ordered for live items and is a separate decision; until it is
-        # taken, the field must not promise what it does not do.
+        # pins both shapes with numbers on them. Closing the divergence would
+        # change what is ordered for live items and is a separate decision;
+        # until it is taken, the field must not promise what it does not do.
         help_text=(
-            "How this item's reorder amount is PRESENTED, in cases/packages, when "
-            "case-based reordering is enabled. It does not affect what is ordered — a "
-            "reorder orders 'Reorder quantity', in base units, and any surface that "
-            "promises what will actually be filed shows that number instead, so set "
-            "it too."
+            "Never affects what is ordered. Sizes only how a reorder amount is "
+            "presented, and only for an item whose counting mode gives this column "
+            "meaning."
         ),
     )
     reorder_instruction = models.TextField(

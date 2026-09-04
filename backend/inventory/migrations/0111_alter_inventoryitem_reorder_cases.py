@@ -16,7 +16,7 @@ class Migration(migrations.Migration):
             name="reorder_cases",
             field=models.PositiveIntegerField(
                 default=1,
-                help_text="How this item's reorder amount is PRESENTED, in cases/packages, when case-based reordering is enabled. It does not affect what is ordered — a reorder orders 'Reorder quantity', in base units, and any surface that promises what will actually be filed shows that number instead, so set it too.",
+                help_text="Never affects what is ordered. Sizes only how a reorder amount is presented, and only for an item whose counting mode gives this column meaning.",
                 validators=[django.core.validators.MinValueValidator(1)],
             ),
         ),

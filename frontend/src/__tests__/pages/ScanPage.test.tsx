@@ -905,6 +905,67 @@ describe('ScanPage', () => {
     expect(screen.queryByText(/Widget A/)).toBeNull();
   });
 
+  test('coming BACK to the first item does not resurrect its abandoned loop', async () => {
+    // A -> B -> A, where B's effect takes an early return that starts no run of
+    // its own (B already has a pending reorder). Only the immediately preceding
+    // invocation's run may be adopted, and only for the same item — otherwise
+    // the return to A revives A's abandoned loop alongside a fresh one, and
+    // both POST for A.
+    localStorage.removeItem('token');
+    const itemA = { ...mockItem, id: 'item-a', name: 'Widget A', has_pending_reorder: false };
+    const itemB = { ...mockItem, id: 'item-b', name: 'Widget B', has_pending_reorder: true };
+
+    (api.inventoryAPI.getItem as jest.Mock).mockImplementation(async (id: string) => ({
+      data: id === 'item-a' ? itemA : itemB,
+    }));
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+
+    // Only the FIRST POST hangs — that is the loop under test. The run started
+    // by the return to A resolves at once, so any further POST can only come
+    // from the abandoned loop waking up.
+    let failA: (err: Error) => void = () => {};
+    const aInFlight = new Promise((_resolve, reject) => {
+      failA = reject;
+    });
+    aInFlight.catch(() => {});
+    let posts = 0;
+    (api.reorderAPI.createRequest as jest.Mock).mockImplementation(() => {
+      posts += 1;
+      return posts === 1 ? aInFlight : Promise.resolve({ data: { id: 2 } });
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/scan/item-a']}>
+        <Link to="/scan/item-b">scan widget B</Link>
+        <Link to="/scan/item-a">scan widget A</Link>
+        <Routes>
+          <Route path="/scan/:itemId" element={<ScanPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByText('scan widget B'));
+    // B files nothing — it already has a request — so its effect starts no run
+    // and leaves the ref pointing at nothing of its own.
+    await waitFor(() => expect(api.inventoryAPI.getItem).toHaveBeenCalledWith('item-b'));
+    expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByText('scan widget A'));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/thanks'));
+    expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(2);
+
+    // The first loop stays abandoned: releasing its POST must not restart it,
+    // so A is never filed by two loops at once.
+    failA(new Error('offline'));
+    await new Promise((resolve) => setTimeout(resolve, autoSubmitRetry.delayMs * 200));
+
+    expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(2);
+  });
+
   test('files nothing, and says so, when the payload carries no order quantity', async () => {
     // `reorder_display` is optional on the wire. A page that cannot learn what
     // it would file must not invent a number — that is the defect above — and

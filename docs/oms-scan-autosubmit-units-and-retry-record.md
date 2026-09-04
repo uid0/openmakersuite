@@ -176,43 +176,32 @@ gating the effect behind a login, and dropping the filing quantity from the
 anonymous payload (which the page refuses to guess at, so its absence would
 switch the feature off) — and both fail the build.
 
-## The maintenance low-stock alert: warnings that were silent now appear
+## The maintenance dashboard now files the shortage top-up too
 
-`check_material_stock` decided whether to alert with a raw `inv.current_stock >=
-inv.minimum_stock`, which mixes the two units this branch exists to separate:
-for a pack-counting item `minimum_stock` is a threshold in `count_level` units
-while `current_stock` is base units. A material counted in cases of 12 with
-`minimum_stock=10` (cases) and `current_stock=24` (2 cases) is low by
-`InventoryItem.needs_reorder` and by the reconciliation path's
-`count_at_level(item) <= item.minimum_stock`, but `24 >= 10` dropped it here:
-the maintenance dashboard showed **no** warning, generated the work order, and
-sent a tech to a shelf holding a sixth of its minimum. The action's own
-`reorder_qty` had already been moved onto `base_reorder_quantity` six lines
-below, so the predicate above it was the one part of the action still outside
-the invariant its docstring asserts.
+`check_material_stock`'s `reorder_qty` moved onto `base_reorder_quantity`, and
+`MaintenanceDashboard`'s "Create reorder requests & continue" POSTs that number
+verbatim. The headline case is the pack-counted one — 3 cases of 12 filed 3
+bottles and now files 36 — but the derivation carries the shortage clause
+`max(minimum_stock - current_stock, reorder_quantity)`, which reaches EVERY
+material, not only pack-counted ones. **Stated because it is a real change on
+live data:** a deeply short `each` material (`current_stock=0`,
+`minimum_stock=100`, `reorder_quantity=25`) filed 25 before and files 100 now.
+The dashboard files what a purchase-order pad would for the same shortfall.
+`test_an_each_item_deeply_short_files_the_shortage` pins that number, and
+`test_an_each_item_near_its_minimum_files_its_configured_quantity` is named for
+the side of `max()` it actually sits on.
 
-It now reads `if not inv.needs_reorder: continue` — the mode-aware form, and the
-documented central chokepoint for the `is_retired` guard this loop used to
-re-implement.
+**What was NOT changed here.** The action's low-stock predicate is still the
+pre-existing `current_stock >= minimum_stock`, which compares base units
+against a `minimum_stock` that is a threshold in `count_level` units for the
+pack-counting modes — so a pack-counted material below its case minimum can be
+dropped, and the `current`/`minimum` pair the modal renders is mixed for the
+same reason. Swapping it for `InventoryItem.needs_reorder` was tried on this
+branch and reverted: it is not a drop-in, because that property also suppresses
+kits and legacy `use_case_based_reorder` materials this predicate alerts on
+today, so it removes warnings as well as adding them. It is routed as its own
+task with a pointer comment at the line.
 
-**This is a disclosed behaviour change, not a silent one.** Three effects, all
-stated rather than discovered later:
-
-- pack-counted materials below their count-level threshold now raise a warning
-  they do not raise today — the point of the fix;
-- an `each` material exactly AT its minimum now warns (`needs_reorder` is `<=`,
-  the old predicate was effectively `<`);
-- a **kit** material no longer warns at all. A kit holds no stock of its own —
-  receiving one credits its components — so its stock/minimum pair reads as
-  permanently low, which is why `needs_reorder` excludes kits at every other
-  low-stock surface. This is the one place the change removes an alert, and it
-  removes noise the chokepoint already suppresses everywhere else.
-
-Query cost is kept honest: `count_level` was already `select_related` for
-`base_reorder_quantity` and `needs_reorder` reads the same relation, and
-`item_suppliers` is now prefetched because a legacy case-based item's
-`needs_reorder` asks `current_cases` for its shelf pack size — one query for the
-whole set rather than one per material.
 
 ## Cross-project
 

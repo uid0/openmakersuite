@@ -281,21 +281,28 @@ const ScanPage: React.FC = () => {
   // duplicate, and an unverifiable outcome is still stated rather than
   // swallowed. No re-read consumes an attempt from the bound.
   useEffect(() => {
+    // Each invocation owns exactly one run — the one it adopts or creates — and
+    // can neither abandon nor revive any other. The ref carries only what the
+    // IMMEDIATELY PRECEDING invocation owned, so it is reset below even when
+    // that is nothing.
+    //
+    // A StrictMode remount re-runs this effect after its own cleanup, for the
+    // same item. That re-entry ADOPTS the previous run and clears its abandon
+    // signal — before the single-flight guard returns — handing an attempt
+    // already in flight back its ability to finish, so the development
+    // double-invoke can neither orphan a submit nor fire a second one. Any
+    // other re-entry adopts nothing: an itemId change reuses this component
+    // (the route element is not keyed), and reviving a run abandoned for a real
+    // reason would let it redirect, or write its failure notice, over the item
+    // it no longer belongs to.
     const previousRun = autoSubmitRunRef.current;
-    // A StrictMode remount re-runs this effect after its own cleanup. Clearing
-    // the abandon signal here — before the single-flight guard returns — hands
-    // an attempt that is already in flight back its ability to finish, so the
-    // development double-invoke can neither orphan a submit nor fire a second
-    // one. Scoped to the run's OWN item: an itemId change reuses this component
-    // (the route element is not keyed), and reviving THAT run would let a loop
-    // abandoned for a real reason redirect, or write its failure notice, over
-    // the item it no longer belongs to.
-    if (previousRun && item && previousRun.itemId === item.id) {
-      previousRun.abandoned = false;
-    }
+    let run =
+      previousRun && item && previousRun.itemId === item.id ? previousRun : null;
+    if (run) run.abandoned = false;
+    autoSubmitRunRef.current = run;
+
     const abandon = () => {
-      const inFlight = autoSubmitRunRef.current;
-      if (inFlight) inFlight.abandoned = true;
+      if (run) run.abandoned = true;
     };
 
     if (isLoggedIn || !item) return abandon;
@@ -329,8 +336,9 @@ const ScanPage: React.FC = () => {
     // silent way out — the loop would simply end, leaving "Submitting…" on
     // screen with nothing filed, which is the drop this whole effect exists to
     // prevent. The bound is the one `attempt >= AUTO_SUBMIT_ATTEMPTS` below.
-    const run = { itemId: item.id, abandoned: false };
+    run = { itemId: item.id, abandoned: false };
     autoSubmitRunRef.current = run;
+    const startedRun = run;
 
     // Did the reorder land despite the rejection? Answering costs one GET and
     // no attempt from the bound. `null` means the question could not be asked,
@@ -351,14 +359,14 @@ const ScanPage: React.FC = () => {
       for (let attempt = 1; ; attempt += 1) {
         try {
           await submitOnce();
-          if (!run.abandoned) navigate('/thanks');
+          if (!startedRun.abandoned) navigate('/thanks');
           return;
         } catch (err: any) {
           console.error(
             `Error auto-submitting reorder (attempt ${attempt} of ${AUTO_SUBMIT_ATTEMPTS}):`,
             err
           );
-          if (run.abandoned) return;
+          if (startedRun.abandoned) return;
           if (attempt >= AUTO_SUBMIT_ATTEMPTS) {
             // The notice states that NOTHING was ordered and sends the member
             // to staff, so the last attempt owes the same question the retries
@@ -366,10 +374,10 @@ const ScanPage: React.FC = () => {
             // be reported as a failure, and the remedy it prescribes is a
             // second request for an item that already has one.
             if ((await reorderNowPending()) === true) {
-              if (!run.abandoned) navigate('/thanks');
+              if (!startedRun.abandoned) navigate('/thanks');
               return;
             }
-            if (run.abandoned) return;
+            if (startedRun.abandoned) return;
             setSubmitting(false);
             setAutoSubmitFailure(
               autoSubmitFailureNote(
@@ -380,14 +388,14 @@ const ScanPage: React.FC = () => {
             return;
           }
           await new Promise((resolve) => setTimeout(resolve, autoSubmitRetry.delayMs * attempt));
-          if (run.abandoned) return;
+          if (startedRun.abandoned) return;
           if ((await reorderNowPending()) === true) {
             // From the member's side the scan DID file a request, so this ends
             // where a successful submit ends rather than in the failure notice.
-            if (!run.abandoned) navigate('/thanks');
+            if (!startedRun.abandoned) navigate('/thanks');
             return;
           }
-          if (run.abandoned) return;
+          if (startedRun.abandoned) return;
         }
       }
     })();

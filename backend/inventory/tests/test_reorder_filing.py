@@ -461,7 +461,14 @@ class TestMaintenanceLowStockAlertFilesBaseUnits:
         assert alerts[0]["reorder_qty"] == 36
         assert alerts[0]["reorder_qty"] == base_reorder_quantity(item)
 
-    def test_an_each_item_is_unchanged(self, api_client):
+    def test_an_each_item_near_its_minimum_files_its_configured_quantity(self, api_client):
+        """The shortage (4) loses to the configured 25, so this shape is unchanged.
+
+        Named for what it pins rather than for the whole ``each`` path: it sits
+        on the side of ``max()`` where ``reorder_quantity`` wins, so it cannot
+        see the shortage clause. ``test_an_each_item_deeply_short_files_the_shortage``
+        below covers the side that does move.
+        """
         item = InventoryItemFactory(
             image=None, current_stock=1, minimum_stock=5, reorder_quantity=25
         )
@@ -470,41 +477,22 @@ class TestMaintenanceLowStockAlertFilesBaseUnits:
 
         assert alerts[0]["reorder_qty"] == 25
 
-    def test_a_pack_counting_material_below_its_case_threshold_is_alerted(self, api_client):
-        """2 cases against a 10-case minimum: low everywhere, silent here.
+    def test_an_each_item_deeply_short_files_the_shortage(self, api_client):
+        """``base_reorder_quantity``'s shortage clause reaches EVERY material.
 
-        The predicate compared base-unit ``current_stock`` against a
-        ``minimum_stock`` that is a threshold in CASES for this mode, so
-        ``24 >= 10`` dropped the material and the dashboard showed no warning
-        before sending a tech to the shelf.
+        Not only pack-counted ones: this item filed 25 — the raw column — before
+        the action moved onto that derivation, and files 100 now, which is what
+        a purchase-order pad would order for the same shortfall.
         """
-        item = _pack_item(case_size=12, current_stock=24, minimum_stock=10, reorder_quantity=3)
-        assert item.needs_reorder
+        item = InventoryItemFactory(
+            image=None, current_stock=0, minimum_stock=100, reorder_quantity=25
+        )
 
         alerts = self._alerts_for(api_client, item)
 
-        assert len(alerts) == 1
-        assert alerts[0]["item_id"] == str(item.id)
-
-    def test_a_pack_counting_material_above_its_case_threshold_is_not_alerted(self, api_client):
-        """The control: routing through ``needs_reorder`` did not alert everything."""
-        item = _pack_item(case_size=12, current_stock=240, minimum_stock=10, reorder_quantity=3)
-        assert not item.needs_reorder
-
-        assert self._alerts_for(api_client, item) == []
-
-    def test_a_kit_material_is_not_alerted(self, api_client):
-        """Disclosed consequence: a kit holds no stock of its own.
-
-        Its stock/minimum pair reads as permanently low, which is why
-        ``needs_reorder`` — the central chokepoint this action now routes
-        through — excludes kits at every other low-stock surface.
-        """
-        item = InventoryItemFactory(
-            image=None, is_kit=True, current_stock=1, minimum_stock=5, reorder_quantity=25
-        )
-
-        assert self._alerts_for(api_client, item) == []
+        assert alerts[0]["reorder_qty"] == 100
+        assert alerts[0]["reorder_qty"] == base_reorder_quantity(item)
+        assert alerts[0]["reorder_qty"] != item.reorder_quantity
 
 
 class TestTheApiCarriesThePair:

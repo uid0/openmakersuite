@@ -3,7 +3,7 @@
  */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import ScanPage from '../../pages/ScanPage';
+import ScanPage, { autoSubmitRetry } from '../../pages/ScanPage';
 import * as api from '../../services/api';
 import { networkError } from '../helpers/offline';
 
@@ -75,14 +75,26 @@ describe('ScanPage', () => {
     },
   };
 
+  // What these tests pin about the retry is its BOUND, not its pace — the
+  // attempt count is asserted as a literal below. Driving the real 400/800 ms
+  // backoff through every failure-path case buys nothing but wall-clock and
+  // thins the headroom against the default test timeout, so the gap is shrunk
+  // here and restored after; the loop's behaviour is untouched.
+  const productionRetryDelayMs = autoSubmitRetry.delayMs;
+
   beforeEach(() => {
     jest.clearAllMocks();
     // Clear localStorage to ensure clean state
     localStorage.clear();
+    autoSubmitRetry.delayMs = 1;
     // Mock checklist API calls
     (api.inventoryAPI.getItemChecklists as jest.Mock).mockResolvedValue({
       data: [],
     });
+  });
+
+  afterEach(() => {
+    autoSubmitRetry.delayMs = productionRetryDelayMs;
   });
 
   const renderWithRouter = async (itemId = 'test-id-123') => {
@@ -637,6 +649,49 @@ describe('ScanPage', () => {
     expect(waiting).toHaveTextContent('3 cases (36 bottles)');
   });
 
+  test('a signed-in operator sees the item\'s configured amount, and the form owns the filed one', async () => {
+    // The other half of the same rule. A signed-in reorder is sized by the form
+    // — package count x the selected supplier\'s pack size — not by
+    // `order_quantity`, so the "Reorder Quantity" row must not name a number
+    // this page will not file. It describes the ITEM instead ("3 cases", the
+    // configured amount every operator-facing surface shows), while the Order
+    // Summary states, and the POST sends, the form\'s own total.
+    localStorage.setItem('token', 'test-token');
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({ data: packCountedItem });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: {
+        results: [
+          {
+            id: 7,
+            supplier: 1,
+            supplier_name: 'Test Supplier',
+            unit_cost: '2.00',
+            package_cost: '16.00',
+            quantity_per_package: 8,
+            lead_time_days: 5,
+            is_active: true,
+            is_primary: true,
+          },
+        ],
+      },
+    });
+
+    await renderWithRouter();
+
+    await screen.findByText('Test Widget');
+    const shown = await screen.findByTestId('reorder-quantity');
+    expect(shown).toHaveTextContent('3 cases');
+    expect(shown).not.toHaveTextContent('36');
+
+    // The number this half actually files, stated by the form and then sent.
+    expect(screen.getByText('8 units')).toBeInTheDocument();
+    (api.reorderAPI.createRequest as jest.Mock).mockResolvedValue({ data: { id: 1 } });
+    fireEvent.click(screen.getByRole('button', { name: /request 8 units/i }));
+
+    await waitFor(() => expect(api.reorderAPI.createRequest).toHaveBeenCalled());
+    expect((api.reorderAPI.createRequest as jest.Mock).mock.calls[0][0].quantity).toBe(8);
+  });
+
   // --- A failed auto-submit is bounded, and it is stated ------------------
   // The catch used to clear `submitting` while `submitting` was a dependency of
   // the effect, so a failed submit re-entered it for as long as the page was
@@ -666,7 +721,7 @@ describe('ScanPage', () => {
 
     // Well past the longest backoff the loop would have waited, so an
     // unbounded loop shows up as a growing count rather than as a slow test.
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await new Promise((resolve) => setTimeout(resolve, autoSubmitRetry.delayMs * 200));
 
     expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(settled);
   });

@@ -154,9 +154,13 @@ export const perParent = (rows: PackagingRow[], index: number): number | null =>
 /**
  * `unit` pluralised for `count`. Handles the sibilant ending the naive `+ "s"`
  * gets wrong ("box" → "boxes", not "boxs"), because packaging levels are named
- * by hand and "box" is one of the commonest ones. Deliberately a shade better
- * than the backend's own `_plural`, which only ever appends "s" — nothing
- * compares the two strings, and no server-rendered text is re-pluralised here.
+ * by hand and "box" is one of the commonest ones.
+ *
+ * The SAME rule as the backend's `inventory.services.packaging._plural`, which
+ * now shares it. That matters because server-rendered wording and this one meet
+ * on the same screen: `reorderFiling` renders the server's `order_text`
+ * verbatim beside labels built here, so a unit that pluralised one way on the
+ * server and another way in the browser read as two different nouns.
  */
 export const pluralizeUnit = (unit: string, count: number): string => {
   if (count === 1) return unit;
@@ -284,9 +288,11 @@ export const reorderThresholdLabel = (item: InventoryItem): string => {
  *
  * NOT what a reorder for this item would actually order — that is
  * {@link reorderFiling}, and the two are different numbers for a pack-counting
- * item and for any item well below its minimum. Read this on a surface that
- * DESCRIBES an item (the list, the item detail page); read `reorderFiling` on
- * one that FILES a reorder, so it cannot show one number and send another.
+ * item and for any item well below its minimum. Read this wherever the reader
+ * is not being promised what will be filed: a surface that only DESCRIBES an
+ * item, or one whose own form states and sends its number. Read
+ * `reorderFiling` on a surface that files a reorder for the reader, so it
+ * cannot show one number and send another.
  */
 export const reorderQuantityLabel = (item: InventoryItem): string => {
   const { unit, quantity } = reorderPresentation(item);

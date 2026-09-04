@@ -482,17 +482,22 @@ because what it turned out to be is worth knowing; 2 and 3 are still open:
    pad) and prints the `order_text` that comes with it, so what a member is
    shown and what is filed are one value. `reorderQuantityLabel` still answers
    the other question — the item's CONFIGURED amount in its own counting unit —
-   and is right on a surface that only describes an item. The pair is pinned by
+   and is right wherever the reader is not being promised what will be filed:
+   a surface that only describes an item, or one whose own form states and
+   sends its number. The pair is pinned by
    `inventory/tests/test_reorder_filing.py` (parity with `base_reorder_quantity`
    across every item shape, and the filed quantity received as base units end to
    end) and by `ScanPage.test.tsx`. The same sweep found and fixed
    `check_material_stock`'s `reorder_qty`, which the maintenance dashboard POSTs
    verbatim. `InventoryList` / `InventoryItemDetailPage` file nothing and were
-   deliberately left on `reorderQuantityLabel`.
+   deliberately left on `reorderQuantityLabel`, as is `ScanPage`'s SIGNED-IN
+   half, whose reorder is sized by the supplier form beside it rather than by
+   `order_quantity`; only the anonymous auto-submit reads the filing pair.
 
    ONE PART OF IT IS STILL OPEN and is the captain's, not an implementer's. For
    a LEGACY `use_case_based_reorder` item the two halves are separate columns:
-   `reorder_cases` sizes every DISPLAY, `reorder_quantity` sizes every ORDER
+   `reorder_cases` sizes how the reorder amount is PRESENTED and reaches no
+   ordering path; `reorder_quantity` sizes what is ORDERED
    (`base_reorder_quantity` routes these items through its `each` branch, which
    `packaging.py`'s module docstring records as deliberate preservation). So an
    operator's "Reorder Cases: 4" does not reach the order. Closing it — reading

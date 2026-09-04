@@ -27,8 +27,15 @@ import {
  */
 const AUTO_SUBMIT_ATTEMPTS = 3;
 
-/** Gap before retry n: n × this, so the attempts spread rather than burst. */
-const AUTO_SUBMIT_RETRY_MS = 400;
+/**
+ * Gap before retry n: n × `delayMs`, so the attempts spread rather than burst.
+ *
+ * A mutable field rather than a bare constant so a test can shrink the wait it
+ * is not measuring — the BOUND is what the tests pin, and driving three real
+ * 400/800 ms backoffs per case only buys wall-clock. Production never writes
+ * it, and reading it per attempt keeps the retry behaviour identical.
+ */
+export const autoSubmitRetry = { delayMs: 400 };
 
 /**
  * What a logged-out member is told when the reorder could not be filed.
@@ -320,7 +327,7 @@ const ScanPage: React.FC = () => {
             );
             return;
           }
-          await new Promise((resolve) => setTimeout(resolve, AUTO_SUBMIT_RETRY_MS * attempt));
+          await new Promise((resolve) => setTimeout(resolve, autoSubmitRetry.delayMs * attempt));
         }
       }
     })();
@@ -389,16 +396,23 @@ const ScanPage: React.FC = () => {
     }
   };
 
-  // What a reorder filed FROM THIS PAGE would order, and the page's one wording
-  // for it. This page both shows a reorder quantity and files one, so it shows
-  // the quantity it files and nothing else: `reorderQuantityLabel` answers a
-  // different question (the item's configured amount in its own counting unit)
-  // and the two are different numbers for a pack-counting item and for any item
-  // well below its minimum. The list and item-detail pages, which file nothing,
-  // keep that label. Null when the payload carried no answer — the page then
+  // What a reorder filed by the ANONYMOUS auto-submit would order, and the
+  // page's one wording for it. `reorderQuantityLabel` answers a different
+  // question (the item's configured amount in its own counting unit) and the
+  // two are different numbers for a pack-counting item and for any item well
+  // below its minimum. Null when the payload carried no answer — the page then
   // files nothing and says so rather than naming a number it invented.
   const filing = item ? reorderFiling(item) : null;
   const filingLabel = item ? filing?.text ?? reorderQuantityLabel(item) : '';
+
+  // The "Reorder Quantity" row answers, for ITS OWN reader, the question its
+  // label implies. A logged-out scanner has no form and no choice: the
+  // auto-submit files `filing.quantity`, so the row names exactly that. A
+  // signed-in operator's reorder is sized by the form below — `totalUnits`,
+  // package count × the selected supplier's pack size — which states and
+  // submits its own number, so the row describes the ITEM instead, with the
+  // configured amount every other operator-facing surface shows.
+  const reorderQuantityRowLabel = item && isLoggedIn ? reorderQuantityLabel(item) : filingLabel;
 
   // Pack size of the supplier the form would order through, and whether it is
   // one we can count with. Every unit figure below reads these, so the page
@@ -585,7 +599,7 @@ const ScanPage: React.FC = () => {
                 </div>
                 <div className="info-item">
                   <span className="label">Reorder Quantity:</span>
-                  <span className="value" data-testid="reorder-quantity">{filingLabel}</span>
+                  <span className="value" data-testid="reorder-quantity">{reorderQuantityRowLabel}</span>
                 </div>
               </>
             ) : (
@@ -599,7 +613,7 @@ const ScanPage: React.FC = () => {
                 </div>
                 <div className="info-item">
                   <span className="label">Reorder Quantity:</span>
-                  <span className="value" data-testid="reorder-quantity">{filingLabel}</span>
+                  <span className="value" data-testid="reorder-quantity">{reorderQuantityRowLabel}</span>
                 </div>
               </>
             )}

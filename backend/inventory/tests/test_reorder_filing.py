@@ -52,6 +52,19 @@ def _pack_item(mode=InventoryItem.CountMode.BY_LEVEL, case_size=12, **kwargs):
     return item
 
 
+def _box_item(case_size=12, **kwargs):
+    """A pack-counting item whose rungs are BOTH sibilant nouns ("box"/"patch")."""
+    kwargs.setdefault("image", None)
+    kwargs.setdefault("base_unit", "patch")
+    item = InventoryItemFactory(**kwargs)
+    box = PackagingLevel.objects.create(item=item, name="box", sort_order=0, base_units=case_size)
+    PackagingLevel.objects.create(item=item, name="patch", sort_order=1, base_units=1)
+    item.count_mode = InventoryItem.CountMode.BY_LEVEL
+    item.count_level = box
+    item.save(update_fields=["count_mode", "count_level"])
+    return item
+
+
 def _case_item(**kwargs):
     """A LEGACY ``use_case_based_reorder`` item — cases without a packaging chain."""
     kwargs.setdefault("image", None)
@@ -208,6 +221,45 @@ class TestOrderTextNamesTheNumberItFiles:
         assert order_quantity_text(item, 7) == "7 sheets"
 
 
+class TestASibilantUnitNounIsPluralisedTheWayTheWebDoes:
+    """ "box" → "boxes", not "boxs" — on the server, because the server renders it.
+
+    ``base_unit`` and ``PackagingLevel.name`` are hand-typed free text, and
+    ``order_text`` is printed verbatim by the page that files the reorder. When
+    ``_plural`` only appended "s" that page showed a member "25 brushs" for a
+    quantity the web's own ``pluralizeUnit`` would have worded "25 brushes".
+    """
+
+    def test_an_each_item_with_a_sibilant_base_unit_reads_es(self):
+        item = InventoryItemFactory(
+            image=None, base_unit="brush", current_stock=50, minimum_stock=10, reorder_quantity=25
+        )
+
+        assert order_quantity_text(item, 25) == "25 brushes"
+        assert reorder_display(item)["order_text"] == "25 brushes"
+
+    def test_a_sibilant_count_level_name_reads_es_in_both_halves(self):
+        item = _box_item(current_stock=35, minimum_stock=2, reorder_quantity=3)
+
+        display = reorder_display(item)
+
+        assert display["order_text"] == "3 boxes (36 patches)"
+        assert order_quantity_text(item, 36) == "3 boxes (36 patches)"
+
+    def test_the_on_hand_line_words_the_same_unit_the_same_way(self):
+        """``reorder_display['text']`` moves too, and that is the correction."""
+        item = _box_item(current_stock=24, minimum_stock=1, reorder_quantity=3)
+
+        assert reorder_display(item)["text"] == "2 boxes on hand · reorder at 1 box"
+
+    def test_exactly_one_is_still_singular(self):
+        item = InventoryItemFactory(
+            image=None, base_unit="brush", current_stock=50, minimum_stock=10, reorder_quantity=1
+        )
+
+        assert order_quantity_text(item, 1) == "1 brush"
+
+
 class TestLegacyCaseBasedItemsAreRecordedAsTheyBehave:
     """The one shape whose display and filing derivation name different amounts.
 
@@ -225,9 +277,10 @@ class TestLegacyCaseBasedItemsAreRecordedAsTheyBehave:
     what lets the scan page stay honest while the columns disagree.
 
     ``InventoryItem.reorder_cases``'s ``help_text`` is worded off THIS class: it
-    says the column sizes the display only and names ``reorder_quantity`` as the
-    one a reorder actually orders. It used to say "Number of cases/packages to
-    reorder when stock is low", which promised a use no code makes. Whether to
+    says the column sizes how the reorder amount is PRESENTED, reaches no
+    ordering path, and names ``reorder_quantity`` as the one a reorder actually
+    orders. It used to say "Number of cases/packages to reorder when stock is
+    low", which promised a use no code makes. Whether to
     close the divergence instead — by having ``base_reorder_quantity`` read
     ``reorder_cases × order_pack_size`` for these items — changes what is ordered
     for live items and is routed to the captain as its own decision.

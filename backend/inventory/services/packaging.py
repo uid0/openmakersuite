@@ -51,6 +51,7 @@ where ``clean()`` never runs.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Iterable, Optional, Sequence
 
@@ -363,16 +364,26 @@ def base_reorder_quantity(item: "InventoryItem") -> int:
     return max(shortage_levels, item.reorder_quantity) * item.count_level.base_units
 
 
-def _plural(unit: str, count) -> str:
-    """``unit`` for exactly one, ``unit`` + "s" otherwise.
+_SIBILANT_ENDING = re.compile(r"(s|x|z|ch|sh)$", re.IGNORECASE)
 
-    Deliberately naive: it only ever appends "s". Hoisted out of
-    :func:`reorder_display` UNCHANGED so :func:`order_quantity_text` words a
-    quantity the same way its neighbours do, and left naive so no string this
-    module already renders moves. The web's ``pluralizeUnit`` handles sibilant
-    endings and is a shade better on purpose; nothing compares the two.
+
+def _plural(unit: str, count) -> str:
+    """``unit`` for exactly one, else "es" after a sibilant ending and "s" otherwise.
+
+    The SAME rule as the web's ``pluralizeUnit`` (``frontend/src/utils/
+    packaging.ts``), and it has to be: a unit noun is free text — ``base_unit``
+    and ``PackagingLevel.name`` are hand-typed CharFields, and "box" and "brush"
+    are ordinary values — while :func:`order_quantity_text` is rendered verbatim
+    by a page that used to word the same quantity through the client rule. One
+    owner, server-side; a naive ``+ "s"`` here printed "3 boxs" to a member.
+
+    This deliberately also moves :func:`reorder_display`'s ``text`` for sibilant
+    units ("2 boxs on hand" → "2 boxes on hand"). That string was misspelled for
+    those units too; correcting it is the point, not a side effect.
     """
-    return unit if count == 1 else f"{unit}s"
+    if count == 1:
+        return unit
+    return f"{unit}es" if _SIBILANT_ENDING.search(unit) else f"{unit}s"
 
 
 def order_quantity_text(item: "InventoryItem", quantity: int) -> str:
@@ -417,8 +428,8 @@ def reorder_display(item: "InventoryItem") -> dict:
     must read a single answer: ``reorder_quantity`` is the item's CONFIGURED
     amount in its own counting unit, ``order_quantity`` is what filing a reorder
     right now would actually order, and a page that files must show the second.
-    ``ScanPage`` is that page — it POSTs ``order_quantity`` and prints
-    ``order_text``, so the two cannot name different numbers again
+    ``ScanPage``'s anonymous scan is that surface — it POSTs ``order_quantity``
+    and prints ``order_text``, so the two cannot name different numbers again
     (``test_reorder_filing.py``, ``ScanPage.test.tsx``).
 
     The two agree for an ``each`` item, differ by the pack size for a

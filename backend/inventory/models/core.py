@@ -304,7 +304,7 @@ class InventoryItem(OwnableModel):
     reorder_cases = models.PositiveIntegerField(
         default=1,
         validators=[MinValueValidator(1)],
-        # DISPLAY ONLY, and the help text says so because the previous wording
+        # PRESENTATION ONLY, and the help text says so because the previous wording
         # ("Number of cases/packages to reorder when stock is low") claimed a use
         # the code does not make: ``base_reorder_quantity`` — the one derivation
         # every filing path uses, from the QR-scan page to the purchase-order pad
@@ -315,9 +315,11 @@ class InventoryItem(OwnableModel):
         # is ordered for live items and is a separate decision; until it is
         # taken, the field must not promise what it does not do.
         help_text=(
-            "Number of cases/packages this item's reorder amount is SHOWN as, when "
-            "case-based reordering is enabled. Display only — a reorder actually "
-            "orders 'Reorder quantity', in base units, so set that one too."
+            "How this item's reorder amount is PRESENTED, in cases/packages, when "
+            "case-based reordering is enabled. It does not affect what is ordered — a "
+            "reorder orders 'Reorder quantity', in base units, and any surface that "
+            "promises what will actually be filed shows that number instead, so set "
+            "it too."
         ),
     )
     reorder_instruction = models.TextField(

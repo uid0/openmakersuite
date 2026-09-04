@@ -463,52 +463,38 @@ was filed here as "the same shape", and it is: but it moves a DATE, not a money
 figure, so it was outside the money branch's invariant and is STILL OPEN.
 
 Three more, found by this branch's sweeps and deliberately NOT fixed here. The
-first has since been CLOSED (`oms-scan-autosubmit-units-and-retry`) and is kept
-because what it turned out to be is worth knowing; 2 and 3 are still open:
+first has since been CLOSED (`oms-scan-autosubmit-units-and-retry`); 2 and 3 are
+still open:
 
-1. **`ScanPage`'s anonymous auto-submit misdescribed a KNOWN case size — CLOSED,
-   and it was wider than "a sentence".** It printed `reorderQuantityLabel` ("3
-   cases") and posted `quantity: item.reorder_quantity`, which for a
-   PACK-COUNTING item is a count of PACKS, so the page filed a twelfth of what
-   it named. The general rule the fix rests on:
+1. **`ScanPage`'s anonymous auto-submit misdescribed a KNOWN case size — CLOSED.**
+   It printed "3 cases" and posted the raw `reorder_quantity`, which for a
+   pack-counting item is a count of PACKS, so it filed a twelfth of what it
+   named. The durable rule:
 
    > A `ReorderRequest`/`PurchaseOrderItem` quantity is ALWAYS base units.
    > `minimum_stock` and `reorder_quantity` are NOT: for the pack-counting
    > `count_mode`s they are amounts in the item's own count unit.
 
-   So a surface that FILES a reorder must not read those columns. It reads
-   `reorder_display.order_quantity` (the wire face of
-   `packaging.base_reorder_quantity`, which is also what fills a purchase-order
-   pad) and prints the `order_text` that comes with it, so what a member is
-   shown and what is filed are one value. `reorderQuantityLabel` still answers
-   the other question — the item's CONFIGURED amount in its own counting unit —
-   and is right wherever the reader is not being promised what will be filed:
-   a surface that only describes an item, or one whose own form states and
-   sends its number. The pair is pinned by
-   `inventory/tests/test_reorder_filing.py` (parity with `base_reorder_quantity`
-   across every item shape, and the filed quantity received as base units end to
-   end) and by `ScanPage.test.tsx`. The same sweep found and fixed
-   `check_material_stock`'s `reorder_qty`, which the maintenance dashboard POSTs
-   verbatim. `InventoryList` / `InventoryItemDetailPage` file nothing and were
-   deliberately left on `reorderQuantityLabel`, as is `ScanPage`'s SIGNED-IN
-   half, whose reorder is sized by the supplier form beside it rather than by
-   `order_quantity`; only the anonymous auto-submit reads the filing pair.
+   A surface that FILES a reorder therefore reads
+   `reorder_display.order_quantity` — the wire face of
+   `packaging.base_reorder_quantity`, which also fills a purchase-order pad —
+   and prints its `order_text`. `reorderQuantityLabel` answers the other
+   question (the CONFIGURED amount, in the item's counting unit) and is right
+   wherever the reader is not being promised what will be filed. Pinned by
+   `inventory/tests/test_reorder_filing.py` and `ScanPage.test.tsx`.
 
-   ONE PART OF IT IS STILL OPEN and is the captain's, not an implementer's. For
-   a LEGACY `use_case_based_reorder` item with a known case size and no
-   packaging chain of its own — `counts_in_packs` is tested first everywhere, so
-   a BRIDGED item reads `reorder_quantity` on both halves — the two halves are
-   separate columns: `reorder_cases` sizes how the reorder amount is PRESENTED
-   and reaches no ordering path; `reorder_quantity` sizes what is ORDERED
-   (`base_reorder_quantity` routes these items through its `each` branch, which
-   `packaging.py`'s module docstring records as deliberate preservation). So an
-   operator's "Reorder Cases: 4" does not reach the order. Closing it — reading
-   `reorder_cases × order_pack_size`, as `reorder_threshold` already branches —
-   would change what is ordered for live items, so it was routed rather than
-   taken. What WAS done: `reorder_cases`'s `help_text` no longer claims to size
-   the order (it said "Number of cases/packages to reorder when stock is low"),
-   and `TestLegacyCaseBasedItemsAreRecordedAsTheyBehave` pins the divergence
-   with numbers on it. Do not close it without that decision.
+   ⚠️ **One part is still open and is the captain's.** For a legacy
+   `use_case_based_reorder` item with no packaging chain of its own,
+   `reorder_cases` sizes only presentation and reaches no ordering path, while
+   `reorder_quantity` sizes what is ordered — so "Reorder Cases: 4" never
+   reaches the order. Closing that changes what is ordered for live items: **do
+   not close it without that decision.**
+   `TestLegacyCaseBasedItemsAreRecordedAsTheyBehave` pins it, including the
+   bridged shape, where `counts_in_packs` wins and both halves read
+   `reorder_quantity` instead.
+
+   Derived set, exclusions, retry-bound reasoning and the ScanTTY check:
+   [`docs/oms-scan-autosubmit-units-and-retry-record.md`](docs/oms-scan-autosubmit-units-and-retry-record.md).
 2. **Frontend readers of `quantity_per_package` outside `ScanPage`** — the same
    falsy-zero pack-size class, all pre-existing, none touched here.
    `PurchaseOrderFormPage.tsx` has eight `item.quantity_per_package || 1` sites

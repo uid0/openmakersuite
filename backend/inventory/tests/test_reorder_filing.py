@@ -374,13 +374,22 @@ class TestTheFiledQuantityIsBaseUnitsEndToEnd:
         assert response.status_code == status.HTTP_201_CREATED
         assert ReorderRequest.objects.filter(item=item).count() == 1
 
-    def test_a_scan_filing_order_quantity_receives_exactly_that_many_base_units(self):
-        """Files ``order_quantity`` anonymously, then receives it, and counts stock.
+    def test_a_scan_filing_order_quantity_receives_exactly_that_many_base_units(
+        self, authenticated_client
+    ):
+        """Files ``order_quantity`` anonymously, then RECEIVES it through the real action.
 
         This is what establishes which of the two numbers the purchasing side is
         meant to receive: ``mark-received`` adds ``ReorderRequest.quantity`` to
         ``current_stock``, and ``current_stock`` is base units by definition. A
         page that filed the pack count would restock a twelfth of the order.
+
+        The receipt half POSTs to ``reorderrequest-mark-received`` rather than
+        doing the addition here. Hand-simulating it (``current_stock +=
+        reorder.quantity``, then asserting the difference) is arithmetically
+        true for every quantity and cannot fail, so it proved nothing about the
+        claim above: were that action changed to convert through ``count_level``
+        this test would still have passed.
         """
         item = _pack_item(case_size=12, current_stock=35, minimum_stock=2, reorder_quantity=3)
         order_quantity = reorder_display(item)["order_quantity"]
@@ -403,9 +412,16 @@ class TestTheFiledQuantityIsBaseUnitsEndToEnd:
 
         item.refresh_from_db()
         before = item.current_stock
-        item.current_stock += reorder.quantity
-        item.save(update_fields=["current_stock"])
 
+        staff_client, _ = authenticated_client
+        receipt = staff_client.post(
+            reverse("reorderrequest-mark-received", args=[reorder.id]),
+            {},
+            format="json",
+        )
+
+        assert receipt.status_code == status.HTTP_200_OK
+        item.refresh_from_db()
         # 3 whole cases of 12 bottles arrived, in the unit stock is counted in.
         assert item.current_stock - before == 36
 
@@ -453,6 +469,42 @@ class TestMaintenanceLowStockAlertFilesBaseUnits:
         alerts = self._alerts_for(api_client, item)
 
         assert alerts[0]["reorder_qty"] == 25
+
+    def test_a_pack_counting_material_below_its_case_threshold_is_alerted(self, api_client):
+        """2 cases against a 10-case minimum: low everywhere, silent here.
+
+        The predicate compared base-unit ``current_stock`` against a
+        ``minimum_stock`` that is a threshold in CASES for this mode, so
+        ``24 >= 10`` dropped the material and the dashboard showed no warning
+        before sending a tech to the shelf.
+        """
+        item = _pack_item(case_size=12, current_stock=24, minimum_stock=10, reorder_quantity=3)
+        assert item.needs_reorder
+
+        alerts = self._alerts_for(api_client, item)
+
+        assert len(alerts) == 1
+        assert alerts[0]["item_id"] == str(item.id)
+
+    def test_a_pack_counting_material_above_its_case_threshold_is_not_alerted(self, api_client):
+        """The control: routing through ``needs_reorder`` did not alert everything."""
+        item = _pack_item(case_size=12, current_stock=240, minimum_stock=10, reorder_quantity=3)
+        assert not item.needs_reorder
+
+        assert self._alerts_for(api_client, item) == []
+
+    def test_a_kit_material_is_not_alerted(self, api_client):
+        """Disclosed consequence: a kit holds no stock of its own.
+
+        Its stock/minimum pair reads as permanently low, which is why
+        ``needs_reorder`` — the central chokepoint this action now routes
+        through — excludes kits at every other low-stock surface.
+        """
+        item = InventoryItemFactory(
+            image=None, is_kit=True, current_stock=1, minimum_stock=5, reorder_quantity=25
+        )
+
+        assert self._alerts_for(api_client, item) == []
 
 
 class TestTheApiCarriesThePair:

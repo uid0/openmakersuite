@@ -121,8 +121,26 @@ class TestCheckMaterialStockAction:
         assert alert["minimum"] == 5
         assert alert["reorder_qty"] == 10
 
-    def test_item_at_minimum_returns_no_alert(self, api_client):
+    def test_item_at_minimum_returns_an_alert(self, api_client):
+        """At the minimum IS low, here as everywhere else.
+
+        This action used to be the outlier: a raw ``current_stock >=
+        minimum_stock`` skip meant an item sitting exactly on its reorder point
+        raised no maintenance warning while ``needs_reorder`` — the badge, the
+        low-stock action, the serializer field — all called it low. The
+        predicate now routes through that chokepoint, so the boundary agrees.
+        """
         inv = InventoryItemFactory(current_stock=5, minimum_stock=5)
+        assert inv.needs_reorder
+        item, _ = _make_item_with_material(inventory_item=inv)
+        response = api_client.get(self._url(item))
+        alerts = response.data["low_stock_alerts"]
+        assert len(alerts) == 1
+        assert alerts[0]["item_id"] == str(inv.id)
+
+    def test_item_one_unit_above_minimum_returns_no_alert(self, api_client):
+        """The tight control for the boundary above: one unit clear is not low."""
+        inv = InventoryItemFactory(current_stock=6, minimum_stock=5)
         item, _ = _make_item_with_material(inventory_item=inv)
         response = api_client.get(self._url(item))
         assert response.data["low_stock_alerts"] == []

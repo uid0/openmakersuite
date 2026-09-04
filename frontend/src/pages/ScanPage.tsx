@@ -268,16 +268,18 @@ const ScanPage: React.FC = () => {
   // rather than in the dependency array, and the last failure is rendered.
   // `ScanPage.test.tsx` pins the bound, the wording and the no-drop guarantee.
   //
-  // WHAT IT CAN STILL FILE TWICE. A retry re-reads the item first and stops if
-  // the reorder has become pending, which NARROWS the duplicate window — it
-  // does NOT close it. `/reorders/requests/` is not idempotent, so a first POST
-  // whose response was lost but whose row commits AFTER the re-read is still
-  // filed a second time. Closing that needs idempotency at the public create
-  // endpoint — a contract change affecting every caller of it, ScanTTY
-  // included — which is routed separately and deliberately not taken here. When
-  // the re-read ITSELF fails the retry proceeds anyway: a missed reorder is
-  // worse than a possible duplicate, and no-silent-drop is why this effect
-  // exists. The re-read does not consume an attempt from the bound.
+  // WHAT IT CAN STILL FILE TWICE. Every failed attempt re-reads the item before
+  // acting on the rejection — a retry stops rather than re-POSTing, and the
+  // LAST attempt stops rather than telling the member nothing was ordered. That
+  // NARROWS the duplicate window; it does NOT close it. `/reorders/requests/`
+  // is not idempotent, so a POST whose response was lost but whose row commits
+  // AFTER the re-read is still filed a second time. Closing that needs
+  // idempotency at the public create endpoint — a contract change affecting
+  // every caller of it, ScanTTY included — which is routed separately and
+  // deliberately not taken here. When the re-read ITSELF fails the loop carries
+  // on as if nothing were filed: a missed reorder is worse than a possible
+  // duplicate, and an unverifiable outcome is still stated rather than
+  // swallowed. No re-read consumes an attempt from the bound.
   useEffect(() => {
     const previousRun = autoSubmitRunRef.current;
     // A StrictMode remount re-runs this effect after its own cleanup. Clearing
@@ -332,14 +334,14 @@ const ScanPage: React.FC = () => {
 
     // Did the reorder land despite the rejection? Answering costs one GET and
     // no attempt from the bound. `null` means the question could not be asked,
-    // which is NOT an answer of "no pending request" — the caller retries on
-    // it, because dropping a reorder is the worse failure.
+    // which is NOT an answer of "no pending request" — the caller carries on as
+    // if nothing were filed, because dropping a reorder is the worse failure.
     const reorderNowPending = async (): Promise<boolean | null> => {
       try {
         const fresh = await inventoryAPI.getItem(item.id);
         return !!fresh.data?.has_pending_reorder;
       } catch (readErr: any) {
-        console.error('Error re-reading item before an auto-submit retry:', readErr);
+        console.error('Error re-reading item after a failed auto-submit:', readErr);
         return null;
       }
     };
@@ -358,6 +360,16 @@ const ScanPage: React.FC = () => {
           );
           if (run.abandoned) return;
           if (attempt >= AUTO_SUBMIT_ATTEMPTS) {
+            // The notice states that NOTHING was ordered and sends the member
+            // to staff, so the last attempt owes the same question the retries
+            // ask: a POST that committed with its response lost would otherwise
+            // be reported as a failure, and the remedy it prescribes is a
+            // second request for an item that already has one.
+            if ((await reorderNowPending()) === true) {
+              if (!run.abandoned) navigate('/thanks');
+              return;
+            }
+            if (run.abandoned) return;
             setSubmitting(false);
             setAutoSubmitFailure(
               autoSubmitFailureNote(

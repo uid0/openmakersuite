@@ -795,6 +795,30 @@ describe('ScanPage', () => {
     expect(screen.queryByTestId('auto-submit-failed')).toBeNull();
   });
 
+  test('the LAST attempt asks too, rather than declaring a filed reorder unfiled', async () => {
+    // Same lost response, on the attempt that has no retry after it. The notice
+    // would say "nothing has been ordered … ask a member of staff", which is
+    // false and whose remedy is a second request for an item that has one.
+    const unfiled = { ...mockItem, has_pending_reorder: false };
+    const filed = { ...mockItem, has_pending_reorder: true };
+    let reads = 0;
+    (api.reorderAPI.createRequest as jest.Mock).mockRejectedValue(new Error('lost response'));
+
+    // Read 1 loads the page; reads 2 and 3 are the retry guards after attempts
+    // 1 and 2 and honestly report nothing filed; read 4 is the pre-notice guard
+    // after attempt 3, whose POST committed before its response was lost.
+    await anonymousScanWhere(async () => {
+      reads += 1;
+      return { data: reads >= 4 ? filed : unfiled };
+    });
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/thanks'), {
+      timeout: 3000,
+    });
+    expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(3);
+    expect(screen.queryByTestId('auto-submit-failed')).toBeNull();
+  });
+
   test('a re-read that itself fails cannot silently drop the reorder', async () => {
     // The re-read is a question, not a gate: unanswered, the retry proceeds,
     // because a missed reorder is worse than a possible duplicate. It also

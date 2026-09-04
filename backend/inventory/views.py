@@ -6256,8 +6256,27 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
         """
         Return low-stock alerts for materials on this maintenance item.
 
-        Emits one alert per MaintenanceMaterial that is linked to an InventoryItem
-        whose current_stock is below its minimum_stock threshold.
+        Emits one alert per MaintenanceMaterial linked to an InventoryItem that
+        ``InventoryItem.needs_reorder`` reports as low.
+
+        ⚠️ THIS MAKES WARNINGS APPEAR THAT ARE SILENT TODAY, deliberately. The
+        predicate was a raw ``current_stock >= minimum_stock``, which mixes the
+        two units this action's own ``reorder_qty`` exists to separate: for a
+        pack-counting item ``minimum_stock`` is a threshold in ``count_level``
+        units while ``current_stock`` is base units. A material counted in cases
+        of 12 with ``minimum_stock=10`` (cases) and ``current_stock=24`` (2
+        cases) is low by every other surface in the system, but ``24 >= 10``
+        dropped it here: the dashboard showed no warning, generated the work
+        order, and sent a tech to a shelf holding a sixth of its minimum.
+        ``needs_reorder`` is the mode-aware form the reconciliation path already
+        uses, and it is the documented central chokepoint for the ``is_retired``
+        guard this loop used to re-implement.
+
+        Two consequences of routing through it, stated rather than discovered:
+        an ``each`` item exactly AT its minimum now alerts (``<=`` rather than
+        ``<``), and a KIT no longer alerts at all — a kit holds no stock of its
+        own, so its stock/minimum pair reads as permanently low, which is why
+        the chokepoint excludes it everywhere else.
 
         ``reorder_qty`` is BASE units — the unit a ``ReorderRequest.quantity``
         is stored in — because the caller FILES it: the maintenance dashboard's
@@ -6269,21 +6288,29 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
         """
         item = self.get_object()
         alerts = []
-        # ``count_level`` is joined because ``base_reorder_quantity`` reads it
-        # (via ``counts_in_packs`` and ``count_at_level``) for every alerted
-        # material; the raw column this replaced touched no relation, so
-        # without the join each low-stock pack-counting material costs a query.
-        materials = item.materials.select_related(
-            "inventory_item", "inventory_item__count_level"
-        ).all()
+        # ``count_level`` is joined because ``needs_reorder`` and
+        # ``base_reorder_quantity`` both read it (via ``counts_in_packs`` and
+        # ``count_at_level``) for every material; the raw column/threshold this
+        # replaced touched no relation, so without the join each pack-counting
+        # material costs a query. ``item_suppliers`` is prefetched for the same
+        # reason on the other branch: a legacy case-based item's
+        # ``needs_reorder`` asks ``current_cases`` for its shelf pack size,
+        # which reads the first supplier link. One query for the set, not one
+        # per material.
+        materials = (
+            item.materials.select_related("inventory_item", "inventory_item__count_level")
+            .prefetch_related("inventory_item__item_suppliers")
+            .all()
+        )
         for material in materials:
             inv = material.inventory_item
             if inv is None:
                 continue
-            # Retired items are phased out — never emit a low-stock alert.
-            if inv.is_retired:
-                continue
-            if inv.current_stock >= inv.minimum_stock:
+            # Mode-aware, and the central chokepoint for the retired/kit guards
+            # this loop used to re-implement. See the docstring: this ADDS
+            # warnings for pack-counted materials that a raw base-unit
+            # comparison against a count-level threshold was dropping.
+            if not inv.needs_reorder:
                 continue
             alerts.append(
                 {

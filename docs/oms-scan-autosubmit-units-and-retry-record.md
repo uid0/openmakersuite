@@ -19,7 +19,14 @@ against real items rather than taken from the report that opened the task:
    `ReorderRequest`/`PurchaseOrderItem` quantity stays in base units".
 2. `reorder_queue/views.py` `mark-received` does
    `item.current_stock += reorder.quantity`, and `current_stock` is documented on
-   `InventoryItem` as always base units. Run end to end: stock 24 → 49.
+   `InventoryItem` as always base units. Pinned by
+   `test_a_scan_filing_order_quantity_receives_exactly_that_many_base_units`,
+   which files 36 anonymously and then POSTs the real
+   `reorderrequest-mark-received` action: stock 35 → 71. That test used to
+   hand-simulate the receipt (`item.current_stock += reorder.quantity`, then
+   assert the difference), which is arithmetically true for every quantity and
+   could not fail — it asserted nothing about `mark-received` and is not what
+   established this line. It exercises the action now.
 3. `ReorderRequest.estimated_cost` multiplies the quantity by a per-BASE-unit
    price (`inventory.services.pricing.order_unit_price`).
 4. `inventory/views.py`'s reconciliation auto-reorder already multiplies by
@@ -135,15 +142,29 @@ costs no attempt from the bound, and if the re-read *itself* fails the retry
 proceeds anyway: a missed reorder is worse than a possible duplicate, and
 no-silent-drop is the criterion this effect exists to satisfy.
 
+The **last** attempt asks the same question, and this is a deliberate change to
+what an anonymous visitor SEES. Without it, a third POST that commits with its
+response lost shows the member "nothing has been ordered … ask a member of staff
+to add it to the reorder queue" while a pending request for that item exists —
+a false statement on the one screen this effect exists to make truthful, whose
+prescribed remedy is precisely the duplicate filing being narrowed. So
+`reorderNowPending()` runs once before the notice is rendered, and a `true`
+takes the filed terminal state instead. It changes what such a visitor is TOLD,
+not what they can DO: no new control, no new endpoint, no permission change. If
+that re-read itself fails the notice is still shown — an unverifiable outcome
+must be stated, never swallowed.
+
 **This narrows the window; it does not close it.** A server commit that lands
 *after* the re-read and before the retry still files twice. Closing it needs
 idempotency at the public create endpoint — an idempotency key, or a
 pending-request check in the create path — which changes behaviour for every
 caller of that endpoint, ScanTTY included. That is a contract change, is routed
-separately, and is deliberately **not** taken in this branch. Two tests pin what
-was taken: a retry that finds the reorder pending files exactly one POST and
-lands the member in the filed state, and a re-read that itself fails still
-retries to the same bound of three.
+separately, and is deliberately **not** taken in this branch. Three tests pin
+what was taken: a retry that finds the reorder pending files exactly one POST
+and lands the member in the filed state; a re-read that itself fails still
+retries to the same bound of three; and a final attempt whose pre-notice
+re-read reports the reorder pending reaches the filed state with no failure
+notice rendered.
 
 ## Anonymous submission is the primary path, and is not narrowed
 
@@ -154,6 +175,44 @@ retry only replaces attempts that were already failing. Two mutations pin it —
 gating the effect behind a login, and dropping the filing quantity from the
 anonymous payload (which the page refuses to guess at, so its absence would
 switch the feature off) — and both fail the build.
+
+## The maintenance low-stock alert: warnings that were silent now appear
+
+`check_material_stock` decided whether to alert with a raw `inv.current_stock >=
+inv.minimum_stock`, which mixes the two units this branch exists to separate:
+for a pack-counting item `minimum_stock` is a threshold in `count_level` units
+while `current_stock` is base units. A material counted in cases of 12 with
+`minimum_stock=10` (cases) and `current_stock=24` (2 cases) is low by
+`InventoryItem.needs_reorder` and by the reconciliation path's
+`count_at_level(item) <= item.minimum_stock`, but `24 >= 10` dropped it here:
+the maintenance dashboard showed **no** warning, generated the work order, and
+sent a tech to a shelf holding a sixth of its minimum. The action's own
+`reorder_qty` had already been moved onto `base_reorder_quantity` six lines
+below, so the predicate above it was the one part of the action still outside
+the invariant its docstring asserts.
+
+It now reads `if not inv.needs_reorder: continue` — the mode-aware form, and the
+documented central chokepoint for the `is_retired` guard this loop used to
+re-implement.
+
+**This is a disclosed behaviour change, not a silent one.** Three effects, all
+stated rather than discovered later:
+
+- pack-counted materials below their count-level threshold now raise a warning
+  they do not raise today — the point of the fix;
+- an `each` material exactly AT its minimum now warns (`needs_reorder` is `<=`,
+  the old predicate was effectively `<`);
+- a **kit** material no longer warns at all. A kit holds no stock of its own —
+  receiving one credits its components — so its stock/minimum pair reads as
+  permanently low, which is why `needs_reorder` excludes kits at every other
+  low-stock surface. This is the one place the change removes an alert, and it
+  removes noise the chokepoint already suppresses everywhere else.
+
+Query cost is kept honest: `count_level` was already `select_related` for
+`base_reorder_quantity` and `needs_reorder` reads the same relation, and
+`item_suppliers` is now prefetched because a legacy case-based item's
+`needs_reorder` asks `current_cases` for its shelf pack size — one query for the
+whole set rather than one per material.
 
 ## Cross-project
 

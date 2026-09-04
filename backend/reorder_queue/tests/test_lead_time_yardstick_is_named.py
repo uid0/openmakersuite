@@ -212,19 +212,46 @@ def test_the_changelist_calls_the_quote_column_the_quote():
 
 
 def test_the_supplier_payload_names_the_yardstick_and_carries_both_promises():
-    """``recent_logs`` used to serve ``was_late`` with nothing saying vs. what."""
+    """``recent_logs`` used to serve ``was_late`` with nothing saying vs. what.
+
+    The KEYS carry the yardstick here, not only the labels the web puts on them:
+    a consumer reading ``on_time_percentage`` or ``was_late`` off this block
+    asserts a bare lateness however the screen is worded. This block has no
+    external consumer, so the rename is safe here where it is not for the
+    reorders payloads ScanTTY decodes by name.
+    """
     log = _kept_promise_broken_quote()
 
     analytics = SupplierDetailSerializer(log.supplier).data["lead_time_analytics"]
 
     assert analytics["variance_measured_against"] == LeadTimeLog.VARIANCE_YARDSTICK
+    assert analytics["within_quoted_lead_time_pct"] == 0.0
+    assert analytics["avg_variance_vs_quoted_lead_time_days"] == 7.0
+    # No key on the block asserts a bare on-time-ness any more.
+    assert "on_time_percentage" not in analytics
+    assert "average_variance" not in analytics
     (row,) = analytics["recent_logs"]
-    # Nothing renamed or dropped: every key a consumer already read is intact.
     assert row["variance_days"] == 7
-    assert row["was_late"] is True
+    assert row["was_over_quoted_lead_time"] is True
+    assert "was_late" not in row
     assert row["expected_delivery_date"] == row["actual_delivery_date"]
-    # And the promise that resolves the apparent contradiction.
+    # And the promise that resolves the apparent contradiction — the verdict AND
+    # the date the operator would chase the vendor with.
     assert row["met_confirmed_date"] is True
+    assert row["confirmed_delivery_date"] == log.actual_delivery_date.isoformat()
+
+
+def test_a_row_with_no_confirmed_date_serves_no_date_to_present_as_agreed():
+    """``null``, never the row's own quote-derived ``expected_delivery_date``."""
+    log = _delivery(quoted=3, confirmed_after=None, delivered_after=9)
+
+    analytics = SupplierDetailSerializer(log.supplier).data["lead_time_analytics"]
+
+    (row,) = analytics["recent_logs"]
+    assert row["met_confirmed_date"] is None
+    assert row["confirmed_delivery_date"] is None
+    # The row still HAS a date of its own; it just is not an agreed one.
+    assert row["expected_delivery_date"] is not None
 
 
 def test_the_supplier_payload_names_the_yardstick_with_no_deliveries_yet():
@@ -233,6 +260,30 @@ def test_the_supplier_payload_names_the_yardstick_with_no_deliveries_yet():
 
     assert analytics["total_orders"] == 0
     assert analytics["variance_measured_against"] == LeadTimeLog.VARIANCE_YARDSTICK
+
+
+def test_the_two_supplier_analytics_endpoints_agree_when_there_are_no_deliveries(
+    authenticated_client,
+):
+    """Same numbers, same names — including the shape of "no numbers yet".
+
+    ``SupplierViewSet.analytics`` and ``SupplierDetailSerializer`` both serve a
+    ``lead_time_analytics`` block. If only one of them names the yardstick when a
+    supplier has no deliveries, a consumer reading the other is left to assume
+    which promise the rates will be about once they arrive.
+    """
+    client, _ = authenticated_client
+    supplier = SupplierFactory()
+
+    response = client.get(reverse("supplier-analytics", kwargs={"pk": supplier.pk}))
+
+    assert response.status_code == 200
+    from_action = response.data["lead_time_analytics"]
+    from_detail = SupplierDetailSerializer(supplier).data["lead_time_analytics"]
+
+    assert from_action["variance_measured_against"] == LeadTimeLog.VARIANCE_YARDSTICK
+    # ``recent_logs`` is the detail block's only extra key; the rest must match.
+    assert from_action == {k: v for k, v in from_detail.items() if k != "recent_logs"}
 
 
 def test_the_reorders_analytics_payloads_name_the_yardstick(authenticated_client):
@@ -286,10 +337,13 @@ def test_the_purchasing_lead_time_report_names_the_yardstick(authenticated_clien
 def test_the_lead_time_csv_header_names_the_yardstick(authenticated_client):
     """The download a buyer opens in a spreadsheet, away from any of this context.
 
-    "On-Time Rate" in a spreadsheet reads as the share of agreed dates the vendor
-    hit. It is not — it is the share of deliveries inside the standing quote — so
-    the header says which. The row VALUES are untouched: only the header line
-    changed, which this pins by checking the number still lands under it.
+    "on_time_rate" as a column reads as the share of agreed dates the vendor hit.
+    It is not — it is the share of deliveries inside the standing quote — so the
+    COLUMN NAME says which, rather than a human label doing it: this endpoint
+    emits machine keys on every other ``?type=``, and one export answering in two
+    header conventions would break whatever reads the others. The row VALUES are
+    untouched, which this pins by checking each number still lands under its
+    renamed column.
     """
     client, _ = authenticated_client
     log = _kept_promise_broken_quote()
@@ -305,14 +359,19 @@ def test_the_lead_time_csv_header_names_the_yardstick(authenticated_client):
 
     assert response.status_code == 200
     header, *body = response.content.decode().strip().splitlines()
-    assert "Avg Variance vs. Quoted Lead Time (days)" in header
-    assert "Within Quoted Lead Time (%)" in header
-    assert "On-Time Rate" not in header
-    # The values did not move with the labels.
     columns = header.split(",")
+    assert "avg_quoted_lead_time_days" in columns
+    assert "avg_variance_vs_quoted_lead_time_days" in columns
+    assert "within_quoted_lead_time_pct" in columns
+    # Neither the bare key nor a bare human label may come back.
+    assert "on_time_rate" not in columns
+    assert "avg_variance" not in columns
+    assert "On-Time Rate" not in header
+    # The values did not move with the column names.
     row = dict(zip(columns, body[0].split(",")))
-    assert row["Avg Variance vs. Quoted Lead Time (days)"] == "7.0"
-    assert row["Within Quoted Lead Time (%)"] == "0.0%"
+    assert row["avg_quoted_lead_time_days"] == "3.0"
+    assert row["avg_variance_vs_quoted_lead_time_days"] == "7.0"
+    assert row["within_quoted_lead_time_pct"] == "0.0%"
 
 
 # ── which promise the operator is SHOWN before delivery ──────────────────────

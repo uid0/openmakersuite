@@ -1,16 +1,18 @@
 /**
  * The supplier lead-time surface names what its lateness is measured against.
  *
- * `variance_days`, `was_late`, `average_variance` and `on_time_percentage` all
- * score the supplier link's STANDING QUOTED lead time — never the delivery date
- * the operator confirmed on the order. Those are two promises, and a vendor that
- * quotes 3 days, has the order confirmed for day 10 and delivers on day 10
- * reaches this component as `expected_delivery_date == actual_delivery_date`
- * beside `variance_days: 7, was_late: true`.
+ * Every rate and variance this component reads scores the supplier link's
+ * STANDING QUOTED lead time — never the delivery date the operator confirmed on
+ * the order. Those are two promises, and a vendor that quotes 3 days, has the
+ * order confirmed for day 10 and delivers on day 10 reaches this component as
+ * `expected_delivery_date == actual_delivery_date` beside `variance_days: 7,
+ * was_over_quoted_lead_time: true`.
  *
  * The captain chases vendors off this screen, so a card reading a bare
  * "On-Time Percentage" tells them a supplier missed agreed dates it in fact
- * met. These tests fail if any label goes back to a bare lateness.
+ * met. These tests fail if any label goes back to a bare lateness, and the
+ * tooltip carries the confirmed DATE beside its verdict so the operator has
+ * the date to chase on rather than just the word.
  */
 import { MantineProvider } from '@mantine/core';
 import { render, screen } from '@testing-library/react';
@@ -24,9 +26,9 @@ const keptPromiseBrokenQuote = {
   average_lead_time: 10,
   min_lead_time: 10,
   max_lead_time: 10,
-  average_variance: 7,
+  avg_variance_vs_quoted_lead_time_days: 7,
   total_orders: 1,
-  on_time_percentage: 0,
+  within_quoted_lead_time_pct: 0,
   variance_measured_against: 'quoted_lead_time',
   recent_logs: [
     {
@@ -37,8 +39,9 @@ const keptPromiseBrokenQuote = {
       estimated_lead_time_days: 3,
       actual_lead_time_days: 10,
       variance_days: 7,
-      was_late: true,
+      was_over_quoted_lead_time: true,
       met_confirmed_date: true,
+      confirmed_delivery_date: '2026-03-11',
     },
   ],
 };
@@ -81,19 +84,31 @@ describe('lead-time labels name the yardstick', () => {
 });
 
 describe('confirmedDatePhrase', () => {
-  it('reports a met confirmed date', () => {
-    expect(confirmedDatePhrase(true)).toBe('Met the confirmed delivery date');
+  it('reports a met confirmed date WITH the date it was judged against', () => {
+    // The date is the point: it is what the operator quotes back to the vendor.
+    expect(confirmedDatePhrase(true, '2026-03-11')).toBe(
+      'Met the confirmed delivery date 2026-03-11'
+    );
   });
 
-  it('reports a missed confirmed date', () => {
-    expect(confirmedDatePhrase(false)).toBe('Missed the confirmed delivery date');
+  it('reports a missed confirmed date with its date', () => {
+    expect(confirmedDatePhrase(false, '2026-03-11')).toBe(
+      'Missed the confirmed delivery date 2026-03-11'
+    );
+  });
+
+  it('still gives the bare verdict when the date did not reach it', () => {
+    expect(confirmedDatePhrase(true)).toBe('Met the confirmed delivery date');
+    expect(confirmedDatePhrase(false, null)).toBe('Missed the confirmed delivery date');
   });
 
   it('says nothing at all when no date was confirmed on the order', () => {
     // Not "missed": there is no agreed date to have missed, and inventing one
     // would assert the second promise the whole fix exists to stop asserting.
-    expect(confirmedDatePhrase(null)).toBeNull();
-    expect(confirmedDatePhrase(undefined)).toBeNull();
+    expect(confirmedDatePhrase(null, null)).toBeNull();
+    expect(confirmedDatePhrase(undefined, undefined)).toBeNull();
+    // Not even when a date is somehow present without a verdict.
+    expect(confirmedDatePhrase(null, '2026-03-11')).toBeNull();
   });
 });
 
@@ -105,6 +120,7 @@ describe('LeadTimeTooltip', () => {
     variance: 7,
     date: '01/03/2026',
     metConfirmedDate: true as boolean | null | undefined,
+    confirmedDeliveryDate: '2026-03-11' as string | null | undefined,
   };
 
   const renderTooltip = (payloadRow: typeof row) =>
@@ -119,13 +135,14 @@ describe('LeadTimeTooltip', () => {
 
     // The vendor really did break its quote — that number is unchanged.
     expect(screen.getByText(/\+7 days vs\. quoted lead time/i)).toBeInTheDocument();
-    // And the promise it kept is right there beside it.
-    expect(screen.getByText('Met the confirmed delivery date')).toBeInTheDocument();
+    // And the promise it kept is right there beside it, WITH the agreed date —
+    // a bare verdict leaves the operator without the date to chase on.
+    expect(screen.getByText('Met the confirmed delivery date 2026-03-11')).toBeInTheDocument();
     expect(screen.queryByText(/7 days late/i)).not.toBeInTheDocument();
   });
 
   it('omits the confirmed-date line when the order confirmed no date', () => {
-    renderTooltip({ ...row, metConfirmedDate: null });
+    renderTooltip({ ...row, metConfirmedDate: null, confirmedDeliveryDate: null });
 
     expect(screen.getByText(/\+7 days vs\. quoted lead time/i)).toBeInTheDocument();
     expect(screen.queryByText(/confirmed delivery date/i)).not.toBeInTheDocument();

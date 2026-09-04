@@ -14,8 +14,9 @@ import { Card, Group, Stack, Text } from '@mantine/core';
 import React, { useMemo } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
-/** The words this surface uses for the promise every number here scores. */
-export const YARDSTICK_LABEL = 'quoted lead time';
+import { YARDSTICK_LABEL, YARDSTICK_LABEL_TITLE } from '../constants/leadTimeYardstick';
+
+export { YARDSTICK_LABEL };
 
 export interface LeadTimeAnalytics {
   average_lead_time: number | null;
@@ -24,12 +25,14 @@ export interface LeadTimeAnalytics {
   /**
    * Average of `variance_days`, measured against the supplier link's STANDING
    * QUOTED lead time — never against the delivery dates confirmed on the
-   * orders. `variance_measured_against` carries that yardstick from the API so
-   * no label here has to restate it from memory.
+   * orders, which is why the key itself says so. `variance_measured_against`
+   * carries the yardstick's MACHINE name (`quoted_lead_time`) from the API; the
+   * words shown to a person come from `YARDSTICK_LABEL`, the web's single copy
+   * of `LeadTimeLog.VARIANCE_YARDSTICK_LABEL`.
    */
-  average_variance: number | null;
+  avg_variance_vs_quoted_lead_time_days: number | null;
   total_orders: number;
-  on_time_percentage: number | null;
+  within_quoted_lead_time_pct: number | null;
   variance_measured_against?: string;
   recent_logs?: Array<{
     item_name: string;
@@ -40,9 +43,11 @@ export interface LeadTimeAnalytics {
     actual_lead_time_days: number;
     variance_days: number;
     /** Later than the QUOTE. A row can be `true` having hit the agreed date. */
-    was_late: boolean;
+    was_over_quoted_lead_time: boolean;
     /** Met the date the operator confirmed; `null` when none was confirmed. */
     met_confirmed_date?: boolean | null;
+    /** The date that verdict judged; `null` when the order confirmed none. */
+    confirmed_delivery_date?: string | null;
   }>;
 }
 
@@ -58,12 +63,22 @@ export interface LeadTimeChartProps {
  * and this returns `null` rather than guessing. Kept separate from the variance
  * phrasing because a row can be over its quote and still have met this date —
  * that pair is exactly what the operator needs to see together.
+ *
+ * The verdict carries its DATE, because that is the date the operator chases
+ * the vendor with; without it the screen says a promise was kept or broken and
+ * leaves the reader to go and find which promise.
  */
-export function confirmedDatePhrase(metConfirmedDate: boolean | null | undefined): string | null {
+export function confirmedDatePhrase(
+  metConfirmedDate: boolean | null | undefined,
+  confirmedDeliveryDate?: string | null
+): string | null {
   if (metConfirmedDate === null || metConfirmedDate === undefined) {
     return null;
   }
-  return metConfirmedDate ? 'Met the confirmed delivery date' : 'Missed the confirmed delivery date';
+  const verdict = metConfirmedDate
+    ? 'Met the confirmed delivery date'
+    : 'Missed the confirmed delivery date';
+  return confirmedDeliveryDate ? `${verdict} ${confirmedDeliveryDate}` : verdict;
 }
 
 interface LeadTimeTooltipRow {
@@ -73,6 +88,7 @@ interface LeadTimeTooltipRow {
   variance: number;
   date: string;
   metConfirmedDate: boolean | null | undefined;
+  confirmedDeliveryDate: string | null | undefined;
 }
 
 /**
@@ -88,7 +104,7 @@ export const LeadTimeTooltip: React.FC<{
     return null;
   }
   const row = payload[0].payload;
-  const confirmed = confirmedDatePhrase(row.metConfirmedDate);
+  const confirmed = confirmedDatePhrase(row.metConfirmedDate, row.confirmedDeliveryDate);
   return (
     <Card withBorder p="xs">
       <Text size="sm" fw={600}>
@@ -122,6 +138,7 @@ const LeadTimeChart: React.FC<LeadTimeChartProps> = ({ analytics }) => {
       variance: log.variance_days,
       date: new Date(log.order_date).toLocaleDateString(),
       metConfirmedDate: log.met_confirmed_date,
+      confirmedDeliveryDate: log.confirmed_delivery_date,
     }));
   }, [analytics.recent_logs]);
 
@@ -151,11 +168,11 @@ const LeadTimeChart: React.FC<LeadTimeChartProps> = ({ analytics }) => {
         </Card>
         <Card withBorder p="md">
           <Text size="sm" c="dimmed">
-            Within Quoted Lead Time
+            Within {YARDSTICK_LABEL_TITLE}
           </Text>
           <Text size="xl" fw={700}>
-            {analytics.on_time_percentage !== null
-              ? `${analytics.on_time_percentage.toFixed(1)}%`
+            {analytics.within_quoted_lead_time_pct !== null
+              ? `${analytics.within_quoted_lead_time_pct.toFixed(1)}%`
               : 'N/A'}
           </Text>
         </Card>
@@ -171,15 +188,20 @@ const LeadTimeChart: React.FC<LeadTimeChartProps> = ({ analytics }) => {
         </Card>
         <Card withBorder p="md">
           <Text size="sm" c="dimmed">
-            Avg Variance vs. Quoted Lead Time
+            Avg Variance vs. {YARDSTICK_LABEL_TITLE}
           </Text>
           <Text
             size="xl"
             fw={700}
-            c={analytics.average_variance !== null && analytics.average_variance > 0 ? 'red' : 'green'}
+            c={
+              analytics.avg_variance_vs_quoted_lead_time_days !== null &&
+              analytics.avg_variance_vs_quoted_lead_time_days > 0
+                ? 'red'
+                : 'green'
+            }
           >
-            {analytics.average_variance !== null
-              ? `${analytics.average_variance > 0 ? '+' : ''}${analytics.average_variance.toFixed(1)} days`
+            {analytics.avg_variance_vs_quoted_lead_time_days !== null
+              ? `${analytics.avg_variance_vs_quoted_lead_time_days > 0 ? '+' : ''}${analytics.avg_variance_vs_quoted_lead_time_days.toFixed(1)} days`
               : 'N/A'}
           </Text>
         </Card>

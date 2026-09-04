@@ -766,7 +766,7 @@ def test_an_old_delivery_counts_exactly_as_much_as_a_recent_one():
     last week, score identically. A decay constant is a tuning knob nobody has
     the data to set over a handful of orders a year, and it would make the
     number that decides a purchase disagree with the unweighted
-    ``on_time_percentage`` the supplier screen already shows. The known cost is
+    ``within_quoted_lead_time_pct`` the supplier screen already shows. The known cost is
     that a vendor who was chronically late years ago carries it forever; the
     remedy is a window on the query, and it is filed rather than guessed at.
     """

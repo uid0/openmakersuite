@@ -342,9 +342,18 @@ because this row's own `expected_delivery_date` falls back to the quote and is
 then not an agreed date at all. `reorder_queue/tests/test_lead_time_yardstick_is_named.py`
 pins every surface and fails if a new one renders a bare "N days late".
 
-Payload keys were ADDED, never renamed: ScanTTY decodes `on_time_delivery_rate`,
-`late_delivery_rate`, `average_variance_days`, `avg_variance` and `on_time_rate`
-by name off `/api/reorders/analytics/` and `/api/reorders/reports/purchasing/`.
+Naming the yardstick means naming it in the KEY, not only in the label a person
+reads: a consumer decoding `on_time_rate` or `was_late` asserts a bare lateness
+however the screen is worded. So the supplier `lead_time_analytics` block and the
+`lead_time_analysis` CSV columns say `within_quoted_lead_time_pct`,
+`avg_variance_vs_quoted_lead_time_days` and `was_over_quoted_lead_time`.
+
+What limits that is the cross-project contract, not taste. ScanTTY decodes
+`on_time_delivery_rate`, `late_delivery_rate`, `early_delivery_rate`,
+`average_variance_days`, `avg_variance` and `on_time_rate` BY NAME off
+`/api/reorders/analytics/` and `/api/reorders/reports/purchasing/` — those keys
+must not be renamed, and carry `variance_measured_against` alongside instead. It
+decodes nothing off the supplier endpoints, which is why those could be renamed.
 
 ### The alert-suppression class: CLOSED (op-c1ke)
 

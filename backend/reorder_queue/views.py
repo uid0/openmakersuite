@@ -4422,44 +4422,36 @@ class PurchasingReportViewSet(viewsets.ViewSet):
                 'attachment; filename="purchasing_lead_time_analysis.csv"'
             )
 
+            # Machine keys and ``writeheader()``, the one convention every
+            # branch of this endpoint uses — but the keys themselves name the
+            # yardstick. A column called "on_time_rate" reads in a spreadsheet
+            # as the share of AGREED dates the vendor hit; it is the share of
+            # deliveries inside the supplier link's standing quoted lead time,
+            # so a buyer sorting on it would chase the wrong vendors. The JSON
+            # keys of ``lead_time_analysis`` are untouched (ScanTTY decodes
+            # those by name); only this export's columns are renamed. Pinned by
+            # ``test_the_lead_time_csv_header_names_the_yardstick``.
             fieldnames = [
                 "supplier_name",
                 "item_name",
                 "total_orders",
-                "avg_estimated_lead_time",
+                "avg_quoted_lead_time_days",
                 "avg_actual_lead_time",
-                "avg_variance",
-                "on_time_rate",
+                "avg_variance_vs_quoted_lead_time_days",
+                "within_quoted_lead_time_pct",
             ]
             writer = csv.DictWriter(response_obj, fieldnames=fieldnames)
-            # A header row a person reads, not the dict keys. "avg_variance" and
-            # "on_time_rate" name no yardstick, and both are measured against the
-            # supplier link's standing quoted lead time rather than the delivery
-            # dates confirmed on the orders — a spreadsheet reading these as
-            # missed agreed dates would chase the wrong vendors. The dict keys
-            # below are untouched, so the row values are unchanged. Pinned by
-            # ``test_the_lead_time_csv_header_names_the_yardstick``.
-            writer.writerow(
-                {
-                    "supplier_name": "Supplier",
-                    "item_name": "Item Name",
-                    "total_orders": "Total Orders",
-                    "avg_estimated_lead_time": "Avg Quoted Lead Time (days)",
-                    "avg_actual_lead_time": "Avg Actual Lead Time (days)",
-                    "avg_variance": "Avg Variance vs. Quoted Lead Time (days)",
-                    "on_time_rate": "Within Quoted Lead Time (%)",
-                }
-            )
+            writer.writeheader()
             for row in data:
                 writer.writerow(
                     {
                         "supplier_name": row["supplier_name"],
                         "item_name": row["item_name"],
                         "total_orders": row["total_orders"],
-                        "avg_estimated_lead_time": row["avg_estimated_lead_time"],
+                        "avg_quoted_lead_time_days": row["avg_estimated_lead_time"],
                         "avg_actual_lead_time": row["avg_actual_lead_time"],
-                        "avg_variance": row["avg_variance"],
-                        "on_time_rate": f"{row['on_time_rate']:.1f}%",
+                        "avg_variance_vs_quoted_lead_time_days": row["avg_variance"],
+                        "within_quoted_lead_time_pct": f"{row['on_time_rate']:.1f}%",
                     }
                 )
 

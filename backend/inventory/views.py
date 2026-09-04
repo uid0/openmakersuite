@@ -184,7 +184,19 @@ class SupplierViewSet(viewsets.ModelViewSet):
             # Lead time analytics
             lead_time_logs = LeadTimeLog.objects.filter(item_supplier__supplier=supplier)
 
-            lead_time_stats = {}
+            # The same shape the supplier-detail block serves when a supplier
+            # has no deliveries yet: the yardstick must not appear and vanish
+            # with the data, and these two endpoints must not disagree about
+            # what an empty block looks like either.
+            lead_time_stats = {
+                "average_lead_time": None,
+                "min_lead_time": None,
+                "max_lead_time": None,
+                "avg_variance_vs_quoted_lead_time_days": None,
+                "total_orders": 0,
+                "within_quoted_lead_time_pct": None,
+                "variance_measured_against": LeadTimeLog.VARIANCE_YARDSTICK,
+            }
             if lead_time_logs.exists():
                 stats = lead_time_logs.aggregate(
                     avg_lead_time=Avg("actual_lead_time_days"),
@@ -207,17 +219,17 @@ class SupplierViewSet(viewsets.ModelViewSet):
                     ),
                     "min_lead_time": stats["min_lead_time"],
                     "max_lead_time": stats["max_lead_time"],
-                    "average_variance": (
+                    "avg_variance_vs_quoted_lead_time_days": (
                         float(stats["avg_variance"]) if stats["avg_variance"] else None
                     ),
                     "total_orders": stats["total_orders"],
-                    "on_time_percentage": (
+                    "within_quoted_lead_time_pct": (
                         float(on_time_percentage) if on_time_percentage is not None else None
                     ),
-                    # Same yardstick, same key, same source constant as the
+                    # Same yardstick, same keys, same source constant as the
                     # supplier-detail block in ``inventory.serializers`` — these
                     # two endpoints serve the same numbers and must not name two
-                    # different promises.
+                    # different promises, empty or not.
                     "variance_measured_against": LeadTimeLog.VARIANCE_YARDSTICK,
                 }
 

@@ -489,6 +489,19 @@ because what it turned out to be is worth knowing; 2 and 3 are still open:
    `check_material_stock`'s `reorder_qty`, which the maintenance dashboard POSTs
    verbatim. `InventoryList` / `InventoryItemDetailPage` file nothing and were
    deliberately left on `reorderQuantityLabel`.
+
+   ONE PART OF IT IS STILL OPEN and is the captain's, not an implementer's. For
+   a LEGACY `use_case_based_reorder` item the two halves are separate columns:
+   `reorder_cases` sizes every DISPLAY, `reorder_quantity` sizes every ORDER
+   (`base_reorder_quantity` routes these items through its `each` branch, which
+   `packaging.py`'s module docstring records as deliberate preservation). So an
+   operator's "Reorder Cases: 4" does not reach the order. Closing it — reading
+   `reorder_cases × order_pack_size`, as `reorder_threshold` already branches —
+   would change what is ordered for live items, so it was routed rather than
+   taken. What WAS done: `reorder_cases`'s `help_text` no longer claims to size
+   the order (it said "Number of cases/packages to reorder when stock is low"),
+   and `TestLegacyCaseBasedItemsAreRecordedAsTheyBehave` pins the divergence
+   with numbers on it. Do not close it without that decision.
 2. **Frontend readers of `quantity_per_package` outside `ScanPage`** — the same
    falsy-zero pack-size class, all pre-existing, none touched here.
    `PurchaseOrderFormPage.tsx` has eight `item.quantity_per_package || 1` sites

@@ -223,9 +223,18 @@ class TestLegacyCaseBasedItemsAreRecordedAsTheyBehave:
     than a surprise, and so closing it is a visible decision rather than a quiet
     edit. ``order_quantity`` reports what is actually filed either way, which is
     what lets the scan page stay honest while the columns disagree.
+
+    ``InventoryItem.reorder_cases``'s ``help_text`` is worded off THIS class: it
+    says the column sizes the display only and names ``reorder_quantity`` as the
+    one a reorder actually orders. It used to say "Number of cases/packages to
+    reorder when stock is low", which promised a use no code makes. Whether to
+    close the divergence instead — by having ``base_reorder_quantity`` read
+    ``reorder_cases × order_pack_size`` for these items — changes what is ordered
+    for live items and is routed to the captain as its own decision.
     """
 
     def test_display_reads_reorder_cases_while_the_order_reads_reorder_quantity(self):
+        """The sentence ``reorder_cases``'s help text now makes, with numbers on it."""
         item = _case_item(reorder_cases=4, reorder_quantity=25, quantity_per_package=10)
 
         display = reorder_display(item)

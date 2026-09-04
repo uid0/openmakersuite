@@ -214,13 +214,18 @@ class SupplierViewSet(viewsets.ModelViewSet):
                 )
 
                 lead_time_stats = {
+                    # ``is not None``, never truthiness — same reasoning and
+                    # same spelling as the supplier-detail block: a perfect
+                    # record averages 0.0 and is an answer, not an absence.
                     "average_lead_time": (
-                        float(stats["avg_lead_time"]) if stats["avg_lead_time"] else None
+                        float(stats["avg_lead_time"])
+                        if stats["avg_lead_time"] is not None
+                        else None
                     ),
                     "min_lead_time": stats["min_lead_time"],
                     "max_lead_time": stats["max_lead_time"],
                     "avg_variance_vs_quoted_lead_time_days": (
-                        float(stats["avg_variance"]) if stats["avg_variance"] else None
+                        float(stats["avg_variance"]) if stats["avg_variance"] is not None else None
                     ),
                     "total_orders": stats["total_orders"],
                     "within_quoted_lead_time_pct": (

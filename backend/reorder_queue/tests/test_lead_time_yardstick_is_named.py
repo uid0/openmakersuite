@@ -286,6 +286,63 @@ def test_the_two_supplier_analytics_endpoints_agree_when_there_are_no_deliveries
     assert from_action == {k: v for k, v in from_detail.items() if k != "recent_logs"}
 
 
+def _both_supplier_blocks(client, supplier):
+    """The ``lead_time_analytics`` block as each of the two endpoints serves it.
+
+    They are separate code paths over the same aggregate, so a guard fixed on one
+    and not the other would put two different answers on two screens.
+    """
+    response = client.get(reverse("supplier-analytics", kwargs={"pk": supplier.pk}))
+    assert response.status_code == 200
+    return (
+        response.data["lead_time_analytics"],
+        SupplierDetailSerializer(supplier).data["lead_time_analytics"],
+    )
+
+
+def test_a_vendor_that_hit_its_quote_exactly_reads_as_zero_not_as_no_data(
+    authenticated_client,
+):
+    """Quote 5, deliver on day 5: average variance 0.0, and 0.0 is an ANSWER.
+
+    Served as ``null`` it renders "N/A" on the very card this change exists to
+    make honest, beside a sibling card reading "100.0% within quoted lead time".
+    A perfect record is the one a buyer most needs to read.
+    """
+    client, _ = authenticated_client
+    log = _delivery(quoted=5, delivered_after=5)
+    assert log.variance_days == 0
+
+    from_action, from_detail = _both_supplier_blocks(client, log.supplier)
+
+    for block in (from_action, from_detail):
+        assert block["avg_variance_vs_quoted_lead_time_days"] == 0.0
+        assert block["avg_variance_vs_quoted_lead_time_days"] is not None
+        assert block["within_quoted_lead_time_pct"] == 100.0
+
+
+def test_a_same_day_vendors_zero_day_lead_time_reads_as_zero_not_as_no_data(
+    authenticated_client,
+):
+    """A counter pickup that lands the day it is ordered averages 0 days.
+
+    ``create_lead_time_log`` already refuses to invent a fortnight for these
+    suppliers; the payload must not undo that by reporting the 0 it recorded as
+    an absence of data.
+    """
+    client, _ = authenticated_client
+    log = _delivery(quoted=3, delivered_after=0)
+    assert log.actual_lead_time_days == 0
+
+    from_action, from_detail = _both_supplier_blocks(client, log.supplier)
+
+    for block in (from_action, from_detail):
+        assert block["average_lead_time"] == 0.0
+        assert block["average_lead_time"] is not None
+        assert block["min_lead_time"] == 0
+        assert block["max_lead_time"] == 0
+
+
 def test_the_reorders_analytics_payloads_name_the_yardstick(authenticated_client):
     """``supplier_performance``, ``lead_time_trends`` and ``dashboard_summary``.
 

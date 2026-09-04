@@ -400,13 +400,20 @@ class SupplierDetailSerializer(SupplierSerializer):
             )
 
             return {
+                # ``is not None``, never truthiness: a vendor that landed every
+                # order exactly on its quote averages a variance of 0.0, and the
+                # falsy spelling served that perfect record as ``null`` — the
+                # card beside it reading "100.0% within quoted lead time" while
+                # this one read "N/A". A same-day supplier's 0-day average lead
+                # time is the same fact. Both are answers, not absences; these
+                # are ``None`` only with no rows at all, which returns above.
                 "average_lead_time": (
-                    float(stats["avg_lead_time"]) if stats["avg_lead_time"] else None
+                    float(stats["avg_lead_time"]) if stats["avg_lead_time"] is not None else None
                 ),
                 "min_lead_time": stats["min_lead_time"],
                 "max_lead_time": stats["max_lead_time"],
                 "avg_variance_vs_quoted_lead_time_days": (
-                    float(stats["avg_variance"]) if stats["avg_variance"] else None
+                    float(stats["avg_variance"]) if stats["avg_variance"] is not None else None
                 ),
                 "total_orders": stats["total_orders"],
                 "within_quoted_lead_time_pct": (

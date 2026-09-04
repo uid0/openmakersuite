@@ -16,8 +16,6 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 
 import { YARDSTICK_LABEL, YARDSTICK_LABEL_TITLE } from '../constants/leadTimeYardstick';
 
-export { YARDSTICK_LABEL };
-
 export interface LeadTimeAnalytics {
   average_lead_time: number | null;
   min_lead_time: number | null;

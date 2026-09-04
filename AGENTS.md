@@ -344,16 +344,43 @@ pins every surface and fails if a new one renders a bare "N days late".
 
 Naming the yardstick means naming it in the KEY, not only in the label a person
 reads: a consumer decoding `on_time_rate` or `was_late` asserts a bare lateness
-however the screen is worded. So the supplier `lead_time_analytics` block and the
-`lead_time_analysis` CSV columns say `within_quoted_lead_time_pct`,
-`avg_variance_vs_quoted_lead_time_days` and `was_over_quoted_lead_time`.
+however the screen is worded. Two contracts were therefore RENAMED, which is a
+breaking change for any client outside this repo:
 
-What limits that is the cross-project contract, not taste. ScanTTY decodes
-`on_time_delivery_rate`, `late_delivery_rate`, `early_delivery_rate`,
-`average_variance_days`, `avg_variance` and `on_time_rate` BY NAME off
-`/api/reorders/analytics/` and `/api/reorders/reports/purchasing/` — those keys
-must not be renamed, and carry `variance_measured_against` alongside instead. It
-decodes nothing off the supplier endpoints, which is why those could be renamed.
+`GET /api/inventory/suppliers/<id>/` and `/analytics/`, in the
+`lead_time_analytics` block served identically by both:
+
+| was | is |
+| --- | --- |
+| `on_time_percentage` | `within_quoted_lead_time_pct` |
+| `average_variance` | `avg_variance_vs_quoted_lead_time_days` |
+| `recent_logs[].was_late` | `was_over_quoted_lead_time` |
+
+`GET /api/reorders/reports/purchasing/export/?type=lead_time_analysis`, in the
+CSV header row (machine keys, matching the export's three untouched siblings) —
+any spreadsheet keyed on the old header must be re-pointed:
+
+| was | is |
+| --- | --- |
+| `avg_estimated_lead_time` | `avg_quoted_lead_time_days` |
+| `avg_variance` | `avg_variance_vs_quoted_lead_time_days` |
+| `on_time_rate` | `within_quoted_lead_time_pct` |
+
+One concept, one name across both. What bounds the rename is the cross-project
+contract, not taste: ScanTTY decodes `on_time_delivery_rate`,
+`late_delivery_rate`, `early_delivery_rate`, `average_variance_days` and the
+`lead_time_analysis` JSON's `avg_variance` / `on_time_rate` BY NAME off
+`/api/reorders/analytics/` and `/api/reorders/reports/purchasing/`. Those keys
+were deliberately NOT renamed and must not be; they carry
+`variance_measured_against` alongside instead. ScanTTY decodes nothing off the
+supplier endpoints and does not read the CSV, which is what made those two
+renameable.
+
+A rate or average of exactly `0` is an ANSWER, not an absence — a vendor that
+hit its quote on every order averages a variance of `0.0`, and a counter-pickup
+supplier averages a `0`-day lead time. Guard these with `is not None`, never
+truthiness, or the payload reports a perfect record as "N/A" beside a sibling
+card reading 100%. See also the alert-suppression class below.
 
 ### The alert-suppression class: CLOSED (op-c1ke)
 

@@ -6269,7 +6269,13 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
         """
         item = self.get_object()
         alerts = []
-        materials = item.materials.select_related("inventory_item").all()
+        # ``count_level`` is joined because ``base_reorder_quantity`` reads it
+        # (via ``counts_in_packs`` and ``count_at_level``) for every alerted
+        # material; the raw column this replaced touched no relation, so
+        # without the join each low-stock pack-counting material costs a query.
+        materials = item.materials.select_related(
+            "inventory_item", "inventory_item__count_level"
+        ).all()
         for material in materials:
             inv = material.inventory_item
             if inv is None:

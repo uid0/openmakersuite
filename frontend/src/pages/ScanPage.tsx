@@ -145,7 +145,11 @@ const ScanPage: React.FC = () => {
   // Single-flight guard for that auto-submit, keyed by the item it fired for, so
   // a re-render can never re-enter it and a genuine route change still can.
   const autoSubmitStartedForRef = useRef<string | null>(null);
-  const autoSubmitAbandonedRef = useRef(false);
+  // The in-flight auto-submit run, carried WITH the item it belongs to. The
+  // identity is what makes the abandon signal safe to clear: only a re-entry
+  // for the SAME item is the StrictMode double-invoke, and only that one may
+  // revive a run. A route change to another item leaves the old run abandoned.
+  const autoSubmitRunRef = useRef<{ itemId: string; abandoned: boolean } | null>(null);
 
   // Enhanced form state (logged in users)
   const [selectedSupplier, setSelectedSupplier] = useState<ItemSupplier | null>(null);
@@ -263,14 +267,33 @@ const ScanPage: React.FC = () => {
   // silent drop is on the table now: the retries live inside ONE awaited loop
   // rather than in the dependency array, and the last failure is rendered.
   // `ScanPage.test.tsx` pins the bound, the wording and the no-drop guarantee.
+  //
+  // WHAT IT CAN STILL FILE TWICE. A retry re-reads the item first and stops if
+  // the reorder has become pending, which NARROWS the duplicate window — it
+  // does NOT close it. `/reorders/requests/` is not idempotent, so a first POST
+  // whose response was lost but whose row commits AFTER the re-read is still
+  // filed a second time. Closing that needs idempotency at the public create
+  // endpoint — a contract change affecting every caller of it, ScanTTY
+  // included — which is routed separately and deliberately not taken here. When
+  // the re-read ITSELF fails the retry proceeds anyway: a missed reorder is
+  // worse than a possible duplicate, and no-silent-drop is why this effect
+  // exists. The re-read does not consume an attempt from the bound.
   useEffect(() => {
+    const previousRun = autoSubmitRunRef.current;
     // A StrictMode remount re-runs this effect after its own cleanup. Clearing
-    // the flag here — before the single-flight guard returns — hands an attempt
-    // that is already in flight back its ability to finish, so the development
-    // double-invoke can neither orphan a submit nor fire a second one.
-    autoSubmitAbandonedRef.current = false;
+    // the abandon signal here — before the single-flight guard returns — hands
+    // an attempt that is already in flight back its ability to finish, so the
+    // development double-invoke can neither orphan a submit nor fire a second
+    // one. Scoped to the run's OWN item: an itemId change reuses this component
+    // (the route element is not keyed), and reviving THAT run would let a loop
+    // abandoned for a real reason redirect, or write its failure notice, over
+    // the item it no longer belongs to.
+    if (previousRun && item && previousRun.itemId === item.id) {
+      previousRun.abandoned = false;
+    }
     const abandon = () => {
-      autoSubmitAbandonedRef.current = true;
+      const inFlight = autoSubmitRunRef.current;
+      if (inFlight) inFlight.abandoned = true;
     };
 
     if (isLoggedIn || !item) return abandon;
@@ -304,19 +327,36 @@ const ScanPage: React.FC = () => {
     // silent way out — the loop would simply end, leaving "Submitting…" on
     // screen with nothing filed, which is the drop this whole effect exists to
     // prevent. The bound is the one `attempt >= AUTO_SUBMIT_ATTEMPTS` below.
+    const run = { itemId: item.id, abandoned: false };
+    autoSubmitRunRef.current = run;
+
+    // Did the reorder land despite the rejection? Answering costs one GET and
+    // no attempt from the bound. `null` means the question could not be asked,
+    // which is NOT an answer of "no pending request" — the caller retries on
+    // it, because dropping a reorder is the worse failure.
+    const reorderNowPending = async (): Promise<boolean | null> => {
+      try {
+        const fresh = await inventoryAPI.getItem(item.id);
+        return !!fresh.data?.has_pending_reorder;
+      } catch (readErr: any) {
+        console.error('Error re-reading item before an auto-submit retry:', readErr);
+        return null;
+      }
+    };
+
     (async () => {
       setSubmitting(true);
       for (let attempt = 1; ; attempt += 1) {
         try {
           await submitOnce();
-          if (!autoSubmitAbandonedRef.current) navigate('/thanks');
+          if (!run.abandoned) navigate('/thanks');
           return;
         } catch (err: any) {
           console.error(
             `Error auto-submitting reorder (attempt ${attempt} of ${AUTO_SUBMIT_ATTEMPTS}):`,
             err
           );
-          if (autoSubmitAbandonedRef.current) return;
+          if (run.abandoned) return;
           if (attempt >= AUTO_SUBMIT_ATTEMPTS) {
             setSubmitting(false);
             setAutoSubmitFailure(
@@ -328,6 +368,14 @@ const ScanPage: React.FC = () => {
             return;
           }
           await new Promise((resolve) => setTimeout(resolve, autoSubmitRetry.delayMs * attempt));
+          if (run.abandoned) return;
+          if ((await reorderNowPending()) === true) {
+            // From the member's side the scan DID file a request, so this ends
+            // where a successful submit ends rather than in the failure notice.
+            if (!run.abandoned) navigate('/thanks');
+            return;
+          }
+          if (run.abandoned) return;
         }
       }
     })();

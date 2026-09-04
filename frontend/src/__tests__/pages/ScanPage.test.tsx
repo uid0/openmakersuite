@@ -2,7 +2,7 @@
  * Tests for ScanPage component
  */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import ScanPage, { autoSubmitRetry } from '../../pages/ScanPage';
 import * as api from '../../services/api';
 import { networkError } from '../helpers/offline';
@@ -754,6 +754,131 @@ describe('ScanPage', () => {
     });
     expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(2);
     expect(screen.queryByTestId('auto-submit-failed')).toBeNull();
+  });
+
+  // --- A retry asks whether the first attempt landed ----------------------
+  // `/reorders/requests/` is not idempotent, so a POST whose row committed but
+  // whose response was lost looks exactly like a failure here. Re-reading the
+  // item before re-POSTing NARROWS that duplicate window; it does not close it
+  // (a commit landing after the re-read still files twice — closing it needs
+  // idempotency at the public endpoint, routed separately).
+
+  const anonymousScanWhere = async (
+    getItem: (id: string) => Promise<{ data: Record<string, unknown> }>
+  ) => {
+    localStorage.removeItem('token');
+    (api.inventoryAPI.getItem as jest.Mock).mockImplementation(getItem);
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+    return renderWithRouter();
+  };
+
+  test('a retry that finds the reorder already pending files nothing further', async () => {
+    // The lost-response case: the server committed, the client saw a rejection.
+    const unfiled = { ...mockItem, has_pending_reorder: false };
+    const filed = { ...mockItem, has_pending_reorder: true };
+    let reads = 0;
+    (api.reorderAPI.createRequest as jest.Mock).mockRejectedValue(new Error('lost response'));
+
+    await anonymousScanWhere(async () => {
+      reads += 1;
+      return { data: reads === 1 ? unfiled : filed };
+    });
+
+    // The member's scan DID result in a filed request, so they end where a
+    // successful submit ends — not on a notice telling them nothing was ordered.
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/thanks'), {
+      timeout: 3000,
+    });
+    expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('auto-submit-failed')).toBeNull();
+  });
+
+  test('a re-read that itself fails cannot silently drop the reorder', async () => {
+    // The re-read is a question, not a gate: unanswered, the retry proceeds,
+    // because a missed reorder is worse than a possible duplicate. It also
+    // spends no attempt of its own — the bound is still three POSTs.
+    let reads = 0;
+    (api.reorderAPI.createRequest as jest.Mock).mockRejectedValue(new Error('offline'));
+
+    await anonymousScanWhere(async () => {
+      reads += 1;
+      if (reads === 1) return { data: { ...mockItem, has_pending_reorder: false } };
+      throw networkError();
+    });
+
+    const notice = await screen.findByTestId('auto-submit-failed', {}, { timeout: 3000 });
+    expect(notice).toHaveTextContent(/nothing has been ordered/i);
+    expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(3);
+  });
+
+  test('scanning a second item leaves the first item\'s retry loop abandoned', async () => {
+    // `/scan/:itemId` → `/scan/:otherId` reuses this component: the route
+    // element is not keyed, so React Router changes the param without
+    // remounting. The abandon signal the cleanup raises must therefore survive
+    // the effect re-run that follows it — only a re-entry for the SAME item is
+    // the StrictMode double-invoke that may revive a run.
+    localStorage.removeItem('token');
+    const itemA = { ...mockItem, id: 'item-a', name: 'Widget A', has_pending_reorder: false };
+    const itemB = { ...mockItem, id: 'item-b', name: 'Widget B', has_pending_reorder: false };
+
+    (api.inventoryAPI.getItem as jest.Mock).mockImplementation(async (id: string) => ({
+      data: id === 'item-a' ? itemA : itemB,
+    }));
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+
+    // A's first POST hangs until the test releases it, so the item change
+    // happens while that attempt is genuinely in flight.
+    let failA: (err: Error) => void = () => {};
+    const aInFlight = new Promise((_resolve, reject) => {
+      failA = reject;
+    });
+    aInFlight.catch(() => {});
+    (api.reorderAPI.createRequest as jest.Mock).mockImplementation(
+      ({ item }: { item: string }) =>
+        item === 'item-a' ? aInFlight : Promise.resolve({ data: { id: 2 } })
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/scan/item-a']}>
+        <Link to="/scan/item-b">scan widget B</Link>
+        <Routes>
+          <Route path="/scan/:itemId" element={<ScanPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    // A's attempt is in flight (its POST never settles until `failA` below).
+    await waitFor(() =>
+      expect(api.reorderAPI.createRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ item: 'item-a' })
+      )
+    );
+
+    fireEvent.click(screen.getByText('scan widget B'));
+    // B's POST proves the param changed, the item reloaded and the effect
+    // re-ran — the exact sequence that used to revive A's loop.
+    await waitFor(() =>
+      expect(api.reorderAPI.createRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ item: 'item-b' })
+      )
+    );
+
+    failA(new Error('offline'));
+    // Well past every backoff A's loop would have waited had it been revived.
+    await new Promise((resolve) => setTimeout(resolve, autoSubmitRetry.delayMs * 200));
+
+    // A's loop is dead: it neither re-POSTs for A nor writes A's name over the
+    // page now showing B.
+    const postedForA = (api.reorderAPI.createRequest as jest.Mock).mock.calls.filter(
+      ([payload]: [{ item: string }]) => payload.item === 'item-a'
+    );
+    expect(postedForA).toHaveLength(1);
+    expect(screen.queryByTestId('auto-submit-failed')).toBeNull();
+    expect(screen.queryByText(/Widget A/)).toBeNull();
   });
 
   test('files nothing, and says so, when the payload carries no order quantity', async () => {

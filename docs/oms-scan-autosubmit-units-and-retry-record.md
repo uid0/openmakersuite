@@ -118,6 +118,33 @@ already have.
 one changes what such a visitor can *do* rather than what they are told, which
 was reserved to the captain.
 
+### The duplicate window the retry opens, narrowed but NOT closed
+
+A bounded retry on a non-idempotent endpoint can file twice. `POST
+/reorders/requests/` has no uniqueness or pending-request check
+(`ReorderRequestCreateSerializer`), so a first attempt whose row committed but
+whose response was lost — a dropped mobile connection, a proxy answering 502
+after the write — looks to the page exactly like a failure, and the retry files
+a second pending request for the same item.
+
+What this branch does about it: **a retry re-reads the item first**
+(`inventoryAPI.getItem`) and, if `has_pending_reorder` has flipped true, stops
+and takes the same terminal state a successful submit takes — the member's scan
+did result in a filed request, so they are not shown a failure. The re-read
+costs no attempt from the bound, and if the re-read *itself* fails the retry
+proceeds anyway: a missed reorder is worse than a possible duplicate, and
+no-silent-drop is the criterion this effect exists to satisfy.
+
+**This narrows the window; it does not close it.** A server commit that lands
+*after* the re-read and before the retry still files twice. Closing it needs
+idempotency at the public create endpoint — an idempotency key, or a
+pending-request check in the create path — which changes behaviour for every
+caller of that endpoint, ScanTTY included. That is a contract change, is routed
+separately, and is deliberately **not** taken in this branch. Two tests pin what
+was taken: a retry that finds the reorder pending files exactly one POST and
+lands the member in the filed state, and a re-read that itself fails still
+retries to the same bound of three.
+
 ## Anonymous submission is the primary path, and is not narrowed
 
 Most people who scan a shelf label are not registered members; anonymous

@@ -18,6 +18,7 @@ import {
   onHandLabel,
   perParent,
   pluralizeUnit,
+  reorderFiling,
   resolveCountLevelError,
   toPackagingPayload,
   toPackagingRows,
@@ -298,5 +299,70 @@ describe('pluralizeUnit / baseUnitOf', () => {
     expect(baseUnitOf({ base_unit: undefined })).toBe('unit');
     expect(baseUnitOf({ base_unit: '   ' })).toBe('unit');
     expect(baseUnitOf({ base_unit: 'sheet' })).toBe('sheet');
+  });
+});
+
+describe('reorderFiling', () => {
+  // The one thing a surface that BOTH shows a reorder quantity and files one
+  // may read. It is deliberately a pass-through of the server's answer and not
+  // a client twin: a twin would have to reproduce the shortage top-up, and one
+  // that quietly dropped it would file less than the page had promised.
+
+  it("hands back the server's base-unit quantity and its wording", () => {
+    const item = makeItem({
+      reorder_quantity: 3,
+      reorder_display: {
+        mode: 'by_level',
+        unit: 'case',
+        threshold: 2,
+        current: 2,
+        reorder_quantity: 3,
+        order_quantity: 36,
+        order_text: '3 cases (36 bottles)',
+        needs_reorder: true,
+        text: '2 cases on hand · reorder at 2 cases',
+      },
+    });
+
+    expect(reorderFiling(item)).toEqual({ quantity: 36, text: '3 cases (36 bottles)' });
+  });
+
+  it('never returns the raw reorder_quantity column for a pack-counting item', () => {
+    const item = makeItem({
+      reorder_quantity: 3,
+      reorder_display: {
+        mode: 'by_level',
+        unit: 'case',
+        threshold: 2,
+        current: 2,
+        reorder_quantity: 3,
+        order_quantity: 36,
+        order_text: '3 cases (36 bottles)',
+        needs_reorder: true,
+        text: '2 cases on hand · reorder at 2 cases',
+      },
+    });
+
+    expect(reorderFiling(item)?.quantity).not.toBe(item.reorder_quantity);
+  });
+
+  it('refuses rather than guessing when the payload carries no answer', () => {
+    expect(reorderFiling(makeItem())).toBeNull();
+  });
+
+  it('refuses a half-present block rather than filing part of one', () => {
+    const partial = makeItem({
+      reorder_display: {
+        mode: 'each',
+        unit: 'unit',
+        threshold: 2,
+        current: 10,
+        reorder_quantity: 4,
+        needs_reorder: false,
+        text: '10 units on hand · reorder at 2 units',
+      } as never,
+    });
+
+    expect(reorderFiling(partial)).toBeNull();
   });
 });

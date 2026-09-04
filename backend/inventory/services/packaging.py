@@ -363,13 +363,69 @@ def base_reorder_quantity(item: "InventoryItem") -> int:
     return max(shortage_levels, item.reorder_quantity) * item.count_level.base_units
 
 
+def _plural(unit: str, count) -> str:
+    """``unit`` for exactly one, ``unit`` + "s" otherwise.
+
+    Deliberately naive: it only ever appends "s". Hoisted out of
+    :func:`reorder_display` UNCHANGED so :func:`order_quantity_text` words a
+    quantity the same way its neighbours do, and left naive so no string this
+    module already renders moves. The web's ``pluralizeUnit`` handles sibilant
+    endings and is a shade better on purpose; nothing compares the two.
+    """
+    return unit if count == 1 else f"{unit}s"
+
+
+def order_quantity_text(item: "InventoryItem", quantity: int) -> str:
+    """``quantity`` BASE units, worded for a human who is about to have it ordered.
+
+    The wording twin of :func:`base_reorder_quantity`, so a surface that FILES a
+    reorder can name the number it is filing rather than a differently-derived
+    one beside it. Base units are what a ``ReorderRequest.quantity`` is stored
+    in — ``mark-received`` adds it straight to ``current_stock`` — so the base
+    count is always spelled out; for an item counted in whole packs the pack
+    reading leads, because that is the noun the shelf label and every other
+    screen use for it.
+
+    The pack reading is offered ONLY when the base count divides exactly into
+    whole packs. A quantity that does not (the shortage clause can produce one
+    for a half-configured item) would need "2.5 cases", and a member cannot act
+    on a number of boxes that does not exist.
+    """
+    base_unit = item.base_unit or "unit"
+    if counts_in_packs(item):
+        per_pack = item.count_level.base_units
+        if per_pack >= 1 and quantity % per_pack == 0:
+            packs = quantity // per_pack
+            pack_unit = item.count_level.name
+            return (
+                f"{packs} {_plural(pack_unit, packs)} "
+                f"({quantity} {_plural(base_unit, quantity)})"
+            )
+    return f"{quantity} {_plural(base_unit, quantity)}"
+
+
 def reorder_display(item: "InventoryItem") -> dict:
     """Reorder point + current count in one unit, ready to label a UI (op-es7c).
 
-    ``{mode, unit, threshold, current, reorder_quantity, needs_reorder, text}``
-    — every quantity expressed in ``unit``, so a caller can render
-    "1 case on hand · reorder at 2 cases" without knowing which columns the
-    item's ``count_mode`` gives meaning to.
+    ``{mode, unit, threshold, current, reorder_quantity, needs_reorder, text,
+    order_quantity, order_text}``.
+
+    Every quantity is expressed in ``unit`` EXCEPT ``order_quantity``, which is
+    BASE units — the unit a filed ``ReorderRequest.quantity`` is stored in — and
+    ``order_text``, which words it. The pair is here rather than in a block of
+    its own because a surface that both shows a reorder quantity and files one
+    must read a single answer: ``reorder_quantity`` is the item's CONFIGURED
+    amount in its own counting unit, ``order_quantity`` is what filing a reorder
+    right now would actually order, and a page that files must show the second.
+    ``ScanPage`` is that page — it POSTs ``order_quantity`` and prints
+    ``order_text``, so the two cannot name different numbers again
+    (``test_reorder_filing.py``, ``ScanPage.test.tsx``).
+
+    The two agree for an ``each`` item, differ by the pack size for a
+    pack-counting one (3 cases ↔ 36 bottles), and differ outright for a legacy
+    ``use_case_based_reorder`` item, whose ordering path reads
+    ``reorder_quantity`` while its display reads ``reorder_cases`` — see
+    :func:`base_reorder_quantity`, which owns that behaviour.
     """
     threshold, unit = reorder_threshold(item)
     current_cases = None if counts_in_packs(item) else item.current_cases
@@ -387,8 +443,7 @@ def reorder_display(item: "InventoryItem") -> dict:
         current = item.current_stock
         quantity = item.reorder_quantity
 
-    def _plural(count) -> str:
-        return unit if count == 1 else f"{unit}s"
+    order_quantity = base_reorder_quantity(item)
 
     return {
         "mode": item.count_mode,
@@ -396,10 +451,12 @@ def reorder_display(item: "InventoryItem") -> dict:
         "threshold": threshold,
         "current": current,
         "reorder_quantity": quantity,
+        "order_quantity": order_quantity,
+        "order_text": order_quantity_text(item, order_quantity),
         "needs_reorder": item.needs_reorder,
         "text": (
-            f"{current} {_plural(current)} on hand · "
-            f"reorder at {threshold} {_plural(threshold)}"
+            f"{current} {_plural(unit, current)} on hand · "
+            f"reorder at {threshold} {_plural(unit, threshold)}"
         ),
     }
 

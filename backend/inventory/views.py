@@ -126,6 +126,7 @@ from .serializers import (
     WorkOrderValidationSerializer,
 )
 from .services.packaging import (
+    base_reorder_quantity,
     count_at_level,
     count_unit,
     counts_in_packs,
@@ -6257,6 +6258,14 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
 
         Emits one alert per MaintenanceMaterial that is linked to an InventoryItem
         whose current_stock is below its minimum_stock threshold.
+
+        ``reorder_qty`` is BASE units — the unit a ``ReorderRequest.quantity``
+        is stored in — because the caller FILES it: the maintenance dashboard's
+        "Create reorder requests & continue" POSTs this number straight through.
+        It is therefore ``base_reorder_quantity``, the one derivation every
+        other filing path uses, and not the raw ``reorder_quantity`` column,
+        which for a pack-counting item is a count of PACKS and filed a 12th of
+        the intended order (``test_reorder_filing.py``).
         """
         item = self.get_object()
         alerts = []
@@ -6277,7 +6286,7 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
                     "name": inv.name,
                     "current": inv.current_stock,
                     "minimum": inv.minimum_stock,
-                    "reorder_qty": inv.reorder_quantity,
+                    "reorder_qty": base_reorder_quantity(inv),
                 }
             )
         return Response({"low_stock_alerts": alerts})

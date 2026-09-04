@@ -278,12 +278,52 @@ export const reorderThresholdLabel = (item: InventoryItem): string => {
 };
 
 /**
- * "40 units" / "2 cases" — how much to reorder, with the unit it is counted in.
- * The quantity twin of {@link reorderThresholdLabel}, same single owner.
+ * "40 units" / "2 cases" — the item's CONFIGURED reorder amount, with the unit
+ * it is counted in. The quantity twin of {@link reorderThresholdLabel}, same
+ * single owner.
+ *
+ * NOT what a reorder for this item would actually order — that is
+ * {@link reorderFiling}, and the two are different numbers for a pack-counting
+ * item and for any item well below its minimum. Read this on a surface that
+ * DESCRIBES an item (the list, the item detail page); read `reorderFiling` on
+ * one that FILES a reorder, so it cannot show one number and send another.
  */
 export const reorderQuantityLabel = (item: InventoryItem): string => {
   const { unit, quantity } = reorderPresentation(item);
   return `${quantity} ${pluralizeUnit(unit, quantity)}`;
+};
+
+/**
+ * What filing a reorder for this item right now would order, and how to say it.
+ *
+ * THE one thing a surface that BOTH shows a reorder quantity AND files one may
+ * read. `reorderQuantityLabel` above answers a different question — the item's
+ * CONFIGURED reorder amount in its own counting unit — and the two are not the
+ * same number: they differ by the pack size for a pack-counting item (3 cases
+ * = 36 bottles) and by the server's shortage top-up for any item well below its
+ * minimum. ScanPage printed the first and POSTed a third derivation of its own,
+ * so a member read "3 cases" off a shelf label and had 3 bottles ordered.
+ *
+ * `quantity` is BASE units, which is what a `ReorderRequest.quantity` is stored
+ * in — `mark-received` adds it straight to `current_stock`. Both halves come
+ * from the SERVER's `base_reorder_quantity`, the same derivation that fills a
+ * purchase-order pad, so no client re-derives it.
+ *
+ * Returns null when `reorder_display` is absent — it is optional on the wire,
+ * and a page that cannot learn what it would file must say so rather than
+ * guess. Deliberately NOT given a client twin: the shortage top-up needs the
+ * server's count-at-level maths, and a twin that silently dropped it would file
+ * less than the page promised, which is the defect this function exists to
+ * close.
+ */
+export const reorderFiling = (
+  item: InventoryItem
+): { quantity: number; text: string } | null => {
+  const display = item.reorder_display;
+  if (!display || typeof display.order_quantity !== 'number' || !display.order_text) {
+    return null;
+  }
+  return { quantity: display.order_quantity, text: display.order_text };
 };
 
 /**

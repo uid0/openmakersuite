@@ -58,6 +58,21 @@ describe('ScanPage', () => {
       scored_without_history: false,
       alternatives: [],
     },
+    // The serializer sends this on every item, and the anonymous auto-submit
+    // reads `order_quantity`/`order_text` from it — the server's answer to
+    // "what would a reorder for this item order, in the base units a request is
+    // stored in?". For a plain each item it is `reorder_quantity` unchanged.
+    reorder_display: {
+      mode: 'each',
+      unit: 'unit',
+      threshold: 10,
+      current: 50,
+      reorder_quantity: 25,
+      order_quantity: 25,
+      order_text: '25 units',
+      needs_reorder: false,
+      text: '50 units on hand · reorder at 10 units',
+    },
   };
 
   beforeEach(() => {
@@ -173,6 +188,8 @@ describe('ScanPage', () => {
     threshold: 3,
     current: 2,
     reorder_quantity: 40,
+    order_quantity: 40,
+    order_text: '40 units',
     needs_reorder: true,
     text: '2 units on hand · reorder at 3 units',
   };
@@ -195,12 +212,16 @@ describe('ScanPage', () => {
   });
 
   // `reorder_display` is optional on the wire, so the fallback must be correct
-  // on its own — never back to the bare minimum_stock.
+  // on its own — never back to the bare minimum_stock. A signed-in reader still
+  // gets `reorderQuantityLabel`'s client twin here; what a payload without that
+  // block CANNOT do is let the anonymous path file a quantity (see
+  // "files nothing, and says so, when the payload carries no order quantity").
   test('falls back to base units when reorder_display is absent', async () => {
     localStorage.setItem('token', 'test-token');
 
+    const { reorder_display: _omitted, ...withoutDisplay } = mockItem;
     (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
-      data: { ...mockItem, ...unknownCaseItem },
+      data: { ...withoutDisplay, ...unknownCaseItem },
     });
     (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
       data: { results: [] },
@@ -219,9 +240,8 @@ describe('ScanPage', () => {
   test('the anonymous auto-submit message never quotes cases it cannot count', async () => {
     localStorage.removeItem('token');
 
-    // A failed auto-submit is the one settled state that shows this block:
-    // the catch sets `submitting` back to false, which is exactly the branch
-    // whose comment says "show the form so user can manually submit".
+    // The auto-submit's terminal failure is the one settled state that shows
+    // this block; the page renders it after AUTO_SUBMIT_ATTEMPTS tries.
     (api.reorderAPI.createRequest as jest.Mock).mockRejectedValue(new Error('offline'));
     (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
       data: { ...mockItem, ...unknownCaseItem, reorder_display: unknownCaseDisplay },
@@ -232,8 +252,9 @@ describe('ScanPage', () => {
 
     await renderWithRouter();
 
+    await screen.findByTestId('auto-submit-failed', {}, { timeout: 3000 });
     await screen.findByText('Test Widget');
-    const message = await screen.findByText(/automatically submitting a reorder request/i);
+    const message = await screen.findByTestId('reorder-quantity');
     expect(message).toHaveTextContent('40 units');
     expect(message).not.toHaveTextContent(/case/i);
   });
@@ -510,6 +531,187 @@ describe('ScanPage', () => {
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/thanks');
     });
+  });
+
+  // --- What the scan SHOWS is what the scan FILES -------------------------
+  // The page both names a reorder quantity and files one on a logged-out
+  // member's behalf, and the two used to be different derivations: it printed
+  // `reorderQuantityLabel` (the item's CONFIGURED amount, in the item's own
+  // counting unit — "3 cases") and POSTed the raw `reorder_quantity` column,
+  // which for a pack-counting item is a count of PACKS. A member read "3 cases"
+  // off the shelf label and had three bottles ordered. Both halves read the
+  // server's `reorder_display.order_quantity`/`order_text` now.
+
+  // Exactly the payload `inventory/tests/test_reorder_filing.py` produces for a
+  // case of 12 bottles: the configured amount is 3 (cases), the amount a filed
+  // request stores is 36 (bottles). Three different numbers were available to
+  // get wrong, which is why this is the fixture.
+  const packCountedItem = {
+    ...mockItem,
+    has_pending_reorder: false,
+    base_unit: 'bottle',
+    count_mode: 'by_level' as const,
+    count_level: 1,
+    packaging_levels: [
+      { id: 1, name: 'case', sort_order: 0, base_units: 12, per_parent: 12 },
+      { id: 2, name: 'bottle', sort_order: 1, base_units: 1, per_parent: null },
+    ],
+    current_stock: 35,
+    minimum_stock: 2,
+    reorder_quantity: 3,
+    needs_reorder: true,
+    reorder_display: {
+      mode: 'by_level',
+      unit: 'case',
+      threshold: 2,
+      current: 2,
+      reorder_quantity: 3,
+      order_quantity: 36,
+      order_text: '3 cases (36 bottles)',
+      needs_reorder: true,
+      text: '2 cases on hand · reorder at 2 cases',
+    },
+  };
+
+  const anonymousScanOf = async (data: Record<string, unknown>) => {
+    localStorage.removeItem('token');
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({ data });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+    return renderWithRouter();
+  };
+
+  test('an anonymous scanner — no token, no account — still files a reorder', async () => {
+    // The PRIMARY user of this page. Most people who scan a shelf label are not
+    // registered members, and anonymous scan-to-reorder is what the printed
+    // labels exist for, so the fix above must make the request TRUTHFUL without
+    // making the path smaller: no login step, no gate, still exactly one POST.
+    (api.reorderAPI.createRequest as jest.Mock).mockResolvedValue({ data: { id: 1 } });
+
+    await anonymousScanOf(packCountedItem);
+
+    expect(localStorage.getItem('token')).toBeNull();
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/thanks'));
+    expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(1);
+  });
+
+  test('files the quantity it shows, not the raw reorder_quantity column', async () => {
+    (api.reorderAPI.createRequest as jest.Mock).mockResolvedValue({ data: { id: 1 } });
+
+    await anonymousScanOf(packCountedItem);
+
+    await waitFor(() => {
+      expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(1);
+    });
+    const filed = (api.reorderAPI.createRequest as jest.Mock).mock.calls[0][0];
+
+    // 3 cases of 12 bottles. The column says 3; a request is stored in bottles.
+    expect(filed.quantity).toBe(36);
+    expect(filed.quantity).not.toBe(packCountedItem.reorder_quantity);
+    expect(filed.quantity).toBe(packCountedItem.reorder_display.order_quantity);
+  });
+
+  test('the quantity on screen names the quantity that was filed', async () => {
+    // THE acceptance criterion: one number, reachable from both sides. The
+    // rendered text must name the POSTed quantity, so a divergence between the
+    // two derivations shows up here rather than on a purchase order.
+    (api.reorderAPI.createRequest as jest.Mock).mockRejectedValue(new Error('offline'));
+
+    await anonymousScanOf(packCountedItem);
+
+    await screen.findByTestId('auto-submit-failed', {}, { timeout: 3000 });
+    const shown = screen.getByTestId('reorder-quantity');
+    const filed = (api.reorderAPI.createRequest as jest.Mock).mock.calls[0][0];
+
+    expect(shown).toHaveTextContent(String(filed.quantity));
+    expect(shown).toHaveTextContent('3 cases (36 bottles)');
+  });
+
+  test('the submitting screen names the quantity in flight', async () => {
+    (api.reorderAPI.createRequest as jest.Mock).mockReturnValue(new Promise(() => {}));
+
+    await anonymousScanOf(packCountedItem);
+
+    const waiting = await screen.findByText(/please wait while we submit a request/i);
+    expect(waiting).toHaveTextContent('3 cases (36 bottles)');
+  });
+
+  // --- A failed auto-submit is bounded, and it is stated ------------------
+  // The catch used to clear `submitting` while `submitting` was a dependency of
+  // the effect, so a failed submit re-entered it for as long as the page was
+  // open: 19 POSTs to the public reorder endpoint in 150 ms, measured in jsdom
+  // against a rejection delayed 5 ms. Latching it to one attempt was tried and
+  // reverted — an anonymous visitor has no manual submit path, so a bare latch
+  // parks them on "redirecting shortly" with nothing filed.
+
+  test('a failing auto-submit stops after exactly three attempts', async () => {
+    (api.reorderAPI.createRequest as jest.Mock).mockRejectedValue(new Error('offline'));
+
+    await anonymousScanOf({ ...mockItem, has_pending_reorder: false });
+
+    await screen.findByTestId('auto-submit-failed', {}, { timeout: 3000 });
+    // The bound, written out rather than imported: changing
+    // AUTO_SUBMIT_ATTEMPTS must fail this test, not silently move it.
+    expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(3);
+  });
+
+  test('and files nothing further once it has stopped', async () => {
+    (api.reorderAPI.createRequest as jest.Mock).mockRejectedValue(new Error('offline'));
+
+    await anonymousScanOf({ ...mockItem, has_pending_reorder: false });
+
+    await screen.findByTestId('auto-submit-failed', {}, { timeout: 3000 });
+    const settled = (api.reorderAPI.createRequest as jest.Mock).mock.calls.length;
+
+    // Well past the longest backoff the loop would have waited, so an
+    // unbounded loop shows up as a growing count rather than as a slow test.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(settled);
+  });
+
+  test('the member is told the reorder was not filed, and what to do', async () => {
+    (api.reorderAPI.createRequest as jest.Mock).mockRejectedValue(new Error('offline'));
+
+    await anonymousScanOf({ ...mockItem, has_pending_reorder: false });
+
+    const notice = await screen.findByTestId('auto-submit-failed', {}, { timeout: 3000 });
+    // Never a silent drop: the item, the fact that nothing was ordered, and an
+    // action the member already has.
+    expect(notice).toHaveTextContent('Test Widget');
+    expect(notice).toHaveTextContent(/nothing has been ordered/i);
+    expect(notice).toHaveTextContent(/reload this page|member of staff/i);
+    expect(mockNavigate).not.toHaveBeenCalledWith('/thanks');
+  });
+
+  test('a retry inside the bound still files the request', async () => {
+    // The half a latch gets wrong: one transient failure must not cost the
+    // member their reorder.
+    (api.reorderAPI.createRequest as jest.Mock)
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ data: { id: 1 } });
+
+    await anonymousScanOf({ ...mockItem, has_pending_reorder: false });
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/thanks'), {
+      timeout: 3000,
+    });
+    expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId('auto-submit-failed')).toBeNull();
+  });
+
+  test('files nothing, and says so, when the payload carries no order quantity', async () => {
+    // `reorder_display` is optional on the wire. A page that cannot learn what
+    // it would file must not invent a number — that is the defect above — and
+    // must not stall silently either.
+    const { reorder_display: _omitted, ...withoutDisplay } = mockItem;
+
+    await anonymousScanOf({ ...withoutDisplay, has_pending_reorder: false });
+
+    const notice = await screen.findByTestId('auto-submit-failed');
+    expect(notice).toHaveTextContent(/did not tell us how much a reorder should order/i);
+    expect(api.reorderAPI.createRequest).not.toHaveBeenCalled();
   });
 
   // --- A price nobody recorded is not $0.00 (op-9m2v) ---------------------
@@ -789,15 +991,16 @@ describe('ScanPage', () => {
     localStorage.removeItem('token');
     // A failed auto-submit is the ONLY anonymous state that renders the item
     // block: `has_pending_reorder` short-circuits to the "already requested"
-    // screen, and a successful submit redirects to /thanks. It does not settle
-    // — the retry loop documented on the effect in ScanPage.tsx keeps running
-    // underneath these assertions until the component unmounts. That loop is a
-    // pre-existing defect being filed separately; nothing below asserts on it.
+    // screen, and a successful submit redirects to /thanks. It SETTLES now —
+    // the auto-submit stops after AUTO_SUBMIT_ATTEMPTS tries and renders the
+    // failure notice — so these assertions run against a page that has stopped
+    // doing anything, and the wait below is for that terminal state.
     (api.reorderAPI.createRequest as jest.Mock).mockRejectedValue(new Error('offline'));
     (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
       data: { ...mockItem, supplier_choice: choice },
     });
     await renderWithRouter();
+    await screen.findByTestId('auto-submit-failed', {}, { timeout: 3000 });
     await screen.findByText('Test Widget');
   };
 

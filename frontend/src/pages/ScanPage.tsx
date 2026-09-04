@@ -4,7 +4,7 @@
  * - Non-logged users: Simple reorder → thanks page
  * - Logged users: Supplier selection with cost optimization
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { checklistsAPI, inventoryAPI, reorderAPI } from '../services/api';
 import '../styles/ScanPage.css';
@@ -12,13 +12,44 @@ import { Checklist, InventoryItem, ItemSupplier } from '../types';
 import { formatDateOnly } from '../utils/dates';
 import { promptInput, showError } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
-import { reorderQuantityLabel } from '../utils/packaging';
+import { reorderFiling, reorderQuantityLabel } from '../utils/packaging';
 import {
   alternativeSupplierNamesText,
   chosenSupplierName,
   publicSupplierChoiceNote,
   supplierChoiceNote,
 } from '../utils/supplierChoice';
+
+/**
+ * How many times an anonymous scan tries to file its reorder before it stops
+ * and says so. Bounded because the member cannot retry by hand — see the
+ * auto-submit effect below.
+ */
+const AUTO_SUBMIT_ATTEMPTS = 3;
+
+/** Gap before retry n: n × this, so the attempts spread rather than burst. */
+const AUTO_SUBMIT_RETRY_MS = 400;
+
+/**
+ * What a logged-out member is told when the reorder could not be filed.
+ *
+ * Names the item, says plainly that NOTHING was ordered, and gives an action
+ * they already have (reload, or ask someone). It deliberately offers no retry
+ * control: an anonymous visitor has none today, and adding one would change
+ * what such a visitor can DO rather than what they are told.
+ */
+const autoSubmitFailureNote = (itemName: string, detail: string): string =>
+  `We could not submit a reorder request for ${itemName} after ` +
+  `${AUTO_SUBMIT_ATTEMPTS} attempts, so nothing has been ordered. ${detail} ` +
+  'Reload this page to try again, or ask a member of staff to add it to the ' +
+  'reorder queue.';
+
+/** What that member is told when the page cannot learn what it would file. */
+const FILING_UNKNOWN_NOTE =
+  'This item did not tell us how much a reorder should order, so nothing has ' +
+  'been submitted — filing a guessed quantity would be worse than filing ' +
+  'nothing. Reload this page to try again, or ask a member of staff to add it ' +
+  'to the reorder queue.';
 
 /** The page's one phrasing for a pack size it cannot count with. */
 const PACK_SIZE_UNKNOWN = '— (case size unknown)';
@@ -101,6 +132,13 @@ const ScanPage: React.FC = () => {
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  // The terminal state of a logged-out member's auto-submit when it did NOT
+  // file: the sentence they are shown instead of a silent stall.
+  const [autoSubmitFailure, setAutoSubmitFailure] = useState<string | null>(null);
+  // Single-flight guard for that auto-submit, keyed by the item it fired for, so
+  // a re-render can never re-enter it and a genuine route change still can.
+  const autoSubmitStartedForRef = useRef<string | null>(null);
+  const autoSubmitAbandonedRef = useRef(false);
 
   // Enhanced form state (logged in users)
   const [selectedSupplier, setSelectedSupplier] = useState<ItemSupplier | null>(null);
@@ -192,49 +230,103 @@ const ScanPage: React.FC = () => {
     }
   };
 
-  // Auto-submit reorder for non-logged users (only if no pending request exists)
+  // Auto-submit reorder for non-logged users (only if no pending request exists).
   //
-  // KNOWN DEFECT, pre-existing and deliberately out of scope for op-3xsp: the
-  // catch below clears `submitting`, which is itself a dependency, so a failed
-  // submit re-enters this effect for as long as the page is open. Measured in
-  // jsdom against a rejection delayed 5 ms: 19 calls to `reorderAPI.createRequest`
-  // in 150 ms. Latching it to one attempt was tried and reverted — an anonymous
-  // visitor has no manual submit path (`handleSubmitReorder` returns early on
-  // `!isLoggedIn` and the form below is `isLoggedIn`-gated), so a latch trades
-  // the retry storm for a silently dropped reorder. Which of the two is worse
-  // is a product decision this change is not authorised to make.
+  // The one place this page acts on a member's behalf, so it owes them two
+  // things, and it used to get both wrong.
+  //
+  // WHAT IT FILES. The quantity is `reorderFiling(item)` — the server's own
+  // `reorder_display.order_quantity`, in the BASE units a request is stored in
+  // — and the page prints the wording that comes with it, so the number a
+  // member reads and the number that is filed are one value. It POSTed the raw
+  // `item.reorder_quantity` column, which for a pack-counting item is a count
+  // of PACKS: the screen said "3 cases" and three bottles were ordered. When
+  // the payload carries no such answer the page files NOTHING and says so;
+  // guessing is what the old code did.
+  //
+  // HOW OFTEN IT FILES. It is bounded to AUTO_SUBMIT_ATTEMPTS tries and ends in
+  // exactly one of: filed (→ /thanks), already pending, or a stated failure.
+  // Base cleared `submitting` in the catch while `submitting` was a dependency,
+  // so a failed submit re-entered the effect for as long as the page was open —
+  // 19 POSTs to the public endpoint in 150 ms against a rejection delayed 5 ms.
+  // Latching it to a single attempt was tried and reverted, correctly: an
+  // anonymous visitor has NO manual submit path (`handleSubmitReorder` returns
+  // early on `!isLoggedIn`, and the form is `isLoggedIn`-gated), so a bare latch
+  // parks them on "submitting" with nothing filed. Neither the storm nor the
+  // silent drop is on the table now: the retries live inside ONE awaited loop
+  // rather than in the dependency array, and the last failure is rendered.
+  // `ScanPage.test.tsx` pins the bound, the wording and the no-drop guarantee.
   useEffect(() => {
-    const autoSubmitReorder = async () => {
-      if (!isLoggedIn && item && !submitting && !submitted) {
-        // Check if item already has a pending reorder request
-        if (item.has_pending_reorder) {
-          // Don't auto-submit, just set submitted to show the existing request message
-          setSubmitted(true);
-          return;
-        }
-
-        try {
-          setSubmitting(true);
-          await reorderAPI.createRequest({
-            item: item.id,
-            quantity: item.reorder_quantity,
-            requested_by: 'Anonymous',
-            request_notes: 'Auto-submitted via QR scan',
-            priority: item.needs_reorder ? 'high' : 'normal',
-          });
-
-          // Redirect to thanks page immediately
-          navigate('/thanks');
-        } catch (err: any) {
-          console.error('Error auto-submitting reorder:', err);
-          // On error, show the form so user can manually submit
-          setSubmitting(false);
-        }
-      }
+    // A StrictMode remount re-runs this effect after its own cleanup. Clearing
+    // the flag here — before the single-flight guard returns — hands an attempt
+    // that is already in flight back its ability to finish, so the development
+    // double-invoke can neither orphan a submit nor fire a second one.
+    autoSubmitAbandonedRef.current = false;
+    const abandon = () => {
+      autoSubmitAbandonedRef.current = true;
     };
 
-    autoSubmitReorder();
-  }, [isLoggedIn, item, submitting, submitted, navigate]);
+    if (isLoggedIn || !item) return abandon;
+    if (autoSubmitStartedForRef.current === item.id) return abandon;
+    autoSubmitStartedForRef.current = item.id;
+
+    if (item.has_pending_reorder) {
+      // Nothing to file; show the existing request instead.
+      setSubmitted(true);
+      return abandon;
+    }
+
+    const filing = reorderFiling(item);
+    if (!filing) {
+      setAutoSubmitFailure(FILING_UNKNOWN_NOTE);
+      return abandon;
+    }
+
+    const submitOnce = () =>
+      reorderAPI.createRequest({
+        item: item.id,
+        quantity: filing.quantity,
+        requested_by: 'Anonymous',
+        request_notes: 'Auto-submitted via QR scan',
+        priority: item.needs_reorder ? 'high' : 'normal',
+      });
+
+    // The loop carries NO exit condition of its own, deliberately: every way out
+    // is a `return` that has already put the page into a terminal state the
+    // member can see (redirected, or told). A `for` bound would be a second,
+    // silent way out — the loop would simply end, leaving "Submitting…" on
+    // screen with nothing filed, which is the drop this whole effect exists to
+    // prevent. The bound is the one `attempt >= AUTO_SUBMIT_ATTEMPTS` below.
+    (async () => {
+      setSubmitting(true);
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          await submitOnce();
+          if (!autoSubmitAbandonedRef.current) navigate('/thanks');
+          return;
+        } catch (err: any) {
+          console.error(
+            `Error auto-submitting reorder (attempt ${attempt} of ${AUTO_SUBMIT_ATTEMPTS}):`,
+            err
+          );
+          if (autoSubmitAbandonedRef.current) return;
+          if (attempt >= AUTO_SUBMIT_ATTEMPTS) {
+            setSubmitting(false);
+            setAutoSubmitFailure(
+              autoSubmitFailureNote(
+                item.name,
+                extractErrorMessage(err, 'The request could not be sent.')
+              )
+            );
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, AUTO_SUBMIT_RETRY_MS * attempt));
+        }
+      }
+    })();
+
+    return abandon;
+  }, [isLoggedIn, item, navigate]);
 
   // Handle supplier selection change
   const handleSupplierChange = (supplierId: number) => {
@@ -297,6 +389,17 @@ const ScanPage: React.FC = () => {
     }
   };
 
+  // What a reorder filed FROM THIS PAGE would order, and the page's one wording
+  // for it. This page both shows a reorder quantity and files one, so it shows
+  // the quantity it files and nothing else: `reorderQuantityLabel` answers a
+  // different question (the item's configured amount in its own counting unit)
+  // and the two are different numbers for a pack-counting item and for any item
+  // well below its minimum. The list and item-detail pages, which file nothing,
+  // keep that label. Null when the payload carried no answer — the page then
+  // files nothing and says so rather than naming a number it invented.
+  const filing = item ? reorderFiling(item) : null;
+  const filingLabel = item ? filing?.text ?? reorderQuantityLabel(item) : '';
+
   // Pack size of the supplier the form would order through, and whether it is
   // one we can count with. Every unit figure below reads these, so the page
   // cannot print a confident number beside a refusal that says it has none.
@@ -329,13 +432,15 @@ const ScanPage: React.FC = () => {
     );
   }
 
-  // Show submitting state for non-logged users
+  // Show submitting state for non-logged users. It names the quantity for the
+  // same reason the message below does: this screen can be the last thing a
+  // member sees before the redirect, so the number in flight is on it.
   if (!isLoggedIn && submitting) {
     return (
       <div className="scan-page">
         <div className="loading">
           <h2>🔄 Submitting Reorder Request</h2>
-          <p>Please wait while we process your request...</p>
+          <p>Please wait while we submit a request for <strong>{filingLabel}</strong>...</p>
         </div>
       </div>
     );
@@ -480,7 +585,7 @@ const ScanPage: React.FC = () => {
                 </div>
                 <div className="info-item">
                   <span className="label">Reorder Quantity:</span>
-                  <span className="value">{reorderQuantityLabel(item)}</span>
+                  <span className="value" data-testid="reorder-quantity">{filingLabel}</span>
                 </div>
               </>
             ) : (
@@ -494,7 +599,7 @@ const ScanPage: React.FC = () => {
                 </div>
                 <div className="info-item">
                   <span className="label">Reorder Quantity:</span>
-                  <span className="value">{reorderQuantityLabel(item)}</span>
+                  <span className="value" data-testid="reorder-quantity">{filingLabel}</span>
                 </div>
               </>
             )}
@@ -562,13 +667,17 @@ const ScanPage: React.FC = () => {
           )}
         </div>
 
-        {!isLoggedIn && !submitting && (
-          <div className="auto-submit-message">
-            <h2>🔄 Processing Reorder Request</h2>
-            <p>We're automatically submitting a reorder request for <strong>
-              {reorderQuantityLabel(item)}
-            </strong> of this item.</p>
-            <p>You'll be redirected to a confirmation page shortly...</p>
+        {/* The auto-submit's one non-redirect outcome. A logged-out member gets
+            here only after the attempts stop without filing, and the block
+            says so — it replaced a "Processing… you'll be redirected shortly"
+            notice that was the RESTING state of the retry storm, and so was the
+            screen a member sat on while nothing was ordered. The in-flight
+            wording now lives on the submitting screen above, which names the
+            same quantity; there is one story per state. */}
+        {!isLoggedIn && autoSubmitFailure && (
+          <div className="alert alert-warning" role="alert" data-testid="auto-submit-failed">
+            <h2>⚠ Reorder Not Submitted</h2>
+            <p>{autoSubmitFailure}</p>
           </div>
         )}
 

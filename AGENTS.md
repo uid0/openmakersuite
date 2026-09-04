@@ -462,14 +462,33 @@ them). `get_expected_delivery_date`'s
 was filed here as "the same shape", and it is: but it moves a DATE, not a money
 figure, so it was outside the money branch's invariant and is STILL OPEN.
 
-Three more, found by this branch's sweeps and deliberately NOT fixed here:
+Three more, found by this branch's sweeps and deliberately NOT fixed here. The
+first has since been CLOSED (`oms-scan-autosubmit-units-and-retry`) and is kept
+because what it turned out to be is worth knowing; 2 and 3 are still open:
 
-1. **`ScanPage`'s anonymous auto-submit misdescribes a KNOWN case size.** The
-   sentence reads through `reorder_display`, so an item whose case size is
-   unknown is now correct, but for a KNOWN case size it says "N cases" while
-   `frontend/src/pages/ScanPage.tsx` posts `quantity: item.reorder_quantity` in
-   BASE UNITS. Pre-existing, and about a value the system DOES know, so it is
-   outside the alert-suppression class this branch closes. Filed separately.
+1. **`ScanPage`'s anonymous auto-submit misdescribed a KNOWN case size — CLOSED,
+   and it was wider than "a sentence".** It printed `reorderQuantityLabel` ("3
+   cases") and posted `quantity: item.reorder_quantity`, which for a
+   PACK-COUNTING item is a count of PACKS, so the page filed a twelfth of what
+   it named. The general rule the fix rests on:
+
+   > A `ReorderRequest`/`PurchaseOrderItem` quantity is ALWAYS base units.
+   > `minimum_stock` and `reorder_quantity` are NOT: for the pack-counting
+   > `count_mode`s they are amounts in the item's own count unit.
+
+   So a surface that FILES a reorder must not read those columns. It reads
+   `reorder_display.order_quantity` (the wire face of
+   `packaging.base_reorder_quantity`, which is also what fills a purchase-order
+   pad) and prints the `order_text` that comes with it, so what a member is
+   shown and what is filed are one value. `reorderQuantityLabel` still answers
+   the other question — the item's CONFIGURED amount in its own counting unit —
+   and is right on a surface that only describes an item. The pair is pinned by
+   `inventory/tests/test_reorder_filing.py` (parity with `base_reorder_quantity`
+   across every item shape, and the filed quantity received as base units end to
+   end) and by `ScanPage.test.tsx`. The same sweep found and fixed
+   `check_material_stock`'s `reorder_qty`, which the maintenance dashboard POSTs
+   verbatim. `InventoryList` / `InventoryItemDetailPage` file nothing and were
+   deliberately left on `reorderQuantityLabel`.
 2. **Frontend readers of `quantity_per_package` outside `ScanPage`** — the same
    falsy-zero pack-size class, all pre-existing, none touched here.
    `PurchaseOrderFormPage.tsx` has eight `item.quantity_per_package || 1` sites

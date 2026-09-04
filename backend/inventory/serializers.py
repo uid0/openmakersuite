@@ -1051,6 +1051,13 @@ class InventoryItemSerializer(serializers.ModelSerializer):
         the item's ``count_mode`` gives meaning to. Reads only ``count_level``
         (already select_related on every queryset that serialises items) and
         ``item_suppliers`` (already prefetched), so it costs no extra query.
+
+        Also carries ``order_quantity``/``order_text`` — what filing a reorder
+        for this item right now would order, in the BASE units a
+        ``ReorderRequest.quantity`` is stored in, plus its wording. A client
+        that both shows a reorder quantity and files one reads that pair rather
+        than re-deriving it from raw columns; see
+        :func:`inventory.services.packaging.reorder_display`.
         """
         from inventory.services.packaging import reorder_display
 

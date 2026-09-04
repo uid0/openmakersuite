@@ -1143,7 +1143,15 @@ class AddPurchaseOrderLineSerializer(serializers.Serializer):
 
 
 class LeadTimeLogSerializer(serializers.ModelSerializer):
-    """Serializer for lead time tracking data."""
+    """Serializer for lead time tracking data.
+
+    Not imported and not routed, which is the only reason the bare ``was_late``
+    / ``was_early`` fields below are tolerable: every payload a person actually
+    reads names what those flags are measured against (see ``LeadTimeLog``).
+    Wiring this serializer to a view means naming the yardstick here too —
+    ``variance_measured_against`` and ``met_confirmed_date``, as the supplier
+    analytics block does — or it will serve a bare lateness a row cannot support.
+    """
 
     # Related data
     item_details = InventoryItemSerializer(source="item", read_only=True)

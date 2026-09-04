@@ -1605,7 +1605,9 @@ class LeadTimeLog(models.Model):
     #: own, so the admin, the two supplier-analytics payloads and the purchasing
     #: report cannot drift into naming three different things. Served in the
     #: analytics payloads as ``variance_measured_against``; pinned by
-    #: ``test_every_variance_payload_names_the_same_yardstick``.
+    #: ``test_the_supplier_payload_names_the_yardstick_and_carries_both_promises``,
+    #: ``test_the_reorders_analytics_payloads_name_the_yardstick`` and
+    #: ``test_the_purchasing_lead_time_report_names_the_yardstick``.
     VARIANCE_YARDSTICK = "quoted_lead_time"
 
     #: The same yardstick in the words a person reads. Used by the admin and by

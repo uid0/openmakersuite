@@ -10,9 +10,9 @@ describe('LeadTimeChart', () => {
     average_lead_time: 7.5,
     min_lead_time: 5,
     max_lead_time: 10,
-    average_variance: 0.5,
+    avg_variance_vs_quoted_lead_time_days: 0.5,
     total_orders: 10,
-    on_time_percentage: 80.0,
+    within_quoted_lead_time_pct: 80.0,
     recent_logs: [
       {
         item_name: 'Test Item 1',
@@ -22,7 +22,7 @@ describe('LeadTimeChart', () => {
         estimated_lead_time_days: 14,
         actual_lead_time_days: 15,
         variance_days: 1,
-        was_late: true,
+        was_over_quoted_lead_time: true,
       },
       {
         item_name: 'Test Item 2',
@@ -32,7 +32,7 @@ describe('LeadTimeChart', () => {
         estimated_lead_time_days: 10,
         actual_lead_time_days: 8,
         variance_days: -2,
-        was_late: false,
+        was_over_quoted_lead_time: false,
       },
     ],
   };
@@ -45,9 +45,9 @@ describe('LeadTimeChart', () => {
     );
 
     expect(screen.getByText('Average Lead Time')).toBeInTheDocument();
-    expect(screen.getByText('On-Time Percentage')).toBeInTheDocument();
+    expect(screen.getByText('Within Quoted Lead Time')).toBeInTheDocument();
     expect(screen.getByText('Min / Max Lead Time')).toBeInTheDocument();
-    expect(screen.getByText('Average Variance')).toBeInTheDocument();
+    expect(screen.getByText('Avg Variance vs. Quoted Lead Time')).toBeInTheDocument();
   });
 
   it('displays correct statistics values', () => {
@@ -69,7 +69,7 @@ describe('LeadTimeChart', () => {
       </MantineProvider>
     );
 
-    expect(screen.getByText('Lead Time Comparison (Recent Orders)')).toBeInTheDocument();
+    expect(screen.getByText('Quoted vs. Actual Lead Time (Recent Orders)')).toBeInTheDocument();
   });
 
   it('displays empty state when no data', () => {
@@ -77,9 +77,9 @@ describe('LeadTimeChart', () => {
       average_lead_time: null,
       min_lead_time: null,
       max_lead_time: null,
-      average_variance: null,
+      avg_variance_vs_quoted_lead_time_days: null,
       total_orders: 0,
-      on_time_percentage: null,
+      within_quoted_lead_time_pct: null,
       recent_logs: [],
     };
 

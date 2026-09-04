@@ -75,9 +75,9 @@ describe('SupplierDetailPage', () => {
       average_lead_time: 7.5,
       min_lead_time: 5,
       max_lead_time: 10,
-      average_variance: 0.5,
+      avg_variance_vs_quoted_lead_time_days: 0.5,
       total_orders: 10,
-      on_time_percentage: 80,
+      within_quoted_lead_time_pct: 80,
     },
     price_trends: {
       trends: [],

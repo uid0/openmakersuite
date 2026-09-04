@@ -2,6 +2,7 @@
  * CSV Export Utility
  * Functions for exporting data to CSV format
  */
+import { YARDSTICK_LABEL_TITLE } from '../constants/leadTimeYardstick';
 import { formatDateOnly } from './dates';
 import {
   SUPPLIER_BASIS_LABELS,
@@ -251,23 +252,31 @@ export function exportPurchasingReportToCSV(
       'Total Spend': item.total_spend ? `$${item.total_spend.toFixed(2)}` : '$0.00',
     }));
   } else if (reportType === 'lead_time_analysis') {
+    // Variance and rate are both against the supplier link's standing quoted
+    // lead time, not against the delivery dates confirmed on the orders. A
+    // spreadsheet built on "On-Time Rate" alone reads as missed agreed dates and
+    // sends the buyer after the wrong vendors, so each header names the quote —
+    // in the web's single copy of those words, not a fourth restatement.
+    const quotedLeadTime = `Avg ${YARDSTICK_LABEL_TITLE} (days)`;
+    const varianceVsQuote = `Avg Variance vs. ${YARDSTICK_LABEL_TITLE} (days)`;
+    const withinQuote = `Within ${YARDSTICK_LABEL_TITLE} (%)`;
     headers = [
       'Supplier',
       'Item Name',
       'Total Orders',
-      'Avg Estimated Lead Time (days)',
+      quotedLeadTime,
       'Avg Actual Lead Time (days)',
-      'Avg Variance (days)',
-      'On-Time Rate (%)',
+      varianceVsQuote,
+      withinQuote,
     ];
     csvData = data.map((item) => ({
       Supplier: item.supplier_name || '',
       'Item Name': item.item_name || '',
       'Total Orders': item.total_orders || 0,
-      'Avg Estimated Lead Time (days)': item.avg_estimated_lead_time || 0,
+      [quotedLeadTime]: item.avg_estimated_lead_time || 0,
       'Avg Actual Lead Time (days)': item.avg_actual_lead_time || 0,
-      'Avg Variance (days)': item.avg_variance || 0,
-      'On-Time Rate (%)': item.on_time_rate ? `${item.on_time_rate.toFixed(1)}%` : '0%',
+      [varianceVsQuote]: item.avg_variance || 0,
+      [withinQuote]: item.on_time_rate ? `${item.on_time_rate.toFixed(1)}%` : '0%',
     }));
   } else if (reportType === 'price_trends') {
     headers = [

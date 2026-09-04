@@ -16,6 +16,7 @@ import { DatePickerInput, DatesRangeValue } from '@mantine/dates';
 import { IconDownload } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import React, { useEffect, useMemo, useState } from 'react';
+import { YARDSTICK_LABEL_TITLE } from '../constants/leadTimeYardstick';
 import { reportsAPI } from '../services/api';
 import {
   PurchasingLeadTimeAnalysis,
@@ -335,16 +336,25 @@ const PurchasingReportPage: React.FC = () => {
                         Total Orders
                       </Table.Th>
                       <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('avg_estimated_lead_time')}>
-                        Avg Est. Lead Time (days)
+                        Avg {YARDSTICK_LABEL_TITLE} (days)
                       </Table.Th>
                       <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('avg_actual_lead_time')}>
                         Avg Actual Lead Time (days)
                       </Table.Th>
+                      {/*
+                        Both of these are measured against the supplier link's
+                        standing quoted lead time, never against the delivery
+                        dates confirmed on the orders — a supplier can sit at a
+                        low rate here having hit every date it agreed to. The
+                        headers say the yardstick so nobody chases a vendor for
+                        the wrong broken promise, in the web's single copy of
+                        those words rather than a restatement from memory.
+                      */}
                       <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('avg_variance')}>
-                        Avg Variance (days)
+                        Avg Variance vs. {YARDSTICK_LABEL_TITLE} (days)
                       </Table.Th>
                       <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('on_time_rate')}>
-                        On-Time Rate (%)
+                        Within {YARDSTICK_LABEL_TITLE} (%)
                       </Table.Th>
                     </Table.Tr>
                   </Table.Thead>

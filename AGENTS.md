@@ -323,6 +323,65 @@ unbuyable item's wait is NOT distinguishable from a live one's. Do not write
 anywhere that it is; adding the column and a reader is filed as follow-up
 `oms-demand-forecast-lead-basis`.
 
+### A lead-time lateness must name the promise it scores
+
+`LeadTimeLog` carries TWO promises and only one is scored. `variance_days`,
+`was_late` and every rate derived from them measure the supplier link's STANDING
+QUOTE; `expected_delivery_date` is the separately confirmed order date and
+nothing scores it. That is deliberate — the model docstring carries the
+reasoning, and `test_variance_scores_the_standing_quote_not_the_confirmed_date`
+pins it. Do not reopen it.
+
+The consequence for anything you build: a row can read `+7, was_late` having
+arrived on the day the operator agreed, so **no screen, payload or export may
+show one of those numbers without naming the yardstick**, and per-row surfaces
+show `met_confirmed_date` beside it. Take the words from
+`LeadTimeLog.VARIANCE_YARDSTICK{,_LABEL}` rather than writing your own, and note
+`met_confirmed_date` is tri-state — `None` where the order confirmed no date,
+because this row's own `expected_delivery_date` falls back to the quote and is
+then not an agreed date at all. `reorder_queue/tests/test_lead_time_yardstick_is_named.py`
+pins every surface and fails if a new one renders a bare "N days late".
+
+Naming the yardstick means naming it in the KEY, not only in the label a person
+reads: a consumer decoding `on_time_rate` or `was_late` asserts a bare lateness
+however the screen is worded. Two contracts were therefore RENAMED, which is a
+breaking change for any client outside this repo:
+
+`GET /api/inventory/suppliers/<id>/` and `/analytics/`, in the
+`lead_time_analytics` block served identically by both:
+
+| was | is |
+| --- | --- |
+| `on_time_percentage` | `within_quoted_lead_time_pct` |
+| `average_variance` | `avg_variance_vs_quoted_lead_time_days` |
+| `recent_logs[].was_late` | `was_over_quoted_lead_time` |
+
+`GET /api/reorders/reports/purchasing/export/?type=lead_time_analysis`, in the
+CSV header row (machine keys, matching the export's three untouched siblings) —
+any spreadsheet keyed on the old header must be re-pointed:
+
+| was | is |
+| --- | --- |
+| `avg_estimated_lead_time` | `avg_quoted_lead_time_days` |
+| `avg_variance` | `avg_variance_vs_quoted_lead_time_days` |
+| `on_time_rate` | `within_quoted_lead_time_pct` |
+
+One concept, one name across both. What bounds the rename is the cross-project
+contract, not taste: ScanTTY decodes `on_time_delivery_rate`,
+`late_delivery_rate`, `early_delivery_rate`, `average_variance_days` and the
+`lead_time_analysis` JSON's `avg_variance` / `on_time_rate` BY NAME off
+`/api/reorders/analytics/` and `/api/reorders/reports/purchasing/`. Those keys
+were deliberately NOT renamed and must not be; they carry
+`variance_measured_against` alongside instead. ScanTTY decodes nothing off the
+supplier endpoints and does not read the CSV, which is what made those two
+renameable.
+
+A rate or average of exactly `0` is an ANSWER, not an absence — a vendor that
+hit its quote on every order averages a variance of `0.0`, and a counter-pickup
+supplier averages a `0`-day lead time. Guard these with `is not None`, never
+truthiness, or the payload reports a perfect record as "N/A" beside a sibling
+card reading 100%. See also the alert-suppression class below.
+
 ### The alert-suppression class: CLOSED (op-c1ke)
 
 A value made honestly `None` gets collapsed by downstream arithmetic or a

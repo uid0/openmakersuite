@@ -337,20 +337,32 @@ class SupplierDetailSerializer(SupplierSerializer):
     def get_lead_time_analytics(self, obj):
         """Get lead time analytics for this supplier.
 
-        REPORTED, NOT FIXED: the ``recent_logs`` block below emits
-        ``expected_delivery_date``, ``actual_delivery_date``, ``variance_days``
-        and ``was_late`` on one object with nothing saying WHICH promise
-        ``was_late`` refers to. ``variance_days`` is measured against the
-        supplier link's standing quoted lead time, not against
-        ``expected_delivery_date`` (see ``LeadTimeLog``), so a vendor that quotes
-        3, has the order confirmed at 10 and delivers on day 10 reaches this
-        payload — and ``frontend/src/pages/SupplierDetailPage.tsx``'s
-        ``LeadTimeChart`` — as ``expected_delivery_date == actual_delivery_date``
-        alongside ``variance_days: 7, was_late: true``, which reads as a
-        contradiction. The variance itself is correct and deliberate; it is the
-        rendering that asserts a bare lateness the row does not support. Naming
-        the yardstick here changes the served API shape, which was not
-        authorised on this branch.
+        Every rate and variance here is measured against the supplier link's
+        standing quoted lead time, never against ``expected_delivery_date`` (see
+        ``LeadTimeLog``). That used to reach this payload — and
+        ``frontend/src/pages/SupplierDetailPage.tsx``'s ``LeadTimeChart`` —
+        unnamed, so a vendor that quotes 3, has the order confirmed at 10 and
+        delivers on day 10 arrived as ``expected_delivery_date ==
+        actual_delivery_date`` alongside ``variance_days: 7, was_late: true``
+        and read as a contradiction.
+
+        So the KEYS name the yardstick too, not only the labels a person reads:
+        ``within_quoted_lead_time_pct``, ``avg_variance_vs_quoted_lead_time_days``
+        and each row's ``was_over_quoted_lead_time`` replace the bare
+        ``on_time_percentage`` / ``average_variance`` / ``was_late``. This block
+        has no external consumer — ScanTTY never calls the supplier endpoints and
+        decodes none of these names — and this repo's web moves with it, so the
+        rename is safe here in a way it is NOT for the reorders analytics
+        payloads, whose keys ScanTTY decodes by name and which keep theirs.
+
+        Alongside them, keys derived from ``LeadTimeLog`` so this payload cannot
+        name a different promise than the admin does:
+        ``variance_measured_against`` states the yardstick once for the whole
+        block, and each row's ``met_confirmed_date`` plus
+        ``confirmed_delivery_date`` carry the other promise — the verdict and the
+        date an operator would chase the vendor with, both ``null`` when no date
+        was confirmed on the order. Pinned by
+        ``test_lead_time_yardstick_is_named.py``.
         """
         try:
             from django.db.models import Avg, Count, Max, Min
@@ -365,9 +377,12 @@ class SupplierDetailSerializer(SupplierSerializer):
                     "average_lead_time": None,
                     "min_lead_time": None,
                     "max_lead_time": None,
-                    "average_variance": None,
+                    "avg_variance_vs_quoted_lead_time_days": None,
                     "total_orders": 0,
-                    "on_time_percentage": None,
+                    "within_quoted_lead_time_pct": None,
+                    # Present on the empty block too, so a consumer can read the
+                    # yardstick without it appearing and vanishing with the data.
+                    "variance_measured_against": LeadTimeLog.VARIANCE_YARDSTICK,
                 }
 
             stats = logs.aggregate(
@@ -385,18 +400,29 @@ class SupplierDetailSerializer(SupplierSerializer):
             )
 
             return {
+                # ``is not None``, never truthiness: a vendor that landed every
+                # order exactly on its quote averages a variance of 0.0, and the
+                # falsy spelling served that perfect record as ``null`` — the
+                # card beside it reading "100.0% within quoted lead time" while
+                # this one read "N/A". A same-day supplier's 0-day average lead
+                # time is the same fact. Both are answers, not absences; these
+                # are ``None`` only with no rows at all, which returns above.
                 "average_lead_time": (
-                    float(stats["avg_lead_time"]) if stats["avg_lead_time"] else None
+                    float(stats["avg_lead_time"]) if stats["avg_lead_time"] is not None else None
                 ),
                 "min_lead_time": stats["min_lead_time"],
                 "max_lead_time": stats["max_lead_time"],
-                "average_variance": (
-                    float(stats["avg_variance"]) if stats["avg_variance"] else None
+                "avg_variance_vs_quoted_lead_time_days": (
+                    float(stats["avg_variance"]) if stats["avg_variance"] is not None else None
                 ),
                 "total_orders": stats["total_orders"],
-                "on_time_percentage": (
+                "within_quoted_lead_time_pct": (
                     float(on_time_percentage) if on_time_percentage is not None else None
                 ),
+                # What every variance and rate above and below is measured
+                # against, said once for the whole block instead of repeated on
+                # each row: it is the same for all of them.
+                "variance_measured_against": LeadTimeLog.VARIANCE_YARDSTICK,
                 "recent_logs": [
                     {
                         "item_name": log.item_supplier.item.name,
@@ -406,9 +432,23 @@ class SupplierDetailSerializer(SupplierSerializer):
                         "estimated_lead_time_days": log.estimated_lead_time_days,
                         "actual_lead_time_days": log.actual_lead_time_days,
                         "variance_days": log.variance_days,
-                        "was_late": log.was_late,
+                        "was_over_quoted_lead_time": log.was_late,
+                        # The other promise, which varies per row and which
+                        # nothing here scores: the verdict AND the date it was
+                        # judged against, both ``null`` where the order carries
+                        # no confirmed date. Never the row's own
+                        # ``expected_delivery_date`` — that falls back to the
+                        # quote and is then a date nobody agreed to.
+                        "met_confirmed_date": log.met_confirmed_date,
+                        "confirmed_delivery_date": (
+                            log.confirmed_delivery_date.isoformat()
+                            if log.confirmed_delivery_date is not None
+                            else None
+                        ),
                     }
-                    for log in logs.order_by("-actual_delivery_date")[:10]
+                    for log in logs.order_by("-actual_delivery_date").select_related(
+                        "purchase_order", "item_supplier__item"
+                    )[:10]
                 ],
             }
         except ImportError:

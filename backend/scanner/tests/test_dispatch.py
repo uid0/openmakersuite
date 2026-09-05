@@ -19,6 +19,7 @@ from inventory.tests.factories import (
     InventoryItemFactory,
     ItemSupplierFactory,
     LocationFactory,
+    SupplierFactory,
 )
 
 pytestmark = pytest.mark.django_db
@@ -90,10 +91,17 @@ class TestScannerDispatch:
         assert response.data["target_type"] == "fixture"
         assert response.data["target_id"] == str(fixture.id)
 
-    def test_upc_unit_match_receives_single(self, api_client):
+    def test_upc_unit_match_receives_single(self, authenticated_client):
+        # Signed in: a UPC resolves through ``ItemSupplier``, so
+        # ``item_supplier_id`` and ``supplier_name`` are withheld from a caller
+        # with no session (op-anonymous-read-posture). Receiving is an operator
+        # flow and still gets the link it resolved; the anonymous shape is
+        # pinned by ``test_upc_match_withholds_the_vendor_from_an_anonymous_caller``
+        # below and in ``config/tests/test_anonymous_vendor_exposure.py``.
+        client, _user = authenticated_client
         item = InventoryItemFactory(current_stock=5)
         link = ItemSupplierFactory(item=item, unit_upc="012345678905", package_upc="")
-        response = _dispatch(api_client, "012345678905")
+        response = _dispatch(client, "012345678905")
         assert response.status_code == status.HTTP_200_OK
         assert response.data["action"] == "inventory_receive"
         assert response.data["item_supplier_id"] == link.pk
@@ -101,14 +109,38 @@ class TestScannerDispatch:
         assert response.data["is_package"] is False
         assert response.data["current_stock"] == 5
 
-    def test_upc_package_match_marks_is_package(self, api_client):
+    def test_upc_package_match_marks_is_package(self, authenticated_client):
+        client, _user = authenticated_client
         item = InventoryItemFactory()
         link = ItemSupplierFactory(item=item, unit_upc="", package_upc="1234567890128")
-        response = _dispatch(api_client, "1234567890128")
+        response = _dispatch(client, "1234567890128")
         assert response.status_code == status.HTTP_200_OK
         assert response.data["action"] == "inventory_receive"
         assert response.data["item_supplier_id"] == link.pk
         assert response.data["is_package"] is True
+
+    def test_upc_match_withholds_the_vendor_from_an_anonymous_caller(self, api_client):
+        """The endpoint stays open — it is what a barcode gun hits — and a UPC is
+        printed on the outside of the box, so anyone holding one could turn it
+        into the name of the vendor we buy that item from
+        (op-anonymous-read-posture). What the scan is FOR is unchanged."""
+        item = InventoryItemFactory(current_stock=5)
+        ItemSupplierFactory(
+            item=item,
+            unit_upc="012345678905",
+            package_upc="",
+            supplier=SupplierFactory(name="Acme Supply Co"),
+        )
+
+        response = _dispatch(api_client, "012345678905")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["action"] == "inventory_receive"
+        assert response.data["item_id"] == str(item.id)
+        assert response.data["current_stock"] == 5
+        assert "item_supplier_id" not in response.data
+        assert "supplier_name" not in response.data
+        assert b"Acme Supply Co" not in response.content
 
     def test_upc_unmatched_returns_unknown_with_hint(self, api_client):
         response = _dispatch(api_client, "999999999993")

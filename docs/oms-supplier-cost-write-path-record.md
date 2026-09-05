@@ -508,6 +508,42 @@ carries `supplier_choice`, or it proves nothing.
 Until then the standing warning is the comment above the attribution line on
 that page: changing Supplier there is not a supported way to retarget the terms.
 
+**Three further inaccuracies on this surface, SHIPPED KNOWINGLY.** Each was
+raised in review, verified, and left in place by operator decision: the money
+defect on this path is closed, and what remains is copy and one display
+condition on a screen that has its own branch. They belong to whoever picks that
+branch up.
+
+1. **The ruling-(C) observability condition is UNMET on this form — a gap
+   against an ACCEPTED REQUIREMENT, not a nice-to-have.** Ruling (C) required
+   that `unit_cost` be "presented as derived wherever it is editable". The kit
+   form's Unit cost box is editable, and its description reads "Per unit. The
+   case price is derived from it." — which presents the PACKAGE as the derived
+   figure, the opposite direction, and says nothing about the box's own value
+   being re-derived when it is left blank. Since the blanking, blank IS the
+   default state of that box, so the re-derive branch is now the ordinary path
+   on this form and the one path the copy gives no cue about. The wording it
+   needs is the same shape as `SupplierRelationshipForm`'s corrected pair, which
+   state both halves: what the figure is derived from, and what changing it
+   does.
+
+2. **The advisory's copy is false in one reachable state; the CONDITION is
+   right and only the leading sentence is wrong.** It reads "The price shown
+   above is a different supplier's." It renders whenever the named supplier
+   differs from the chosen link, which does not require a price to be on
+   screen: when the chosen orderable link records no cost,
+   `order_unit_price(item).amount` is `None` and the read-only line above
+   renders "No price on file", so the sentence names a price the operator
+   cannot see. The warning is still warranted in that state, because the SKU
+   box still seeds from that link — so fix the wording, not the condition.
+
+3. **The op-3xsp comment's PRICE half is stale; split it, do not delete it.**
+   The comment above the attribution line still says "the save writes this
+   vendor's SKU and price onto whichever vendor the field names". The price
+   half stopped being true when the cost box was blanked — the CLOSED half
+   above says why. The SKU half remains true and is the worse half, so that
+   sentence is still the standing warning and must survive the correction.
+
 ### Lost-update window on the stored-row read
 
 `stored_pricing` issues a plain `SELECT` with no `select_for_update()`. Being

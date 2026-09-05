@@ -34,6 +34,34 @@ const readError = (err: unknown, fallback: string): string => {
   return fallback;
 };
 
+/**
+ * The purchase terms to SHOW, for the supplier the form would write them to.
+ *
+ * The terms on screen have to belong to the supplier currently named, because
+ * they are what a save sends. `ItemSupplier.save()` derives from the DELTA
+ * against the named link (`inventory.services.suppliers.derive_costs`), so a
+ * unit cost belonging to another vendor reads as a cost that MOVED, GOVERNS,
+ * and re-prices the named link's stored case price.
+ *
+ * With no supplier named, the top-level `supplier_sku` / `unit_cost` are shown:
+ * those are the CHOSEN supplier's figures, which is exactly what the
+ * attribution line beside them says (op-3xsp), and no write can carry them —
+ * `supplier_terms` only ships once a supplier IS named.
+ *
+ * A named supplier with no link yet has no terms to show, so both go blank.
+ * Blank ships as `unit_cost: null` — "no price on file", never a recorded zero.
+ */
+const termsForSupplier = (
+  kit: Kit,
+  named: number | '',
+): { supplierSku: string; unitCost: number | string } => {
+  if (named === '') {
+    return { supplierSku: kit.supplier_sku ?? '', unitCost: kit.unit_cost ?? '' };
+  }
+  const link = (kit.suppliers ?? []).find((row) => row.supplier === named);
+  return { supplierSku: link?.supplier_sku ?? '', unitCost: link?.unit_cost ?? '' };
+};
+
 const KitDetailPage: React.FC = () => {
   const { kitId } = useParams<{ kitId: string }>();
   const navigate = useNavigate();
@@ -68,7 +96,7 @@ const KitDetailPage: React.FC = () => {
   const [savedAt, setSavedAt] = useState<string | null>(null);
 
   /** Fold a server kit into the form. Shared by load and every save. */
-  const applyKit = useCallback((next: Kit) => {
+  const applyKit = useCallback((next: Kit, named: number | '') => {
     setKit(next);
     setName(next.name ?? '');
     setDescription(next.description ?? '');
@@ -82,8 +110,9 @@ const KitDetailPage: React.FC = () => {
         quantity: row.quantity,
       })),
     );
-    setSupplierSku(next.supplier_sku ?? '');
-    setUnitCost(next.unit_cost ?? '');
+    const terms = termsForSupplier(next, named);
+    setSupplierSku(terms.supplierSku);
+    setUnitCost(terms.unitCost);
   }, []);
 
   useEffect(() => {
@@ -109,7 +138,7 @@ const KitDetailPage: React.FC = () => {
     kitAPI
       .getKit(kitId as string)
       .then((res) => {
-        if (!cancelled) applyKit(res.data);
+        if (!cancelled) applyKit(res.data, '');
       })
       .catch(() => {
         if (!cancelled) setLoadError('Could not load this kit.');
@@ -157,7 +186,7 @@ const KitDetailPage: React.FC = () => {
         ? await kitAPI.createKit(payload)
         : await kitAPI.updateKit(kitId as string, payload);
       // Patch straight from the response — no refetch, no loading placeholder.
-      applyKit(res.data);
+      applyKit(res.data, supplierId);
       setSavedAt(new Date().toISOString());
       if (isNew) navigate(`/inventory/kits/${res.data.id}`, { replace: true });
     } catch (err) {
@@ -300,7 +329,13 @@ const KitDetailPage: React.FC = () => {
                       value={supplierId === '' ? '' : String(supplierId)}
                       onChange={(event) => {
                         const next = event.currentTarget.value;
-                        setSupplierId(next === '' ? '' : Number(next));
+                        const named = next === '' ? '' : Number(next);
+                        setSupplierId(named);
+                        if (kit) {
+                          const terms = termsForSupplier(kit, named);
+                          setSupplierSku(terms.supplierSku);
+                          setUnitCost(terms.unitCost);
+                        }
                       }}
                       disabled={saving}
                       list="kit-supplier-options"

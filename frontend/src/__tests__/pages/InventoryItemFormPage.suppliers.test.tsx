@@ -882,10 +882,5 @@ describe('InventoryItemFormPage — derived costs after a partial save', { timeo
     // and this second PATCH re-priced the case price to 9.99.
     await waitFor(() => expect(writesToFailingRow()).toHaveLength(2));
     expect(writesToStaleRow()).toHaveLength(1);
-    expect(
-      writesToStaleRow()
-        .slice(1)
-        .map((request) => JSON.parse(request.data as string).unit_cost)
-    ).not.toContain('3.33');
   });
 });

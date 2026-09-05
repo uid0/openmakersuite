@@ -28,15 +28,6 @@ if TYPE_CHECKING:
 #: The scale both cost columns are stored at (``DecimalField(decimal_places=2)``).
 COST_SCALE = Decimal("0.01")
 
-#: The two columns that are derived from each other, authoritative one first.
-#: ``package_cost`` governs: it is what the shop actually pays a supplier for a
-#: case, and ``unit_cost`` is documented on the model as "auto-calculated from
-#: package cost". The Django admin already makes ``unit_cost`` read-only, the
-#: item form's ``_process_cost_data`` already prefers ``package_cost``, and
-#: ScanTTY's API client documents the same precedence. Decided by the operator.
-AUTHORITATIVE_COST = "package_cost"
-DERIVED_COST = "unit_cost"
-
 
 def quantize_cost(value):
     """Round a cost to the scale the column stores, or return it untouched.

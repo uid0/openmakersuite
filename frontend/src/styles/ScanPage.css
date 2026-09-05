@@ -289,36 +289,6 @@
   color: #1565c0;
 }
 
-.auto-submit-message {
-  background: linear-gradient(135deg, #e8f5e8 0%, #f0f8f0 100%);
-  border-radius: 12px;
-  padding: 20px;
-  margin: 20px 0;
-  text-align: center;
-  border-left: 4px solid #28a745;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.auto-submit-message h2 {
-  color: #155724;
-  margin: 0 0 15px 0;
-  font-size: 1.3rem;
-  font-weight: 600;
-}
-
-.auto-submit-message p {
-  color: #155724;
-  margin: 10px 0;
-  font-size: 1rem;
-  line-height: 1.5;
-}
-
-.auto-submit-message p:last-child {
-  margin-bottom: 0;
-  font-style: italic;
-  color: #6c757d;
-}
-
 /* Mobile responsive adjustments for enhanced form */
 @media (max-width: 768px) {
   .detail-grid {

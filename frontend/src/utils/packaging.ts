@@ -154,9 +154,13 @@ export const perParent = (rows: PackagingRow[], index: number): number | null =>
 /**
  * `unit` pluralised for `count`. Handles the sibilant ending the naive `+ "s"`
  * gets wrong ("box" → "boxes", not "boxs"), because packaging levels are named
- * by hand and "box" is one of the commonest ones. Deliberately a shade better
- * than the backend's own `_plural`, which only ever appends "s" — nothing
- * compares the two strings, and no server-rendered text is re-pluralised here.
+ * by hand and "box" is one of the commonest ones.
+ *
+ * The SAME rule as the backend's `inventory.services.packaging._plural`, which
+ * now shares it. That matters because server-rendered wording and this one meet
+ * on the same screen: `reorderFiling` renders the server's `order_text`
+ * verbatim beside labels built here, so a unit that pluralised one way on the
+ * server and another way in the browser read as two different nouns.
  */
 export const pluralizeUnit = (unit: string, count: number): string => {
   if (count === 1) return unit;
@@ -278,12 +282,54 @@ export const reorderThresholdLabel = (item: InventoryItem): string => {
 };
 
 /**
- * "40 units" / "2 cases" — how much to reorder, with the unit it is counted in.
- * The quantity twin of {@link reorderThresholdLabel}, same single owner.
+ * "40 units" / "2 cases" — the item's CONFIGURED reorder amount, with the unit
+ * it is counted in. The quantity twin of {@link reorderThresholdLabel}, same
+ * single owner.
+ *
+ * NOT what a reorder for this item would actually order — that is
+ * {@link reorderFiling}, and the two are different numbers for a pack-counting
+ * item and for any item well below its minimum. Read this wherever the reader
+ * is not being promised what will be filed: a surface that only DESCRIBES an
+ * item, or one whose own form states and sends its number. Read
+ * `reorderFiling` on a surface that files a reorder for the reader, so it
+ * cannot show one number and send another.
  */
 export const reorderQuantityLabel = (item: InventoryItem): string => {
   const { unit, quantity } = reorderPresentation(item);
   return `${quantity} ${pluralizeUnit(unit, quantity)}`;
+};
+
+/**
+ * What filing a reorder for this item right now would order, and how to say it.
+ *
+ * THE one thing a surface that BOTH shows a reorder quantity AND files one may
+ * read. `reorderQuantityLabel` above answers a different question — the item's
+ * CONFIGURED reorder amount in its own counting unit — and the two are not the
+ * same number: they differ by the pack size for a pack-counting item (3 cases
+ * = 36 bottles) and by the server's shortage top-up for any item well below its
+ * minimum. ScanPage printed the first and POSTed a third derivation of its own,
+ * so a member read "3 cases" off a shelf label and had 3 bottles ordered.
+ *
+ * `quantity` is BASE units, which is what a `ReorderRequest.quantity` is stored
+ * in — `mark-received` adds it straight to `current_stock`. Both halves come
+ * from the SERVER's `base_reorder_quantity`, the same derivation that fills a
+ * purchase-order pad, so no client re-derives it.
+ *
+ * Returns null when `reorder_display` is absent — it is optional on the wire,
+ * and a page that cannot learn what it would file must say so rather than
+ * guess. Deliberately NOT given a client twin: the shortage top-up needs the
+ * server's count-at-level maths, and a twin that silently dropped it would file
+ * less than the page promised, which is the defect this function exists to
+ * close.
+ */
+export const reorderFiling = (
+  item: InventoryItem
+): { quantity: number; text: string } | null => {
+  const display = item.reorder_display;
+  if (!display || typeof display.order_quantity !== 'number' || !display.order_text) {
+    return null;
+  }
+  return { quantity: display.order_quantity, text: display.order_text };
 };
 
 /**

@@ -126,6 +126,7 @@ from .serializers import (
     WorkOrderValidationSerializer,
 )
 from .services.packaging import (
+    base_reorder_quantity,
     count_at_level,
     count_unit,
     counts_in_packs,
@@ -6257,10 +6258,32 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
 
         Emits one alert per MaintenanceMaterial that is linked to an InventoryItem
         whose current_stock is below its minimum_stock threshold.
+
+        ``reorder_qty`` is BASE units — the unit a ``ReorderRequest.quantity``
+        is stored in — because the caller FILES it: the maintenance dashboard's
+        "Create reorder requests & continue" POSTs this number straight through.
+        It is therefore ``base_reorder_quantity``, the one derivation every
+        other filing path uses, and not the raw ``reorder_quantity`` column,
+        which for a pack-counting item is a count of PACKS and filed a 12th of
+        the intended order (``test_reorder_filing.py``).
+
+        Note what that changes for an ``each`` material too, because
+        ``base_reorder_quantity`` carries the shortage clause
+        ``max(minimum_stock - current_stock, reorder_quantity)``: a deeply short
+        item — ``current_stock=0``, ``minimum_stock=100``,
+        ``reorder_quantity=25`` — filed 25 before and files 100 now. The
+        dashboard files what a purchase-order pad would, for every material and
+        not only pack-counted ones.
         """
         item = self.get_object()
         alerts = []
-        materials = item.materials.select_related("inventory_item").all()
+        # ``count_level`` is joined because ``base_reorder_quantity`` reads it
+        # (via ``counts_in_packs`` and ``count_at_level``) for every alerted
+        # material; the raw column it replaced touched no relation, so without
+        # the join each low-stock pack-counting material costs a query.
+        materials = item.materials.select_related(
+            "inventory_item", "inventory_item__count_level"
+        ).all()
         for material in materials:
             inv = material.inventory_item
             if inv is None:
@@ -6268,6 +6291,15 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
             # Retired items are phased out — never emit a low-stock alert.
             if inv.is_retired:
                 continue
+            # PRE-EXISTING and deliberately untouched here: this compares
+            # ``current_stock`` (base units) against ``minimum_stock``, which
+            # for the pack-counting count_modes is a threshold in count_level
+            # units — so a pack-counted material below its case minimum can be
+            # dropped, and the ``current``/``minimum`` pair below is mixed for
+            # the same reason. ``InventoryItem.needs_reorder`` is the mode-aware
+            # form, but swapping to it is not a drop-in: it also suppresses kits
+            # and legacy ``use_case_based_reorder`` items this predicate alerts
+            # on today. Routed as its own task; do not re-derive it here.
             if inv.current_stock >= inv.minimum_stock:
                 continue
             alerts.append(
@@ -6277,7 +6309,7 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
                     "name": inv.name,
                     "current": inv.current_stock,
                     "minimum": inv.minimum_stock,
-                    "reorder_qty": inv.reorder_quantity,
+                    "reorder_qty": base_reorder_quantity(inv),
                 }
             )
         return Response({"low_stock_alerts": alerts})

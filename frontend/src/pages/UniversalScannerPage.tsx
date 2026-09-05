@@ -7,13 +7,19 @@
  *
  * On submit, POSTs to `/api/scanner/dispatch/` which resolves the
  * payload to an action descriptor, then fires the corresponding
- * side-effect endpoint:
+ * side-effect endpoint. Every one of them fires the same way — on the
+ * scan, with no further confirmation step — so the list below no longer
+ * marks some "auto" and one "member confirmed"; there is no such
+ * distinction in `runSideEffect`:
  *
- *   inventory_reorder  → POST /reorders/requests/ (member confirmed)
+ *   inventory_reorder  → POST /reorders/requests/ for a fixed quantity of 1
+ *                        ("Mark for reorder" — a purchaser sizes the order,
+ *                        so this deliberately does NOT read the item's own
+ *                        reorder quantity; nothing here shows one either)
  *   inventory_receive  → show item + supplier, deep-link to item page
  *                        (real receive flow lives on item detail)
- *   asset_checkin      → POST /inventory/assets/<id>/scan/ (auto)
- *   location_checkin   → POST /location-checkins/check-ins/ (auto)
+ *   asset_checkin      → POST /inventory/assets/<id>/scan/
+ *   location_checkin   → POST /location-checkins/check-ins/
  *   fixture / donation_item → nav link
  *   unknown            → error card
  *

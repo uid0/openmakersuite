@@ -257,14 +257,32 @@ export interface ItemOnHandDisplay {
 /**
  * Reorder point + current count in ONE unit (op-es7c), so a caller can label
  * the pair without knowing which columns the item's `count_mode` gives meaning
- * to. For a pack-counting item every quantity here is in `unit` (cases/reams).
+ * to. For a pack-counting item every quantity here is in `unit` (cases/reams)
+ * — EXCEPT the `order_*` pair, which is in base units. See below.
  */
 export interface ItemReorderDisplay {
   mode: ItemCountMode;
   unit: string;
   threshold: number;
   current: number;
+  /** The item's CONFIGURED reorder amount, in `unit`. Not what gets ordered. */
   reorder_quantity: number;
+  /**
+   * What filing a reorder for this item right now would order, in BASE units —
+   * the unit a `ReorderRequest.quantity` is stored in and `mark-received` adds
+   * to `current_stock`. The server's `base_reorder_quantity`, which is also
+   * what fills a purchase-order pad, so a scan and a pad cannot order two
+   * different amounts.
+   *
+   * It differs from `reorder_quantity` by the pack size for a pack-counting
+   * item (3 cases = 36 bottles), and by the shortage top-up for any item that
+   * has fallen well below its minimum. A surface that FILES a reorder shows
+   * and sends this one; a surface that only describes the item's configuration
+   * shows `reorder_quantity`.
+   */
+  order_quantity: number;
+  /** `order_quantity` worded: "36 bottles", or "3 cases (36 bottles)". */
+  order_text: string;
   needs_reorder: boolean;
   text: string;
 }
@@ -1012,6 +1030,12 @@ export interface LowStockAlert {
   name: string;
   current: number;
   minimum: number;
+  /**
+   * BASE units — the server's `base_reorder_quantity`, not the raw
+   * `reorder_quantity` column — because `MaintenanceDashboard` POSTs it
+   * verbatim as a `ReorderRequest.quantity`. See `check_material_stock`'s
+   * docstring, which owns the contract.
+   */
   reorder_qty: number;
 }
 

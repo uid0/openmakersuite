@@ -304,7 +304,33 @@ class InventoryItem(OwnableModel):
     reorder_cases = models.PositiveIntegerField(
         default=1,
         validators=[MinValueValidator(1)],
-        help_text="Number of cases/packages to reorder when stock is low (only used if case-based reordering is enabled)",
+        # PRESENTATION ONLY, and the help text says so because the previous wording
+        # ("Number of cases/packages to reorder when stock is low") claimed a use
+        # the code does not make: ``base_reorder_quantity`` — the one derivation
+        # every filing path uses, from the QR-scan page to the purchase-order pad
+        # — has no branch that reads this column, ever.
+        #
+        # The help text states a PRINCIPLE and names no screen, because which
+        # surface reads which column is exactly what drifts. Two facts sit
+        # behind it. Ordering never reads this column. And whether PRESENTATION
+        # reads it is decided by the item's COUNTING MODE, not by
+        # ``use_case_based_reorder``: ``reorder_display`` tests
+        # ``counts_in_packs`` first, so a BRIDGED item — the legacy flag plus a
+        # packaging chain, which ``bridge_case_reorder_to_packaging``
+        # deliberately leaves behind — reads ``reorder_quantity`` on both
+        # halves and this column on neither. Only a legacy case-based item with
+        # a known case size and no chain of its own has its display sized here,
+        # and for it ``base_reorder_quantity`` still orders ``reorder_quantity``
+        # in base units while a bridged item orders that times the pack size.
+        # ``test_reorder_filing.py::TestLegacyCaseBasedItemsAreRecordedAsTheyBehave``
+        # pins both shapes with numbers on them. Closing the divergence would
+        # change what is ordered for live items and is a separate decision;
+        # until it is taken, the field must not promise what it does not do.
+        help_text=(
+            "Never affects what is ordered. Sizes only how a reorder amount is "
+            "presented, and only for an item whose counting mode gives this column "
+            "meaning."
+        ),
     )
     reorder_instruction = models.TextField(
         blank=True,

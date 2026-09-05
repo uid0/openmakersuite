@@ -492,6 +492,13 @@ def refusing_nginx():
         (root / "conf.d").mkdir()
         (root / "conf.d" / "default.conf").write_text(rendered)
         (root / "nginx.conf").write_text(
+            # The master process writes a pid file before it accepts anything,
+            # at the path the BINARY was compiled with — /run/nginx.pid on the
+            # CI runner, which only root may write, so nginx aborted there while
+            # starting fine on a developer box. `-p` does not move it: the
+            # compiled default is absolute. Everything this harness writes
+            # belongs in its own temporary directory.
+            f"pid {root}/nginx.pid;\n"
             "events {}\n"
             "http {\n"
             f"    include {mime_types};\n"

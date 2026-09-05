@@ -39,6 +39,13 @@ services:
     volumes:
       - ./backend:/app
       - ./docs:/docs:ro
+      # The CI docker job runs pytest in here, where backend/ is mounted at
+      # /app and the repo root is not on disk, so a test resolving a
+      # repo-root path lands on `/<dir>`. `config/tests/test_protected_media.py`
+      # reads the nginx template the same way `test_celery_task_inventory.py`
+      # reads /docs — without this mount it cannot check the half of the
+      # media gate that Django does not enforce.
+      - ./nginx:/nginx:ro
       - static_volume:/app/staticfiles
       - media_volume:/app/media
     ports:

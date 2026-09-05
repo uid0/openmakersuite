@@ -75,10 +75,27 @@ class ResolvedScan:
     current_stock: Optional[int] = None
     raw_payload: str = ""
 
-    def to_dict(self) -> dict:
+    #: The two keys on this result that name a vendor (op-anonymous-read-posture).
+    #:
+    #: ``dispatch_scan`` is ``AllowAny`` by design — it is what a barcode gun
+    #: hits, and the anonymous QR-scan flow runs through it. But a UPC is
+    #: printed on the outside of the box, so anyone holding one could turn it
+    #: into the name of the vendor the makerspace buys that item from. The
+    #: resolver still finds the link (receiving needs it); the VIEW decides who
+    #: is told about it.
+    #:
+    #: ``raw_payload`` is deliberately NOT here: it is the caller's own scan
+    #: echoed back, which they already had.
+    VENDOR_ONLY_KEYS = ("supplier_name", "item_supplier_id")
+
+    def to_dict(self, *, include_vendor_data: bool = True) -> dict:
         # DRF JSONRenderer handles dataclass-to-dict via vars(), but
         # being explicit lets us drop None fields for a tidier response.
-        return {k: v for k, v in vars(self).items() if v is not None}
+        data = {k: v for k, v in vars(self).items() if v is not None}
+        if not include_vendor_data:
+            for key in self.VENDOR_ONLY_KEYS:
+                data.pop(key, None)
+        return data
 
 
 def _strip_url(payload: str) -> tuple[str, bool]:

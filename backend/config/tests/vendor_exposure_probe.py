@@ -27,8 +27,12 @@ VENDOR_SENTINELS = {
     "VENDOR_NAME": "ZZQQ-VENDOR-IDENTITY-ACME-SUPPLY-CO",
     "VENDOR_NAME_2": "ZZQQ-VENDOR-IDENTITY-BETA-PARTS-LTD",
     "SUPPLIER_SKU": "ZZQQ-SKU-77113",
-    "PACKAGE_UPC": "ZZQQ0000000012",
-    "UNIT_UPC": "ZZQQ0000000029",
+    # Real 12-digit UPCs, not a ZZQQ-prefixed string: ``scanner.resolvers``
+    # only treats a PURE-DIGIT payload of length 8/12/13/14 as a barcode, so a
+    # prefixed sentinel would never reach the UPC path and that surface would
+    # test as clean while being open.
+    "PACKAGE_UPC": "991470000012",
+    "UNIT_UPC": "991470000029",
     "UNIT_COST": "313.37",
     "PACKAGE_COST": "3133.70",
     "PRICE_HISTORY_COST": "271.71",
@@ -80,6 +84,7 @@ def seed_vendor_fixture():
         PriceHistory,
         Supplier,
         SupplierAgreement,
+        UsageLog,
     )
     from reorder_queue.models import (
         PurchaseOrder,
@@ -194,6 +199,18 @@ def seed_vendor_fixture():
         asset_tag="ZZQQ-FIX-1",
     )
 
+    # A consumption record carrying the price snapshot. Seeded because
+    # ``InventoryItemDetailSerializer.recent_usage`` nests ``UsageLogSerializer``
+    # on the anonymous item payload: with no usage row, that nesting serialises
+    # to ``[]`` and the crawl reports the surface clean whether or not it is.
+    usage_log = UsageLog.objects.create(
+        item=item,
+        quantity_used=1,
+        notes="ZZQQ usage",
+        unit_cost=Decimal(s["UNIT_COST"]),
+        total_cost=Decimal(s["UNIT_COST"]),
+    )
+
     reorder_request = ReorderRequest.objects.create(
         item=item,
         quantity=20,
@@ -223,6 +240,7 @@ def seed_vendor_fixture():
         "staff": staff,
         "supplier": supplier,
         "supplier_2": supplier_2,
+        "usage_log": usage_log,
     }
 
 
@@ -230,7 +248,7 @@ _ROUTE_ARG = re.compile(r"<(?:([^:>]+):)?([^>]+)>")
 _REGEX_GROUP = re.compile(r"\(\?P<([^>]+)>[^()]*(?:\([^()]*\)[^()]*)*\)")
 
 
-def _value_for(name: str, conv: str | None, fill: dict) -> str:
+def _value_for(name: str, conv: str | None, fill: dict, route: str = "") -> str:
     if name in fill:
         return str(fill[name])
     # DRF's format-suffix routes ('items.json'). They reach the same view and
@@ -242,6 +260,16 @@ def _value_for(name: str, conv: str | None, fill: dict) -> str:
     if conv and f"__{conv}__" in fill:
         return str(fill[f"__{conv}__"])
     if name in ("pk", "id") or name.endswith("_id"):
+        # A DRF router route spells its pk ``(?P<pk>[^/.]+)`` with NO converter,
+        # so ``__uuid__`` never applies and one value cannot serve every table.
+        # Getting this wrong is SILENT: the request 404s and the crawl records
+        # the surface as clean. ``/api/inventory/items/<a supplier's id>/`` did
+        # exactly that, so the item detail payload — the largest vendor surface
+        # there is — was never actually fetched by the crawl. The route prefix
+        # picks a row that exists.
+        for prefix, value in (fill.get("__pk_by_prefix__") or {}).items():
+            if prefix in route:
+                return str(value)
         return str(fill.get("__default_pk__", "1"))
     return "zzqq"
 
@@ -257,9 +285,9 @@ def concrete_path(route: str, fill: dict) -> str | None:
     # pattern below would otherwise match and destroy, silently turning every
     # DRF router route into an unfillable one.
     for match in list(_REGEX_GROUP.finditer(out)):
-        out = out.replace(match.group(0), _value_for(match.group(1), None, fill))
+        out = out.replace(match.group(0), _value_for(match.group(1), None, fill, route))
     for match in list(_ROUTE_ARG.finditer(out)):
-        out = out.replace(match.group(0), _value_for(match.group(2), match.group(1), fill))
+        out = out.replace(match.group(0), _value_for(match.group(2), match.group(1), fill, route))
     out = out.replace("^", "").replace("$", "")
     # A format-suffix route ends '\.json/?' once its group is filled: unescape
     # the dot and drop the optional trailing slash so it becomes requestable.
@@ -370,3 +398,46 @@ def crawl_anonymously(client, fill: dict):
         if leaked and isinstance(status, int) and status < 400:
             disclosures.append((path, view_path, action, status, leaked))
     return disclosures, transcript, unreachable
+
+
+def anonymous_write_surfaces(objs) -> list[tuple[str, dict, str]]:
+    """Every anonymous WRITE, as (path, body, format).
+
+    The GET crawl cannot exercise these — it would be writing to the database —
+    and that blind spot hid a real disclosure: ``POST /api/scanner/dispatch/``
+    is ``AllowAny`` by design (a barcode gun's entry point) and answered a UPC
+    scan with the vendor's name. A UPC is printed on the outside of the box.
+
+    So the writes are exercised too, by hand, from the same seeded fixture. The
+    list is derived from the permission snapshot rather than invented: every
+    routed non-GET action that resolves to ``AllowAny``, plus the function-based
+    ``dispatch_scan``, which the snapshot files under ``*`` and which is exactly
+    the one that was missed. A 4xx here is a fine outcome — the point is that
+    whatever comes back names no vendor.
+    """
+    item, location, fixture = objs["item"], objs["location"], objs["fixture"]
+    return [
+        ("/api/scanner/dispatch/", {"payload": VENDOR_SENTINELS["PACKAGE_UPC"]}, "json"),
+        ("/api/scanner/dispatch/", {"payload": VENDOR_SENTINELS["UNIT_UPC"]}, "json"),
+        ("/api/scanner/dispatch/", {"payload": f"/inventory/scan/{item.id}"}, "json"),
+        (f"/api/inventory/items/{item.id}/scan/", {}, "json"),
+        (f"/api/inventory/items/{item.id}/generate_qr/", {}, "json"),
+        (f"/api/inventory/items/{item.id}/log_usage/", {"quantity": 1}, "json"),
+        (f"/api/inventory/locations/{location.id}/generate_qr/", {}, "json"),
+        (
+            f"/api/inventory/locations/{location.id}/report_problem/",
+            {"description": "shelf empty", "severity": "medium"},
+            "multipart",
+        ),
+        (f"/api/inventory/fixtures/{fixture.id}/scan/", {}, "json"),
+        (
+            "/api/inventory/fixture-refill-requests/",
+            {"fixture": str(fixture.id), "notes": "empty"},
+            "json",
+        ),
+        (
+            "/api/reorders/requests/",
+            {"item": str(item.id), "quantity": 5, "requested_by": "anon"},
+            "json",
+        ),
+    ]

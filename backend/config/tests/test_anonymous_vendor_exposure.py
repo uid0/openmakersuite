@@ -53,6 +53,20 @@ def _fill(objs):
         "__uuid__": str(objs["item"].id),
         "fixture_pk": str(objs["fixture"].id),
         "__default_pk__": str(objs["supplier"].id),
+        # A DRF router pk is untyped, so one value cannot serve every table.
+        # Without these the item and kit detail routes 404 and the crawl reports
+        # them clean without ever having read one.
+        "__pk_by_prefix__": {
+            "inventory/^items/": str(objs["item"].id),
+            "inventory/^kits/": str(objs["item"].id),
+            "inventory/^fixtures/": str(objs["fixture"].id),
+            "inventory/^price-history/": str(objs["price_history"].id),
+            "inventory/^item-suppliers/": str(objs["link"].id),
+            "inventory/^supplier-agreements/": str(objs["agreement"].id),
+            "inventory/^usage-logs/": str(objs["usage_log"].id),
+            "reorders/^purchase-orders/": str(objs["po"].id),
+            "reorders/^requests/": str(objs["reorder_request"].id),
+        },
         "item_id": str(objs["item"].id),
         "location_id": str(objs["location"].id),
         "supplier_id": str(objs["supplier"].id),
@@ -264,6 +278,88 @@ def test_anonymous_scan_to_reorder_still_works_end_to_end(vendor_fixture, anonym
     assert filed.status_code == 201, f"anonymous reorder refused: {filed.content!r}"
     assert ReorderRequest.objects.count() == before + 1
     assert sentinels_in(filed) == [], "the reorder receipt disclosed vendor data"
+
+
+@pytest.mark.integration
+def test_no_anonymous_write_names_a_vendor_in_its_reply(vendor_fixture, anonymous):
+    """The half the GET crawl cannot reach, exercised by hand.
+
+    A write's REPLY is a read, and this is where the crawl's blind spot cost
+    something real: ``dispatch_scan`` answered an anonymous UPC scan with the
+    vendor's name. Every anonymous write is issued here and its reply checked.
+    """
+    from config.tests.vendor_exposure_probe import anonymous_write_surfaces
+
+    disclosures = []
+    for path, body, fmt in anonymous_write_surfaces(vendor_fixture):
+        response = anonymous.post(path, body, format=fmt)
+        leaked = [
+            name
+            for name in sentinels_in(response)
+            # ``raw_payload`` echoes the caller's own scan back at them, which
+            # they already had. Everything else is the server telling them
+            # something new.
+            if not (
+                path == "/api/scanner/dispatch/"
+                and name in ("PACKAGE_UPC", "UNIT_UPC")
+                and response.json().get("raw_payload") == VENDOR_SENTINELS[name]
+            )
+        ]
+        if leaked:
+            disclosures.append(f"  {response.status_code} POST {path} -> {', '.join(leaked)}")
+
+    assert not disclosures, "anonymous writes disclosed vendor data:\n" + "\n".join(disclosures)
+
+
+@pytest.mark.integration
+def test_the_scanner_dispatch_names_no_vendor_to_an_anonymous_caller(vendor_fixture, anonymous):
+    """``POST /api/scanner/dispatch/`` — a surface the GET crawl cannot reach.
+
+    It is ``AllowAny`` by design (it is what a barcode gun hits), and scanning a
+    supplier's UPC resolves through ``ItemSupplier``, so the reply carried
+    ``supplier_name`` and ``item_supplier_id``. A UPC is printed on the box —
+    anyone holding one could turn it into the name of the vendor we buy from.
+
+    Found by reading rather than by the crawl, because the crawl issues no
+    writes; recorded here so the gap it represents is closed by a check rather
+    than by an argument.
+    """
+    response = anonymous.post(
+        "/api/scanner/dispatch/",
+        {"payload": VENDOR_SENTINELS["PACKAGE_UPC"]},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.content
+    body = response.json()
+    # What the scan is FOR still works: it resolves to the right item.
+    assert body["item_name"] == PUBLIC_SENTINELS["ITEM_NAME"]
+    assert body["action"] == "inventory_receive"
+    # ...without saying whose barcode it was.
+    assert "supplier_name" not in body
+    assert "item_supplier_id" not in body
+    # Everything except the caller's own scan echoed back in ``raw_payload`` —
+    # they supplied that, so returning it discloses nothing.
+    assert sentinels_in(response) == ["PACKAGE_UPC"]
+    assert body["raw_payload"] == VENDOR_SENTINELS["PACKAGE_UPC"]
+
+
+@pytest.mark.integration
+def test_the_scanner_dispatch_still_names_the_vendor_to_an_operator(vendor_fixture):
+    """CONTROL: receiving is an operator flow and needs the link it resolved."""
+    client = APIClient()
+    client.force_authenticate(user=vendor_fixture["staff"])
+
+    response = client.post(
+        "/api/scanner/dispatch/",
+        {"payload": VENDOR_SENTINELS["PACKAGE_UPC"]},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.content
+    body = response.json()
+    assert body["supplier_name"] == VENDOR_SENTINELS["VENDOR_NAME"]
+    assert body["item_supplier_id"] == vendor_fixture["link"].pk
 
 
 @pytest.mark.integration

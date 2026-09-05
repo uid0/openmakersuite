@@ -169,7 +169,27 @@ class LocationSerializer(serializers.ModelSerializer):
         return None
 
 
-class UsageLogSerializer(serializers.ModelSerializer):
+class UsageLogSerializer(VendorGatedSerializerMixin, serializers.ModelSerializer):
+    """One consumption record — and a snapshot of what the stock cost.
+
+    TWO ANONYMOUS PATHS REACH THIS, which is why the gate is on the serializer
+    rather than on either of them (op-anonymous-read-posture):
+
+    * ``InventoryItemViewSet.log_usage`` is ``AllowAny`` — recording that you
+      took something off a shelf is the other half of the QR-scan flow — and it
+      returns the row it just wrote;
+    * ``InventoryItemDetailSerializer.recent_usage`` nests this on the item
+      payload, which ``retrieve`` serves to anyone.
+
+    ``fields = "__all__"`` means every column ships, and two of them are the
+    vendor's price: ``unit_cost`` is ``InventoryItem.unit_cost`` snapshotted at
+    consume time (the primary supplier's price) and ``total_cost`` is that times
+    the quantity — so publishing either publishes the other. Both are withheld
+    from a caller with no session; the consumption record itself is not.
+    """
+
+    VENDOR_ONLY_FIELDS = ("unit_cost", "total_cost")
+
     class Meta:
         model = UsageLog
         fields = "__all__"

@@ -21,6 +21,8 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
+from inventory.services.vendor_visibility import may_see_vendor_data
+
 from .resolvers import resolve
 from .serializers import ScanDispatchRequestSerializer
 
@@ -57,4 +59,12 @@ def dispatch_scan(request):
     payload = request_serializer.validated_data["payload"]
 
     result = resolve(payload)
-    return Response(result.to_dict(), status=status.HTTP_200_OK)
+    # A UPC scan resolves through ``ItemSupplier``, so the result carries the
+    # vendor's name. This endpoint is ``AllowAny`` and stays that way — it is
+    # the barcode gun's entry point — so the gate is on the two vendor keys
+    # (op-anonymous-read-posture). Everything the scan is FOR (which item, what
+    # action, current stock) reaches every caller.
+    return Response(
+        result.to_dict(include_vendor_data=may_see_vendor_data(request)),
+        status=status.HTTP_200_OK,
+    )

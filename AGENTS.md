@@ -833,6 +833,28 @@ sentinel — so a viewset added later, or one whose `get_permissions` quietly
 widens, fails there. It does NOT read `permission_classes`, and that is the
 point: see below.
 
+**A crawl has blind spots, and this one's cost two real disclosures.** Both were
+found by asking what the instrument could NOT see, and both are now covered:
+
+* **Writes.** A crawl issues no POSTs, so it missed that `scanner/dispatch/`
+  answered an anonymous UPC scan with the vendor's name — and a UPC is printed
+  on the box. Every anonymous write is now exercised by hand from the same
+  fixture (`anonymous_write_surfaces`), which is how `log_usage` returning the
+  cost snapshot was found too.
+* **Fixtures that make a surface look empty.** A nested serializer over an empty
+  relation serialises to `[]` and reads as clean: `recent_usage` on the item
+  payload tested green only because nothing had been consumed. The seed now
+  carries a row for every nesting the gate depends on — usage log, fixture,
+  purchase order, agreement.
+* **A pk that 404s.** A DRF router pk is untyped, so one value cannot serve
+  every table, and a wrong one is SILENT — `/api/inventory/items/<a supplier
+  id>/` 404'd, so the largest vendor payload there is was never fetched. The
+  fill is route-aware now, and the coverage module asserts a floor on requests
+  actually built.
+
+The lesson generalises past this branch: when a check comes back clean, ask what
+it could not have seen.
+
 **`docs/API_PERMISSION_MATRIX.md` NOW RECORDS WHAT IS ENFORCED.** It used to
 snapshot declared `permission_classes` only, so all 103 `(view, action)` entries
 behind a `get_permissions` override were wrong — several with the opposite

@@ -128,6 +128,7 @@ see "Protected media" at the end of this document.
 | --- | --- | --- | --- | --- |
 | POST | `inventory/items/<id>/scan/` | public | Increment scan count when a member scans a QR code. | Required: per-IP throttle + duplicate-submit dedupe. |
 | GET  | `inventory/items/<id>/public/` | public | Public read of scannable item fields (no cost/supplier data). | Not required (read). |
+| POST | `inventory/items/<id>/log_usage/` | public (vendor block withheld) | `AllowAny` — recording that you took something off a shelf is the other half of the QR-scan flow. The reply is a `UsageLogSerializer` row, and that serializer is `fields = "__all__"`, so it carried `unit_cost` (the primary supplier's price, snapshotted at consume time) and `total_cost` (that times the quantity — publishing either reconstructs the other). Both withheld from a caller with no session; the consumption record, the stock movement and the `warning` are unchanged. The SAME serializer is nested on the item payload as `recent_usage`, which `retrieve` serves anonymously, so the gate is on the serializer rather than on either path. |
 | GET  | `inventory/items/<id>/download_card/` | public (vendor block withheld) | Avery 5388 index-card PDF. **Anonymous:** the `Avg Lead` / `Max Lead` lines are omitted — a lead time is vendor data the captain's decision names, and a printed card cannot be recalled. The QR code, name, SKU, location and reorder point are unchanged for everyone. `IndexCardRenderer(include_vendor_data=...)` defaults to False, so an operator surface that should print them says so. The same gate covers `inventory/fixtures/<id>/download_card/`, which renders the refill item through the same renderer. | Not required (read). |
 | GET  | `inventory/items/<id>/kits/` | public (vendor block withheld) | Kits that supply this component — reorder-triage context shown beside stock (op-8n0). Read-only, informational: it never creates an order. **Anonymous:** `supplier_name`, `supplier_sku` and `unit_cost` are ABSENT with `"vendor_data_withheld": true`; which kit, how many it contains and whether it is stocked all remain. | Not required (read). |
 | GET  | `inventory/items/<id>/metrics/` | public (vendor block withheld) | Computed stock metrics row (QOH/QOO/QA/QC/QIT/RP + case shape). Mirrors `retrieve`'s exposure. **Anonymous:** `lead_time_days`, `unit_cost`, `cost_trend`, `last_po_unit_cost` and the two `supplier_scored_without_*` flags are ABSENT, replaced by `"vendor_data_withheld": true`. `case_size` and `is_case_based` stay — a pack size is a shelf fact, not a vendor one (op-c1ke), and the public `current_cases` already depends on it. **Authenticated:** unchanged, which is why the pinned ScanTTY contract survives. | Not required (read). |
@@ -215,6 +216,8 @@ facts in `VENDOR_ONLY_FIELDS`:
 | `InventoryItemDetailSerializer` | the above plus `supplier_details`, `all_suppliers`, `price_trend_summary` |
 | `InventoryMetricsSerializer` (`items/<id>/metrics/`, `items/?with_metrics=1`) | `lead_time_days`, `unit_cost`, `cost_trend`, `last_po_unit_cost`, `supplier_scored_without_price`, `supplier_scored_without_history` |
 | `KitSummarySerializer` (`items/<id>/kits/`) | `supplier_name`, `supplier_sku`, `unit_cost` |
+| `UsageLogSerializer` (`items/<id>/log_usage/` reply, and `recent_usage` nested on the item payload) | `unit_cost`, `total_cost` |
+| `ResolvedScan` (`scanner/dispatch/`) | `supplier_name`, `item_supplier_id` |
 
 Keys are OMITTED, not nulled, and the payload carries
 `"vendor_data_withheld": true` in their place. `null` already means "nothing on
@@ -371,7 +374,7 @@ case shape, reorder point and quantity, hazard information, and the anonymous
 
 | Method | Path | Class | Notes |
 | --- | --- | --- | --- |
-| POST | `scanner/dispatch/` | public | `AllowAny` so the workshop kiosk can scan without a JWT. Read-only: never mutates state — side effects happen via the per-entity endpoints (reorder / asset.scan / location-checkins.create) which enforce their own auth. |
+| POST | `scanner/dispatch/` | public (vendor block withheld) | `AllowAny` so the workshop kiosk can scan without a JWT, and it stays that way. Read-only: never mutates state — side effects happen via the per-entity endpoints (reorder / asset.scan / location-checkins.create) which enforce their own auth. **A UPC payload resolves through `ItemSupplier`, so the reply used to carry `supplier_name` and `item_supplier_id` — and a UPC is printed on the outside of the box, so anyone holding one could turn it into the name of the vendor we buy that item from.** Both keys are withheld from a caller with no session (`ResolvedScan.VENDOR_ONLY_KEYS`, op-anonymous-read-posture); the action, the item, its name and its stock still reach everyone, and a signed-in receiver still gets the link it resolved. `raw_payload` deliberately still echoes the scan — that is the caller's own input. Found by exercising the anonymous WRITE surfaces, not by the GET crawl, which issues no writes. |
 
 ## Notifications (`/api/notifications/`)
 

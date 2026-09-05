@@ -1343,7 +1343,11 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                         "nothing posted to the ledger"
                     )
 
-        data = UsageLogSerializer(usage_log).data
+        # ``context`` is not optional: ``UsageLogSerializer`` withholds the cost
+        # snapshot from a caller it cannot prove is signed in, and FAILS CLOSED,
+        # so a hand-built instance without it hides the figure from an operator
+        # too (op-anonymous-read-posture).
+        data = UsageLogSerializer(usage_log, context=self.get_serializer_context()).data
         # Echo the unit the entry was read in so a caller that sent a pack count
         # can confirm the conversion (``quantity_used`` above is base units).
         data = {

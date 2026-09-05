@@ -91,8 +91,10 @@ def derive_costs(*, unit_cost, package_cost, quantity_per_package, stored=None):
       because editing a SKU or a flag is not a price edit.
     * ``package_cost`` moved to a value — it governs; ``unit_cost`` re-derives.
     * ``package_cost`` cleared and nothing else moved — the authoritative cost is
-      gone, so both clear. That is how an operator says "I no longer know what
-      this costs", and it has to stay sayable.
+      gone, so BOTH clear, at every pack size and on every link shape. That is
+      how an operator says "I no longer know what this costs", and it has to stay
+      sayable; leaving the derived figure standing beside an emptied case price
+      would advertise a price the operator has just withdrawn.
     * ``package_cost`` cleared but ``unit_cost`` MOVED — the changed VALUE wins.
       They emptied one box and typed in the other; discarding what they typed
       because of the box they emptied would be the same silent loss by a
@@ -108,10 +110,7 @@ def derive_costs(*, unit_cost, package_cost, quantity_per_package, stored=None):
       the case price when there is one and the pack size can divide; otherwise
       the stored pair is held exactly as it was. There is no pack size and no
       link shape where clearing it alone destroys the recorded figure, so there
-      is no qualifying clause to state. That is decided in ONE place, above the
-      divide-by-zero guard — three earlier statements of this rule each answered
-      one combination and left a neighbouring one storing NULL, so a second site
-      deciding a cleared unit cost is that mistake repeating. The write response
+      is no qualifying clause to state. The write response
       carries the value it came back as. It follows that a link holding only a
       unit cost cannot have its price cleared through this path at all, not even
       by sending both as null, because an explicitly-null ``package_cost`` is
@@ -123,6 +122,16 @@ def derive_costs(*, unit_cost, package_cost, quantity_per_package, stored=None):
       ``unit_cost``. "The case holds 6, not 3" is a statement about packing, not
       about price; holding the unit price instead would silently multiply a
       recorded case price the supplier never re-quoted.
+
+    BOTH cleared-cost cases are decided TOGETHER, in one block above the
+    divide-by-zero guard, because they are one question — what an emptied box
+    means — and splitting them is how a case gets missed. That is not a
+    hypothetical: three successive statements of the cleared-``unit_cost`` rule
+    each answered one combination and left a neighbour storing NULL, and the
+    fourth put that rule in one place but scoped it to the one column, leaving a
+    cleared ``package_cost`` falling through the guard at a pack size below 1
+    with the derived unit price still standing. A cost supplied as a VALUE is a
+    separate question and stays below the guard, because it needs arithmetic.
     """
     unit_cost = quantize_cost(unit_cost)
     package_cost = quantize_cost(package_cost)
@@ -137,19 +146,25 @@ def derive_costs(*, unit_cost, package_cost, quantity_per_package, stored=None):
     stored_package = quantize_cost(stored.get("package_cost")) if stored is not None else None
     divides = bool(quantity_per_package) and quantity_per_package >= 1
 
-    # THE ONE PLACE a cleared ``unit_cost`` is decided. It sits above the
-    # divide-by-zero guard on purpose: holding performs no arithmetic, so the
-    # guard has no claim on it, and every combination of pack size and surviving
-    # case price is answered here rather than in an arm somewhere below.
-    if (
-        stored is not None
-        and unit_cost is None
-        and stored_unit is not None
-        and package_cost == stored_package
-    ):
-        if stored_package is not None and divides:
-            return from_package(stored_package)
-        return stored_unit, stored_package
+    # THE ONE PLACE a CLEARED COST is decided, for either column. It sits above
+    # the divide-by-zero guard on purpose: clearing and holding perform no
+    # arithmetic, so the guard has no claim on either, and every combination of
+    # pack size and surviving case price is answered here rather than in an arm
+    # somewhere below. Both columns are decided together because they are one
+    # question — what does an emptied box mean — and answering half of it here
+    # left the other half falling through the guard at a pack size below 1.
+    if stored is not None:
+        unit_value_moved = unit_cost is not None and unit_cost != stored_unit
+        package_cleared = package_cost is None and stored_package is not None
+        unit_cleared = unit_cost is None and stored_unit is not None
+
+        if package_cleared and not unit_value_moved:
+            return None, None
+
+        if unit_cleared and package_cost == stored_package:
+            if stored_package is not None and divides:
+                return from_package(stored_package)
+            return stored_unit, stored_package
 
     # The model validates >= 1, but a bypassed validator must not divide by zero.
     if not divides:
@@ -170,19 +185,14 @@ def derive_costs(*, unit_cost, package_cost, quantity_per_package, stored=None):
     # clears first would mean an operator who empties the case-price box AND
     # types a NEW unit price gets NULL/NULL — their typed figure discarded
     # without a word, which is the defect class this whole path is being fixed
-    # for. An echoed unit cost has NOT moved, so it never reaches here: it falls
-    # to the package_moved clear below, and emptying the case price alone still
-    # clears both.
+    # for. An echoed unit cost has NOT moved, so it never reaches here: the
+    # cleared-cost block above answers it, and emptying the case price alone
+    # still clears both.
     if package_moved and package_cost is not None:
         return from_package(package_cost)
 
     if unit_moved and unit_cost is not None:
         return from_unit(unit_cost)
-
-    if package_moved:
-        # The authoritative cost was emptied and nothing else was named: that is
-        # how "I no longer know what this costs" is said, and it has to be sayable.
-        return None, None
 
     if pack_moved:
         if package_cost is not None:

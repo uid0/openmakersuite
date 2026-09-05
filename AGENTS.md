@@ -819,7 +819,10 @@ The rule, decided by the operator and pinned in
   or flag edit is not a price edit.
 - `package_cost` moved — it governs. It is what the shop actually pays, and it is
   the only safe direction: `package -> unit` is the lossy half.
-- `package_cost` cleared — both clear. "No price on file" has to stay sayable.
+- `package_cost` cleared — both clear, at every pack size and on every link
+  shape. "No price on file" has to stay sayable, and a derived unit price left
+  standing beside an emptied case price advertises a figure the operator has just
+  withdrawn.
 - `package_cost` cleared AND a `unit_cost` that MOVED against the stored row in
   the same request — the changed value wins and the case price re-derives from
   it. A value that MOVED beats a clear, whichever box it came from: taking the
@@ -835,8 +838,11 @@ The rule, decided by the operator and pinned in
 - only `unit_cost` cleared — it is a derived figure, so it is NEVER stored as
   NULL: re-derived from the case price where one survives and the pack size can
   divide, and otherwise held exactly as stored. No pack size and no link shape is
-  an exception, and `derive_costs` decides this in one place so none can be
-  missed. The cost of that is one unreachable state, deliberately: a unit-only
+  an exception. `derive_costs` decides BOTH cleared-cost cases — this one and the
+  cleared `package_cost` above it — together in one place, because they are one
+  question and answering half of it there is what left the other half falling
+  through the divide-by-zero guard. The cost of that is one unreachable state,
+  deliberately: a unit-only
   link's price cannot be cleared through this path — set a case price and clear
   that instead, which clears both. The
   write response carries the value it came back as, and the item form's

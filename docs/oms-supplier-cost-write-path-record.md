@@ -452,10 +452,16 @@ TOUCHES NEITHER BOX now sends `unit_cost: null`; `derive_costs` reaches the
 `unit_moved` / `unit_cost is None` clause and re-derives from the named link's
 own surviving `package_cost`, so that link stores exactly what it already held
 and `pricing_changed` files nothing. A link with NO case price to re-derive from
-holds its stored unit cost instead of losing it. A cleared `unit_cost` is decided
-in ONE place in `derive_costs`, above the divide-by-zero guard, and it is never
-stored as NULL at any pack size or link shape — re-derived where a case price and
-a usable pack size allow, held exactly as stored otherwise. That is what makes
+holds its stored unit cost instead of losing it. A cleared cost — EITHER column —
+is decided in ONE place in `derive_costs`, above the divide-by-zero guard. A
+cleared `unit_cost` is never stored as NULL at any pack size or link shape:
+re-derived where a case price and a usable pack size allow, held exactly as
+stored otherwise. A cleared `package_cost` clears BOTH at any pack size or link
+shape, so "no price on file" stays sayable and no derived figure is left
+advertising a price that was just withdrawn. The two are decided together
+because they are one question; deciding only the unit half there is what left a
+cleared case price falling through the guard below a pack size of 1, with the
+stale unit price standing. That is what makes
 "the blank box is safe" true of every link shape and every pack size rather than
 only of the ones that carry both costs. Measured on a link for B at (unit 10.00,
 package 30.00, pack 3) with the box holding A's 3.33: that save used to store

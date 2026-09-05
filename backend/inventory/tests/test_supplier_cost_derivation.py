@@ -745,36 +745,55 @@ class TestInvariantClearingAPriceIsObservable:
         assert history_rows(link) == before
 
     @pytest.mark.parametrize(
-        "stored_unit,stored_package,pack",
+        "cleared,stored_unit,stored_package,pack",
         [
-            (Decimal("3.33"), LOSSY_PACKAGE_COST, LOSSY_PACK_SIZE),
-            (Decimal("5.00"), None, LOSSY_PACK_SIZE),
-            (Decimal("1.00"), Decimal("5.00"), 0),
-            (Decimal("1.00"), None, 0),
+            ("unit_cost", Decimal("3.33"), LOSSY_PACKAGE_COST, LOSSY_PACK_SIZE),
+            ("unit_cost", Decimal("5.00"), None, LOSSY_PACK_SIZE),
+            ("unit_cost", Decimal("1.00"), Decimal("5.00"), 0),
+            ("unit_cost", Decimal("1.00"), None, 0),
+            ("package_cost", Decimal("3.33"), LOSSY_PACKAGE_COST, LOSSY_PACK_SIZE),
+            ("package_cost", Decimal("1.00"), Decimal("5.00"), 0),
         ],
         ids=[
-            "divides-and-survives",
-            "divides-no-survivor",
-            "no-divide-survives",
-            "no-divide-no-survivor",
+            "unit-cleared-divides-and-survives",
+            "unit-cleared-divides-no-survivor",
+            "unit-cleared-no-divide-survives",
+            "unit-cleared-no-divide-no-survivor",
+            "package-cleared-divides",
+            "package-cleared-no-divide",
         ],
     )
-    def test_a_cleared_unit_price_is_never_stored_as_null(
-        self, item, supplier, authenticated_client, stored_unit, stored_package, pack
+    def test_an_emptied_cost_box_means_the_same_thing_at_every_pack_size(
+        self,
+        item,
+        supplier,
+        authenticated_client,
+        cleared,
+        stored_unit,
+        stored_package,
+        pack,
     ):
-        """The whole rule, over every combination it has to answer.
+        """The whole cleared-cost rule, over every combination it has to answer.
 
-        Three earlier statements of "clearing the unit price alone never destroys
-        it" each answered one combination and left a neighbour storing NULL: the
-        re-derive alone was false with no survivor; the hold added for that arm
-        stopped at a usable pack size; extending it to pack < 1 again covered only
-        its no-survivor arm. So this asserts all four — (pack divides / does not)
-        by (a case price survives / does not) — and asserts BOTH halves of the
-        defect in each: the recorded figure is intact AND no price-history row
-        claims the supplier withdrew it.
+        Four earlier statements of it each answered some combinations and left a
+        neighbour wrong: re-deriving alone was false with no survivor; the hold
+        added for that arm stopped at a usable pack size; extending it to pack < 1
+        again covered only its no-survivor arm; and putting the rule in one place
+        scoped it to the unit column, so a cleared case price still fell through
+        the divide-by-zero guard below pack 1 with the derived unit price left
+        standing. So this asserts both columns across (pack divides / does not) by
+        (a case price survives / does not), and asserts the stored pair AND the
+        price history in every case.
 
-        The pairs are self-consistent, so "intact" means the same thing whether
-        the rule re-derives the figure or holds it.
+        The two halves want OPPOSITE history assertions, and conflating them is
+        how the earlier rounds' false NULL/NULL row got written in the first
+        place. Clearing the DERIVED cost changes nothing, so no row may be filed —
+        a row there would claim a withdrawal that did not happen. Clearing the
+        AUTHORITATIVE cost genuinely takes the price to unknown, so a row MUST be
+        filed: that NULL/NULL record is true, and the audit trail is the point.
+
+        The stored pairs are self-consistent, so "intact" means the same thing
+        whether the rule re-derives the unit figure or holds it.
         """
         link = make_link(item, supplier)
         ItemSupplier.objects.filter(pk=link.pk).update(
@@ -787,13 +806,17 @@ class TestInvariantClearingAPriceIsObservable:
         client, _ = authenticated_client
         response = client.patch(
             reverse("itemsupplier-detail", args=[link.pk]),
-            {"unit_cost": None},
+            {cleared: None},
             format="json",
         )
 
         assert response.status_code == 200
-        assert stored_pair(link) == (stored_unit, stored_package, pack)
-        assert history_rows(link) == before
+        if cleared == "unit_cost":
+            assert stored_pair(link) == (stored_unit, stored_package, pack)
+            assert history_rows(link) == before
+        else:
+            assert stored_pair(link) == (None, None, pack)
+            assert history_rows(link) == before + [("updated", None, None, pack)]
 
 
 class TestInvariantASaveWithNoPriceIntentFilesNoHistory:

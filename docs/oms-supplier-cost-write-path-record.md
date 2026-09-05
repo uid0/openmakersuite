@@ -451,7 +451,10 @@ rather than pre-filled from `next.unit_cost` — the CHOSEN supplier's figure, v
 TOUCHES NEITHER BOX now sends `unit_cost: null`; `derive_costs` reaches the
 `unit_moved` / `unit_cost is None` clause and re-derives from the named link's
 own surviving `package_cost`, so that link stores exactly what it already held
-and `pricing_changed` files nothing. Measured on a link for B at (unit 10.00,
+and `pricing_changed` files nothing. A link with NO case price to re-derive from
+holds its stored unit cost instead of losing it — that branch returns the stored
+pair rather than `(None, None)`, which is what makes "the blank box is safe" true
+of every link shape rather than only of the ones that carry both costs. Measured on a link for B at (unit 10.00,
 package 30.00, pack 3) with the box holding A's 3.33: that save used to store
 (3.33, 9.99, 3); with the box blank it stores (10.00, 30.00, 3), untouched.
 **The blank box is what closes this route. It is not cosmetic — re-seeding it

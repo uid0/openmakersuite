@@ -634,6 +634,80 @@ class TestInvariantClearingAPriceIsObservable:
         assert Decimal(response.data["unit_cost"]) == Decimal("4.00")
         assert Decimal(response.data["package_cost"]) == Decimal("12.00")
 
+    def test_clearing_the_unit_price_with_no_case_price_to_re_derive_from_holds_it(
+        self, item, supplier, authenticated_client
+    ):
+        """BEFORE/AFTER: the guarantee held only while a case price survived.
+
+        A link carrying ONLY a unit cost has nothing to re-derive from, and the
+        branch used to hand back NULL/NULL — the recorded price destroyed, plus a
+        history row asserting the supplier withdrew it. "A derived figure cannot be
+        cleared on its own" reads the same way with no survivor: hold what is
+        stored. The shape is legacy (symptom 4's end state) and cannot be created
+        through any write site today, so it is built here with a queryset UPDATE
+        that bypasses ``save()``, which is how such a row reaches disk.
+
+        ``test_clearing_the_case_price_clears_both`` above is the control for the
+        other half: clearing the case price on a link that has both still clears
+        both, so ruling (C)'s clear stays reachable exactly where it is defined.
+        """
+        link = make_link(item, supplier)
+        ItemSupplier.objects.filter(pk=link.pk).update(
+            unit_cost=Decimal("5.00"), package_cost=None, quantity_per_package=1
+        )
+        link.refresh_from_db()
+        assert stored_pair(link) == (Decimal("5.00"), None, 1)
+        before = history_rows(link)
+
+        client, _ = authenticated_client
+        response = client.patch(
+            reverse("itemsupplier-detail", args=[link.pk]),
+            {"unit_cost": None},
+            format="json",
+        )
+
+        assert response.status_code == 200
+        assert stored_pair(link) == (Decimal("5.00"), None, 1)
+        assert history_rows(link) == before
+
+    def test_a_kit_terms_save_with_a_blank_cost_box_holds_a_unit_only_price(
+        self, supplier, staff_client
+    ):
+        """BEFORE/AFTER: the same branch, reached without the operator clearing anything.
+
+        The kit form's cost box seeds from nothing, so it is empty on every load
+        and an ordinary terms save — name a supplier, type a SKU, never touch the
+        cost — ships ``unit_cost: null``. On a link that carries only a unit cost
+        that used to read as "clear it".
+        """
+        component = InventoryItemFactory(image=None, is_kit=False, is_serialized=False)
+        kit = InventoryItemFactory(image=None, is_kit=True, current_stock=0, minimum_stock=0)
+        link = make_link(kit, supplier)
+        ItemSupplier.objects.filter(pk=link.pk).update(
+            unit_cost=Decimal("5.00"), package_cost=None, quantity_per_package=1
+        )
+        link.refresh_from_db()
+        assert stored_pair(link) == (Decimal("5.00"), None, 1)
+        before = history_rows(link)
+
+        response = staff_client.patch(
+            reverse("kit-detail", args=[kit.pk]),
+            {
+                "name": kit.name,
+                "components": [{"component": component.pk, "quantity": 1}],
+                "supplier_terms": {
+                    "supplier": supplier.pk,
+                    "supplier_sku": "KIT-SKU",
+                    "unit_cost": None,
+                },
+            },
+            format="json",
+        )
+
+        assert response.status_code == 200, response.data
+        assert stored_pair(link) == (Decimal("5.00"), None, 1)
+        assert history_rows(link) == before
+
 
 class TestInvariantASaveWithNoPriceIntentFilesNoHistory:
     """The set is wider than the two hand-rolled write sites.

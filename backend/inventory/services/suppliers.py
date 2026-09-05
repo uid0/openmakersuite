@@ -104,8 +104,20 @@ def derive_costs(*, unit_cost, package_cost, quantity_per_package, stored=None):
       is the ordinary case on every form: they all send both boxes and the
       operator edits one.
     * only ``unit_cost`` cleared — it is a derived figure and cannot be cleared
-      on its own, so it comes back. The surfaces that offer the box present it
-      as derived, and the write response carries the value it came back as.
+      on its own, so it comes back: re-derived from the surviving
+      ``package_cost``, or, when there is no case price to re-derive FROM, held
+      exactly as stored. Destroying the figure instead would be the silent loss
+      this function exists to end, and the same rule reads the same way either
+      way — it still cannot be cleared on its own. The write response carries
+      the value it came back as. That leaves ONE thing unreachable, deliberately:
+      a link holding only a unit cost, with no case price, cannot have its price
+      cleared through this path at all, not even by sending both as null, because
+      an explicitly-null ``package_cost`` is indistinguishable from one that was
+      already null. That shape is legacy — symptom 4's end state, fixed going
+      forward, so new links carry both or neither — and the remedy is to set a
+      case price and then clear THAT, which clears both. On presenting the box as
+      derived, the surfaces disagree: see the open list in
+      ``docs/oms-supplier-cost-write-path-record.md``.
     * only the pack size moved — hold ``package_cost`` and re-derive
       ``unit_cost``. "The case holds 6, not 3" is a statement about packing, not
       about price; holding the unit price instead would silently multiply a
@@ -157,9 +169,12 @@ def derive_costs(*, unit_cost, package_cost, quantity_per_package, stored=None):
 
     if unit_moved:
         # The derived box was emptied on its own; it re-derives from the survivor.
+        # With no survivor there is nothing to re-derive FROM, and the same rule
+        # still says a derived figure cannot be cleared on its own — so the stored
+        # pair is held rather than destroyed.
         if package_cost is not None:
             return from_package(package_cost)
-        return None, None
+        return stored_unit, stored_package
 
     if pack_moved:
         if package_cost is not None:

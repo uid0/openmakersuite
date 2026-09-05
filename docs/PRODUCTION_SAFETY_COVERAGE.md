@@ -86,9 +86,9 @@ expectation to the implementation in code and identifies the gaps.
 
 | Endpoint | Matrix expectation | Implementation | Status |
 | --- | --- | --- | --- |
-| `POST /api/auth/register/` | Account-creation throttle. | `backend/auth_views.py:50` is `@permission_classes([AllowAny])`; no throttle, no dedupe. | Gap |
-| `POST /api/auth/login/` | Login-attempt throttle. | `backend/auth_views.py:102` is `@permission_classes([AllowAny])`; no throttle. | Gap |
-| `POST /api/auth/refresh/` | Refresh throttle. | `backend/auth_views.py:158` is `@permission_classes([AllowAny])`; no throttle. | Gap |
+| `POST /api/auth/register/` | Account-creation throttle. | `backend/auth_views.py`'s `register_user` is `@permission_classes([AllowAny])`; no throttle, no dedupe. | Gap |
+| `POST /api/auth/login/` | Login-attempt throttle. | `backend/auth_views.py`'s `login_user` is `@permission_classes([AllowAny])`; no throttle. | Gap |
+| `POST /api/auth/refresh/` | Refresh throttle. | `backend/auth_views.py`'s `refresh_token` is `@permission_classes([AllowAny])`; no throttle. | Gap |
 | `POST /api/auth/passkey/register/` (begin) | Required on registration. | Begin endpoint accepts anonymous callers; assertion step is signed. | Partial — signed assertion mitigates replay; registration begin is unthrottled. |
 | `POST /api/inventory/items/<id>/scan/` | Idempotent timestamp update (no business state). | `backend/inventory/views.py:813` updates `last_scanned_at`; no throttle. | Acceptable per matrix — idempotent. |
 | `POST /api/inventory/assets/<id>/scan/` | Idempotent timestamp update. | `backend/inventory/views.py:1677` (`@permission_classes([AllowAny])`); idempotent. | Acceptable per matrix. |
@@ -114,6 +114,13 @@ expectation to the implementation in code and identifies the gaps.
 | `POST /api/forgekey/devices/<id>/photo/` | Signed device payload. | `backend/forgekey/views.py` validates the signed payload in the view body. | Mitigated. |
 | `POST /api/forgekey/mqtt-webhook/` | Webhook secret + HMAC. | `backend/forgekey/views.py` validates the HMAC. | Mitigated. |
 | `POST /api/screens/.../heartbeat/` | Per-slug throttle. | `backend/screens/views.py` heartbeat action accepts anonymous callers; no throttle. | Gap |
+
+The three `backend/auth_views.py` rows cite the FUNCTION rather than a line
+number, because line numbers rot: `op-anonymous-read-posture` moved all three
+by about 110 lines. The `backend/inventory/views.py` citations still carry
+line numbers and several are already stale; that decay predates this table's
+last edit and sweeping it is a separate piece of work, deliberately not done
+here. Cite a symbol, not a line, when you touch a row.
 
 ### Cross-cutting controls
 

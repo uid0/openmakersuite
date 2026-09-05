@@ -786,22 +786,32 @@ could not make functional changes — NOT declined.
 
 ### Vendor identity and vendor pricing are behind a login (op-anonymous-read-posture)
 
+The captain's decision: vendor names and vendor pricing are always behind user
+auth. That covers vendor names, supplier SKUs, supplier UPCs, lead times, and
+every form of vendor money, on every surface. WHICH keys that is on each
+payload, which media prefixes are gated and what stays open with its reason are
+owned by [`docs/API_PERMISSION_MATRIX.md`](docs/API_PERMISSION_MATRIX.md); the
+branch's own evidence is in
+[`docs/oms-anonymous-read-posture-record.md`](docs/oms-anonymous-read-posture-record.md).
+What follows is only what a future session needs and cannot derive.
+
 `inventory.services.vendor_visibility` is the ONE answer to "may this caller see
 vendor data". It is the sibling of `supplier_selection` and `pack_size` and the
 same discipline: it decides WHO is asking; each serializer decides WHICH of its
 own keys are vendor facts, in its `VENDOR_ONLY_FIELDS`. It FAILS CLOSED, so a
 serializer built without `context` restricts rather than discloses — which means
-a view that hand-builds one MUST pass `self.get_serializer_context()`. That trap
+a view that hand-builds one MUST pass `self.get_serializer_context()`, and one
+that forgets silently withholds vendor data from a signed-in operator. That trap
 is live: `_annotate_metrics` was a `@staticmethod` and had to stop being one.
 
-Two shapes, and which a route gets is not a style choice:
-
-* an endpoint whose every row IS vendor data is closed outright —
-  `inventory/{suppliers,supplier-agreements,item-suppliers,price-history}/` and
-  `reorders/purchase-orders/`, all now `IsAuthenticated` for reads too;
-* an endpoint the anonymous QR-scan flow runs on keeps `AllowAny` and withholds
-  the FIELDS — the item payload, `metrics`, `kits`, `download_card`, and
-  `reorders/analytics/transparency/`.
+Two shapes, and which a route gets is not a style choice: an endpoint whose
+every row IS vendor data is CLOSED OUTRIGHT; an endpoint the anonymous QR-scan
+flow or the public transparency page runs on keeps `AllowAny` and WITHHOLDS THE
+FIELDS — the same shape `dashboard/inventory-summary/` already uses for its
+valuation. Closing a scan-path endpoint is the wrong end of it: anonymous
+scanning is a designed feature, and anonymous scan-to-reorder and issue
+reporting are pinned end to end in
+`config/tests/test_anonymous_vendor_exposure.py`.
 
 **Keys are OMITTED, not nulled**, and the payload carries
 `vendor_data_withheld: true`. `null` already means "nothing on file" here
@@ -817,53 +827,20 @@ same reason the server drops the keys.
 withheld because `current_stock` is public beside it. `quantity_per_package` /
 `case_size` are NOT: a pack size is a shelf fact, which is the call op-c1ke
 already made for `current_cases`, and anonymous reorder sizing depends on it.
-The transparency feed keeps its aggregate totals and `po_number` — a total names
-no vendor and `po_number` is ours, unlike `supplier_order_number` — and withholds
-`ReorderRequest.order_number`, operator-typed free text that holds the vendor's
-reference as often as not.
+An ambiguous field falls closed — `ReorderRequest.order_number` is
+operator-typed free text that holds the vendor's reference as often as not,
+while `PurchaseOrder.po_number` is ours, with `supplier_order_number` beside it
+as the vendor's. The full exclusion list, each with its reason, is the matrix's.
 
-**What must not break, and is pinned:** anonymous scan-to-reorder and issue
-reporting, end to end, in
-`config/tests/test_anonymous_vendor_exposure.py`. If you find yourself requiring
-a login on the scan path, you have the wrong end of it.
-
-**The gate is a crawl, not a list.** That module walks the live URL conf, issues
-real unauthenticated requests, and fails on any response carrying a seeded vendor
-sentinel — so a viewset added later, or one whose `get_permissions` quietly
-widens, fails there. It does NOT read `permission_classes`, and that is the
-point: see below.
-
-**A crawl has blind spots, and this one's cost two real disclosures.** Both were
-found by asking what the instrument could NOT see, and both are now covered:
-
-* **Writes.** A crawl issues no POSTs, so it missed that `scanner/dispatch/`
-  answered an anonymous UPC scan with the vendor's name — and a UPC is printed
-  on the box. Every anonymous write is now exercised by hand from the same
-  fixture (`anonymous_write_surfaces`), which is how `log_usage` returning the
-  cost snapshot was found too.
-* **Fixtures that make a surface look empty.** A nested serializer over an empty
-  relation serialises to `[]` and reads as clean: `recent_usage` on the item
-  payload tested green only because nothing had been consumed. The seed now
-  carries a row for every nesting the gate depends on — usage log, fixture,
-  purchase order, agreement.
-* **A pk that 404s.** A DRF router pk is untyped, so one value cannot serve
-  every table, and a wrong one is SILENT — `/api/inventory/items/<a supplier
-  id>/` 404'd, so the largest vendor payload there is was never fetched. The
-  fill is route-aware now, and the coverage module asserts a floor on requests
-  actually built.
-
-The lesson generalises past this branch: when a check comes back clean, ask what
-it could not have seen.
-
-**`docs/API_PERMISSION_MATRIX.md` NOW RECORDS WHAT IS ENFORCED.** It used to
-snapshot declared `permission_classes` only, so all 103 `(view, action)` entries
-behind a `get_permissions` override were wrong — several with the opposite
-meaning — and it was cited as evidence that a screen was anonymously readable
-when it was not. `_perm_names` resolves the real answer now, applying any
-`@action(permission_classes=[...])` first the way DRF applies route
-`initkwargs`; skipping that step reports the class default for every decorated
-action. Treat the matrix as evidence again, but confirm anything load-bearing
-with a request.
+**The gate is a crawl, not a list.** `config/tests/test_anonymous_vendor_exposure.py`
+walks the live URL conf, issues real unauthenticated requests, and fails on any
+response carrying a seeded vendor sentinel — so a viewset added later, or one
+whose `get_permissions` quietly widens, fails there. It does NOT read
+`permission_classes`, and that is the point: a matrix that snapshots declared
+classes misreports every `get_permissions` override by construction, which is
+how a screen was once reported anonymously readable when it was not. The matrix
+resolves what is ENFORCED now and is evidence again, but confirm anything
+load-bearing with a request.
 
 **A `FileField` URL is answered by nginx, not Django.** No `permission_classes`
 change reaches `/media/`. `config.protected_media.VENDOR_MEDIA_PREFIXES` owns
@@ -874,40 +851,31 @@ under `if settings.DEBUG` — a rule that exists only in development is how the
 dev server and production came to disagree about who may read an invoice.
 
 **THE UNIT OF THAT DERIVATION IS AN UPLOAD FIELD, NOT A URL PREFIX**, and this
-is the part worth carrying forward. The first pass answered "which prefixes have
-I already seen?" and stopped at four; asking "where can a vendor document be
-STORED?" over every `upload_to` under `backend/` found five more, including a
-callable-valued one a string-literal sweep cannot see and two roots fed by the
-Postmark inbound webhook, where the contents are whatever a vendor emailed in
-and cannot be narrowed by argument. Per this file's own "when a hand sweep
-misses TWICE, build the gate" rule, the classification is now enforced rather
-than remembered: `backend/config/tests/test_upload_field_classification.py`
-walks the tree with the AST and fails on any `upload_to` that is neither gated
-nor carried in its `OPEN_PREFIXES` with a written reason. Add an upload field
-and that test tells you to classify it.
+is the part worth carrying forward. Answering "which prefixes have I already
+seen?" stops early; asking "where can a vendor document be STORED?" over every
+`upload_to` under `backend/` reaches the callable-valued fields a string-literal
+sweep cannot see and the roots fed by inbound mail, whose contents are whatever
+a vendor emailed in and cannot be narrowed by argument. Per this file's own
+"when a hand sweep misses TWICE, build the gate" rule, the classification is
+enforced rather than remembered:
+`backend/config/tests/test_upload_field_classification.py` walks the tree with
+the AST and fails on any `upload_to` that is neither gated nor carried in its
+`OPEN_PREFIXES` with a written reason. Add an upload field and that test tells
+you to classify it.
 
 **A CHECK THAT CANNOT FAIL IS WORSE THAN NO CHECK**, because it reads as
-evidence. This branch produced nine, in three shapes: checks that ASSERTED
-NOTHING (the nginx refusal remedy enforced nowhere; a write-surface list whose
-docstring called it derived while the body returned eleven literals; an
-undecodable-PDF branch whose comment said it reported); checks GUARDED ON
-SOMETHING ALWAYS TRUE (`sys.modules` holds `rest_framework.serializers` no
-matter what; a first-party path filter that skips every app on a `/tmp` vs
-`/private/tmp` mismatch and passes having inspected nothing); and checks that
-READ NOTHING (a crawl 404ing on an untyped router pk, a nested serializer over
-an empty relation, a fixture feeding a signed-in payload to a logged-out
-render). Two habits catch all three and both are cheap: MUTATION-PROVE a new
-guard against the exact reversion it names — make the reversion, watch it fail,
-restore — and give every derived set an ANTI-VACUITY FLOOR, a floor on how much
-it reached (`statuses[200] >= 50`) or a known member it must contain
-(`inventory.SupplierAgreement.document`). This is not tidying: three of this
-branch's real disclosures were found only after a vacuous check was repaired.
-
-**ScanTTY is unaffected.** Verified against `uid0/scantty` `main` at
-`ca71ba2a` (SHA confirmed through the GitHub API): its root shows the login
-screen unless a token is cached (`internal/tui/app.go:139`), every request from
-a screen under it carries `Authorization: Bearer`, and it never fetches
-`/media/`. No key was renamed or removed, so no contract moved.
+evidence. Three shapes recur: checks that ASSERT NOTHING, checks GUARDED ON
+SOMETHING ALWAYS TRUE, and checks that READ NOTHING — a crawl 404ing on an
+untyped router pk, a nested serializer over an empty relation, a fixture feeding
+a signed-in payload to a logged-out render. Two habits catch all three and both
+are cheap: MUTATION-PROVE a new guard against the exact reversion it names —
+make the reversion, watch it fail, restore — and give every derived set an
+ANTI-VACUITY FLOOR, a floor on how much it reached (`statuses[200] >= 50`) or a
+known member it must contain (`inventory.SupplierAgreement.document`). This is
+not tidying: three of this branch's real disclosures were found only after a
+vacuous check was repaired, and the count and the case histories are in the
+branch record. The lesson generalises: when a check comes back clean, ask what
+it could not have seen.
 
 ### oms-supplier-terms-write-path — the DERIVATION is closed; some surfaces are not
 

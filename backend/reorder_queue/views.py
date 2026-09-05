@@ -417,10 +417,7 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         if not cls._is_reorder_approver(user, reorder.item):
             return False
 
-        reorder.status = ReorderRequest.Status.APPROVED
-        reorder.reviewed_by = user
-        reorder.reviewed_at = timezone.now()
-        reorder.save(update_fields=["status", "reviewed_by", "reviewed_at", "updated_at"])
+        services.approve_request(reorder, user)
         return True
 
     def create(self, request, *args, **kwargs):
@@ -638,11 +635,9 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        reorder.status = ReorderRequest.Status.APPROVED
-        reorder.reviewed_by = request.user
-        reorder.reviewed_at = timezone.now()
-        reorder.admin_notes = request.data.get("admin_notes", reorder.admin_notes)
-        reorder.save()
+        services.approve_request(
+            reorder, request.user, admin_notes=request.data.get("admin_notes", reorder.admin_notes)
+        )
 
         serializer = self.get_serializer(reorder)
         return Response(serializer.data)
@@ -723,11 +718,9 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
     def cancel(self, request, pk=None):
         """Cancel a reorder request."""
         reorder = self.get_object()
-        reorder.status = ReorderRequest.Status.CANCELLED
-        reorder.reviewed_by = request.user
-        reorder.reviewed_at = timezone.now()
-        reorder.admin_notes = request.data.get("admin_notes", reorder.admin_notes)
-        reorder.save()
+        services.cancel_request(
+            reorder, request.user, admin_notes=request.data.get("admin_notes", reorder.admin_notes)
+        )
 
         serializer = self.get_serializer(reorder)
         return Response(serializer.data)
@@ -979,18 +972,14 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         """Stamp a purchase order as SENT and record the transition.
 
         Shared by the manual ``send_to_supplier`` action and the automatic
-        sales-order-number trigger so both paths stay consistent: status -> SENT,
-        ``sent_by``/``sent_at`` stamped, the linked reorder requests synced (both
-        via :func:`services.mark_sent`), and a ``po_send`` audit event recorded.
-        Callers own the DRAFT precondition.
+        sales-order-number trigger. Both, and the admin changelist's bulk
+        action, now go through the one definition of the transition —
+        :func:`services.mark_sent` — which stamps ``sent_by``/``sent_at``, syncs
+        the linked reorder requests AND records the ``po_send`` audit event.
+        This method used to record that event itself; the third caller is why
+        it does not any more. Callers own the DRAFT precondition.
         """
         services.mark_sent(purchase_order, user)
-        record_audit_event(
-            action=PurchaseOrderAuditEvent.Action.PO_SEND,
-            actor=user,
-            purchase_order=purchase_order,
-            metadata={"po_number": purchase_order.po_number},
-        )
 
     @action(detail=False, methods=["post"])
     def create_optimized_order(self, request):

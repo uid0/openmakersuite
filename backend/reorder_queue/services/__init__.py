@@ -61,6 +61,7 @@ from .receiving import (
     serialized_receipt_targets,
     serials_outstanding,
 )
+from .reorder_requests import approve_request, cancel_request
 
 __all__ = [
     "LineEntryError",
@@ -93,6 +94,8 @@ __all__ = [
     "update_reorder_requests_from_po",
     "void_line_item",
     "void_po",
+    "approve_request",
+    "cancel_request",
     "LineReceipt",
     "SerialCapture",
     "build_receiving_worksheet",

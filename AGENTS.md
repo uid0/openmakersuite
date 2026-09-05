@@ -834,7 +834,8 @@ The rule, decided by the operator and pinned in
   ordinary case: every form sends both boxes and the operator edits one.
 - only `unit_cost` cleared — it re-derives, because it is a derived figure:
   from the surviving `package_cost`, or, when the link has no case price to
-  re-derive from, the stored unit cost is HELD rather than destroyed. The cost of
+  re-derive from, the stored unit cost is HELD rather than destroyed — at every
+  pack size, including the `< 1` sizes that run no derivation at all. The cost of
   that is one unreachable state, deliberately: a unit-only link's price cannot be
   cleared through this path — set a case price and clear that instead, which
   clears both. The

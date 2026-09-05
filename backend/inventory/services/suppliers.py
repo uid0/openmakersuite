@@ -106,7 +106,8 @@ def derive_costs(*, unit_cost, package_cost, quantity_per_package, stored=None):
     * only ``unit_cost`` cleared — it is a derived figure and cannot be cleared
       on its own, so it comes back: re-derived from the surviving
       ``package_cost``, or, when there is no case price to re-derive FROM, held
-      exactly as stored. Destroying the figure instead would be the silent loss
+      exactly as stored — at every pack size, including the ``< 1`` sizes that
+      run no derivation at all. Destroying the figure instead would be the silent loss
       this function exists to end, and the same rule reads the same way either
       way — it still cannot be cleared on its own. The write response carries
       the value it came back as. That leaves ONE thing unreachable, deliberately:
@@ -128,6 +129,13 @@ def derive_costs(*, unit_cost, package_cost, quantity_per_package, stored=None):
 
     # The model validates >= 1, but a bypassed validator must not divide by zero.
     if not quantity_per_package or quantity_per_package < 1:
+        if stored is not None and unit_cost is None and package_cost is None:
+            stored_package = quantize_cost(stored.get("package_cost"))
+            # Holding is not arithmetic, so the divide this guard exists to avoid
+            # is not in reach; a cleared unit cost with no survivor is held here
+            # for the same reason it is held below.
+            if stored_package is None:
+                return quantize_cost(stored.get("unit_cost")), stored_package
         return unit_cost, package_cost
 
     def from_package(package):

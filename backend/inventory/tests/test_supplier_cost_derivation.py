@@ -708,6 +708,38 @@ class TestInvariantClearingAPriceIsObservable:
         assert stored_pair(link) == (Decimal("5.00"), None, 1)
         assert history_rows(link) == before
 
+    def test_the_hold_survives_a_pack_size_that_runs_no_derivation_at_all(
+        self, item, supplier, authenticated_client
+    ):
+        """BEFORE/AFTER: the hold is unconditional, including where nothing derives.
+
+        A pack size below 1 short-circuits ``derive_costs`` before any delta
+        logic — the guard that keeps a bypassed validator from dividing by zero.
+        It used to hand back the SUPPLIED pair there, so a cleared unit cost with
+        no case price to fall back on still stored NULL and filed a history row
+        claiming the supplier withdrew the price. ``pack_size`` calls this shape
+        RECORDED_ZERO and ``test_price_guards`` builds one deliberately, so it is
+        a population, not a hypothetical.
+        """
+        link = make_link(item, supplier)
+        ItemSupplier.objects.filter(pk=link.pk).update(
+            unit_cost=Decimal("1.00"), package_cost=None, quantity_per_package=0
+        )
+        link.refresh_from_db()
+        assert stored_pair(link) == (Decimal("1.00"), None, 0)
+        before = history_rows(link)
+
+        client, _ = authenticated_client
+        response = client.patch(
+            reverse("itemsupplier-detail", args=[link.pk]),
+            {"unit_cost": None},
+            format="json",
+        )
+
+        assert response.status_code == 200
+        assert stored_pair(link) == (Decimal("1.00"), None, 0)
+        assert history_rows(link) == before
+
 
 class TestInvariantASaveWithNoPriceIntentFilesNoHistory:
     """The set is wider than the two hand-rolled write sites.

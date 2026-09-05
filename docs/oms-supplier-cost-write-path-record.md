@@ -453,8 +453,10 @@ TOUCHES NEITHER BOX now sends `unit_cost: null`; `derive_costs` reaches the
 own surviving `package_cost`, so that link stores exactly what it already held
 and `pricing_changed` files nothing. A link with NO case price to re-derive from
 holds its stored unit cost instead of losing it — that branch returns the stored
-pair rather than `(None, None)`, which is what makes "the blank box is safe" true
-of every link shape rather than only of the ones that carry both costs. Measured on a link for B at (unit 10.00,
+pair rather than `(None, None)`, and the `quantity_per_package < 1` guard holds
+the same pair for the same case, so the hold is unconditional. That is what makes
+"the blank box is safe" true of every link shape and every pack size rather than
+only of the ones that carry both costs. Measured on a link for B at (unit 10.00,
 package 30.00, pack 3) with the box holding A's 3.33: that save used to store
 (3.33, 9.99, 3); with the box blank it stores (10.00, 30.00, 3), untouched.
 **The blank box is what closes this route. It is not cosmetic — re-seeding it

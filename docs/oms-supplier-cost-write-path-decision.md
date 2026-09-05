@@ -1,0 +1,84 @@
+# Supplier cost write path — the one product decision
+
+Status: **routed to firstmate, awaiting answer.** Everything not depending on
+the answer is being built in parallel.
+
+## What the investigation changed about the question
+
+The brief asks which of `unit_cost` / `package_cost` is authoritative "when they
+disagree". Measured against base, most disagreements are **not ambiguous**, and
+saying so shrinks the decision to two cases.
+
+Both existing write sites hand the model a *partial* picture and the model then
+re-derives from whatever survived. But `ItemSupplier.save()` can read the stored
+row — `pricing_changed()` already does. So the model can compute a **delta**
+against what is stored, and a delta is well defined regardless of whether a form
+*omitted* a field or *echoed it unchanged*. That is precisely the distinction the
+withdrawn attempt could not make at the callers, and it is why the three caller
+rules each reopened the other's defect.
+
+Under a delta rule:
+
+| unit moved | package moved | pack moved | outcome |
+|---|---|---|---|
+| no  | no  | no  | derive nothing — both byte-identical (Invariant 1) |
+| yes | no  | any | **unit governs**, package re-derives — unambiguous |
+| no  | yes | any | **package governs**, unit re-derives — unambiguous |
+| yes | yes | any | **(A) genuinely ambiguous** |
+| no  | no  | yes | **(B) genuinely ambiguous** |
+
+Rows 2 and 3 need no decision, and they are the common case: every form on every
+surface seeds both boxes from the stored row and the operator edits one of them.
+
+## (A) Both costs moved in one request, and they disagree
+
+**Recommendation: `package_cost` governs; `unit_cost` re-derives from it.**
+
+Four independent surfaces already assert this, none of them added by this work:
+
+1. `ItemSupplier.unit_cost.help_text` — "Cost per individual unit from this
+   supplier (**auto-calculated from package cost**)". `package_cost.help_text` —
+   "Total cost for one package from this supplier (**what you actually pay**)".
+2. `inventory/admin.py` — `ItemSupplierAdmin.readonly_fields` contains
+   `unit_cost`; the inline offers `package_cost` for edit and `unit_cost_display`
+   read-only. The admin already treats unit as derived.
+3. `inventory/views.py::_process_cost_data` — "Prefer package_cost if provided".
+4. ScanTTY `internal/omsapi/inventory.go`, remote `main` @ `de380e1` — "if
+   package_cost is set it wins (unit_cost = package_cost / qty)".
+
+Choosing `unit_cost` would make three of those four wrong and would require a
+contract change in a second repo.
+
+The arithmetic agrees. `package -> unit` is the lossy direction (`10.00 / 3` is
+not representable at `decimal_places=2`); `unit -> package` is exact. Letting
+unit govern means an invoice-accurate case price gets overwritten by one
+reconstructed from a rounded unit price — which is exactly the `10.00 -> 9.99`
+defect, symptom 5.
+
+## (B) Only the pack size moved
+
+**Recommendation: hold `package_cost`, re-derive `unit_cost`.**
+
+Correcting "this case actually holds 6, not 3" is a statement about the pack, not
+about what the supplier charges for a case. Holding `unit_cost` fixed instead
+would silently double the recorded case price on a pack-size correction —
+inventing a price the supplier never quoted. This is also the only choice
+consistent with (A), which matters because the brief requires that
+"authoritative" survive a pack-size change.
+
+## (C) Clearing exactly one of the pair — lower stakes, same decision
+
+ScanTTY sends an explicit `null` to clear a cost box (no `omitempty`, documented).
+Today `null` never clears: the surviving cost re-derives the cleared one. That is
+already pinned as a known base behaviour in `AGENTS.md`.
+
+**Recommendation: clearing the authoritative cost (`package_cost`) clears both;
+clearing only the derived cost (`unit_cost`) re-derives it.**
+
+Clearing the case price is the operator saying "I do not know what this costs",
+and "no price on file" must be reachable — that is the whole thesis of the
+falsy-zero-money-guards work this branch follows. Blanking the derived box alone
+is not meaningful, so re-deriving it is right and is also today's behaviour.
+
+Rejected alternative: "clearing either clears both" — an operator blanking only
+the unit box would silently destroy the case price they never touched.

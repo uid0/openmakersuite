@@ -1731,23 +1731,38 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             return ItemSupplier._meta.get_field("quantity_per_package").default
 
     def _create_supplier_relationship(self, item, supplier, data, cost_data, lead_time, quantity):
-        """Create or update the ItemSupplier relationship."""
+        """Create or update the ItemSupplier relationship.
+
+        A cost the request did not carry is OMITTED rather than sent as ``None``.
+        ``ItemSupplier.save()`` reads a cost that moved to ``None`` as "the
+        operator cleared this price", which is the right reading of an explicit
+        null and the wrong reading of an absent key — and ``update_or_create``
+        applies every key in ``defaults`` to a row it finds. This path only ever
+        creates today (it is reached from item CREATE, where no link exists yet),
+        so nothing is clearable here; omitting the key keeps the site honest if
+        that ever stops being true, and keeps it on the same rule as every other
+        writer.
+        """
         package_cost_value, unit_cost_value = cost_data
+
+        defaults = {
+            "supplier_sku": data.get("supplier_sku") or item.sku or str(item.id),
+            "supplier_url": data.get("supplier_url", ""),
+            "average_lead_time": lead_time,
+            "quantity_per_package": quantity,
+            "package_upc": data.get("package_upc", ""),
+            "unit_upc": data.get("unit_upc", ""),
+            "is_primary": True,
+        }
+        if package_cost_value is not None:
+            defaults["package_cost"] = package_cost_value
+        if unit_cost_value is not None:
+            defaults["unit_cost"] = unit_cost_value
 
         ItemSupplier.objects.update_or_create(
             item=item,
             supplier=supplier,
-            defaults={
-                "supplier_sku": data.get("supplier_sku") or item.sku or str(item.id),
-                "supplier_url": data.get("supplier_url", ""),
-                "unit_cost": unit_cost_value,
-                "package_cost": package_cost_value,
-                "average_lead_time": lead_time,
-                "quantity_per_package": quantity,
-                "package_upc": data.get("package_upc", ""),
-                "unit_upc": data.get("unit_upc", ""),
-                "is_primary": True,
-            },
+            defaults=defaults,
         )
 
 

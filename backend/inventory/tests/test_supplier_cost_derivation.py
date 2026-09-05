@@ -1,0 +1,340 @@
+"""The supplier cost write path, stated as invariants rather than as symptoms.
+
+``ItemSupplier.save()`` derives ``unit_cost`` and ``package_cost`` from each
+other. Both columns are ``DecimalField(decimal_places=2)``, so the
+``package -> unit`` direction is LOSSY and the pair does not round-trip:
+
+    package_cost 10.00, quantity_per_package 3
+      unit_cost    = 10.00 / 3 = 3.3333...  stored as 3.33   (a cent is lost)
+      package_cost = 3.33  * 3 =                     9.99    (and never comes back)
+
+Every defect on this path is that one cent escaping. A write site that hands the
+model a PARTIAL picture makes the model re-derive from whatever survived, and the
+re-derivation runs `package -> unit -> package` on values nobody edited.
+
+These tests fix the invariants that must hold at EVERY write site, so the path is
+not patched one symptom at a time. The fixtures deliberately use a pack size that
+does NOT divide the case price evenly — every pre-existing test of this behaviour
+uses ``quantity_per_package=1``, where the derivation is exact and no defect on
+this path is reachable.
+
+Test naming: BEFORE/AFTER marks behaviour this branch moves, CONTROL marks
+behaviour that must NOT move.
+"""
+
+from decimal import Decimal
+
+from django.urls import reverse
+
+import pytest
+
+from rest_framework.test import APIClient
+
+from inventory.models.core import ItemSupplier, PriceHistory
+from inventory.tests.factories import InventoryItemFactory, SupplierFactory
+
+pytestmark = pytest.mark.django_db
+
+
+# The pair that cannot round-trip. 10.00 / 3 -> 3.33 -> 9.99.
+LOSSY_PACKAGE_COST = Decimal("10.00")
+LOSSY_PACK_SIZE = 3
+LOSSY_UNIT_COST = Decimal("3.33")
+
+
+@pytest.fixture
+def item():
+    return InventoryItemFactory(image=None)
+
+
+@pytest.fixture
+def supplier():
+    return SupplierFactory()
+
+
+@pytest.fixture
+def staff_client(django_user_model):
+    """Kits are staff-writable; mirrors the fixture in ``test_kits.py``."""
+    user = django_user_model.objects.create_user(
+        username="cost-staff", password="pw", is_staff=True
+    )
+    client = APIClient()
+    client.force_authenticate(user=user)
+    return client
+
+
+def make_link(item, supplier, **overrides):
+    """A saved link whose stored pair cannot be re-derived from either half."""
+    fields = {
+        "item": item,
+        "supplier": supplier,
+        "supplier_sku": "SKU-ORIGINAL",
+        "supplier_url": "",
+        "unit_cost": None,
+        "package_cost": LOSSY_PACKAGE_COST,
+        "quantity_per_package": LOSSY_PACK_SIZE,
+        "average_lead_time": 7,
+        "is_primary": True,
+    }
+    fields.update(overrides)
+    link = ItemSupplier.objects.create(**fields)
+    link.refresh_from_db()
+    return link
+
+
+def stored_pair(link):
+    link.refresh_from_db()
+    return (link.unit_cost, link.package_cost, link.quantity_per_package)
+
+
+def history_rows(link):
+    return list(
+        PriceHistory.objects.filter(item_supplier=link)
+        .order_by("recorded_at", "pk")
+        .values_list("change_type", "unit_cost", "package_cost", "quantity_per_package")
+    )
+
+
+class TestInvariantTheDerivationIsLossy:
+    """The arithmetic the whole path turns on, pinned so it is never assumed away."""
+
+    def test_the_stored_pair_cannot_be_rebuilt_from_the_unit_cost(self, item, supplier):
+        """CONTROL: this is WHY a partial write corrupts. 10.00 -> 3.33 -> 9.99."""
+        link = make_link(item, supplier)
+
+        assert link.package_cost == Decimal("10.00")
+        assert link.unit_cost == Decimal("3.33")
+        # Re-deriving the case price from the stored unit price loses a cent.
+        assert link.unit_cost * link.quantity_per_package == Decimal("9.99")
+        assert link.unit_cost * link.quantity_per_package != link.package_cost
+
+    def test_a_derived_unit_cost_is_stored_at_the_column_scale(self, item, supplier):
+        """AFTER: what save() leaves in memory equals what the database holds.
+
+        save() assigned ``package_cost / quantity_per_package`` unrounded, so the
+        in-memory row carried 3.333333333333333333333333333 while the row on disk
+        held 3.33. Every reader between save() and a refresh saw a number the
+        database does not have — including record_price_history().
+        """
+        link = ItemSupplier(
+            item=item,
+            supplier=supplier,
+            supplier_sku="SKU-SCALE",
+            package_cost=LOSSY_PACKAGE_COST,
+            quantity_per_package=LOSSY_PACK_SIZE,
+        )
+        link.save()
+
+        in_memory = link.unit_cost
+        link.refresh_from_db()
+        assert in_memory == link.unit_cost
+        assert in_memory.as_tuple().exponent == -2
+
+
+class TestInvariantASaveThatChangesNoPriceMovesNoPrice:
+    """Invariant 1. Editing a SKU, or a flag, is not a price edit."""
+
+    def test_flag_only_save_leaves_both_stored_prices_byte_identical(self, item, supplier):
+        """BEFORE/AFTER: mark_discontinued / void_line_item re-enter the derivation."""
+        link = make_link(item, supplier)
+        before = stored_pair(link)
+
+        fresh = ItemSupplier.objects.get(pk=link.pk)
+        fresh.is_discontinued = True
+        fresh.is_active = False
+        fresh.save()
+
+        assert stored_pair(link) == before
+
+    def test_flag_only_save_writes_no_price_history_row(self, item, supplier):
+        """BEFORE/AFTER: the captain reads this history. A flag edit is not a price.
+
+        ``pricing_changed()`` compared the STORED 3.33 against the freshly
+        re-derived, unrounded 3.3333..., so every save of a link whose case price
+        is not evenly divisible filed an ``updated`` price-history row recording a
+        price change that did not happen.
+        """
+        link = make_link(item, supplier)
+        PriceHistory.objects.filter(item_supplier=link).delete()
+
+        fresh = ItemSupplier.objects.get(pk=link.pk)
+        fresh.is_discontinued = True
+        fresh.save()
+
+        assert history_rows(link) == []
+
+    def test_sku_only_edit_on_the_item_form_leaves_both_prices_byte_identical(
+        self, item, supplier, authenticated_client
+    ):
+        """BEFORE/AFTER: symptom 5. The case price drifted 10.00 -> 9.99."""
+        client, _ = authenticated_client
+        link = make_link(item, supplier)
+        before = stored_pair(link)
+
+        response = client.patch(
+            reverse("itemsupplier-detail", args=[link.pk]),
+            {"supplier_sku": "SKU-EDITED"},
+            format="json",
+        )
+
+        assert response.status_code == 200
+        assert stored_pair(link) == before
+
+    def test_sku_only_edit_that_echoes_the_stored_unit_cost_moves_no_price(
+        self, item, supplier, authenticated_client
+    ):
+        """BEFORE/AFTER: symptom 5 as the forms actually send it.
+
+        Every supplier form seeds both cost boxes from the stored row and sends
+        them back. An echoed unit cost beside an edited SKU is not a price edit,
+        and must not re-derive the case price it was itself rounded from.
+        """
+        client, _ = authenticated_client
+        link = make_link(item, supplier)
+        before = stored_pair(link)
+
+        response = client.patch(
+            reverse("itemsupplier-detail", args=[link.pk]),
+            {"supplier_sku": "SKU-EDITED", "unit_cost": str(LOSSY_UNIT_COST)},
+            format="json",
+        )
+
+        assert response.status_code == 200
+        assert stored_pair(link) == before
+        assert history_rows(link) == [("created", LOSSY_UNIT_COST, LOSSY_PACKAGE_COST, 3)]
+
+
+class TestInvariantAnAbsentValueIsNeverFabricated:
+    """Invariant 3. Absent is not zero, and absent is not the field default."""
+
+    def test_create_with_no_cost_at_all_leaves_both_prices_null(self, item, supplier):
+        """CONTROL: no price on file must stay reachable — it is not a free item."""
+        link = make_link(item, supplier, unit_cost=None, package_cost=None)
+
+        assert link.unit_cost is None
+        assert link.package_cost is None
+
+    def test_kit_terms_that_omit_the_pack_size_do_not_reset_a_recorded_one(
+        self, supplier, staff_client
+    ):
+        """BEFORE/AFTER: symptom 2. ``defaults.setdefault("quantity_per_package", 1)``.
+
+        The kit form does not offer a pack-size box, so the kit write site
+        supplied the model default for it on EVERY save. A recorded pack size of 3
+        was reset to 1, and the unit price then re-derived from the untouched case
+        price at the wrong pack size. Driven through the real kit endpoint, not a
+        copy of its ``defaults`` dict.
+        """
+        component = InventoryItemFactory(image=None, is_kit=False, is_serialized=False)
+        kit = InventoryItemFactory(
+            image=None, is_kit=True, current_stock=0, minimum_stock=0
+        )
+        link = make_link(kit, supplier)
+        before = stored_pair(link)
+
+        response = staff_client.patch(
+            reverse("kit-detail", args=[kit.pk]),
+            {
+                "name": kit.name,
+                "components": [{"component": component.pk, "quantity": 1}],
+                "supplier_terms": {
+                    "supplier": supplier.pk,
+                    "supplier_sku": "KIT-SKU-EDITED",
+                },
+            },
+            format="json",
+        )
+
+        assert response.status_code == 200, response.data
+        link.refresh_from_db()
+        assert link.supplier_sku == "KIT-SKU-EDITED"
+        assert stored_pair(link) == before
+
+
+class TestInvariantOperatorInputIsNotDiscarded:
+    """A price the operator names governs. Neither half is inert."""
+
+    def test_a_typed_unit_cost_is_honoured_on_a_link_that_has_a_case_price(
+        self, item, supplier, authenticated_client
+    ):
+        """BEFORE/AFTER: symptom 3. save() re-derived unit_cost from the stored case
+        price and overwrote what the operator typed, so the box was inert."""
+        client, _ = authenticated_client
+        link = make_link(item, supplier)
+
+        response = client.patch(
+            reverse("itemsupplier-detail", args=[link.pk]),
+            {"unit_cost": "4.00"},
+            format="json",
+        )
+
+        assert response.status_code == 200
+        link.refresh_from_db()
+        assert link.unit_cost == Decimal("4.00")
+        # The case price follows the value the operator named: 4.00 x 3.
+        assert link.package_cost == Decimal("12.00")
+
+    def test_a_derived_case_price_is_persisted_on_a_restricted_update(self, item, supplier):
+        """BEFORE/AFTER: symptom 4. ``update_or_create`` restricts ``update_fields``
+        to its own ``defaults`` keys, so a case price save() derived was computed
+        and then dropped on the floor."""
+        link = make_link(item, supplier, unit_cost=None, package_cost=None,
+                         quantity_per_package=LOSSY_PACK_SIZE)
+
+        ItemSupplier.objects.update_or_create(
+            item=link.item,
+            supplier=link.supplier,
+            defaults={"unit_cost": Decimal("5.00"), "supplier_sku": "SKU-COSTED"},
+        )
+
+        link.refresh_from_db()
+        assert link.unit_cost == Decimal("5.00")
+        assert link.package_cost == Decimal("15.00")
+
+
+class TestInvariantEveryWriteSiteObeysTheSameRule:
+    """Invariant 5. One rule, so a fix at one site is a fix at all of them."""
+
+    def test_the_item_form_write_site_omits_a_cost_the_request_did_not_carry(
+        self, item, supplier
+    ):
+        """BEFORE/AFTER: views.py ``_create_supplier_relationship``.
+
+        It used to put ``"package_cost": None`` in ``defaults`` whenever the
+        request carried only a unit cost. ``update_or_create`` applies every key
+        in ``defaults`` to a row it finds, and ``save()`` reads a cost that moved
+        to ``None`` as "the operator cleared this price" — so the shape that means
+        "absent" would have read as "clear". Pinned against the real method so the
+        two cannot drift apart.
+        """
+        from inventory.views import InventoryItemViewSet
+
+        link = make_link(item, supplier)
+        before = stored_pair(link)
+        view = InventoryItemViewSet()
+
+        view._create_supplier_relationship(
+            item,
+            supplier,
+            {"supplier_sku": "SKU-EDITED"},
+            (None, LOSSY_UNIT_COST),
+            7,
+            LOSSY_PACK_SIZE,
+        )
+
+        link.refresh_from_db()
+        assert link.supplier_sku == "SKU-EDITED"
+        assert stored_pair(link) == before
+
+    def test_a_sku_edit_moves_no_price_through_the_kit_write_site(self, item, supplier):
+        """BEFORE/AFTER: serializers.py ``_apply_supplier_terms``'s partial write."""
+        link = make_link(item, supplier)
+        before = stored_pair(link)
+
+        ItemSupplier.objects.update_or_create(
+            item=item,
+            supplier_id=supplier.pk,
+            defaults={"supplier_sku": "KIT-EDITED", "is_primary": True},
+        )
+
+        assert stored_pair(link) == before

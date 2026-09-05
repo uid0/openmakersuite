@@ -1536,38 +1536,62 @@ class ItemSupplier(models.Model):
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Derive cost fields, then delegate the primary-flag + price-history side effects.
 
-        Cost derivation (``unit_cost``/``package_cost``) is a pure local
-        invariant and stays here. The single-primary enforcement and
-        :class:`PriceHistory` write are grouped into one ``transaction.atomic``
-        block and delegated to :mod:`inventory.services.suppliers` (gh #887,
-        AC-2) so a failure can't leave a demoted sibling without the save, or a
-        saved row without its history entry. Order is preserved exactly:
-        demote siblings, snapshot the pre-save pricing, save, then record.
+        Cost derivation is stated once, in
+        :func:`inventory.services.suppliers.derive_costs`, and applied HERE
+        rather than at the write sites. ``unit_cost`` and ``package_cost`` are
+        derived from each other, so a caller that names one of them cannot avoid
+        implying something about the other; only ``save()`` sees both what the
+        caller supplied and what is stored, which is what makes "the operator
+        did not touch this price" expressible at all. Three successive attempts
+        to express it at the callers each fixed one case by reopening another —
+        see ``docs/oms-falsy-zero-money-guards-record.md``.
 
-        If package_cost is provided, calculate unit_cost automatically.
-        If only unit_cost is provided (backward compatibility), calculate package_cost.
+        A derived column is added to ``update_fields`` when the caller restricted
+        it, because ``QuerySet.update_or_create`` restricts ``update_fields`` to
+        its own ``defaults`` keys: without this a ``package_cost`` this method
+        derives is computed and then dropped on the floor.
+
+        The single-primary enforcement and :class:`PriceHistory` write are
+        grouped into one ``transaction.atomic`` block and delegated to
+        :mod:`inventory.services.suppliers` (gh #887, AC-2) so a failure can't
+        leave a demoted sibling without the save, or a saved row without its
+        history entry. Order is preserved exactly: demote siblings, snapshot the
+        pre-save pricing, save, then record.
         """
-        # Auto-calculate unit cost from package cost (local invariant)
-        if self.package_cost is not None and self.quantity_per_package > 0:
-            self.unit_cost = self.package_cost / self.quantity_per_package
-        # Backward compatibility: if only unit_cost is provided, calculate package_cost
-        elif (
-            self.unit_cost is not None
-            and self.package_cost is None
-            and self.quantity_per_package > 0
-        ):
-            self.package_cost = self.unit_cost * self.quantity_per_package
-
         from ..services.suppliers import (
+            derive_costs,
             enforce_single_primary,
             pricing_changed,
             record_price_history,
+            stored_pricing,
         )
+
+        stored = stored_pricing(self)
+        before = (self.unit_cost, self.package_cost)
+        self.unit_cost, self.package_cost = derive_costs(
+            unit_cost=self.unit_cost,
+            package_cost=self.package_cost,
+            quantity_per_package=self.quantity_per_package,
+            stored=stored,
+        )
+
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            derived = {
+                name
+                for name, was, now in (
+                    ("unit_cost", before[0], self.unit_cost),
+                    ("package_cost", before[1], self.package_cost),
+                )
+                if was != now
+            }
+            if derived:
+                kwargs["update_fields"] = frozenset(update_fields) | derived
 
         is_new = self.pk is None
         with transaction.atomic():
             enforce_single_primary(self)
-            price_changed = pricing_changed(self)
+            price_changed = pricing_changed(self, stored)
             super().save(*args, **kwargs)
             record_price_history(self, is_new=is_new, price_changed=price_changed)
 

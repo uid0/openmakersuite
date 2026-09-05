@@ -1955,18 +1955,53 @@ class AssetProblemAdmin(admin.ModelAdmin):
 
     actions = ["mark_resolved", "mark_closed"]
 
+    def _settle(self, request, queryset, *, new_status, settleable=None):
+        """Move each selected report to ``new_status``, stamping the resolution.
+
+        The stamp every other route to ``resolved``/``closed`` writes:
+        ``AssetViewSet.resolve_problem`` and ``AssetProblemViewSet.resolve``
+        both take ``closed`` explicitly and set ``resolved_at``/``resolved_by``
+        for it, and ``services.problem_auto_resolve`` — the one function every
+        work-order completion path calls — sets both too. ``mark_closed`` used
+        a bare ``queryset.update(status=...)``, so a report closed from this
+        changelist showed as closed with no resolution date and no resolver on
+        the API and in ScanTTY, which decode both fields; ``mark_resolved``
+        stamped the date and left the resolver blank.
+
+        ``if not problem.resolved_at`` matches the guard on both API routes and
+        the "already-resolved reports are left alone" rule in
+        ``problem_auto_resolve``: closing a report somebody else resolved is a
+        filing change, not a new resolution, so it must not overwrite who did
+        the work. Returns how many rows moved.
+
+        ``settleable`` is the status precondition, or ``None`` for "no
+        precondition" — each action keeps exactly the population it had before,
+        so this change is the stamp and nothing else.
+        """
+        from django.utils import timezone
+
+        from membership.actor import actor_display
+
+        rows = queryset if settleable is None else queryset.filter(status__in=settleable)
+        count = 0
+        for problem in rows:
+            problem.status = new_status
+            if not problem.resolved_at:
+                problem.resolved_at = timezone.now()
+                problem.resolved_by = actor_display(request.user)
+            problem.save()
+            count += 1
+        return count
+
     @admin.action(description="Mark selected as resolved")
     def mark_resolved(self, request, queryset):
         """Mark selected problems as resolved."""
-        from django.utils import timezone
-
-        count = 0
-        for problem in queryset.filter(status=AssetProblem.Status.REPORTED):
-            problem.status = AssetProblem.Status.RESOLVED
-            problem.resolved_at = timezone.now()
-            problem.save()
-            count += 1
-
+        count = self._settle(
+            request,
+            queryset,
+            new_status=AssetProblem.Status.RESOLVED,
+            settleable=(AssetProblem.Status.REPORTED,),
+        )
         self.message_user(
             request,
             f"{count} problem(s) marked as resolved.",
@@ -1975,8 +2010,14 @@ class AssetProblemAdmin(admin.ModelAdmin):
 
     @admin.action(description="Mark selected as closed")
     def mark_closed(self, request, queryset):
-        """Mark selected problems as closed."""
-        count = queryset.update(status=AssetProblem.Status.CLOSED)
+        """Mark selected problems as closed.
+
+        Deliberately unfiltered, as it always was: closing takes a wider set
+        than resolving — filing away a report somebody already resolved is the
+        main use — and narrowing it here would take an action away from
+        operators that this change has no business touching.
+        """
+        count = self._settle(request, queryset, new_status=AssetProblem.Status.CLOSED)
         self.message_user(
             request,
             f"{count} problem(s) marked as closed.",

@@ -658,3 +658,71 @@ class TestSettleStampRule:
         assert problem.status == AssetProblem.Status.CLOSED
         assert problem.resolved_at is not None
         assert problem.resolved_by == (staff.handle or staff.username)
+
+    def test_problem_route_second_resolve_keeps_the_first_resolver(self, staff_client, problem):
+        """A resolve of an already-resolved report is not a second resolution.
+
+        Neither API route carries a status precondition, so a stale detail page
+        or any repeated POST reaches this. Keying the stamp on the target state
+        alone silently replaced the first resolver's name and moment here — the
+        row settled once, and that is the moment the column records.
+        """
+        original = timezone.now() - timedelta(days=3)
+        problem.status = AssetProblem.Status.RESOLVED
+        problem.resolved_by = "dana"
+        problem.resolved_at = original
+        problem.save()
+
+        resp = staff_client.post(
+            f"/api/inventory/asset-problems/{problem.id}/resolve/",
+            {"resolution_notes": "Looked at it again"},
+            format="json",
+        )
+        assert resp.status_code == 200, resp.content
+
+        problem.refresh_from_db()
+        assert problem.status == AssetProblem.Status.RESOLVED
+        assert problem.resolved_by == "dana"
+        assert problem.resolved_at == original
+
+    def test_asset_route_second_resolve_keeps_the_first_resolver(
+        self, staff_client, asset, problem
+    ):
+        original = timezone.now() - timedelta(days=3)
+        problem.status = AssetProblem.Status.RESOLVED
+        problem.resolved_by = "dana"
+        problem.resolved_at = original
+        problem.save()
+
+        resp = staff_client.post(
+            f"/api/inventory/assets/{asset.id}/resolve_problem/",
+            {"problem_id": str(problem.id)},
+            format="json",
+        )
+        assert resp.status_code == 200, resp.content
+
+        problem.refresh_from_db()
+        assert problem.resolved_by == "dana"
+        assert problem.resolved_at == original
+
+    def test_a_settled_report_with_no_stamp_at_all_is_filled(self, staff_client, staff, problem):
+        """The one case where a settled row IS stamped: filling a gap.
+
+        A row damaged by the pre-fix bulk write sits settled carrying no
+        ``resolved_at``. Writing one is filling a hole, not taking a name.
+        """
+        problem.status = AssetProblem.Status.RESOLVED
+        problem.resolved_by = ""
+        problem.resolved_at = None
+        problem.save()
+
+        resp = staff_client.post(
+            f"/api/inventory/asset-problems/{problem.id}/resolve/",
+            {"status": AssetProblem.Status.CLOSED},
+            format="json",
+        )
+        assert resp.status_code == 200, resp.content
+
+        problem.refresh_from_db()
+        assert problem.resolved_at is not None
+        assert problem.resolved_by == (staff.handle or staff.username)

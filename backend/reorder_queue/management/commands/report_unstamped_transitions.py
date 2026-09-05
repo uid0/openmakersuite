@@ -10,8 +10,9 @@ dropped the MOMENT:
   * "Approve selected requests"         set ``status``/``reviewed_by``, not ``reviewed_at``
   * "Cancel selected requests"          set ``status``/``reviewed_by``, not ``reviewed_at``
 
-The code is fixed. This command names the rows written BEFORE the fix, because
-the consequence outlived the bug: ``services.receiving.create_lead_time_log``
+Every WORKFLOW route is fixed. This command names the rows those bulk writes
+left behind, because the consequence outlived the bug:
+``services.receiving.create_lead_time_log``
 returns early on a falsy ``sent_at``, so when one of those orders was delivered
 NO ``LeadTimeLog`` was written — and that table is what
 ``inventory.services.supplier_selection``'s performance term scores suppliers
@@ -62,6 +63,15 @@ never be read as covering something narrower or broader than it does:
     clean records damaged, so they are excluded and the order count is a FLOOR.
     The output says so on the line beside the number.
 
+It is a signature, so it is not a historical set. Read
+:func:`orders_sent_without_a_moment` before treating a future count as pre-fix
+rows only: ``status``, ``sent_at`` and ``sent_by`` remain writable on
+``PurchaseOrderSerializer``, so a ``PATCH {"status": "sent"}`` can still land
+the order shape today. REPORTED, NOT FIXED — the sibling entity already closed
+that door via ``read_only_fields`` (op-xj1i), but narrowing a writable field on
+the purchase-order API is an operator-visible contract change and a product
+decision, not a review's.
+
 This command is deliberately, permanently READ-ONLY. There is no ``--fix`` and
 no ``--backfill``: there is nothing truthful to write. Do not add one.
 
@@ -110,11 +120,33 @@ REQUEST_SIGNATURE = "reviewed_by set, reviewed_at NULL"
 def orders_sent_without_a_moment():
     """Purchase orders that reached the supplier with no ``sent_at``.
 
-    The population, not the cause: this is every route that could produce the
-    shape, and the pre-fix admin action is the only one in the code that did
-    (``services.mark_sent`` has always stamped it, and the API's send refuses a
-    non-DRAFT order, so such a row could never be re-stamped by a later send).
-    A row edited directly in the database would land here too.
+    THE SHAPE, NOT A CLOSED HISTORICAL SET. This finds rows carrying the damage
+    signature whenever they were written, and a non-zero count next quarter is
+    NOT automatically a count of pre-fix rows. Two routes can still produce the
+    shape today:
+
+      * a direct database edit;
+      * ``PATCH /api/reorders/purchase-orders/<id>/`` with
+        ``{"status": "sent"}``. ``PurchaseOrderSerializer.read_only_fields`` is
+        ``["po_number", "updated_at"]``, so ``status``, ``sent_at`` and
+        ``sent_by`` are all writable, and ``perform_update``'s auto-send does
+        not catch it — ``_auto_transition_to_sent`` returns immediately on an
+        order that is no longer DRAFT. The row lands SENT with a null
+        ``sent_at``, no ``po_send`` event and no reorder-request sweep, and its
+        delivery writes no ``LeadTimeLog``: the whole chain this branch closed
+        on the admin path, reachable through the API.
+
+    That second one is REPORTED, NOT FIXED here. The sibling entity already
+    shut the same door — ``ReorderRequestSerializer.read_only_fields`` carries
+    ``status``/``reviewed_by``/``reviewed_at``/``ordered_at`` for exactly this
+    reason (op-xj1i) — so the shape of the fix is known, but narrowing a
+    writable field on the purchase-order API is an operator-visible contract
+    change and a separate product decision, not a review's to make.
+
+    What IS closed: every workflow route. ``services.mark_sent`` has always
+    stamped ``sent_at`` and now records the send inside one transaction, the
+    API's send action refuses a non-DRAFT order, and the admin changelist goes
+    through the service.
     """
     return (
         PurchaseOrder.objects.filter(status__in=SENT_ONWARD_STATUSES, sent_at__isnull=True)
@@ -267,6 +299,12 @@ class Command(BaseCommand):
             "  this number is therefore a FLOOR: an order sent before the fix and "
             "since cancelled or voided is not counted here, because its null "
             "sent_at can no longer be told apart from one that never went out."
+        )
+        self.stdout.write(
+            "  and it is not necessarily historical: status/sent_at are still "
+            "writable on the purchase-order API, so a PATCH setting status=sent "
+            "can land this shape today. See the module docstring — REPORTED, "
+            "NOT FIXED."
         )
         for row in payload["orders_sent_without_sent_at"]:
             name = row["po_number"] or "#{}".format(row["id"])

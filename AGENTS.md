@@ -971,15 +971,23 @@ The rules that follow:
   fact-set that is only true whole must not be able to commit half of itself,
   or a failed send leaves exactly the incomplete transition the set exists to
   prevent. A caller that transitions several rows gets one unit per row.
-- **Stamping is not the same obligation as filing.** `settle_problem` derives
-  this from the target state rather than from a flag the caller passes:
-  settling into `resolved` restamps `resolved_at`/`resolved_by` unconditionally,
-  because a recurrence still carries the previous occurrence's stamp and
-  inheriting it dates today's work months ago; settling into `closed` fills the
-  stamp only when absent, because filing away somebody else's resolution must
-  not steal their credit. Do not collapse the two, and do not re-derive either
-  half at a call site. `resolve_problems_for_work_order` is documented as
-  consistent with the rule rather than calling it, and says why.
+- **Derive a stamp's condition from what the column MEANS, and the meaning is
+  usually about the SOURCE state.** `resolved_at`/`resolved_by` record when a
+  report ENTERED settlement, so `settle_problem`'s one predicate is
+  `problem.status not in {resolved, closed} and new_status in {resolved,
+  closed}` — read before the new status is assigned. Two earlier drafts of this
+  rule keyed on the TARGET and each bought one bug: "closing preserves" left a
+  months-old stamp on a report reopened after a recurrence, and "resolving
+  restamps" then wiped the first resolver when an already-resolved report was
+  resolved again (no API route has a status precondition, so a stale detail
+  page reaches it). One arm is deliberate on top of that: `or not resolved_at`
+  fills a settled row that carries no stamp at all, because filling a gap left
+  by the pre-fix bulk write is not overwriting anybody. Every writer calls the
+  one function — both `AssetProblem` API routes, `LocationProblemViewSet`,
+  the admin actions, and `resolve_problems_for_work_order`. Do not re-derive
+  either half at a call site; the sibling `LocationProblem` route kept its own
+  copy one commit longer than the rest and that is exactly where the stale
+  stamp survived.
 
 `reorder_queue/management/commands/report_unstamped_transitions.py` names the
 rows written before the fix. **Key such a report on the DAMAGE SIGNATURE, not
@@ -998,6 +1006,18 @@ recorded.** `order_date` is a different, editable fact and `updated_at` has been
 overwritten; back-filling either into `LeadTimeLog` would put invented numbers
 into the column that chooses suppliers, which is worse than the honest gap
 (`DeliveryRecord.factor` already returns 1 for "no history" on purpose).
+
+**A report keyed on a signature is not a report on a closed historical set**,
+and must not read as one. `status`/`sent_at`/`sent_by` are still writable on
+`PurchaseOrderSerializer` (`read_only_fields` is `po_number`/`updated_at`
+only), so `PATCH {"status": "sent"}` still lands a SENT order with a null
+`sent_at` — no `po_send` row, no request sweep, no `LeadTimeLog` on delivery.
+REPORTED, NOT FIXED: `ReorderRequestSerializer` closed the identical door with
+`read_only_fields` (op-xj1i), so the fix is known, but narrowing a writable
+field on the purchase-order API is an operator-visible contract change and a
+product decision. The command's docstring and its printed output both say so,
+because a count a reader believes is historical is worse than one they know is
+a live signature.
 
 ### The pre-send boundary: when a PO is still the shop's own document
 

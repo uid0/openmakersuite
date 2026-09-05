@@ -10,9 +10,11 @@ Covers:
 
 import io
 import uuid
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
+from django.utils import timezone
 from django.utils.crypto import get_random_string
 
 import pytest
@@ -485,3 +487,115 @@ class TestLogisticsDashboardLocationProblems:
         body = resp.json()
         assert body["urgent_location_problems"] == 0
         assert body["alert_active"] is False
+
+
+@pytest.mark.django_db
+class TestLocationProblemSettleStampRule:
+    """``resolved_at``/``resolved_by`` record when the row ENTERED settlement.
+
+    The byte-identical sibling of the ``AssetProblem`` routes, and the last
+    writer still carrying a hand-written copy of the old conditional. All four
+    transitions through the real DRF route, because the failure this pins is
+    invisible from the outside: the ``LOCATION_PROBLEM_RESOLVE`` audit row says
+    the resolve happened today while the row itself can be showing a previous
+    occurrence's date, so the two records of one event disagree with no error.
+    """
+
+    def _reported(self, location, **kwargs):
+        return LocationProblem.objects.create(
+            location=location, description="Tap dripping", **kwargs
+        )
+
+    def _resolve(self, client, problem, **body):
+        return client.post(
+            f"/api/inventory/location-problems/{problem.id}/resolve/", body, format="json"
+        )
+
+    def test_reported_to_resolved_restamps_over_a_previous_occurrence(self, admin_client, location):
+        client, user = admin_client
+        stale = timezone.now() - timedelta(days=238)
+        problem = self._reported(
+            location,
+            status=LocationProblem.Status.REPORTED,
+            resolved_by="dana",
+            resolved_at=stale,
+        )
+
+        assert self._resolve(client, problem).status_code == 200
+
+        problem.refresh_from_db()
+        assert problem.status == LocationProblem.Status.RESOLVED
+        assert problem.resolved_by == (user.handle or user.username)
+        assert problem.resolved_at > stale
+
+    def test_resolved_to_resolved_keeps_the_first_resolver(self, admin_client, location):
+        """A second resolve is not a second resolution."""
+        original = timezone.now() - timedelta(days=3)
+        problem = self._reported(
+            location,
+            status=LocationProblem.Status.RESOLVED,
+            resolved_by="dana",
+            resolved_at=original,
+        )
+        client, _ = admin_client
+
+        assert self._resolve(client, problem).status_code == 200
+
+        problem.refresh_from_db()
+        assert problem.status == LocationProblem.Status.RESOLVED
+        assert problem.resolved_by == "dana"
+        assert problem.resolved_at == original
+
+    def test_resolved_to_closed_keeps_the_resolvers_credit(self, admin_client, location):
+        original = timezone.now() - timedelta(days=3)
+        problem = self._reported(
+            location,
+            status=LocationProblem.Status.RESOLVED,
+            resolved_by="dana",
+            resolved_at=original,
+        )
+        client, _ = admin_client
+
+        assert (
+            self._resolve(client, problem, status=LocationProblem.Status.CLOSED).status_code == 200
+        )
+
+        problem.refresh_from_db()
+        assert problem.status == LocationProblem.Status.CLOSED
+        assert problem.resolved_by == "dana"
+        assert problem.resolved_at == original
+
+    def test_reported_to_closed_records_the_settlement(self, admin_client, location):
+        client, user = admin_client
+        problem = self._reported(location, status=LocationProblem.Status.REPORTED)
+
+        assert (
+            self._resolve(client, problem, status=LocationProblem.Status.CLOSED).status_code == 200
+        )
+
+        problem.refresh_from_db()
+        assert problem.status == LocationProblem.Status.CLOSED
+        assert problem.resolved_at is not None
+        assert problem.resolved_by == (user.handle or user.username)
+
+    def test_a_settled_row_with_no_stamp_at_all_is_filled(self, admin_client, location):
+        """The one case where a settled row IS stamped: filling a gap.
+
+        A row damaged by the pre-fix bulk write sits settled with a null
+        ``resolved_at``. Filling that is not overwriting anybody.
+        """
+        client, user = admin_client
+        problem = self._reported(
+            location,
+            status=LocationProblem.Status.RESOLVED,
+            resolved_by="",
+            resolved_at=None,
+        )
+
+        assert (
+            self._resolve(client, problem, status=LocationProblem.Status.CLOSED).status_code == 200
+        )
+
+        problem.refresh_from_db()
+        assert problem.resolved_at is not None
+        assert problem.resolved_by == (user.handle or user.username)

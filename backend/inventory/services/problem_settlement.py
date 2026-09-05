@@ -1,31 +1,48 @@
 """THE rule for stamping a problem report as it reaches a settled state.
 
-``AssetProblem`` is moved to ``resolved``/``closed`` by four writers — the two
-API actions (``AssetProblemViewSet.resolve``, which is the route ScanTTY uses,
-and ``AssetViewSet.resolve_problem``), ``AssetProblemAdmin``'s two changelist
-actions, and :mod:`inventory.services.problem_auto_resolve` for a finished work
-order. Each carried its own copy of the stamp, and the copies disagreed. This
-module holds the one rule they all now apply, because a rule written out four
-times is a rule that will be joined incompletely by the fifth writer.
+A problem report is moved to ``resolved``/``closed`` by five writers — the two
+``AssetProblem`` API actions (``AssetProblemViewSet.resolve``, which is the
+route ScanTTY uses, and ``AssetViewSet.resolve_problem``),
+``LocationProblemViewSet.resolve`` on the sibling model,
+``AssetProblemAdmin``'s two changelist actions, and
+:mod:`inventory.services.problem_auto_resolve` for a finished work order. Each
+carried its own copy of the stamp and the copies disagreed. They all call this
+one rule now, because a rule written out five times is a rule the sixth writer
+will join incompletely.
 
-The rule, in one sentence: **a new resolution restamps, a close preserves.**
+What the columns MEAN, which is what the rule is derived from
+-------------------------------------------------------------
+``resolved_at``/``resolved_by`` record **when the report entered a settled
+state, and who put it there.** That fact is about the SOURCE state, not the
+target — two earlier drafts of this rule reasoned about the target and each got
+one case wrong for it:
 
-  * Settling INTO ``resolved`` asserts that the work has just been done, so it
-    always writes ``resolved_at``/``resolved_by`` for whoever did it now. A
-    report whose ``status`` was edited back to ``reported`` after a previous
-    occurrence still carries that occurrence's stamp — nothing clears it — so
-    inheriting it would show today's fix with a months-old date and somebody
-    else's name, on ``AssetProblemSerializer`` and in ScanTTY, with no error.
-  * Settling into ``closed`` is a FILING change, not a resolution. It fills the
-    stamp only when the report has none, so filing away a report somebody else
-    resolved never takes their credit.
+  * keying on "settling into ``closed``" preserved a stale stamp on a report
+    whose ``status`` had been edited back to ``reported`` after a recurrence, so
+    today's fix showed a months-old date and somebody else's name;
+  * keying on "settling into ``resolved``" then overwrote the FIRST resolver
+    when an already-resolved report was resolved a second time — a stale detail
+    page, or any client re-POSTing the action — and neither API route carries a
+    status precondition.
 
-:func:`resolve_problems_for_work_order` is consistent with this rule rather than
-a caller of it: it only ever settles into ``resolved``, and it stamps
-unconditionally, which is exactly what the rule says a new resolution does. It
-keeps its own loop because it also carries a shared moment across the batch, a
-``SYSTEM_ACTOR`` fallback for an actor-less background completion, an
-``update_fields`` save, and its own open-status filter.
+Read as one predicate on the transition, both cases fall out:
+
+    entering_settlement = status in {reported, in_progress}
+                          and new_status in {resolved, closed}
+
+An entry into settlement always stamps. A move that is already inside
+settlement — ``resolved`` -> ``resolved``, ``resolved`` -> ``closed`` — is a
+filing change, and never overwrites the moment the row actually settled.
+
+The ``or not problem.resolved_at`` arm below is the deliberate exception: a
+settled row carrying a NULL ``resolved_at`` is a legacy row damaged by the
+pre-fix admin action, and filling that gap is right. Filling a gap is not the
+same as overwriting a stamp, and only the first is allowed.
+
+Both models qualify without a branch: ``AssetProblem.Status`` and
+``LocationProblem.Status`` declare the same four members, so the sets are read
+off ``problem.__class__.Status`` the way ``problem_auto_resolve`` already
+duck-types the two.
 """
 
 from __future__ import annotations
@@ -35,33 +52,43 @@ from django.utils import timezone
 from membership.actor import actor_display
 
 
-def settle_problem(problem, *, new_status, actor, save=True):
-    """Move ``problem`` to ``new_status`` and stamp it by the rule above.
+def settle_problem(problem, *, new_status, actor, actor_name="", at=None, save=True):
+    """Move ``problem`` to ``new_status``, stamping it by the rule above.
 
-    ``new_status`` is ``AssetProblem.Status.RESOLVED`` or ``CLOSED``; the caller
-    owns validating it and owns any other field it wants written (an API route
-    sets ``resolution_notes`` before calling). ``actor`` is the performing user,
-    collapsed to the free-text ``resolved_by`` column through
-    :func:`membership.actor.actor_display`.
+    ``new_status`` is the ``RESOLVED`` or ``CLOSED`` member of the report's own
+    ``Status``; the caller owns validating it, owns any status precondition it
+    wants to keep, and owns any other field it writes (an API route sets
+    ``resolution_notes`` before calling).
 
-    Pass ``save=False`` to have the fields set on the instance without a write,
-    for a caller batching its own ``save()``. Returns ``problem``.
+    ``actor`` is the performing user, collapsed to the free-text ``resolved_by``
+    column through :func:`membership.actor.actor_display`; ``actor_name`` is the
+    fallback that function uses when there is no authenticated user, which is
+    how a background completion labels itself ``SYSTEM_ACTOR``. ``at`` pins the
+    moment, for a batch that wants one moment across every row it settles.
+
+    Pass ``save=False`` to have the fields set without a write, for a caller
+    batching its own ``save()``. Returns ``problem``.
     """
+    settled = _settled_statuses(problem)
+    entering_settlement = problem.status not in settled and new_status in settled
+    if entering_settlement or not problem.resolved_at:
+        problem.resolved_at = at or timezone.now()
+        problem.resolved_by = actor_display(actor, name=actor_name)
     problem.status = new_status
-    if _is_new_resolution(problem, new_status) or not problem.resolved_at:
-        problem.resolved_at = timezone.now()
-        problem.resolved_by = actor_display(actor)
     if save:
         problem.save()
     return problem
 
 
-def _is_new_resolution(problem, new_status):
-    """Whether settling into ``new_status`` is a resolution rather than a filing.
+def _settled_statuses(problem):
+    """The report's settled states, read off its own ``Status``.
 
-    Derived from the target state, not from a flag each caller passes: every
-    writer that lands a report in ``resolved`` is claiming the work was done,
-    and every writer that lands it in ``closed`` is filing. A caller cannot get
-    this wrong by describing itself incorrectly.
+    ``reported``/``in_progress`` are the unsettled pair and
+    ``resolved``/``closed`` the settled one, on both ``AssetProblem`` and
+    ``LocationProblem``. Naming the settled half is enough: "not settled" is
+    then every other state the model has, so a status added later defaults to
+    counting as an entry into settlement rather than being silently treated as
+    already-settled and losing its stamp.
     """
-    return new_status == problem.__class__.Status.RESOLVED
+    status = problem.__class__.Status
+    return (status.RESOLVED, status.CLOSED)

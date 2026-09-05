@@ -3934,7 +3934,15 @@ class LocationProblemViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
     def resolve(self, request, pk=None):
-        """Mark this location problem as resolved or closed."""
+        """Mark this location problem as resolved or closed.
+
+        The same stamp as every ``AssetProblem`` route, through the same
+        :func:`inventory.services.problem_settlement.settle_problem`. This is
+        the sibling that kept a hand-written copy of the old conditional one
+        commit longer than the rest, and it showed: the audit row recorded just
+        below says the resolve happened today while the row itself could still
+        be carrying a previous occurrence's date.
+        """
         problem = self.get_object()
         new_status = request.data.get("status", LocationProblem.Status.RESOLVED)
         if new_status not in (LocationProblem.Status.RESOLVED, LocationProblem.Status.CLOSED):
@@ -3948,15 +3956,10 @@ class LocationProblemViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        problem.status = new_status
         problem.resolution_notes = request.data.get(
             "resolution_notes", problem.resolution_notes or ""
         )
-        if not problem.resolved_at:
-            problem.resolved_at = timezone.now()
-            if request.user.is_authenticated:
-                problem.resolved_by = getattr(request.user, "handle", None) or request.user.username
-        problem.save()
+        settle_problem(problem, new_status=new_status, actor=request.user)
 
         record_maintenance_audit_event(
             action=MaintenanceAuditEvent.Action.LOCATION_PROBLEM_RESOLVE,

@@ -86,9 +86,13 @@ still clears both. The reasoning below stands for the case it actually decides.
 
 Four independent surfaces already assert this, none of them added by this work:
 
-1. `ItemSupplier.unit_cost.help_text` — "Cost per individual unit from this
-   supplier (**auto-calculated from package cost**)". `package_cost.help_text` —
-   "Total cost for one package from this supplier (**what you actually pay**)".
+1. `ItemSupplier.unit_cost.help_text` — read "Cost per individual unit from this
+   supplier (**auto-calculated from package cost**)" when this was put to the
+   operator; it now reads "Cost per individual unit from this supplier.
+   **Derived from the package cost**; changing it re-prices the package", which
+   says the same thing and adds what a change to the box does.
+   `package_cost.help_text` is unchanged — "Total cost for one package from this
+   supplier (**what you actually pay**)".
 2. `inventory/admin.py` — `ItemSupplierAdmin.readonly_fields` contains
    `unit_cost`; the inline offers `package_cost` for edit and `unit_cost_display`
    read-only. The admin already treats unit as derived.
@@ -119,8 +123,9 @@ consistent with (A), which matters because the brief requires that
 ## (C) Clearing exactly one of the pair — lower stakes, same decision
 
 ScanTTY sends an explicit `null` to clear a cost box (no `omitempty`, documented).
-Today `null` never clears: the surviving cost re-derives the cleared one. That is
-already pinned as a known base behaviour in `AGENTS.md`.
+On base, `null` never cleared: the surviving cost re-derived the cleared one.
+(`AGENTS.md` recorded that as known base behaviour; its supplier-cost section now
+states the shipped rule instead.)
 
 **Recommendation: clearing the authoritative cost (`package_cost`) clears both;
 clearing only the derived cost (`unit_cost`) re-derives it.**

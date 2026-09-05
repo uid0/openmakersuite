@@ -160,6 +160,11 @@ def seed_vendor_fixture():
         f"{s['AGREEMENT_DOC']}.pdf", ContentFile(b"ZZQQ-AGREEMENT-PDF-BODY"), save=True
     )
 
+    # A PLAIN account: not staff, not a superuser, in no group, with no
+    # membership. The captain's line is "behind user auth", so the control that
+    # matters is that ANY signed-in account sees vendor data — a staff user
+    # would prove a narrower thing than the decision asks for. Named ``staff``
+    # only because it is the PO's ``created_by``; it holds no privilege.
     staff = get_user_model().objects.create_user(
         username="zzqq-buyer", password="zzqq-not-a-real-password"  # nosec B106
     )

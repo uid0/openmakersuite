@@ -113,18 +113,17 @@ def is_vendor_media(relative_path: str) -> bool:
 
 @never_cache
 def media_access_check(request):
-    """``auth_request`` target for nginx: 200 to a signed-in caller, else 403.
+    """``auth_request`` target for nginx: 204 to a signed-in caller, else 403.
 
-    nginx passes the original path in ``X-Original-URI``. When that header names
-    a path OUTSIDE :data:`VENDOR_MEDIA_PREFIXES` this still answers 200 — the
-    prefix decision belongs to the nginx ``location`` blocks, and answering 403
-    for a public file merely because a misconfigured block asked would take down
-    item photos. The header is checked, not trusted: it can only ever widen an
-    answer to 200 for a path nginx had already decided to protect, never narrow
-    one.
+    That is the whole decision this view makes. WHICH paths are gated is decided
+    by the ``location ^~`` blocks in ``nginx/templates/default.conf.template``,
+    which is why nothing here reads a path: nginx only issues the subrequest for
+    a prefix it has already chosen to protect.
 
-    ``never_cache`` because a cached 200 here is an open door for everybody
-    behind the same proxy.
+    ``never_cache`` because a cached allow here is an open door for everybody
+    behind the same proxy;
+    ``config/tests/test_protected_media.py::test_the_auth_request_endpoint_answers_the_way_nginx_needs``
+    asserts both answers and the ``no-cache`` header.
     """
     if request.user.is_authenticated:
         return HttpResponse(status=204)

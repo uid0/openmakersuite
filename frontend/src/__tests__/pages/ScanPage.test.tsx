@@ -1361,40 +1361,33 @@ describe('ScanPage', () => {
     expect(screen.getByText('Their Unit Cost:')).toBeInTheDocument();
   });
 
-  test('BEFORE/AFTER: an unorderable item still says so, in the member\'s words', async () => {
-    await renderAnonymouslyWithChoice({
-      ...baseChoice,
-      supplier_name: null,
-      item_supplier_id: null,
-      basis: null,
-      reason: 'none_orderable',
-    });
-
-    const note = screen.getByTestId('supplier-choice-note');
-    expect(note).toHaveTextContent('This item cannot currently be ordered.');
-    // The operator wording describes the LINKS; a member learns none of that.
-    expect(note).not.toHaveTextContent(/inactive|discontinued|flagged|primary/i);
-    expect(note).not.toHaveTextContent(/Acme|Beta|Gamma/);
-  });
-
-  test('an item nobody sourced is told apart from one whose sources are dead', async () => {
-    await renderAnonymouslyWithChoice({
-      ...baseChoice,
-      supplier_name: null,
-      item_supplier_id: null,
-      basis: null,
-      reason: 'no_suppliers',
-    });
-
-    expect(screen.getByTestId('supplier-choice-note')).toHaveTextContent(
-      'No supplier is listed for this item.'
-    );
-  });
-
-  test('a payload missing the field says nothing to a logged-out visitor', async () => {
+  /**
+   * THE REAL ANONYMOUS PAYLOAD, which is what the two cases here used to miss.
+   *
+   * They fed a logged-out render a `supplier_choice` carrying `reason` and
+   * asserted a member-worded "This item cannot currently be ordered." — a shape
+   * the server stopped producing when `supplier_choice` joined
+   * `InventoryItemSerializer.VENDOR_ONLY_FIELDS` (op-anonymous-read-posture).
+   * The wording they pinned was therefore unreachable, so it has been removed
+   * from `utils/supplierChoice` rather than left looking like a live policy.
+   * What a real logged-out scanner gets is asserted instead: the key is ABSENT,
+   * and the whole supplier block with it.
+   */
+  test('the supplier block is absent entirely for a real anonymous payload', async () => {
     await renderAnonymouslyWithChoice(undefined as unknown as Record<string, unknown>);
 
     expect(screen.queryByTestId('supplier-choice-note')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('supplier-choice-name')).not.toBeInTheDocument();
+    // And no diagnostic copy about the response in its place — "not included in
+    // this response" is a fact about the payload, not about the item.
+    expect(screen.queryByText(/was not included in this response/i)).not.toBeInTheDocument();
+  });
+
+  test('CONTROL: what the anonymous scanner is there for is untouched', async () => {
+    await renderAnonymouslyWithChoice(undefined as unknown as Record<string, unknown>);
+
+    expect(screen.getByText('Test Widget')).toBeInTheDocument();
+    expect(screen.getByTestId('auto-submit-failed')).toBeInTheDocument();
   });
 
   test('CONTROL: a signed-in operator still gets every caveat', async () => {

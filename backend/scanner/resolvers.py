@@ -88,7 +88,17 @@ class ResolvedScan:
     #: echoed back, which they already had.
     VENDOR_ONLY_KEYS = ("supplier_name", "item_supplier_id")
 
-    def to_dict(self, *, include_vendor_data: bool = True) -> dict:
+    def to_dict(self, *, include_vendor_data: bool = False) -> dict:
+        """This result as a response body, WITHOUT the vendor keys by default.
+
+        The default is ``False`` for the reason
+        ``inventory.services.vendor_visibility`` gives for its own: a caller
+        that has not proven anybody is signed in must restrict rather than
+        disclose. ``IndexCardRenderer`` defaults the same flag the same way.
+        Today's one caller (``scanner.views.dispatch_scan``) passes it
+        explicitly, so nothing changes now — this decides what the NEXT caller
+        gets for saying nothing.
+        """
         # DRF JSONRenderer handles dataclass-to-dict via vars(), but
         # being explicit lets us drop None fields for a tidier response.
         data = {k: v for k, v in vars(self).items() if v is not None}

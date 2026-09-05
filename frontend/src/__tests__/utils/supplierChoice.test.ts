@@ -13,10 +13,8 @@ import {
   SUPPLIER_CHOICE_UNKNOWN,
   alternativeSupplierNames,
   alternativeSupplierNamesText,
-  anonymousAlternativesNote,
   chosenSupplierName,
   supplierChoiceCaveats,
-  publicSupplierChoiceNote,
   supplierChoiceNote,
   supplierChoiceSummary,
 } from '../../utils/supplierChoice';
@@ -126,41 +124,6 @@ describe('alternativeSupplierNamesText', () => {
   });
 });
 
-/**
- * The anonymous count — how many, never who.
- *
- * Written twice before this lived here, and the two copies had already drifted
- * apart by a full stop. It is granted on the item detail page only; the scan
- * page asks for nothing, which is why this is a function a surface must call
- * by name rather than a mode the module applies for it.
- */
-describe('anonymousAlternativesNote', () => {
-  it('counts the others without naming any of them', () => {
-    const note = anonymousAlternativesNote(choice({ alternatives: others('Beta', 'Gamma') }));
-
-    expect(note).toBe('2 other suppliers also stock this item.');
-    expect(note).not.toContain('Beta');
-    expect(note).not.toContain('Gamma');
-  });
-
-  it('agrees with itself for exactly one other', () => {
-    expect(anonymousAlternativesNote(choice({ alternatives: others('Beta') }))).toBe(
-      '1 other supplier also stocks this item.'
-    );
-  });
-
-  it('is null where there were no others', () => {
-    expect(anonymousAlternativesNote(choice())).toBeNull();
-    expect(anonymousAlternativesNote(undefined)).toBeNull();
-  });
-
-  it('never names the chosen supplier either', () => {
-    expect(anonymousAlternativesNote(choice({ alternatives: others('Beta') }))).not.toContain(
-      'Acme Supplies'
-    );
-  });
-});
-
 describe('supplierChoiceCaveats', () => {
   it('is empty for a choice with nothing qualifying it', () => {
     expect(supplierChoiceCaveats(choice())).toEqual([]);
@@ -264,65 +227,15 @@ describe('supplierChoiceNote', () => {
 });
 
 /**
- * `/inventory/scan` is a public QR route. Most of what `supplier_choice`
- * carries is addressed to whoever maintains the supplier links — a member has
- * no flagged primary, and cannot order at all — so the audience split lives
- * here rather than in any page.
- */
-describe('publicSupplierChoiceNote', () => {
-  it('BEFORE/AFTER: withholds every operator caveat', () => {
-    const note = publicSupplierChoiceNote(
-      choice({
-        scored_without_price: true,
-        scored_without_history: true,
-        flagged_primary_unorderable: true,
-      })
-    );
-
-    expect(note).toBeNull();
-  });
-
-  it('BEFORE/AFTER: still says when there is nothing to order, in two ways', () => {
-    const bare = publicSupplierChoiceNote(choice({ supplier_name: null, reason: 'no_suppliers' }));
-    const dead = publicSupplierChoiceNote(
-      choice({ supplier_name: null, reason: 'none_orderable' })
-    );
-
-    expect(bare).toBe('No supplier is listed for this item.');
-    expect(dead).toBe('This item cannot currently be ordered.');
-    expect(bare).not.toBe(dead);
-  });
-
-  // A refusal a member can act on, without the link state behind it.
-  it('leaks no vendor name and no link state', () => {
-    const dead = publicSupplierChoiceNote(
-      choice({ supplier_name: null, reason: 'none_orderable' })
-    );
-
-    expect(dead).not.toMatch(/inactive|discontinued|flagged|primary|link/i);
-  });
-
-  it('stays silent about a payload that never carried the field', () => {
-    expect(publicSupplierChoiceNote(undefined)).toBeNull();
-    expect(publicSupplierChoiceNote(choice({ supplier_name: null, reason: null }))).toBeNull();
-  });
-
-  it('CONTROL: the operator reading is unchanged', () => {
-    expect(supplierChoiceNote(choice({ flagged_primary_unorderable: true }))).toContain(
-      'flagged primary supplier cannot be ordered from'
-    );
-  });
-});
-
-/**
- * An unauthenticated payload does not carry the four derivation keys at all —
- * the server OMITS `basis`, `flagged_primary_unorderable`,
- * `scored_without_price` and `scored_without_history` for a logged-out caller
- * (`SupplierChoiceSerializer.OPERATOR_ONLY_FIELDS`).
+ * `SupplierChoiceSerializer.OPERATOR_ONLY_FIELDS` OMITS `basis`,
+ * `flagged_primary_unorderable`, `scored_without_price` and
+ * `scored_without_history` from a payload built without a signed-in caller.
  *
- * The public reading has to be blind to that difference, or the gate turns into
- * a rendering bug: an absent key must never become a rendered caveat, and it
- * must never silently change what an anonymous visitor is shown.
+ * Since op-anonymous-read-posture the whole `supplier_choice` key is withheld
+ * from an anonymous item payload, so this shape now reaches the web only where
+ * a serializer was built without context. Every reading here still has to be
+ * blind to the difference, or the gate turns into a rendering bug: an absent
+ * key must never become a rendered caveat.
  */
 describe('a payload with the operator-only keys omitted', () => {
   const restricted = (overrides: Partial<SupplierChoice> = {}): SupplierChoice => {
@@ -343,12 +256,6 @@ describe('a payload with the operator-only keys omitted', () => {
     expect(chosenSupplierName(restricted(withNames))).toBe(
       chosenSupplierName(choice(withNames))
     );
-    expect(anonymousAlternativesNote(restricted(withNames))).toBe(
-      anonymousAlternativesNote(choice(withNames))
-    );
-    expect(publicSupplierChoiceNote(restricted(withNames))).toBe(
-      publicSupplierChoiceNote(choice(withNames))
-    );
     expect(supplierChoiceSummary(restricted(withNames))).toBe(
       supplierChoiceSummary(choice(withNames))
     );
@@ -360,12 +267,12 @@ describe('a payload with the operator-only keys omitted', () => {
   });
 
   it('still tells the two no-supplier reasons apart', () => {
-    expect(publicSupplierChoiceNote(restricted({ supplier_name: null, reason: 'no_suppliers' }))).toBe(
-      publicSupplierChoiceNote(choice({ supplier_name: null, reason: 'no_suppliers' }))
+    expect(supplierChoiceNote(restricted({ supplier_name: null, reason: 'no_suppliers' }))).toBe(
+      supplierChoiceNote(choice({ supplier_name: null, reason: 'no_suppliers' }))
     );
     expect(
-      publicSupplierChoiceNote(restricted({ supplier_name: null, reason: 'none_orderable' }))
-    ).toBe(publicSupplierChoiceNote(choice({ supplier_name: null, reason: 'none_orderable' })));
+      supplierChoiceNote(restricted({ supplier_name: null, reason: 'none_orderable' }))
+    ).toBe(supplierChoiceNote(choice({ supplier_name: null, reason: 'none_orderable' })));
   });
 });
 

@@ -58,6 +58,10 @@ const KIT = {
 
 beforeEach(() => {
   localStorage.clear();
+  // Call history, not implementations — each render helper sets its own
+  // resolved value after this runs. Needed so "did this page call
+  // listSuppliers?" is a question about the test that asks it.
+  vi.clearAllMocks();
 });
 
 describe('the kit list supplier-SKU column', () => {
@@ -237,6 +241,23 @@ describe('what a logged-out visitor sees on the kit surfaces', () => {
     );
     await waitFor(() => expect(screen.getByTestId('kit-name')).toHaveValue('Ink Kit'));
   };
+
+  /**
+   * REGRESSION (op-anonymous-read-posture). `SupplierViewSet` became
+   * `IsAuthenticated`, and this page fetched `listSuppliers()` on mount
+   * unconditionally. For a logged-out visitor that answered 401, and the
+   * response interceptor — finding no refresh token — cleared localStorage and
+   * dispatched `oms:session-expired`, so `SessionExpiredBanner` told somebody
+   * who had never signed in that their session had expired. The kit detail
+   * route stays PUBLIC (`KitViewSet` is `IsAuthenticatedOrReadOnly`), so the
+   * fix is to skip the request, not to guard the page.
+   */
+  it('does not fetch the supplier list at all', async () => {
+    await renderFormAnonymously();
+
+    expect(inventoryAPI.listSuppliers).not.toHaveBeenCalled();
+    expect(screen.getByTestId('kit-name')).toHaveValue('Ink Kit');
+  });
 
   it('BEFORE/AFTER: the kit list shows a logged-out visitor no SKU and no vendor', async () => {
     await renderListAnonymously();

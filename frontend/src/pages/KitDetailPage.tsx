@@ -85,7 +85,15 @@ const KitDetailPage: React.FC = () => {
     setSupplierSku(next.supplier_sku ?? '');
   }, []);
 
+  // NOT FETCHED WHEN LOGGED OUT (op-anonymous-read-posture). `/inventory/kits/
+  // :kitId` is deliberately reachable without a session — `KitViewSet` is
+  // `IsAuthenticatedOrReadOnly` — but `inventory/suppliers/` is
+  // `IsAuthenticated`, so firing this unconditionally answered 401 and the
+  // response interceptor, finding no refresh token, cleared storage and raised
+  // the session-expired banner at a visitor who never signed in. The picker
+  // this list feeds is behind `showSupplierAttribution` anyway.
   useEffect(() => {
+    if (!showSupplierAttribution) return undefined;
     let cancelled = false;
     inventoryAPI
       .listSuppliers()
@@ -100,7 +108,7 @@ const KitDetailPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [showSupplierAttribution]);
 
   useEffect(() => {
     if (isNew) return undefined;

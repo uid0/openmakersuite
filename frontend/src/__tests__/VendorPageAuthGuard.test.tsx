@@ -35,6 +35,8 @@ vi.mock('../pages/ScanPage', () => ({ default: () => <div>Scan Page</div> }));
 vi.mock('../pages/InventoryItemDetailPage', () => ({
   default: () => <div>Item Detail Page</div>,
 }));
+vi.mock('../pages/InventoryItemFormPage', () => ({ default: () => <div>Item Form Page</div> }));
+vi.mock('../pages/KitDetailPage', () => ({ default: () => <div>Kit Detail Page</div> }));
 vi.mock('../pages/TransparencyPage', () => ({ default: () => <div>Transparency Page</div> }));
 vi.mock('../components/WorkspaceLayout', () => ({
   default: ({ children }: { children: React.ReactNode }) => (
@@ -56,6 +58,17 @@ const GUARDED = [
   ['/purchasing/orders', 'Purchase Order List Page'],
   ['/purchasing/orders/po-1', 'Purchase Order Page'],
   ['/reports/purchasing', 'Purchasing Report Page'],
+  // These four are not vendor pages themselves — they are item and kit
+  // CREATE/EDIT forms. They are guarded because each fetches
+  // `inventory/suppliers/` on mount, which is `IsAuthenticated` now, and an
+  // unguarded mount answered 401: the item form rendered "Failed to load form
+  // data" and the response interceptor, finding no refresh token, raised the
+  // session-expired banner at a visitor who never signed in. Item and kit
+  // writes are `IsAuthenticated` server-side, so nobody could have saved from
+  // them anyway.
+  ['/inventory/items/new', 'Item Form Page'],
+  ['/inventory/items/item-1/edit', 'Item Form Page'],
+  ['/inventory/kits/new', 'Kit Detail Page'],
 ] as const;
 
 /**
@@ -67,6 +80,11 @@ const MUST_STAY_OPEN = [
   ['/inventory/scan/item-1', 'Scan Page'],
   ['/inventory/items/item-1', 'Item Detail Page'],
   ['/inventory/transparency', 'Transparency Page'],
+  // `KitViewSet` is `IsAuthenticatedOrReadOnly`, so kit DETAIL is a deliberate
+  // public read. Guarding it alongside the create form beside it would have
+  // taken away a page an anonymous member can use today; `KitDetailPage` skips
+  // its supplier fetch instead (see KitSupplierAttribution.test.tsx).
+  ['/inventory/kits/k1', 'Kit Detail Page'],
 ] as const;
 
 describe('Vendor page auth guard', () => {

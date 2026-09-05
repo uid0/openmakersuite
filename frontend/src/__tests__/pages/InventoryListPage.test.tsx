@@ -9,6 +9,7 @@ import SessionExpiredBanner, {
 } from '../../components/SessionExpiredBanner';
 import InventoryListPage from '../../pages/InventoryListPage';
 import * as api from '../../services/api';
+import { exportInventoryItemsToCSV } from '../../utils/csvExport';
 import { showError, showInfo, showSuccess } from '../../utils/dialogs';
 
 // Mock the API
@@ -656,6 +657,48 @@ describe('InventoryListPage', () => {
 
       expect(screen.getByRole('columnheader', { name: 'Unit Cost' })).toBeInTheDocument();
       expect(screen.getByText('$15.99')).toBeInTheDocument();
+    });
+
+    /**
+     * The export audience comes off THE ROWS, not off auth state, so the file
+     * and the table it was exported from cannot disagree.
+     *
+     * `isAuthenticated()` is only "is there a token in localStorage", and the
+     * response interceptor clears that token whenever a refresh fails on any
+     * request — including a background one. An operator whose refresh failed
+     * while this table sat on screen showing real prices would then have
+     * exported a file with the Unit Cost and Supplier COLUMNS missing, which is
+     * the same falsehood the column-dropping above exists to avoid, moved into
+     * a file that leaves the system and gets ordered from.
+     */
+    const clickExport = async () => {
+      renderPage();
+      await screen.findByText('Test Item 1');
+      // The bulk bar, and with it Export, appears only once rows are selected —
+      // which is the sequence the finding describes.
+      fireEvent.click(screen.getAllByRole('checkbox')[0]);
+      fireEvent.click(await screen.findByText('Export CSV'));
+      await waitFor(() => expect(exportInventoryItemsToCSV).toHaveBeenCalled());
+      return (exportInventoryItemsToCSV as jest.Mock).mock.calls[0];
+    };
+
+    it('exports the vendor columns for unmarked rows even with no token', async () => {
+      localStorage.removeItem('token');
+
+      const [, audience] = await clickExport();
+
+      expect(audience).toBe('operator');
+    });
+
+    it('drops them when the rows carry the marker', async () => {
+      localStorage.setItem('token', 'a-token-the-payload-disagrees-with');
+      (api.inventoryAPI.listItems as jest.Mock).mockResolvedValue(
+        fullPage(anonymousRows() as unknown as typeof mockItems)
+      );
+
+      const [, audience] = await clickExport();
+
+      expect(audience).toBe('anonymous');
     });
   });
 });

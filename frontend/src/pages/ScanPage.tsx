@@ -16,7 +16,6 @@ import { reorderFiling, reorderQuantityLabel } from '../utils/packaging';
 import {
   alternativeSupplierNamesText,
   chosenSupplierName,
-  publicSupplierChoiceNote,
   supplierChoiceNote,
 } from '../utils/supplierChoice';
 
@@ -493,18 +492,19 @@ const ScanPage: React.FC = () => {
   // this page words it the same way the CSV export and the reorder queue do,
   // and so the page owns none of the derivation.
   const supplierName = chosenSupplierName(item?.supplier_choice);
-  // This route is public, so everything the block renders has an AUDIENCE. A
-  // signed-in operator gets the other suppliers by name and the derivation
-  // caveats; a logged-out scanner gets neither — only the fact that there is
-  // nothing to order, worded to name no vendor and describe no link. The page
-  // picks which reader to ask and renders the answer; the wording, the joining
-  // and the emptiness tests all belong to `utils/supplierChoice`, not here.
+  // This route is public, so both lines below are asked only when signed in.
+  // The server omits `supplier_choice` from an anonymous item payload
+  // (op-anonymous-read-posture), so a logged-out scanner would get null from
+  // the first and `SUPPLIER_CHOICE_UNKNOWN` from the second — diagnostic copy
+  // about the response rather than a fact about the item. There used to be an
+  // anonymous wording here; it named no vendor, but the field it read never
+  // arrives now, so it rendered nothing and has been removed rather than left
+  // as a branch that looks like a policy. The wording, the joining and the
+  // emptiness tests all belong to `utils/supplierChoice`, not here.
   const alternativeText = isLoggedIn
     ? alternativeSupplierNamesText(item?.supplier_choice)
     : null;
-  const supplierNote = isLoggedIn
-    ? supplierChoiceNote(item?.supplier_choice)
-    : publicSupplierChoiceNote(item?.supplier_choice);
+  const supplierNote = isLoggedIn ? supplierChoiceNote(item?.supplier_choice) : null;
 
   if (loading) {
     return (

@@ -248,11 +248,28 @@ function AppContent() {
           {/* Kits (op-8n0): purchasable bundles that decompose on receipt. The
               "new" route is listed before ":kitId" so it is not swallowed as an id. */}
           <Route path="/inventory/kits" element={<WorkspaceLayout><KitListPage /></WorkspaceLayout>} />
-          <Route path="/inventory/kits/new" element={<WorkspaceLayout><KitDetailPage /></WorkspaceLayout>} />
+          {/* The CREATE and EDIT routes below are guarded; the two READ routes
+              beside them are not, and the difference is deliberate
+              (op-anonymous-read-posture).
+
+              `SupplierViewSet` is `IsAuthenticated` now, and each create/edit
+              page fetches `inventory/suppliers/` on mount. Unguarded, an
+              anonymous visitor got a 401 the page rendered as "Failed to load
+              form data" AND a SessionExpiredBanner telling them a session they
+              never had had expired. Item and kit writes are `IsAuthenticated`
+              server-side, so nobody could have saved from these pages anyway —
+              sending them to the login surface before the page mounts is what
+              this guard is for.
+
+              `/inventory/kits/:kitId` stays OPEN: `KitViewSet` is
+              `IsAuthenticatedOrReadOnly`, so kit detail is a deliberate public
+              read, and `KitDetailPage` skips the supplier fetch when logged
+              out rather than losing the page. */}
+          <Route path="/inventory/kits/new" element={<RequireAuth><WorkspaceLayout><KitDetailPage /></WorkspaceLayout></RequireAuth>} />
           <Route path="/inventory/kits/:kitId" element={<WorkspaceLayout><KitDetailPage /></WorkspaceLayout>} />
-          <Route path="/inventory/items/new" element={<WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout>} />
+          <Route path="/inventory/items/new" element={<RequireAuth><WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout></RequireAuth>} />
           <Route path="/inventory/items/:id" element={<WorkspaceLayout><InventoryItemDetailPage /></WorkspaceLayout>} />
-          <Route path="/inventory/items/:id/edit" element={<WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout>} />
+          <Route path="/inventory/items/:id/edit" element={<RequireAuth><WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout></RequireAuth>} />
           {/* Vendor pages, auth-guarded (op-anonymous-read-posture).
 
               THIS GUARD IS NOT THE BOUNDARY and must not be described as one:

@@ -866,15 +866,25 @@ action. Treat the matrix as evidence again, but confirm anything load-bearing
 with a request.
 
 **A `FileField` URL is answered by nginx, not Django.** No `permission_classes`
-change reaches `/media/`. Four prefixes hold vendor paperwork —
-`supplier_agreements/`, `purchase_orders/attachments/`, `work_orders/receipts/`
-(a receipt photo is a vendor's name and their prices, in an image) and
-`index_cards/` (a generated artefact inherits the audience of its CONTENTS, not
-of its generator). `config.protected_media` owns the list; nginx gates them with
+change reaches `/media/`. `config.protected_media.VENDOR_MEDIA_PREFIXES` owns
+the list of prefixes that hold vendor paperwork; nginx gates each with
 `auth_request`, and the same list is enforced in Python for every deployment
 without nginx in front. That Python view is registered unconditionally, not
 under `if settings.DEBUG` — a rule that exists only in development is how the
 dev server and production came to disagree about who may read an invoice.
+
+**THE UNIT OF THAT DERIVATION IS AN UPLOAD FIELD, NOT A URL PREFIX**, and this
+is the part worth carrying forward. The first pass answered "which prefixes have
+I already seen?" and stopped at four; asking "where can a vendor document be
+STORED?" over every `upload_to` under `backend/` found five more, including a
+callable-valued one a string-literal sweep cannot see and two roots fed by the
+Postmark inbound webhook, where the contents are whatever a vendor emailed in
+and cannot be narrowed by argument. Per this file's own "when a hand sweep
+misses TWICE, build the gate" rule, the classification is now enforced rather
+than remembered: `backend/config/tests/test_upload_field_classification.py`
+walks the tree with the AST and fails on any `upload_to` that is neither gated
+nor carried in its `OPEN_PREFIXES` with a written reason. Add an upload field
+and that test tells you to classify it.
 
 **ScanTTY is unaffected.** Verified against `uid0/scantty` `main` at
 `ca71ba2a` (SHA confirmed through the GitHub API): its root shows the login

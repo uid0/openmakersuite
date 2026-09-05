@@ -4,6 +4,7 @@ API tests for reorder queue endpoints.
 
 from datetime import timedelta
 from decimal import Decimal
+from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.urls import reverse
@@ -2492,6 +2493,40 @@ class TestPurchaseOrderAutoTransitionToSent:
         event = self._po_send_events(po).get()
         assert event.purchase_order == po
         assert event.actor == user
+
+    def test_a_rolled_back_auto_send_answers_with_what_the_database_holds(
+        self, authenticated_client
+    ):
+        """A swallowed auto-send failure must not report the PO as sent.
+
+        ``services.mark_sent`` mutates the instance before its transaction
+        writes, and the instance DRF renders the PATCH response from is that
+        same object. So when the send fails and the transaction rolls the row
+        back to DRAFT, an un-refreshed response tells the web UI and ScanTTY the
+        order went to the supplier when it did not — a wrong status on screen
+        for a row nobody sent. The PATCH itself must still succeed: never
+        breaking the write is the whole point of swallowing the failure.
+        """
+        client, user = authenticated_client
+        po = self._draft_po(user)
+
+        with mock.patch(
+            "reorder_queue.services.purchase_orders.record_event",
+            side_effect=RuntimeError("audit insert failed"),
+        ):
+            response = client.patch(
+                self._detail_url(po), {"sales_order_number": "SO-999"}, format="json"
+            )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        po.refresh_from_db()
+        assert po.status == PurchaseOrder.Status.DRAFT
+        assert po.sent_at is None
+        assert po.sales_order_number == "SO-999"
+
+        assert response.data["status"] == PurchaseOrder.Status.DRAFT
+        assert response.data["sent_at"] is None
+        assert response.data["sales_order_number"] == "SO-999"
 
 
 @pytest.mark.integration

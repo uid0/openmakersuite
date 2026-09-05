@@ -1955,18 +1955,48 @@ class AssetProblemAdmin(admin.ModelAdmin):
 
     actions = ["mark_resolved", "mark_closed"]
 
+    def _settle(self, request, queryset, *, new_status, settleable=None):
+        """Move each selected report to ``new_status``, stamping the resolution.
+
+        The stamp is not defined here. It is
+        :func:`inventory.services.problem_settlement.settle_problem`, which
+        every other writer calls as well — a report ENTERING settlement is
+        stamped, a move already inside it is a filing change and keeps the
+        moment the row actually settled. This action used to carry its own
+        copy: ``mark_closed`` did a bare ``queryset.update(status=...)``, so a
+        report closed from this changelist showed as closed with no resolution
+        date and no resolver on the API and in ScanTTY, which decode both
+        fields, and ``mark_resolved`` stamped the date and left the resolver
+        blank. A fourth copy of the rule is how they came to disagree.
+
+        ``settleable`` is the status precondition, or ``None`` for "no
+        precondition" — each action keeps exactly the population it had before,
+        so this change is the stamp and nothing else. Returns how many rows
+        moved.
+        """
+        from inventory.services.problem_settlement import settle_problem
+
+        rows = queryset if settleable is None else queryset.filter(status__in=settleable)
+        count = 0
+        for problem in rows:
+            settle_problem(problem, new_status=new_status, actor=request.user)
+            count += 1
+        return count
+
     @admin.action(description="Mark selected as resolved")
     def mark_resolved(self, request, queryset):
-        """Mark selected problems as resolved."""
-        from django.utils import timezone
+        """Mark selected problems as resolved.
 
-        count = 0
-        for problem in queryset.filter(status=AssetProblem.Status.REPORTED):
-            problem.status = AssetProblem.Status.RESOLVED
-            problem.resolved_at = timezone.now()
-            problem.save()
-            count += 1
-
+        A NEW resolution: the operator is asserting the work was just done, so
+        the stamp is this moment and this actor, never one a previous
+        occurrence of the problem left behind.
+        """
+        count = self._settle(
+            request,
+            queryset,
+            new_status=AssetProblem.Status.RESOLVED,
+            settleable=(AssetProblem.Status.REPORTED,),
+        )
         self.message_user(
             request,
             f"{count} problem(s) marked as resolved.",
@@ -1975,8 +2005,23 @@ class AssetProblemAdmin(admin.ModelAdmin):
 
     @admin.action(description="Mark selected as closed")
     def mark_closed(self, request, queryset):
-        """Mark selected problems as closed."""
-        count = queryset.update(status=AssetProblem.Status.CLOSED)
+        """Mark selected problems as closed.
+
+        Deliberately unfiltered, as it always was: closing takes a wider set
+        than resolving — filing away a report somebody already resolved is the
+        main use — and narrowing it here would take an action away from
+        operators that this change has no business touching.
+
+        Unfiltered means both kinds of row reach it, and the shared rule
+        tells them apart: an unsettled report is entering settlement and is
+        stamped, while one somebody already resolved is a filing change and
+        keeps the stamp it has.
+        """
+        count = self._settle(
+            request,
+            queryset,
+            new_status=AssetProblem.Status.CLOSED,
+        )
         self.message_user(
             request,
             f"{count} problem(s) marked as closed.",

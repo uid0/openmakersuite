@@ -928,6 +928,97 @@ Two consequences worth keeping in mind when touching this path:
   derivation is exact and NO defect on this path is reachable. That is how five
   symptoms reached main under a green suite.
 
+### A status transition owes a SET of facts, and every path owes all of it
+
+A transition is never just `status=`. It carries a moment, sometimes an actor,
+often linked records and an audit row. The failure mode is not forgetting the
+set — it is writing the set out by hand at a SECOND call site, which then joins
+it incompletely. Two live examples, both found this way and both fixed:
+
+- `reorder_queue.admin.mark_as_sent` set `status`/`sent_by` with
+  `queryset.update()` beside `services.mark_sent`. No `sent_at`, so
+  `services.receiving.create_lead_time_log` returned early and a delivery
+  against that order wrote NO `LeadTimeLog` — in the table
+  `inventory.services.supplier_selection` scores suppliers from. It also skipped
+  the reorder-request sweep and the `po_send` audit row.
+- `inventory.admin.mark_closed` set `status` alone where all three other routes
+  to `resolved`/`closed` stamp `resolved_at`/`resolved_by`.
+
+The rules that follow:
+
+- **The service function owns the transition; admin actions call it.** N queries
+  for a checkbox selection is what the record costs. `services.mark_sent`,
+  `services.confirm_order`, `services.reorder_requests.approve_request` /
+  `cancel_request` and `inventory.services.problem_settlement.settle_problem`
+  are the definitions. The last one is the worked example of why an admin
+  helper is not far enough: while the rule lived in `AssetProblemAdmin._settle`
+  the admin was correct and both API resolve routes still carried their own
+  stale copy, so the same report settled differently depending on which button
+  reached it. A rule with more than one writer belongs in `services/`.
+- **A transition with more than one performer owns its audit row too**, hence
+  `mark_sent` recording `po_send` itself — the one documented exception to the
+  #883 split (views keep their own `record_audit_event` calls). Pin it with a
+  COUNT, not `.exists()`, or the caller's copy can come back unnoticed.
+- **`queryset.update()` never moves an `auto_now` `updated_at`.** That alone
+  makes a bulk status action show a stale "Updated" on the admin and in ScanTTY.
+  Reach for `.update()` only where you can say what you are bypassing;
+  `services.purchase_orders.void_po` is the example that can.
+- **Preserve each action's population when you convert it.** `mark_closed` is
+  deliberately unfiltered — narrowing it removes an operator's ability to file
+  away a resolved report.
+- **The set is one unit of work.** `services.mark_sent` writes the order, the
+  linked requests and the audit row inside a single `transaction.atomic()`: a
+  fact-set that is only true whole must not be able to commit half of itself,
+  or a failed send leaves exactly the incomplete transition the set exists to
+  prevent. A caller that transitions several rows gets one unit per row.
+- **Derive a stamp's condition from what the column MEANS, and the meaning is
+  usually about the SOURCE state.** `resolved_at`/`resolved_by` record when a
+  report ENTERED settlement, so `settle_problem`'s one predicate is
+  `problem.status not in {resolved, closed} and new_status in {resolved,
+  closed}` — read before the new status is assigned. Two earlier drafts of this
+  rule keyed on the TARGET and each bought one bug: "closing preserves" left a
+  months-old stamp on a report reopened after a recurrence, and "resolving
+  restamps" then wiped the first resolver when an already-resolved report was
+  resolved again (no API route has a status precondition, so a stale detail
+  page reaches it). One arm is deliberate on top of that: `or not resolved_at`
+  fills a settled row that carries no stamp at all, because filling a gap left
+  by the pre-fix bulk write is not overwriting anybody. Every writer calls the
+  one function — both `AssetProblem` API routes, `LocationProblemViewSet`,
+  the admin actions, and `resolve_problems_for_work_order`. Do not re-derive
+  either half at a call site; the sibling `LocationProblem` route kept its own
+  copy one commit longer than the rest and that is exactly where the stale
+  stamp survived.
+
+`reorder_queue/management/commands/report_unstamped_transitions.py` names the
+rows written before the fix. **Key such a report on the DAMAGE SIGNATURE, not
+on the status the row sits at today** — a damaged row keeps moving (an approved
+request bulk-written without `reviewed_at` is carried on to `ordered` and
+`received` by paths that never touch the review columns), and a report that
+under-counts the population it exists to size is worse than none, because a
+small number reads as reassurance. The output names each signature it used, so
+a count can never be read as covering something narrower. Where a signature
+CANNOT be made status-independent — a cancelled purchase order's null `sent_at`
+is indistinguishable from a truthful one, so those rows stay out — say so on
+the line beside the number and call the count a floor. An honest floor is
+usable; a total that quietly is not one is not. It is permanently read-only, and the reason is the
+general one: **a moment nobody recorded cannot be recovered from a moment nobody
+recorded.** `order_date` is a different, editable fact and `updated_at` has been
+overwritten; back-filling either into `LeadTimeLog` would put invented numbers
+into the column that chooses suppliers, which is worse than the honest gap
+(`DeliveryRecord.factor` already returns 1 for "no history" on purpose).
+
+**A report keyed on a signature is not a report on a closed historical set**,
+and must not read as one. `status`/`sent_at`/`sent_by` are still writable on
+`PurchaseOrderSerializer` (`read_only_fields` is `po_number`/`updated_at`
+only), so `PATCH {"status": "sent"}` still lands a SENT order with a null
+`sent_at` — no `po_send` row, no request sweep, no `LeadTimeLog` on delivery.
+REPORTED, NOT FIXED: `ReorderRequestSerializer` closed the identical door with
+`read_only_fields` (op-xj1i), so the fix is known, but narrowing a writable
+field on the purchase-order API is an operator-visible contract change and a
+product decision. The command's docstring and its printed output both say so,
+because a count a reader believes is historical is worse than one they know is
+a live signature.
+
 ### The pre-send boundary: when a PO is still the shop's own document
 
 `PurchaseOrder.PRE_SUPPLIER_STATUSES` is the ONE definition of "the supplier has
@@ -960,21 +1051,15 @@ whichever is true: "the supplier already has this line, void it instead" and
 from the two frozensets — the closed case is *outside `PRE_SUPPLIER_STATUSES`
 and outside `IN_RECEIVING_STATUSES`*, i.e. the terminal statuses, never a typed
 list of labels — with `sent_at` read only as corroboration. Do NOT key such a
-split on `sent_at` alone: `PurchaseOrderAdmin.mark_as_sent` moves a queryset to
-`SENT` with one `update()` and stamps `sent_by` but not `sent_at`, so an order
-can be live with its supplier and hold no stamp. A refusal is only legitimate
-when the operator can act on it, and a refusal that misstates why is worse than
-a bare one.
-
-One thing found here and deliberately NOT changed, routed to follow-up instead
-(the list-filter defect found alongside it — `get_queryset` dropping a draft
-off the list once its only line was gone — has since been fixed, and the next
-section owns that rule):
-
-- `PurchaseOrderAdmin.mark_as_sent` never stamps `sent_at`, which also leaves
-  `days_since_ordered` reading 0 for orders sent that way. Changing it alters
-  existing admin behaviour, so instead nothing in this change depends on that
-  stamp being written.
+split on `sent_at` alone: `status`/`sent_at`/`sent_by` are editable on the admin
+change form and writable on `PurchaseOrderSerializer`, and rows the pre-fix
+`PurchaseOrderAdmin.mark_as_sent` sent without a stamp are still in the table,
+so an order can be live with its supplier and hold no stamp. A refusal is only
+legitimate when the operator can act on it, and a refusal that misstates why is
+worse than a bare one. (The admin action itself now goes through
+`services.mark_sent` and stamps the whole set — see "A status transition owes a
+SET of facts" above, which owns that rule and the read-only report on the rows
+written before it.)
 
 ### Two kinds of empty purchase order, and when emptiness hides one
 

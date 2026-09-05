@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from django.utils import timezone
 
-from membership.actor import SYSTEM_ACTOR, actor_display
+from membership.actor import SYSTEM_ACTOR
 
 
 def resolve_problems_for_work_order(work_order, *, actor=None, notes: str = "") -> int:
@@ -37,21 +37,36 @@ def resolve_problems_for_work_order(work_order, *, actor=None, notes: str = "") 
     completed work order can't overwrite the original resolution stamp with a
     later timestamp. ``notes`` (the work order's completion notes) is copied
     into ``resolution_notes`` only when the report has none of its own.
+
+    The stamp itself is
+    :func:`inventory.services.problem_settlement.settle_problem`, shared with
+    both API resolve routes, the ``LocationProblem`` one and the admin actions.
+    Every row this touches is entering settlement from ``reported``/
+    ``in_progress``, so the shared rule stamps each one — which is exactly what
+    this function did with its own copy, and one copy fewer is the point. The
+    loop stays because of the three things the rule has no opinion on: one
+    moment shared across the batch, the ``SYSTEM_ACTOR`` fallback for an
+    actor-less background completion, and the ``update_fields`` save.
     """
     from inventory.models import AssetProblem
+    from inventory.services.problem_settlement import settle_problem
 
-    # ``resolved_by`` is a free-text column; an actor-less call is a background
-    # completion, which the actor convention labels "System".
-    resolved_by = actor_display(actor, name=SYSTEM_ACTOR)
     now = timezone.now()
     open_statuses = (AssetProblem.Status.REPORTED, AssetProblem.Status.IN_PROGRESS)
     count = 0
 
     for manager in (work_order.asset_problems, work_order.location_problems):
         for problem in manager.filter(status__in=open_statuses):
-            problem.status = problem.__class__.Status.RESOLVED
-            problem.resolved_at = now
-            problem.resolved_by = resolved_by
+            # ``resolved_by`` is a free-text column; an actor-less call is a
+            # background completion, which the actor convention labels "System".
+            settle_problem(
+                problem,
+                new_status=problem.__class__.Status.RESOLVED,
+                actor=actor,
+                actor_name=SYSTEM_ACTOR,
+                at=now,
+                save=False,
+            )
             # Promotion seeds the work order's notes with the report text, so
             # skip the copy when they still match — echoing the complaint back
             # as its own resolution says nothing.

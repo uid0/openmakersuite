@@ -4,6 +4,13 @@ Extracted from ``reorder_queue.serializers`` and ``reorder_queue.views`` (#883).
 The views keep the serializers as the request/response boundary and keep their
 ``record_audit_event`` calls; the workflow body lives here.
 
+ONE EXCEPTION, and the rule behind it: :func:`mark_sent` records its own
+``po_send`` event. A transition performed by MORE THAN ONE caller owns every
+fact it implies, audit row included, because a set of facts split across
+callers is a set each new caller can join incompletely — which is exactly how
+the admin changelist's send came to stamp ``sent_by`` without ``sent_at``.
+Where a transition has a single performer the #883 split stands.
+
 Note: PO number generation stays in ``PurchaseOrder.save()`` (owned by #887) —
 ``create_purchase_order`` relies on ``save()`` to number and retry on
 uniqueness collisions.
@@ -46,7 +53,8 @@ from inventory.services.pack_size import declares_a_case
 from inventory.services.packaging import order_level, parse_at_level, resolve_base_quantity
 from inventory.services.pricing import unit_price_of
 
-from ..models import PurchaseOrder, PurchaseOrderItem, ReorderRequest
+from ..audit import record_event
+from ..models import PurchaseOrder, PurchaseOrderAuditEvent, PurchaseOrderItem, ReorderRequest
 from ..settlement_signals import settlement_batch
 from .approvals import PO_ELIGIBLE_STATUSES
 
@@ -512,18 +520,48 @@ def update_reorder_requests_from_po(purchase_order):
 
 
 def mark_sent(purchase_order, user):
-    """Stamp a purchase order as SENT and sync its linked reorder requests.
+    """Stamp a purchase order as SENT — THE definition of that transition.
 
-    Status -> SENT, ``sent_by``/``sent_at`` stamped, and the linked reorder
-    requests synced. The caller owns the DRAFT precondition and records the
-    ``po_send`` audit event.
+    Everything DRAFT -> SENT owes, in one place: status -> SENT,
+    ``sent_by``/``sent_at`` stamped, ``updated_at`` moved by the ``save()``,
+    the linked reorder requests synced, and the ``po_send`` audit row the staff
+    feed reads recorded. The caller owns only the DRAFT precondition.
+
+    The audit call lives HERE rather than in each caller, unlike the rest of
+    this module (see the module docstring — the #883 extraction left the views
+    holding their own ``record_audit_event`` calls). It moved because this
+    transition has more than one performer: the API's ``send_to_supplier``, the
+    sales-order-number auto-send, and the admin changelist's "Mark selected
+    orders as sent". The admin copy was written out by hand beside this
+    function and stamped ``status`` and ``sent_by`` only — no ``sent_at``, so
+    ``receiving.create_lead_time_log`` returned early and every delivery
+    against such an order was missing from the supplier's record that
+    ``inventory.services.supplier_selection`` scores from, and no reorder
+    request it fulfilled was ever closed. A set of facts a transition owes
+    stays complete only if there is one place to add the next one.
+    ``test_every_send_path_stamps_the_whole_transition`` is the check, run over
+    each path that performs it.
+
+    The three writes are one unit of work. A fact-set that is only complete
+    when every part of it lands cannot be allowed to commit half of itself:
+    without the transaction, a failure in the request sweep or the audit insert
+    leaves an order SENT with no linked request closed and no ``po_send`` row —
+    the same shape this function exists to prevent. Callers that transition
+    several orders (the admin changelist) get one unit of work per order.
     """
-    purchase_order.status = PurchaseOrder.Status.SENT
-    purchase_order.sent_by = user
-    purchase_order.sent_at = timezone.now()
-    purchase_order.save()
-    # Keep linked reorder requests in step with the PO going out.
-    update_reorder_requests_from_po(purchase_order)
+    with transaction.atomic():
+        purchase_order.status = PurchaseOrder.Status.SENT
+        purchase_order.sent_by = user
+        purchase_order.sent_at = timezone.now()
+        purchase_order.save()
+        # Keep linked reorder requests in step with the PO going out.
+        update_reorder_requests_from_po(purchase_order)
+        record_event(
+            action=PurchaseOrderAuditEvent.Action.PO_SEND,
+            actor=user,
+            purchase_order=purchase_order,
+            metadata={"po_number": purchase_order.po_number},
+        )
 
 
 #: Sentinel for "the caller supplied no value", distinct from an explicitly

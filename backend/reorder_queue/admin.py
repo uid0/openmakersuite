@@ -27,6 +27,7 @@ from django.db import transaction
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
+from . import services
 from .audit import record_line_reprice
 from .models import (
     DeliveryItem,
@@ -193,16 +194,32 @@ class ReorderRequestAdmin(admin.ModelAdmin):
 
     @admin.action(description="Approve selected requests")
     def approve_requests(self, request, queryset):
-        """Bulk approve selected requests."""
-        updated = queryset.filter(status=ReorderRequest.Status.PENDING).update(
-            status=ReorderRequest.Status.APPROVED, reviewed_by=request.user
-        )
+        """Bulk approve selected requests, through the one review definition.
+
+        A row at a time via :func:`services.approve_request` rather than one
+        ``queryset.update()``. The bulk write stamped ``reviewed_by`` and left
+        ``reviewed_at`` null — an approval by a named person at no time, on
+        every screen that shows the pair — and skipped the ``auto_now``
+        ``updated_at`` besides. N queries for a checkbox selection is what the
+        record costs.
+        """
+        updated = 0
+        for reorder_request in queryset.filter(status=ReorderRequest.Status.PENDING):
+            services.approve_request(reorder_request, request.user)
+            updated += 1
         self.message_user(request, f"{updated} requests approved.")
 
     @admin.action(description="Cancel selected requests")
     def cancel_requests(self, request, queryset):
-        """Bulk cancel selected requests."""
-        updated = queryset.update(status=ReorderRequest.Status.CANCELLED, reviewed_by=request.user)
+        """Bulk cancel selected requests, through the one review definition.
+
+        Deliberately unfiltered, matching the API's ``cancel`` action: a
+        request can be cancelled from any state.
+        """
+        updated = 0
+        for reorder_request in queryset:
+            services.cancel_request(reorder_request, request.user)
+            updated += 1
         self.message_user(request, f"{updated} requests cancelled.")
 
 
@@ -419,18 +436,47 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
 
     @admin.action(description="Mark selected orders as sent")
     def mark_as_sent(self, request, queryset):
-        """Mark orders as sent to supplier."""
-        updated = queryset.filter(status=PurchaseOrder.Status.DRAFT).update(
-            status=PurchaseOrder.Status.SENT, sent_by=request.user
-        )
+        """Send the selected draft orders, through the one send definition.
+
+        A row at a time via :func:`services.mark_sent` rather than one
+        ``queryset.update()``. The bulk write set ``status`` and ``sent_by``
+        and nothing else, so an order sent from this changelist carried no
+        ``sent_at`` — and ``receiving.create_lead_time_log`` returns early on a
+        falsy ``sent_at``, so when that order was delivered the supplier's
+        performance on it was never recorded at all, in the very table
+        ``inventory.services.supplier_selection`` reads to choose the next
+        supplier. It also left the approved reorder requests the order fulfils
+        sitting open, and put no ``po_send`` row in the staff audit feed.
+
+        ``.update()`` here was the bulk idiom, not a deliberate bypass: nothing
+        listens for a ``PurchaseOrder`` save (``settlement_signals`` fires on
+        the LINE model, ``signals.py`` on request CREATION), so there was never
+        anything to suppress — while ``updated_at`` is ``auto_now``, which only
+        a ``save()`` moves.
+        """
+        updated = 0
+        for purchase_order in queryset.filter(status=PurchaseOrder.Status.DRAFT):
+            services.mark_sent(purchase_order, request.user)
+            updated += 1
         self.message_user(request, f"{updated} orders marked as sent.")
 
     @admin.action(description="Mark selected orders as confirmed")
     def mark_as_confirmed(self, request, queryset):
-        """Mark orders as confirmed by supplier."""
-        updated = queryset.filter(status=PurchaseOrder.Status.SENT).update(
-            status=PurchaseOrder.Status.CONFIRMED
-        )
+        """Confirm the selected sent orders, through the one confirm definition.
+
+        :func:`services.confirm_order` is called with no
+        ``expected_delivery_date``, which is what its ``UNCHANGED`` sentinel is
+        for: a bulk action has no field to type a per-order date into, so it
+        must leave the date the operator already set alone. The date is
+        therefore a DELIBERATE exclusion from this transition's set here, not a
+        missing stamp — unlike ``updated_at``, which the previous
+        ``queryset.update()`` skipped and the ``save()`` inside the service now
+        moves.
+        """
+        updated = 0
+        for purchase_order in queryset.filter(status=PurchaseOrder.Status.SENT):
+            services.confirm_order(purchase_order)
+            updated += 1
         self.message_user(request, f"{updated} orders marked as confirmed.")
 
 

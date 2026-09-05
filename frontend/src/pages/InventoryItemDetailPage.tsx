@@ -51,6 +51,7 @@ import {
   reorderThresholdLabel,
 } from '../utils/packaging';
 import { anonymousAlternativesNote, chosenSupplierName } from '../utils/supplierChoice';
+import { VENDOR_WITHHELD_TEXT, vendorDataWithheld } from '../utils/vendorVisibility';
 
 /**
  * Supplier-section rendering helpers (op-item-suppliers).
@@ -926,9 +927,20 @@ const InventoryItemDetailPage: React.FC = () => {
                       </Text>
                     )}
                   </Group>
+                  {/* Three states, not two (op-anonymous-read-posture). The
+                      server WITHHOLDS this key from a caller with no session
+                      rather than nulling it, so `=== null` no longer covers the
+                      third: `undefined.toFixed(2)` threw and took this page down
+                      for a logged-out visitor. "No price on file" is a claim
+                      about the item and must not be shown for a state that is a
+                      fact about the reader. */}
                   <Group justify="space-between">
                     <Text size="sm">Unit Cost:</Text>
-                    {item.unit_cost === null ? (
+                    {vendorDataWithheld(item) ? (
+                      <Text size="sm" c="dimmed" data-testid="unit-cost-withheld">
+                        {VENDOR_WITHHELD_TEXT}
+                      </Text>
+                    ) : item.unit_cost === null || item.unit_cost === undefined ? (
                       <Text size="sm" c="dimmed">
                         no price on file
                       </Text>
@@ -1042,19 +1054,18 @@ const InventoryItemDetailPage: React.FC = () => {
                 Rendered for an item with none too: "no suppliers are linked" is
                 a fact worth stating on a reorder screen.
 
-                SIGNED-IN ONLY, and this gate is DELIBERATELY PARTIAL. This
-                route is not behind RequireAuth and `retrieve` is AllowAny, so
-                without the gate this card would widen what an anonymous visitor
-                sees from one supplier name to the whole sourcing table. Gating
-                it removes that widening; it does NOT close the posture. The
-                same SKUs, UPCs and lead times remain anonymously reachable
-                through SupplierViewSet and ItemSupplierViewSet (both
-                IsAuthenticatedOrReadOnly) and through the equally unguarded
-                /inventory/suppliers/:id page, which already renders per-item
-                supplier SKU and lead time. Whether that data should be
-                anonymously readable at all is filed as separate work: a real
-                fix spans views.py, App.tsx and ScanTTY's contract, and is
-                outside this change's no-API-change constraint. */}
+                SIGNED-IN ONLY, and this gate is NO LONGER THE ONLY ONE.
+                It used to be described here as "deliberately partial", because
+                the same SKUs, UPCs and lead times stayed anonymously reachable
+                through SupplierViewSet, ItemSupplierViewSet and the unguarded
+                /inventory/suppliers/:id page — the browser gate removed a
+                widening without closing the posture. That work is done
+                (op-anonymous-read-posture): those viewsets are `IsAuthenticated`,
+                the supplier pages are behind RequireAuth, and `suppliers[]` is
+                omitted from this payload entirely for a caller with no session.
+                So `supplierLinks` is EMPTY for a logged-out visitor whatever
+                this gate does, and the gate now stops an empty sourcing table
+                rendering rather than standing in for a boundary it never was. */}
             {isLoggedIn && (
               <Card withBorder p="md" data-testid="item-suppliers-card">
                 <Stack gap="md">
@@ -1223,7 +1234,11 @@ const InventoryItemDetailPage: React.FC = () => {
                               {kit.quantity_in_kit} per kit
                             </Text>
                           )}
-                          {kit.unit_cost === null ? (
+                          {/* Withheld, unpriced and priced are three states —
+                              see the item's own Unit Cost row above for why
+                              `=== null` alone crashed here. */}
+                          {vendorDataWithheld(kit) ? null : kit.unit_cost === null ||
+                            kit.unit_cost === undefined ? (
                             <Text size="sm" c="dimmed">
                               no price on file
                             </Text>

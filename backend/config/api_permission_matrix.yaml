@@ -119,6 +119,9 @@ views:
   config.health.readyz:
     permission_classes:
     - <default>
+  config.protected_media.media_access_check:
+    permission_classes:
+    - <default>
   customization.views.site_settings:
     permission_classes:
     - AllowAny
@@ -634,22 +637,22 @@ views:
     actions:
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAdminUser
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAdminUser
       list:
         permission_classes:
         - IsAuthenticatedOrReadOnly
       partial_update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAdminUser
       retrieve:
         permission_classes:
         - IsAuthenticatedOrReadOnly
       update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAdminUser
   forgekey.views.DeviceUsageViewSet:
     actions:
       create:
@@ -737,7 +740,7 @@ views:
         - IsAuthenticatedOrReadOnly
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAdminUser
       disable:
         permission_classes:
         - IsAuthenticatedOrReadOnly
@@ -1334,7 +1337,7 @@ views:
     actions:
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - AllowAny
       destroy:
         permission_classes:
         - IsAuthenticatedOrReadOnly
@@ -1389,34 +1392,34 @@ views:
         - AllowAny
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       cycle_count:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       download_blank_card:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       download_card:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - AllowAny
       generate_qr:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - AllowAny
       kits:
         permission_classes:
         - AllowAny
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - AllowAny
       log_usage:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - AllowAny
       low_stock:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - AllowAny
       metrics:
         permission_classes:
         - AllowAny
@@ -1425,25 +1428,25 @@ views:
         - IsAuthenticated
       pack_container:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       partial_update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       purchase_history:
         permission_classes:
         - IsAuthenticated
       qr_code:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - AllowAny
       reordered:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - AllowAny
       retire:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - AllowAny
       scan:
         permission_classes:
         - AllowAny
@@ -1452,10 +1455,10 @@ views:
         - IsAuthenticated
       unretire:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
   inventory.views.InventoryReconciliationViewSet:
     actions:
       batch:
@@ -1500,28 +1503,28 @@ views:
     actions:
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       mark_discontinued:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       partial_update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       price_history:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
   inventory.views.KitViewSet:
     actions:
       create:
@@ -1566,10 +1569,10 @@ views:
         - AllowAny
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAdminUser
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAdminUser
       fixtures:
         permission_classes:
         - AllowAny
@@ -1578,10 +1581,10 @@ views:
         - AllowAny
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - AllowAny
       partial_update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAdminUser
       problems:
         permission_classes:
         - AllowAny
@@ -1593,10 +1596,10 @@ views:
         - AllowAny
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - AllowAny
       update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAdminUser
   inventory.views.MaintenanceDashboardViewSet:
     actions:
       active_work_orders:
@@ -1738,13 +1741,13 @@ views:
     actions:
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       recent_changes:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
   inventory.views.SerializedComponentViewSet:
     actions:
       consume:
@@ -1790,45 +1793,45 @@ views:
     actions:
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       partial_update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
   inventory.views.SupplierViewSet:
     actions:
       analytics:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       partial_update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
   inventory.views.UsageLogViewSet:
     actions:
       create:
@@ -1953,45 +1956,45 @@ views:
         - AllowAny
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - AllowAny
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       partial_update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
   location_checkins.views.LocationFeedbackViewSet:
     actions:
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - AllowAny
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       partial_update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       submit:
         permission_classes:
         - AllowAny
       update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
   location_checkins.views.LocationTaskViewSet:
     actions:
       complete:
@@ -2019,16 +2022,16 @@ views:
     actions:
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - AllowAny
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       partial_update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       report:
         permission_classes:
         - AllowAny
@@ -2037,10 +2040,10 @@ views:
         - IsAuthenticated
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
   location_checkins.views.TopLocationsReportView:
     permission_classes:
     - IsAuthenticated
@@ -2697,79 +2700,79 @@ views:
     actions:
       add_item:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       close_short:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       confirm_order:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       create_optimized_order:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       dashboard_summary:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       destroy_attachment:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       export_order:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       item_lookup:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       mark_delivered:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       mark_received:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       partial_update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       receive:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       receiving:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       reopen_short:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       reorder_data:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       send_to_supplier:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       update_item:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       upload_attachment:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       void:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       void_item:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
   reorder_queue.views.PurchasingReportViewSet:
     actions:
       export:
@@ -2800,7 +2803,7 @@ views:
         - IsAuthenticated
       create:
         permission_classes:
-        - IsAuthenticated
+        - AllowAny
       destroy:
         permission_classes:
         - IsAuthenticated
@@ -3056,19 +3059,19 @@ views:
     actions:
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAdminUser
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAdminUser
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       partial_update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAdminUser
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAdminUser

@@ -47,24 +47,38 @@ def _assert_page_envelope(payload):
 
 @pytest.mark.django_db
 class TestSupplierListContract:
+    """The supplier list is a MEMBER list since op-anonymous-read-posture.
+
+    The page envelope and its navigation are unchanged; the reads simply need a
+    session now, because a supplier row is a vendor's identity. The three tests
+    here used the anonymous ``api_client``.
+    """
+
     url_name = "supplier-list"
 
-    def test_pagination_envelope(self, api_client):
+    def test_pagination_envelope(self, authenticated_client):
+        client, _user = authenticated_client
         SupplierFactory.create_batch(3)
-        resp = api_client.get(reverse(self.url_name))
+        resp = client.get(reverse(self.url_name))
         assert resp.status_code == 200
         _assert_page_envelope(resp.data)
         assert resp.data["count"] == 3
         assert len(resp.data["results"]) == 3
 
-    def test_page_size_navigation(self, api_client):
+    def test_page_size_navigation(self, authenticated_client):
+        client, _user = authenticated_client
         SupplierFactory.create_batch(5)
-        resp = api_client.get(reverse(self.url_name), {"page_size": 2})
+        resp = client.get(reverse(self.url_name), {"page_size": 2})
         assert resp.status_code == 200
         # PageNumberPagination defaults to PAGE_SIZE=50; ?page=2 must navigate.
-        resp2 = api_client.get(reverse(self.url_name), {"page": 1})
+        resp2 = client.get(reverse(self.url_name), {"page": 1})
         assert resp2.status_code == 200
         _assert_page_envelope(resp2.data)
+
+    def test_an_anonymous_caller_gets_no_page_at_all(self, api_client):
+        SupplierFactory.create_batch(3)
+        resp = api_client.get(reverse(self.url_name))
+        assert resp.status_code in (401, 403)
 
 
 @pytest.mark.django_db
@@ -203,7 +217,11 @@ class TestQueryCountBounds:
         assert resp.status_code == 200
         assert resp.data["count"] == 15
 
-    def test_supplier_list_is_bounded(self, api_client, django_assert_max_num_queries):
+    def test_supplier_list_is_bounded(self, authenticated_client, django_assert_max_num_queries):
+        # Authenticated because the list is: an anonymous request is refused
+        # before a queryset is built, so the N+1 guard would cover nothing
+        # (op-anonymous-read-posture). Same guard, moved to where it still runs.
+        api_client, _user = authenticated_client
         # Build 10 suppliers and link each to 3 items. We pass ``supplier=`` to
         # InventoryItemFactory so its post-generation hook reuses our suppliers
         # instead of creating throwaway ones — otherwise the count balloons.

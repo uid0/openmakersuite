@@ -253,10 +253,20 @@ function AppContent() {
           <Route path="/inventory/items/new" element={<WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout>} />
           <Route path="/inventory/items/:id" element={<WorkspaceLayout><InventoryItemDetailPage /></WorkspaceLayout>} />
           <Route path="/inventory/items/:id/edit" element={<WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout>} />
-          <Route path="/inventory/suppliers" element={<WorkspaceLayout><SupplierListPage /></WorkspaceLayout>} />
-          <Route path="/inventory/suppliers/new" element={<WorkspaceLayout><SupplierFormPage /></WorkspaceLayout>} />
-          <Route path="/inventory/suppliers/:id" element={<WorkspaceLayout><SupplierDetailPage /></WorkspaceLayout>} />
-          <Route path="/inventory/suppliers/:id/edit" element={<WorkspaceLayout><SupplierFormPage /></WorkspaceLayout>} />
+          {/* Vendor pages, auth-guarded (op-anonymous-read-posture).
+
+              THIS GUARD IS NOT THE BOUNDARY and must not be described as one:
+              client-side routing cannot keep anything from anyone, and the
+              endpoints these pages read — `inventory/suppliers/`,
+              `item-suppliers/`, `price-history/`, `reorders/purchase-orders/` —
+              are what actually refuse a caller with no session. The guard is
+              here so a logged-out visitor is sent to the login surface BEFORE
+              the page mounts and fetches, instead of being shown a shell full
+              of 401 errors (the same reason `/dashboard` carries it, op-3er). */}
+          <Route path="/inventory/suppliers" element={<RequireAuth><WorkspaceLayout><SupplierListPage /></WorkspaceLayout></RequireAuth>} />
+          <Route path="/inventory/suppliers/new" element={<RequireAuth><WorkspaceLayout><SupplierFormPage /></WorkspaceLayout></RequireAuth>} />
+          <Route path="/inventory/suppliers/:id" element={<RequireAuth><WorkspaceLayout><SupplierDetailPage /></WorkspaceLayout></RequireAuth>} />
+          <Route path="/inventory/suppliers/:id/edit" element={<RequireAuth><WorkspaceLayout><SupplierFormPage /></WorkspaceLayout></RequireAuth>} />
           <Route path="/inventory/assets" element={<WorkspaceLayout><AssetsPage /></WorkspaceLayout>} />
           <Route path="/inventory/admin" element={<WorkspaceLayout><AdminDashboard /></WorkspaceLayout>} />
           <Route path="/facilities/forgekey-dashboard" element={<WorkspaceLayout><ForgeKeyDashboardPage /></WorkspaceLayout>} />
@@ -294,9 +304,11 @@ function AppContent() {
 
           {/* Purchasing Workspace */}
           <Route path="/purchasing" element={<WorkspaceLayout><PurchasingOverviewPage /></WorkspaceLayout>} />
-          <Route path="/purchasing/orders" element={<WorkspaceLayout><PurchaseOrderListPage /></WorkspaceLayout>} />
-          <Route path="/purchasing/orders/new" element={<WorkspaceLayout><PurchaseOrderFormPage /></WorkspaceLayout>} />
-          <Route path="/purchasing/orders/:orderId" element={<WorkspaceLayout><PurchaseOrderPage /></WorkspaceLayout>} />
+          {/* Purchase orders are vendor identity and vendor money end to end —
+              same guard, same reason as the supplier pages above. */}
+          <Route path="/purchasing/orders" element={<RequireAuth><WorkspaceLayout><PurchaseOrderListPage /></WorkspaceLayout></RequireAuth>} />
+          <Route path="/purchasing/orders/new" element={<RequireAuth><WorkspaceLayout><PurchaseOrderFormPage /></WorkspaceLayout></RequireAuth>} />
+          <Route path="/purchasing/orders/:orderId" element={<RequireAuth><WorkspaceLayout><PurchaseOrderPage /></WorkspaceLayout></RequireAuth>} />
 
           {/* Assets Workspace */}
           <Route path="/assets" element={<WorkspaceLayout><AssetsPage /></WorkspaceLayout>} />
@@ -393,7 +405,10 @@ function AppContent() {
           {/* Reports Workspace */}
           <Route path="/reports" element={<WorkspaceLayout><ReportsOverviewPage /></WorkspaceLayout>} />
           <Route path="/reports/inventory" element={<WorkspaceLayout><InventoryReportPage /></WorkspaceLayout>} />
-          <Route path="/reports/purchasing" element={<WorkspaceLayout><PurchasingReportPage /></WorkspaceLayout>} />
+          {/* Spend by supplier, price trends, lead-time analysis — every panel
+              names a vendor or quotes their price, and every endpoint behind
+              them is `IsAuthenticated`. */}
+          <Route path="/reports/purchasing" element={<RequireAuth><WorkspaceLayout><PurchasingReportPage /></WorkspaceLayout></RequireAuth>} />
           <Route path="/reports/assets" element={<WorkspaceLayout><AssetReportPage /></WorkspaceLayout>} />
           <Route path="/reports/cost-recovery" element={<WorkspaceLayout><AssetCostRecoveryPage /></WorkspaceLayout>} />
 

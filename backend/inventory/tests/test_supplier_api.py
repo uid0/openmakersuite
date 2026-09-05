@@ -15,21 +15,35 @@ from inventory.tests.factories import InventoryItemFactory, ItemSupplierFactory,
 pytestmark = pytest.mark.django_db
 
 
+@pytest.fixture
+def supplier_reader(authenticated_client):
+    """A signed-in client for the supplier catalogue.
+
+    Every read here used the anonymous ``api_client`` until
+    op-anonymous-read-posture closed ``SupplierViewSet`` — a supplier row is a
+    vendor's identity, and the detail serializer nests their SKUs, prices and
+    lead times. The reads themselves are unchanged; who may make them is not,
+    and ``TestSupplierCatalogueRequiresAuth`` below pins the new boundary.
+    """
+    client, _user = authenticated_client
+    return client
+
+
 @pytest.mark.integration
 class TestSupplierAPI:
     """Tests for Supplier API endpoints."""
 
-    def test_list_suppliers(self, api_client):
+    def test_list_suppliers(self, supplier_reader):
         """Test listing suppliers."""
         SupplierFactory.create_batch(3)
         url = reverse("supplier-list")
-        response = api_client.get(url)
+        response = supplier_reader.get(url)
 
         assert response.status_code == status.HTTP_200_OK
         assert response.data["count"] == 3
         assert len(response.data["results"]) == 3
 
-    def test_list_suppliers_includes_computed_fields(self, api_client):
+    def test_list_suppliers_includes_computed_fields(self, supplier_reader):
         """Test that list includes computed fields."""
         supplier = SupplierFactory()
         # Create some items for this supplier
@@ -40,7 +54,7 @@ class TestSupplierAPI:
         ItemSupplierFactory(item=InventoryItemFactory(), supplier=supplier, is_active=False)
 
         url = reverse("supplier-list")
-        response = api_client.get(url)
+        response = supplier_reader.get(url)
 
         assert response.status_code == status.HTTP_200_OK
         supplier_data = next(s for s in response.data["results"] if s["id"] == supplier.id)
@@ -48,28 +62,28 @@ class TestSupplierAPI:
         assert "purchase_order_count" in supplier_data
         assert "total_spent" in supplier_data
 
-    def test_filter_suppliers_by_type(self, api_client):
+    def test_filter_suppliers_by_type(self, supplier_reader):
         """Test filtering suppliers by type."""
         SupplierFactory(supplier_type=Supplier.SupplierType.LOCAL)
         SupplierFactory(supplier_type=Supplier.SupplierType.ONLINE)
         SupplierFactory(supplier_type=Supplier.SupplierType.NATIONAL)
 
         url = reverse("supplier-list")
-        response = api_client.get(url, {"supplier_type": Supplier.SupplierType.ONLINE})
+        response = supplier_reader.get(url, {"supplier_type": Supplier.SupplierType.ONLINE})
 
         assert response.status_code == status.HTTP_200_OK
         assert all(
             s["supplier_type"] == Supplier.SupplierType.ONLINE for s in response.data["results"]
         )
 
-    def test_search_suppliers(self, api_client):
+    def test_search_suppliers(self, supplier_reader):
         """Test searching suppliers by name."""
         SupplierFactory(name="Acme Corporation")
         SupplierFactory(name="Beta Supplies")
         SupplierFactory(name="Gamma Tools", notes="Acme competitor")
 
         url = reverse("supplier-list")
-        response = api_client.get(url, {"search": "Acme"})
+        response = supplier_reader.get(url, {"search": "Acme"})
 
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data["results"]) == 2  # Name match and notes match
@@ -104,7 +118,7 @@ class TestSupplierAPI:
         assert response.data["tax_free_paperwork_filed"] is True
         assert response.data["notes"] == "Test notes"
 
-    def test_retrieve_supplier_detail(self, api_client):
+    def test_retrieve_supplier_detail(self, supplier_reader):
         """Test retrieving supplier with detail serializer."""
         supplier = SupplierFactory()
         item1 = InventoryItemFactory()
@@ -113,7 +127,7 @@ class TestSupplierAPI:
         ItemSupplierFactory(item=item2, supplier=supplier)
 
         url = reverse("supplier-detail", kwargs={"pk": supplier.pk})
-        response = api_client.get(url)
+        response = supplier_reader.get(url)
 
         assert response.status_code == status.HTTP_200_OK
         assert response.data["name"] == supplier.name
@@ -165,18 +179,18 @@ class TestSupplierAPI:
         assert response.status_code == status.HTTP_204_NO_CONTENT
         assert not Supplier.objects.filter(pk=supplier.pk).exists()
 
-    def test_supplier_analytics_endpoint(self, api_client):
+    def test_supplier_analytics_endpoint(self, supplier_reader):
         """Test supplier analytics endpoint."""
         supplier = SupplierFactory()
         url = reverse("supplier-analytics", kwargs={"pk": supplier.pk})
-        response = api_client.get(url)
+        response = supplier_reader.get(url)
 
         assert response.status_code == status.HTTP_200_OK
         assert "lead_time_analytics" in response.data
         assert "price_trends" in response.data
         assert "order_statistics" in response.data
 
-    def test_supplier_analytics_with_data(self, api_client, authenticated_client):
+    def test_supplier_analytics_with_data(self, supplier_reader, authenticated_client):
         """Test supplier analytics with actual data."""
         supplier = SupplierFactory()
         item = InventoryItemFactory()
@@ -216,14 +230,14 @@ class TestSupplierAPI:
             pass  # reorder_queue not available in test environment
 
         url = reverse("supplier-analytics", kwargs={"pk": supplier.pk})
-        response = api_client.get(url)
+        response = supplier_reader.get(url)
 
         assert response.status_code == status.HTTP_200_OK
         assert "lead_time_analytics" in response.data
         assert "price_trends" in response.data
         assert "order_statistics" in response.data
 
-    def test_supplier_serializer_computed_fields(self, api_client):
+    def test_supplier_serializer_computed_fields(self, supplier_reader):
         """Test that serializer computes fields correctly."""
         supplier = SupplierFactory()
 
@@ -236,12 +250,12 @@ class TestSupplierAPI:
         ItemSupplierFactory(item=item3, supplier=supplier, is_active=False)
 
         url = reverse("supplier-list")
-        response = api_client.get(url)
+        response = supplier_reader.get(url)
 
         supplier_data = next(s for s in response.data["results"] if s["id"] == supplier.id)
         assert supplier_data["item_count"] == 2  # Only active items
 
-    def test_supplier_detail_serializer_includes_items(self, api_client):
+    def test_supplier_detail_serializer_includes_items(self, supplier_reader):
         """Test that detail serializer includes related items."""
         supplier = SupplierFactory()
         item1 = InventoryItemFactory()
@@ -250,7 +264,7 @@ class TestSupplierAPI:
         ItemSupplierFactory(item=item2, supplier=supplier, supplier_sku="SKU2")
 
         url = reverse("supplier-detail", kwargs={"pk": supplier.pk})
-        response = api_client.get(url)
+        response = supplier_reader.get(url)
 
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data["items"]) == 2
@@ -258,14 +272,14 @@ class TestSupplierAPI:
         assert any(item["supplier_sku"] == "SKU1" for item in response.data["items"])
         assert any(item["supplier_sku"] == "SKU2" for item in response.data["items"])
 
-    def test_supplier_analytics_empty_lead_time_logs(self, api_client):
+    def test_supplier_analytics_empty_lead_time_logs(self, supplier_reader):
         """Test analytics endpoint with no lead time logs."""
         supplier = SupplierFactory()
         item = InventoryItemFactory()
         ItemSupplierFactory(item=item, supplier=supplier)
 
         url = reverse("supplier-analytics", kwargs={"pk": supplier.pk})
-        response = api_client.get(url)
+        response = supplier_reader.get(url)
 
         assert response.status_code == status.HTTP_200_OK
         assert "lead_time_analytics" in response.data
@@ -273,11 +287,11 @@ class TestSupplierAPI:
         lead_time = response.data["lead_time_analytics"]
         assert lead_time.get("total_orders") == 0 or "total_orders" not in lead_time
 
-    def test_supplier_list_with_pagination(self, api_client):
+    def test_supplier_list_with_pagination(self, supplier_reader):
         """Test supplier list with pagination."""
         SupplierFactory.create_batch(25)
         url = reverse("supplier-list")
-        response = api_client.get(url)
+        response = supplier_reader.get(url)
 
         assert response.status_code == status.HTTP_200_OK
         assert "count" in response.data
@@ -295,3 +309,45 @@ class TestSupplierAPI:
         assert response.status_code == status.HTTP_200_OK
         assert response.data["tax_free_paperwork_filed"] is True
         assert response.data["name"] == "Original"  # Name unchanged
+
+
+@pytest.mark.integration
+class TestSupplierCatalogueRequiresAuth:
+    """The boundary the tests above used to sit on the wrong side of.
+
+    ``SupplierViewSet`` served ``list``, ``retrieve`` and ``analytics`` to
+    anonymous callers under ``IsAuthenticatedOrReadOnly``. The captain's
+    decision — "Vendor names should not be public, same with Vendor Pricing" —
+    closes them (op-anonymous-read-posture). Asserted here as well as in
+    ``config/tests/test_anonymous_vendor_exposure.py`` so a change to this
+    viewset fails beside its own tests.
+    """
+
+    def test_an_anonymous_caller_cannot_list_suppliers(self, api_client):
+        SupplierFactory(name="ZZQQ Anonymous Probe Vendor")
+        response = api_client.get(reverse("supplier-list"))
+
+        assert response.status_code in (
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+        )
+        assert b"ZZQQ Anonymous Probe Vendor" not in response.content
+
+    def test_an_anonymous_caller_cannot_read_one_supplier(self, api_client):
+        supplier = SupplierFactory(name="ZZQQ Anonymous Probe Vendor")
+        response = api_client.get(reverse("supplier-detail", kwargs={"pk": supplier.pk}))
+
+        assert response.status_code in (
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+        )
+        assert b"ZZQQ Anonymous Probe Vendor" not in response.content
+
+    def test_an_anonymous_caller_cannot_read_supplier_analytics(self, api_client):
+        supplier = SupplierFactory()
+        response = api_client.get(f"/api/inventory/suppliers/{supplier.pk}/analytics/")
+
+        assert response.status_code in (
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+        )

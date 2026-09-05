@@ -21,6 +21,29 @@ from inventory.tests.factories import (
 )
 
 
+def operator_context():
+    """Serializer context for a SIGNED-IN reader.
+
+    ``InventoryItemSerializer`` withholds its vendor block — ``suppliers[]``
+    included — from a caller it cannot prove is authenticated, and FAILS CLOSED
+    when it has no ``request`` at all (op-anonymous-read-posture). A serializer
+    built bare, as these tests used to build it, therefore gets the anonymous
+    payload. This supplies the context the real view supplies, so the tests
+    below keep asserting the contract they were written to assert.
+    """
+    from django.contrib.auth import get_user_model
+    from django.utils.crypto import get_random_string
+
+    from rest_framework.test import APIRequestFactory
+
+    request = APIRequestFactory().get("/")
+    request.user = get_user_model().objects.create_user(
+        username=f"suppliers-array-{get_random_string(8)}",
+        password=get_random_string(24),
+    )
+    return {"request": request}
+
+
 class TestSimpleSuppliersArray(TestCase):
     """Simple test for suppliers array in API responses."""
 
@@ -74,7 +97,7 @@ class TestSimpleSuppliersArray(TestCase):
         )
 
         # Test serialization
-        serializer = InventoryItemSerializer(item)
+        serializer = InventoryItemSerializer(item, context=operator_context())
         data = serializer.data
 
         # Check suppliers array exists and has correct count
@@ -120,7 +143,7 @@ class TestSimpleSuppliersArray(TestCase):
             minimum_stock=2,
         )
 
-        serializer = InventoryItemSerializer(item)
+        serializer = InventoryItemSerializer(item, context=operator_context())
         data = serializer.data
 
         # Should have empty suppliers array
@@ -161,7 +184,7 @@ class TestSimpleSuppliersArray(TestCase):
             is_active=True,
         )
 
-        serializer = InventoryItemSerializer(item)
+        serializer = InventoryItemSerializer(item, context=operator_context())
         data = serializer.data
 
         supplier_data = data["suppliers"][0]
@@ -209,7 +232,7 @@ class TestSimpleSuppliersArray(TestCase):
             is_active=True,
         )
 
-        serializer = InventoryItemSerializer(item)
+        serializer = InventoryItemSerializer(item, context=operator_context())
         data = serializer.data
 
         # Check hazmat data is present
@@ -223,6 +246,15 @@ class TestSimpleSuppliersArray(TestCase):
         # Check suppliers array is still present
         self.assertEqual(len(data["suppliers"]), 1)
         self.assertEqual(data["suppliers"][0]["supplier_name"], "Hazmat Supplier")
+
+
+@pytest.fixture
+def suppliers_reader(authenticated_client):
+    """A signed-in client. ``suppliers[]`` is the vendor roster, withheld from an
+    anonymous caller since op-anonymous-read-posture; the CONTRACT these tests
+    pin is what a signed-in reader gets, and it is unchanged."""
+    client, _user = authenticated_client
+    return client
 
 
 @pytest.mark.django_db
@@ -251,7 +283,9 @@ class TestItemDetailSuppliersContract:
         "is_discontinued",
     }
 
-    def test_detail_response_carries_every_supplier_with_the_keys_the_ui_reads(self, api_client):
+    def test_detail_response_carries_every_supplier_with_the_keys_the_ui_reads(
+        self, suppliers_reader
+    ):
         # The factory always seeds one supplier link; clear it so this test
         # controls the whole set.
         item = InventoryItemFactory()
@@ -275,7 +309,7 @@ class TestItemDetailSuppliersContract:
         )
 
         url = reverse("inventoryitem-detail", kwargs={"pk": item.id})
-        response = api_client.get(url)
+        response = suppliers_reader.get(url)
 
         assert response.status_code == status.HTTP_200_OK
         suppliers = response.data["suppliers"]
@@ -301,7 +335,7 @@ class TestItemDetailSuppliersContract:
         assert beta["is_discontinued"] is True
         assert {s["id"] for s in suppliers} == {primary.pk, secondary.pk}
 
-    def test_unrecorded_supplier_text_fields_come_back_blank_not_missing(self, api_client):
+    def test_unrecorded_supplier_text_fields_come_back_blank_not_missing(self, suppliers_reader):
         """A supplier with no UPC recorded still carries the keys, empty.
 
         The page renders "Not recorded" for these; it can only do that if the
@@ -319,7 +353,7 @@ class TestItemDetailSuppliersContract:
         )
 
         url = reverse("inventoryitem-detail", kwargs={"pk": item.id})
-        response = api_client.get(url)
+        response = suppliers_reader.get(url)
 
         assert response.status_code == status.HTTP_200_OK
         link = response.data["suppliers"][0]
@@ -329,14 +363,14 @@ class TestItemDetailSuppliersContract:
         # A recorded 0-day lead time is a real value, not an absence.
         assert link["average_lead_time"] == 0
 
-    def test_item_with_no_supplier_links_returns_an_empty_array(self, api_client):
+    def test_item_with_no_supplier_links_returns_an_empty_array(self, suppliers_reader):
         """Empty array, never a missing key — "none" must stay distinguishable
         from "we were not told"."""
         item = InventoryItemFactory()
         item.item_suppliers.all().delete()
 
         url = reverse("inventoryitem-detail", kwargs={"pk": item.id})
-        response = api_client.get(url)
+        response = suppliers_reader.get(url)
 
         assert response.status_code == status.HTTP_200_OK
         assert "suppliers" in response.data

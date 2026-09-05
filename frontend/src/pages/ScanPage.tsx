@@ -693,22 +693,32 @@ const ScanPage: React.FC = () => {
                 "Supplier: Acme" for an item stocked by three — with the lead
                 time and the price beside it reading as the item's own numbers.
                 Every sentence below comes from the server's own answer; nothing
-                here ranks or filters links. */}
+                here ranks or filters links.
+
+                THE WHOLE BLOCK IS SIGNED-IN ONLY NOW, and not because of a
+                condition added here. The server omits `supplier_choice`,
+                `average_lead_time` and `unit_cost` from an anonymous caller's
+                item payload (op-anonymous-read-posture), so `supplierName` is
+                null for a logged-out scanner and this renders nothing at all.
+                That is the intended outcome, not a degradation to paper over:
+                what an anonymous scanner needs is above — the item, its stock
+                and its reorder quantity — and the reorder they file is
+                unchanged. Do not reintroduce a fallback that quotes a vendor
+                here from some other key. */}
             {supplierName && (
               <>
                 <div className="info-item" data-testid="supplier-choice-name">
                   <span className="label">We order this from:</span>
                   <span className="value">
                     {supplierName}
-                    {/* SIGNED-IN ONLY, and with no anonymous substitute. This
-                        route is not behind RequireAuth and serves logged-out QR
-                        scanners, who get the chosen supplier's name, lead time
-                        and price — exactly what they saw before this field
-                        existed, and no indication that any other vendor exists.
-                        Not the roster, and not a count of it either: a count is
-                        authorised on the item detail page and nowhere else, and
-                        widening anonymous disclosure is the requester's to
-                        grant, not a nearby surface's to infer by analogy. */}
+                    {/* The alternatives, by name. This comment used to record
+                        that a logged-out QR scanner still got "the chosen
+                        supplier's name, lead time and price" and that only the
+                        ALTERNATIVES were withheld from them. That is no longer
+                        true of any of it: a logged-out scanner reaches none of
+                        this block, because the server sends none of the keys it
+                        reads (op-anonymous-read-posture). What remains here is
+                        the operator's view. */}
                     {alternativeText !== null && (
                       <span className="value secondary" data-testid="supplier-choice-alternatives">
                         {' '}

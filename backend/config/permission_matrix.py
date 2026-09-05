@@ -16,6 +16,8 @@ from typing import Iterable
 
 from django.urls import URLPattern, URLResolver, get_resolver
 
+from rest_framework import views
+
 import yaml
 
 MATRIX_PATH = Path(__file__).resolve().parent / "api_permission_matrix.yaml"
@@ -65,9 +67,14 @@ class EndpointSnapshot:
     example_method: str
 
 
-def _perm_names(view_cls, action_name: str | None) -> tuple[str, ...]:
-    """Return the permission_classes for ``view_cls``, taking any per-action
-    override from a DRF ``@action`` decorator into account."""
+def _declared_perm_names(view_cls, action_name: str | None) -> tuple[str, ...]:
+    """The permission_classes DECLARED on ``view_cls`` for this action.
+
+    Reads the ``@action(permission_classes=[...])`` override where there is one,
+    else the class attribute. This is what the snapshot used to record for
+    everything, and it is a true answer only for a view that does not override
+    ``get_permissions``.
+    """
     if action_name is not None:
         method = getattr(view_cls, action_name, None)
         # ``@action(permission_classes=[...])`` stashes its kwargs on the bound
@@ -80,6 +87,66 @@ def _perm_names(view_cls, action_name: str | None) -> tuple[str, ...]:
     if pc is None:
         return ("<default>",)
     return tuple(getattr(c, "__name__", repr(c)) for c in pc)
+
+
+def _perm_names(view_cls, action_name: str | None) -> tuple[str, ...]:
+    """The permission classes this view ACTUALLY ENFORCES for ``action_name``.
+
+    WHY THIS IS NOT JUST ``view_cls.permission_classes`` (op-anonymous-read-posture).
+    A ``ViewSet`` may override ``get_permissions`` and return something entirely
+    different per action — ``InventoryItemViewSet`` returns ``AllowAny`` for its
+    public actions while declaring no ``permission_classes`` at all, and
+    ``PurchaseOrderViewSet`` used to return ``AllowAny`` for ``list``/``retrieve``
+    while declaring ``IsAuthenticated``. Recording the declaration for those
+    views does not merely omit detail: it states the opposite of what the server
+    does, and this document is read as evidence. A permission matrix that
+    misstates permissions is worse than none, so it is fixed here rather than
+    footnoted.
+
+    Every ``get_permissions`` in this codebase branches on ``self.action`` alone,
+    so setting that attribute on a bare instance resolves them faithfully. When
+    one grows a dependency on ``self.request`` — or on anything else absent here —
+    the call raises and this FALLS BACK to the declared classes rather than
+    guessing, because a wrong entry is the failure mode being fixed. The
+    fallback is visible: the entry is suffixed ``(unresolved)`` so a reader can
+    tell a resolved answer from an unresolved one, and the YAML records the same
+    suffix, so a view that stops resolving shows up as drift.
+
+    THE ``@action`` OVERRIDE IS APPLIED FIRST, and getting this wrong inverts
+    the answer. DRF carries ``@action(permission_classes=[...])`` as route
+    ``initkwargs`` and sets them ON THE INSTANCE before dispatch, so the base
+    ``get_permissions`` — which reads ``self.permission_classes`` — sees the
+    action's list, not the class's. A resolution that instantiates the class and
+    calls straight through skips that step and reports the class default for
+    every decorated action: it would have recorded ``AnalyticsViewSet.transparency``
+    as ``IsAuthenticated`` when the server serves it to anyone. Assigning
+    ``permission_classes`` here is the same assignment DRF makes.
+    """
+    declared_override = None
+    if action_name is not None:
+        method = getattr(view_cls, action_name, None)
+        if method is not None and hasattr(method, "kwargs"):
+            declared_override = method.kwargs.get("permission_classes")
+
+    # A function-based view has no ``get_permissions`` at all, and a class that
+    # inherits DRF's unchanged means what it declares.
+    if getattr(view_cls, "get_permissions", None) is views.APIView.get_permissions or not isinstance(
+        view_cls, type
+    ):
+        return _declared_perm_names(view_cls, action_name)
+
+    try:
+        view = view_cls()
+        view.action = action_name
+        view.kwargs = {}
+        view.format_kwarg = None
+        if declared_override is not None:
+            view.permission_classes = declared_override
+        resolved = view.get_permissions()
+    except Exception:
+        return _declared_perm_names(view_cls, action_name) + ("(unresolved)",)
+
+    return tuple(type(p).__name__ for p in resolved)
 
 
 def _walk(resolver, prefix: str) -> Iterable[EndpointSnapshot]:

@@ -133,21 +133,29 @@ class TestNoLinesIsNotHidingGrounds:
         assert empty_draft.id in _listed_ids(response)
 
     @pytest.mark.parametrize("po_status", PUBLIC_STATUSES)
-    def test_the_public_list_also_shows_an_order_with_no_lines(self, api_client, po_status):
-        """Stated deliberately: this widens what an anonymous caller sees.
+    def test_an_anonymous_caller_sees_no_purchase_order_list_to_be_shown_it_on(
+        self, api_client, po_status
+    ):
+        """This test used to assert the opposite, deliberately: that an empty
+        sent order was visible on the ANONYMOUS list too, because "it is a data
+        problem someone has to be able to see".
 
-        A sent order carrying no lines is reachable today — ``send_to_supplier``
-        and the sales-order-number auto-send both accept an order with nothing
-        on it — and it was invisible on every list. It is a data problem someone
-        has to be able to see, not noise; hiding it hid the problem, not the
-        clutter.
+        That reasoning is untouched and still holds — for the people who can act
+        on it. The captain closed the list to callers with no session
+        (op-anonymous-read-posture): a purchase order names the vendor, the
+        agreement it was placed under, their order number and every line's cost,
+        and an anonymous visitor can do nothing about an empty one. The
+        visibility this test was written to protect is pinned, unchanged, by
+        ``test_an_order_with_no_lines_is_listed`` above, which runs signed in
+        and over ALL statuses rather than only the public four.
         """
         owner = UserFactory()
         purchase_order = _make_po(owner, po_status=po_status, line_count=0)
 
         response = api_client.get(reverse("purchaseorder-list"))
 
-        assert purchase_order.id in _listed_ids(response)
+        assert response.status_code in (401, 403)
+        assert purchase_order.supplier.name.encode() not in response.content
 
 
 class TestEmptiedByVoidingHidesOnlyOnceThereIsAnObligation:

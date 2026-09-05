@@ -12,7 +12,12 @@ from __future__ import annotations
 
 import pytest
 
-from config.permission_matrix import diff, introspect_endpoints, load_matrix
+from config.permission_matrix import (
+    EndpointKey,
+    diff,
+    introspect_endpoints,
+    load_matrix,
+)
 
 
 @pytest.mark.unit
@@ -80,3 +85,89 @@ def test_permission_matrix_covers_documented_apps():
         f"api_permission_matrix.yaml: {missing}. Either remove them from the "
         "Markdown matrix or run `manage.py check_permission_matrix --write`."
     )
+
+
+@pytest.mark.integration
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "view_path,action,expected,path,anonymous_status",
+    [
+        # Declares no ``permission_classes`` at all and returns AllowAny from
+        # ``get_permissions``. The old snapshot recorded the DRF default.
+        (
+            "inventory.views.InventoryItemViewSet",
+            "list",
+            ("AllowAny",),
+            "/api/inventory/items/",
+            200,
+        ),
+        # Same class, same method, opposite answer — which is the whole reason
+        # a per-view entry cannot describe a ``get_permissions`` view.
+        (
+            "inventory.views.InventoryItemViewSet",
+            "download_blank_card",
+            ("IsAuthenticated",),
+            None,
+            None,
+        ),
+        # Closed on this branch. Was recorded ``IsAuthenticatedOrReadOnly``
+        # while ``get_permissions`` returned ``AllowAny`` for reads.
+        (
+            "reorder_queue.views.PurchaseOrderViewSet",
+            "list",
+            ("IsAuthenticated",),
+            "/api/reorders/purchase-orders/",
+            401,
+        ),
+        # An ``@action`` override on a class that ALSO overrides
+        # ``get_permissions``: DRF applies the action's list as initkwargs, so
+        # the resolution must too. Recording the class answer here would say
+        # this public feed is authenticated.
+        (
+            "reorder_queue.views.AnalyticsViewSet",
+            "transparency",
+            ("AllowAny",),
+            "/api/reorders/analytics/transparency/",
+            200,
+        ),
+        # The anonymous QR-scan reorder, which must stay open.
+        (
+            "reorder_queue.views.ReorderRequestViewSet",
+            "create",
+            ("AllowAny",),
+            None,
+            None,
+        ),
+        (
+            "inventory.views.SupplierViewSet",
+            "list",
+            ("IsAuthenticated",),
+            "/api/inventory/suppliers/",
+            401,
+        ),
+    ],
+)
+def test_the_matrix_records_what_is_enforced_not_what_is_declared(
+    view_path, action, expected, path, anonymous_status, client
+):
+    """The matrix's own correctness, checked against the server.
+
+    ``docs/API_PERMISSION_MATRIX.md`` and its YAML used to snapshot DECLARED
+    ``permission_classes``, so every view overriding ``get_permissions`` was
+    recorded wrongly — not vaguely, but with the opposite answer for the six
+    rows below. That is a defect in its own right: this document is read as
+    evidence about who can reach what, and it was cited to conclude a screen was
+    anonymously readable when it was not (op-anonymous-read-posture).
+
+    Each case pins the snapshot AND, where the endpoint can be exercised, what
+    an unauthenticated request actually gets — so the document cannot drift back
+    into describing something the server does not do.
+    """
+    snapshot = introspect_endpoints()[EndpointKey(view_path, action)]
+    assert snapshot.permission_classes == expected
+
+    stored = load_matrix()[EndpointKey(view_path, action)]
+    assert stored == expected, "api_permission_matrix.yaml disagrees with the code"
+
+    if path is not None:
+        assert client.get(path).status_code == anonymous_status

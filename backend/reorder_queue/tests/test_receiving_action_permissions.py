@@ -121,8 +121,18 @@ class TestAnonymousCallersAreRefused:
             "docs/API_PERMISSION_MATRIX.md:\n" + "\n".join(allowed_anonymously)
         )
 
-    def test_the_purchase_order_list_and_detail_stay_open(self, django_user_model):
-        """The deliberate anonymous reads the queue dashboard depends on."""
+    def test_the_purchase_order_list_and_detail_are_closed_too(self, django_user_model):
+        """This test was named ``..._stay_open`` and asserted 200 on both.
+
+        It described the one deliberate hole in this class: ``list`` and
+        ``retrieve`` were ``AllowAny`` "for the queue dashboard". The captain
+        closed it (op-anonymous-read-posture) — a purchase order is the
+        supplier's name, the agreement, their order number, the payment terms
+        and every line's cost, and the "cost data is filtered in the serializer"
+        claim in the permission matrix that justified leaving it open was false.
+        Inverted rather than deleted, because the class's whole subject is which
+        of these actions an anonymous caller reaches, and this is now none.
+        """
         owner = django_user_model.objects.create_user(username="po-owner-2", password="pw")
         purchase_order = PurchaseOrder.objects.create(
             supplier=SupplierFactory(name="Fastenal"),
@@ -132,8 +142,28 @@ class TestAnonymousCallersAreRefused:
         )
 
         anonymous = APIClient()
-        assert anonymous.get(reverse("purchaseorder-list")).status_code == 200
-        assert (
-            anonymous.get(reverse("purchaseorder-detail", args=[purchase_order.pk])).status_code
-            == 200
+        listing = anonymous.get(reverse("purchaseorder-list"))
+        detail = anonymous.get(reverse("purchaseorder-detail", args=[purchase_order.pk]))
+
+        assert listing.status_code in (401, 403)
+        assert detail.status_code in (401, 403)
+        assert b"Fastenal" not in listing.content
+        assert b"Fastenal" not in detail.content
+
+    def test_a_signed_in_caller_still_reads_the_list_and_detail(self, django_user_model):
+        """CONTROL: closed to anonymous callers, not to the operators who use it."""
+        owner = django_user_model.objects.create_user(username="po-owner-3", password="pw")
+        purchase_order = PurchaseOrder.objects.create(
+            supplier=SupplierFactory(name="Fastenal"),
+            status=PurchaseOrder.Status.SENT,
+            order_date=timezone.now(),
+            created_by=owner,
         )
+
+        client = APIClient()
+        client.force_authenticate(user=owner)
+
+        assert client.get(reverse("purchaseorder-list")).status_code == 200
+        detail = client.get(reverse("purchaseorder-detail", args=[purchase_order.pk]))
+        assert detail.status_code == 200
+        assert b"Fastenal" in detail.content

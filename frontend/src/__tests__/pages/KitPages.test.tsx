@@ -238,3 +238,153 @@ describe('AC-34 / AC-46 — kit mutations are reactive', () => {
     expect(screen.getByTestId('kit-component-editor-empty')).toBeInTheDocument();
   });
 });
+
+describe('the kit form never invents a price the operator did not give', () => {
+  /**
+   * A blank cost box used to send the string `'0'`. That stores a real recorded
+   * price of zero — a free item — which the order pad, the stock-value reports
+   * and the public transparency feed then present and sum as money. "No price on
+   * file" and "this supplier gives it away" are different facts.
+   *
+   * This guard was written once, on `oms-falsy-zero-money-guards`, and removed as
+   * collateral when that branch reverted its whole supplier-terms attempt, so the
+   * defect reached main. It is restored here with the write path it belongs to.
+   */
+  // The Supplier / SKU boxes are signed-in only (`showSupplierAttribution`
+  // reads `isAuthenticated`, which reads a token out of localStorage), and the
+  // payload only carries `supplier_terms` when both are filled in.
+  beforeEach(() => localStorage.setItem('token', 'test-token'));
+  afterEach(() => localStorage.removeItem('token'));
+
+  const saveWithTerms = async (typeCost?: string) => {
+    const user = userEvent.setup();
+    (kitAPI.updateKit as ReturnType<typeof vi.fn>).mockResolvedValue({ data: KIT });
+
+    renderDetail();
+    await waitFor(() => expect(screen.getByTestId('kit-detail-page')).toBeInTheDocument());
+
+    await user.type(screen.getByTestId('kit-supplier'), '7');
+    const cost = screen.getByTestId('kit-unit-cost');
+    await user.clear(cost);
+    if (typeCost !== undefined) await user.type(cost, typeCost);
+
+    await user.click(screen.getByTestId('kit-save'));
+    await waitFor(() => expect(kitAPI.updateKit).toHaveBeenCalled());
+    return (kitAPI.updateKit as ReturnType<typeof vi.fn>).mock.calls[0][1];
+  };
+
+  it('BEFORE/AFTER: a blank cost box sends null, not a fabricated "0"', async () => {
+    const payload = await saveWithTerms();
+
+    expect(payload.supplier_terms.unit_cost).toBeNull();
+    expect(payload.supplier_terms.unit_cost).not.toBe('0');
+  });
+
+  it('CONTROL: a typed 0 is a real price and is still sent', async () => {
+    const payload = await saveWithTerms('0');
+
+    expect(payload.supplier_terms.unit_cost).toBe('0');
+  });
+
+  it('CONTROL: an ordinary typed price is unchanged', async () => {
+    const payload = await saveWithTerms('12.50');
+
+    expect(payload.supplier_terms.unit_cost).toBe('12.5');
+  });
+
+  it('CONTROL: a save that never touches the purchase terms sends none at all', async () => {
+    const user = userEvent.setup();
+    (kitAPI.updateKit as ReturnType<typeof vi.fn>).mockResolvedValue({ data: KIT });
+
+    renderDetail();
+    await waitFor(() => expect(screen.getByTestId('kit-detail-page')).toBeInTheDocument());
+
+    const name = screen.getByTestId('kit-name');
+    await user.clear(name);
+    await user.type(name, 'Renamed');
+    await user.click(screen.getByTestId('kit-save'));
+
+    await waitFor(() => expect(kitAPI.updateKit).toHaveBeenCalled());
+    const payload = (kitAPI.updateKit as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(payload).not.toHaveProperty('supplier_terms');
+  });
+});
+
+/**
+ * The purchase-terms card shows the CHOSEN supplier link's figures — the
+ * read-only price line, and a SKU box that still seeds from that link — while
+ * the Supplier box is free text the operator types. When those two name
+ * different vendors, the card says so.
+ *
+ * That sentence is a claim made to an operator, so it is held to the same
+ * standard as a claim in prose: it has to state something a run can contradict.
+ * Both halves are asserted here, because a test that only checks the warning
+ * appears cannot tell a working condition from one that is always true.
+ *
+ * It only warns. Saving still writes the typed figures onto the named link —
+ * the remaining cross-supplier routes are filed in
+ * docs/oms-supplier-cost-write-path-record.md.
+ */
+describe('the kit form says when the terms on screen belong to another supplier', () => {
+  beforeEach(() => localStorage.setItem('token', 'test-token'));
+  afterEach(() => localStorage.removeItem('token'));
+
+  const KIT_WITH_LINKS = {
+    ...KIT,
+    supplier_choice: {
+      item_supplier_id: 11,
+      supplier_name: 'Acme Supplies',
+      basis: 'best_scored',
+      reason: null,
+      flagged_primary_unorderable: false,
+      scored_without_price: false,
+      scored_without_history: false,
+      alternatives: [],
+    },
+    suppliers: [
+      {
+        id: 11,
+        supplier: 50,
+        supplier_name: 'Acme Supplies',
+        supplier_sku: 'T3200',
+        unit_cost: '89.99',
+        package_cost: '89.99',
+        quantity_per_package: 1,
+      },
+      {
+        id: 12,
+        supplier: 51,
+        supplier_name: 'Beta Parts',
+        supplier_sku: 'BETA-9',
+        unit_cost: '5.00',
+        package_cost: '20.00',
+        quantity_per_package: 4,
+      },
+    ],
+  };
+
+  const nameSupplier = async (id: string) => {
+    const user = userEvent.setup();
+    (kitAPI.getKit as ReturnType<typeof vi.fn>).mockResolvedValue({ data: KIT_WITH_LINKS });
+
+    renderDetail();
+    await waitFor(() => expect(screen.getByTestId('kit-supplier-sku')).toHaveValue('T3200'));
+
+    await user.type(screen.getByTestId('kit-supplier'), id);
+    await waitFor(() => expect(screen.getByTestId('kit-supplier')).toHaveValue(id));
+  };
+
+  it('says nothing while the Supplier box names the kit\u2019s own supplier link', async () => {
+    await nameSupplier('50');
+
+    expect(screen.queryByTestId('kit-supplier-differs')).not.toBeInTheDocument();
+  });
+
+  it('BEFORE/AFTER: warns when the Supplier box names a different supplier', async () => {
+    await nameSupplier('51');
+
+    expect(screen.getByTestId('kit-supplier-differs')).toHaveTextContent(
+      'The price shown above is a different supplier\u2019s. Enter this supplier\u2019s own SKU and price.',
+    );
+  });
+});

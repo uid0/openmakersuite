@@ -1454,7 +1454,10 @@ class ItemSupplier(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
-        help_text="Cost per individual unit from this supplier (auto-calculated from package cost)",
+        help_text=(
+            "Cost per individual unit from this supplier. Derived from the package "
+            "cost; changing it re-prices the package."
+        ),
     )
     package_cost = models.DecimalField(
         max_digits=10,
@@ -1536,38 +1539,78 @@ class ItemSupplier(models.Model):
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Derive cost fields, then delegate the primary-flag + price-history side effects.
 
-        Cost derivation (``unit_cost``/``package_cost``) is a pure local
-        invariant and stays here. The single-primary enforcement and
-        :class:`PriceHistory` write are grouped into one ``transaction.atomic``
-        block and delegated to :mod:`inventory.services.suppliers` (gh #887,
-        AC-2) so a failure can't leave a demoted sibling without the save, or a
-        saved row without its history entry. Order is preserved exactly:
-        demote siblings, snapshot the pre-save pricing, save, then record.
+        Cost derivation is stated once, in
+        :func:`inventory.services.suppliers.derive_costs`, and applied HERE
+        rather than at the write sites. ``unit_cost`` and ``package_cost`` are
+        derived from each other, so a caller that names one of them cannot avoid
+        implying something about the other; only ``save()`` sees both what the
+        caller supplied and what is stored, which is what makes "the operator
+        did not touch this price" expressible at all. Three successive attempts
+        to express it at the callers each fixed one case by reopening another —
+        see ``docs/oms-falsy-zero-money-guards-record.md``.
 
-        If package_cost is provided, calculate unit_cost automatically.
-        If only unit_cost is provided (backward compatibility), calculate package_cost.
+        A derived column is added to ``update_fields`` when the caller restricted
+        it, because ``QuerySet.update_or_create`` restricts ``update_fields`` to
+        its own ``defaults`` keys: without this a ``package_cost`` this method
+        derives is computed and then dropped on the floor.
+
+        The single-primary enforcement and :class:`PriceHistory` write are
+        grouped into one ``transaction.atomic`` block and delegated to
+        :mod:`inventory.services.suppliers` (gh #887, AC-2) so a failure can't
+        leave a demoted sibling without the save, or a saved row without its
+        history entry. The order inside the block is: read the stored row and
+        derive from it, demote siblings, snapshot the pre-save pricing (from that
+        same read, so the derivation and the history cannot disagree about what
+        was on disk), save, then record.
         """
-        # Auto-calculate unit cost from package cost (local invariant)
-        if self.package_cost is not None and self.quantity_per_package > 0:
-            self.unit_cost = self.package_cost / self.quantity_per_package
-        # Backward compatibility: if only unit_cost is provided, calculate package_cost
-        elif (
-            self.unit_cost is not None
-            and self.package_cost is None
-            and self.quantity_per_package > 0
-        ):
-            self.package_cost = self.unit_cost * self.quantity_per_package
-
         from ..services.suppliers import (
+            derive_costs,
             enforce_single_primary,
             pricing_changed,
             record_price_history,
+            stored_pricing,
         )
 
         is_new = self.pk is None
         with transaction.atomic():
+            # Read the pre-save row INSIDE the transaction so the derivation,
+            # the single-primary enforcement, the save and the PriceHistory row
+            # commit or roll back together, and so the derivation and
+            # pricing_changed share ONE read of the stored row and cannot
+            # disagree about what was on disk.
+            #
+            # This does NOT isolate the read from a concurrent writer: the SELECT
+            # takes no row lock, so under PostgreSQL's default READ COMMITTED
+            # another transaction can still commit between it and the UPDATE. The
+            # lost update itself is pre-existing, but the history behaviour in
+            # that race is NOT identical to base: sharing this one read also means
+            # pricing_changed cannot see such a writer, where base's own separate
+            # later SELECT sometimes did and filed a row. Both halves are filed as
+            # one open defect in docs/oms-supplier-cost-write-path-record.md.
+            stored = stored_pricing(self)
+            supplied_unit, supplied_package = self.unit_cost, self.package_cost
+            self.unit_cost, self.package_cost = derive_costs(
+                unit_cost=supplied_unit,
+                package_cost=supplied_package,
+                quantity_per_package=self.quantity_per_package,
+                stored=stored,
+            )
+
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None:
+                derived = {
+                    name
+                    for name, was, now in (
+                        ("unit_cost", supplied_unit, self.unit_cost),
+                        ("package_cost", supplied_package, self.package_cost),
+                    )
+                    if was != now
+                }
+                if derived:
+                    kwargs["update_fields"] = frozenset(update_fields) | derived
+
             enforce_single_primary(self)
-            price_changed = pricing_changed(self)
+            price_changed = pricing_changed(self, stored)
             super().save(*args, **kwargs)
             record_price_history(self, is_new=is_new, price_changed=price_changed)
 

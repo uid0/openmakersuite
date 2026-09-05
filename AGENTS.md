@@ -781,25 +781,56 @@ string and must move with it: the `log_usage` docstring (~:1199),
 APPROVED BY THE OPERATOR and deferred only because the phase that found it
 could not make functional changes — NOT declined.
 
-### oms-supplier-terms-write-path — filed, and the lesson from a withdrawn attempt
+### oms-supplier-terms-write-path — the DERIVATION is closed; some surfaces are not
 
-A single owner for the supplier-terms WRITE path was built, gated and then
-REVERTED IN FULL on this branch: `KitSerializer._apply_supplier_terms`,
-`ItemSupplierSerializer` / `ItemSupplierViewSet` and
-`inventory/services/suppliers.py` are byte-identical to base `7c078de`. The path
-is filed as `oms-supplier-terms-write-path`, carrying six base defects that were
-verified against base and left unfixed. **The full record — root cause, the
-three caller rules tried and what each reopened, the kept/dropped boundary and
-those six defects — is in
-[`docs/oms-falsy-zero-money-guards-record.md`](docs/oms-falsy-zero-money-guards-record.md);
-read it before reopening the bead.**
+**The derivation is closed and has one owner. The kit form's supplier-terms
+surface is NOT.** A fix for it was attempted on this branch and SPLIT OUT after
+three rounds that each produced the next round's defect. Its window — naming one
+supplier while the boxes hold another's figures — is filed, with the trace and
+with the reason the next attempt must not begin by seeding the supplier id, in
+[`docs/oms-supplier-cost-write-path-record.md`](docs/oms-supplier-cost-write-path-record.md)
+under "Still open, filed not fixed". That list also holds the lost-update window
+on `stored_pricing` and the `supplier_terms` `DictField` 500s. **Read it before
+touching the kit form**: "closed" below is about the derivation, not about every
+screen that reaches it.
 
-The durable lesson: `ItemSupplier.save()` derives `unit_cost` and `package_cost`
-FROM EACH OTHER, so any partial write to that path fights the derivation, and
-which cost the operator meant cannot be recovered from the submitted values
-alone. Three different rules at the callers each fixed one case by reopening
-another. **The next attempt should address the derivation in `save()` itself
-rather than the callers, and must not be retried one narrow rule at a time.**
+**One rule, in one place: `inventory.services.suppliers.derive_costs`, called
+from `ItemSupplier.save()`.** `unit_cost` and `package_cost` are derived from
+each other and `package -> unit` is LOSSY at two decimal places — `10.00 / 3`
+stores as `3.33`, and `3.33 * 3` is `9.99` — so any write that handed the model a
+partial picture made it re-derive the twin from a value nobody edited, and a cent
+escaped on a save that touched no price.
+
+**Intent is a DELTA against the stored row, never a rule about which keys a
+caller sent.** That distinction is the whole bead. A form that echoes an
+unchanged cost box and a form that omits it are indistinguishable by key, which
+is why three successive caller-side rules each fixed one case by reopening
+another and the attempt was withdrawn in full — the history is in
+[`docs/oms-falsy-zero-money-guards-record.md`](docs/oms-falsy-zero-money-guards-record.md).
+`save()` is the one place that sees BOTH what the caller supplied and what is
+stored, so it is the one place the rule can be stated. **Do not re-open this at
+the write sites.** A partial `defaults` dict is now safe by construction, so a
+new writer needs no rule of its own.
+
+**The rule itself is stated in ONE live place: the `derive_costs` docstring in
+`backend/inventory/services/suppliers.py`**, on the code it governs, and pinned
+by `backend/inventory/tests/test_supplier_cost_derivation.py`. Read it there
+rather than restating it here — this same rule was written out in several places
+and drifted on three separate passes, each of which missed a copy. The open
+surface gaps, including the kit form's cost box not labelled derived and the
+lost-update window on `stored_pricing`, are in
+[`docs/oms-supplier-cost-write-path-record.md`](docs/oms-supplier-cost-write-path-record.md)
+under "Still open, filed not fixed".
+
+Two consequences worth keeping in mind when touching this path:
+
+- **A derived column is added to `update_fields`.** `QuerySet.update_or_create`
+  restricts `update_fields` to its own `defaults` keys, so without that a
+  `package_cost` the model derives is computed and then dropped on the floor.
+- **Test it at a pack size that does not divide the case price evenly.** Every
+  pre-existing test of this behaviour used `quantity_per_package=1`, where the
+  derivation is exact and NO defect on this path is reachable. That is how five
+  symptoms reached main under a green suite.
 
 ### The pre-send boundary: when a PO is still the shop's own document
 

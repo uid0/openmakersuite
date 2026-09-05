@@ -1515,6 +1515,20 @@ class KitSerializer(InventoryItemSerializer):
         than the item. Folding the terms into the kit create keeps "define a
         kit" a single request; the generic ``/item-suppliers/`` endpoint still
         works for editing them afterwards.
+
+        ``quantity_per_package`` is NOT defaulted here. It used to be
+        ``defaults.setdefault("quantity_per_package", 1)``, a value the operator
+        never supplied: the kit form offers no pack-size box, so every kit save
+        reset a recorded pack size of 3 back to 1, and the unit price then
+        re-derived from the untouched case price at the wrong pack size. A create
+        still takes 1 from the model field's own default; an update now leaves a
+        recorded pack size alone.
+
+        The keys this does send remain a PARTIAL ``defaults``, and that is now
+        safe: :func:`inventory.services.suppliers.derive_costs`, called from
+        ``ItemSupplier.save()``, decides what a partial write means by comparing
+        against the stored row, so an omitted cost is left alone rather than
+        re-derived from its twin.
         """
         if not terms:
             return
@@ -1528,7 +1542,6 @@ class KitSerializer(InventoryItemSerializer):
             for key in ("supplier_sku", "supplier_url", "unit_cost", "average_lead_time")
             if key in terms
         }
-        defaults.setdefault("quantity_per_package", 1)
         defaults["is_primary"] = True
         ItemSupplier.objects.update_or_create(
             item=instance,

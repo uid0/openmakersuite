@@ -1730,24 +1730,68 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         except (ValueError, TypeError):
             return ItemSupplier._meta.get_field("quantity_per_package").default
 
+    def _carries_pack_size(self, data):
+        """Whether the request actually carried a usable pack size.
+
+        ``_process_quantity_value`` cannot answer this: it returns the field
+        default ``1`` for an absent key and for an unparseable one alike, so a
+        caller gating on its result would still write a pack size nobody
+        supplied. The two costs omit on unparseable input because
+        ``_safe_decimal_conversion`` returns ``None``; this asks the raw request
+        so the pack size can be held to the same terms.
+        """
+        quantity = data.get("quantity_per_package")
+        if quantity in (None, "", "null"):
+            return False
+        try:
+            int(quantity)
+        except (ValueError, TypeError):
+            return False
+        return True
+
     def _create_supplier_relationship(self, item, supplier, data, cost_data, lead_time, quantity):
-        """Create or update the ItemSupplier relationship."""
+        """Create or update the ItemSupplier relationship.
+
+        A cost the request did not carry is OMITTED rather than sent as ``None``.
+        ``ItemSupplier.save()`` reads a cost that moved to ``None`` as "the
+        operator cleared this price", which is the right reading of an explicit
+        null and the wrong reading of an absent key — and ``update_or_create``
+        applies every key in ``defaults`` to a row it finds. This path only ever
+        creates today (it is reached from item CREATE, where no link exists yet),
+        so nothing is clearable here; omitting the key keeps the site honest if
+        that ever stops being true, and keeps it on the same rule as every other
+        writer.
+
+        ``quantity_per_package`` is omitted on the same terms, for an absent key
+        and a malformed one alike — hence ``_carries_pack_size`` rather than a
+        test on the processed value, which is the field default ``1`` in both
+        cases. A create takes that ``1`` from the column either way; what the
+        omission removes is the latent fabrication that would, on a reachable
+        update, reset a recorded pack size of 3 back to 1 and re-derive the unit
+        price at the wrong pack size. That is the same fabrication removed from
+        ``KitSerializer._apply_supplier_terms``.
+        """
         package_cost_value, unit_cost_value = cost_data
+
+        defaults = {
+            "supplier_sku": data.get("supplier_sku") or item.sku or str(item.id),
+            "supplier_url": data.get("supplier_url", ""),
+            "average_lead_time": lead_time,
+            "package_upc": data.get("package_upc", ""),
+            "unit_upc": data.get("unit_upc", ""),
+            "is_primary": True,
+        }
+        if self._carries_pack_size(data):
+            defaults["quantity_per_package"] = quantity
+        if package_cost_value is not None:
+            defaults["package_cost"] = package_cost_value
+        if unit_cost_value is not None:
+            defaults["unit_cost"] = unit_cost_value
 
         ItemSupplier.objects.update_or_create(
             item=item,
             supplier=supplier,
-            defaults={
-                "supplier_sku": data.get("supplier_sku") or item.sku or str(item.id),
-                "supplier_url": data.get("supplier_url", ""),
-                "unit_cost": unit_cost_value,
-                "package_cost": package_cost_value,
-                "average_lead_time": lead_time,
-                "quantity_per_package": quantity,
-                "package_upc": data.get("package_upc", ""),
-                "unit_upc": data.get("unit_upc", ""),
-                "is_primary": True,
-            },
+            defaults=defaults,
         )
 
 

@@ -179,6 +179,33 @@ export const validateSupplierRelationships = (
   return errors;
 };
 
+/**
+ * One editor row, built from the server's copy of it.
+ *
+ * The single mapping used both when the page loads and after every write, so
+ * the editable row and the `ItemSupplier` `relationshipChanged` compares it
+ * against are always built the same way. Two consequences that matter:
+ *
+ * 1. **A derived cost reaches the boxes.** `ItemSupplier.save()` derives from
+ *    the DELTA against the stored row, so a box still holding the figure the
+ *    server has just superseded is not inert on the next save — it MOVED, and a
+ *    moved unit cost governs and re-prices the case price.
+ * 2. **A row cannot look dirty forever.** Building the two sides differently
+ *    would leave a field permanently unequal, and the page would re-PATCH an
+ *    untouched row on every save.
+ */
+export const relationshipFromSaved = (saved: ItemSupplier): SupplierRelationship => ({
+  id: saved.id,
+  supplier: saved.supplier,
+  supplier_sku: saved.supplier_sku,
+  supplier_url: saved.supplier_url,
+  unit_cost: saved.unit_cost,
+  package_cost: saved.package_cost,
+  quantity_per_package: saved.quantity_per_package,
+  average_lead_time: saved.average_lead_time,
+  is_primary: saved.is_primary,
+});
+
 /** The offered fields of one row, as the endpoint takes them. */
 export const relationshipPayload = (
   relationship: SupplierRelationship,

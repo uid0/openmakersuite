@@ -277,29 +277,18 @@ rescuing and neither was:
 Everything else in those rounds lived inside `write_supplier_terms` /
 `update_supplier_terms`, its coercers, or its AST gate, all of which are gone.
 
-**BASE DEFECTS ON THIS PATH, FILED NOT FIXED.** Each was verified against base
-`7c078de` directly, and each is present with or without this branch. They are
-listed together so the write path is picked up whole rather than piecemeal:
-- `_apply_supplier_terms` has `defaults.setdefault("quantity_per_package", 1)`,
-  so a kit re-save **resets a recorded pack size**, and `save()` then re-derives
-  the unit price from the old package price. Measured: a link at
-  `3.33 / 10.00 / pack 3` re-saved with no cost edit ends at
-  `10.00 / 10.00 / pack 1`.
-- The same function never puts `package_cost` in `defaults`, so **a typed unit
-  cost is overwritten** by `save()`'s re-derivation from the stored package
-  cost.
-- `update_or_create` with all-concrete defaults restricts `update_fields`, so a
-  `package_cost` that `save()` derives is **not persisted on an update**.
-  Measured: a costless link sent a unit cost of `5` ends at
-  `unit_cost 5.00 / package_cost NULL`.
-- `KitDetailPage.tsx` sends `'0'` for a blank cost box, **storing a fabricated
-  zero** that then reads as a known free price.
-- `ItemSupplierSerializer` is a plain `ModelSerializer` with only the timestamps
-  read-only, so `PATCH {"unit_cost": ...}` does a partial write against the
-  derivation and **echoes back the old price**.
-- `supplier_id` is read out of the unvalidated `DictField` and passed to the
-  ORM, so a **non-numeric id is a 500** rather than a 400. The same is true of a
-  malformed `average_lead_time` and of a cost that overflows `max_digits`.
+**BASE DEFECTS ON THIS PATH — SINCE PICKED UP, and no longer listed here.** Six
+were filed from this branch, each verified against base `7c078de`. They were
+taken whole by `oms-supplier-cost-write-path`, which fixed the derivation itself
+rather than the callers: the fabricated pack size, the overwritten unit cost, the
+`package_cost` dropped from `update_fields`, the kit form's fabricated `'0'` and
+the partial-write echo are all closed and pinned there. Of the six, only the
+unvalidated `DictField` (a non-numeric `supplier` id, a malformed
+`average_lead_time` or a cost overflowing `max_digits` returning 500 rather than
+400) is still open. What remains open on this path is now owned by
+[`oms-supplier-cost-write-path-record.md`](oms-supplier-cost-write-path-record.md)
+under "Still open, filed not fixed". **Do not work the list from this section** —
+it described what was true at the time of the withdrawal.
 
 **One reported defect DISSOLVED with the completed revert, and that was measured
 rather than assumed.** Review reported that an uncoerced string cost reaches
@@ -311,6 +300,11 @@ coercion that had masked it. With the `setdefault` restored the product is
 always `str * 1`, which is the same string Django coerces to a `Decimal` on
 save. Probed on the exact fixture: a costless link at pack 6 sent
 `unit_cost: "5"` stores `5.00` and records no fabricated package price.
+**That reasoning has since expired**: `oms-supplier-cost-write-path` removed the
+`setdefault` as a fabrication and closed the repetition at its source instead —
+`inventory.services.suppliers.quantize_cost` coerces to `Decimal` before any
+arithmetic runs. The masking is gone and so is the thing it masked; see
+[`oms-supplier-cost-write-path-record.md`](oms-supplier-cost-write-path-record.md).
 
 **What this branch still delivers, all of it outside the write path:** the
 `inventory.services.pricing` owner with its four named states, `PriceRollup`,

@@ -79,14 +79,19 @@ ALLOWED: dict[str, tuple[int, str]] = {
         "not more.",
     ),
     "inventory/models/core.py": (
-        7,
-        "ItemSupplier's own package/unit cost derivation in ``save()`` (5) — "
-        "the column's DEFINITION, all guarded ``is not None`` — plus "
-        "``average_unit_cost``'s ``filter(unit_cost__isnull=False)`` + "
-        "``Avg('unit_cost')`` (2), where the SQL aggregate already skips the "
-        "NULLs and the explicit isnull filter says so. No item-level answer is "
-        "produced from a raw column here; ``unit_cost`` / ``package_cost`` / "
-        "``lowest_unit_cost`` / ``total_value`` all read the derivation.",
+        6,
+        "``ItemSupplier.save()`` handing the pair to and from the derivation (4): "
+        "it reads the SUPPLIED pair once into locals, and reads the DERIVED pair "
+        "back when deciding which columns a restricted ``update_fields`` must "
+        "gain — without which a cost the derivation computes is dropped by "
+        "``update_or_create``. The arithmetic itself is not here; it is "
+        "``services.suppliers.derive_costs``, which takes the values as "
+        "parameters. Plus ``average_unit_cost``'s "
+        "``filter(unit_cost__isnull=False)`` + ``Avg('unit_cost')`` (2), where "
+        "the SQL aggregate already skips the NULLs and the explicit isnull "
+        "filter says so. No item-level answer is produced from a raw column "
+        "here; ``unit_cost`` / ``package_cost`` / ``lowest_unit_cost`` / "
+        "``total_value`` all read the derivation.",
     ),
     "inventory/services/supplier_selection.py": (
         3,
@@ -103,9 +108,14 @@ ALLOWED: dict[str, tuple[int, str]] = {
     ),
     "inventory/services/suppliers.py": (
         6,
-        "Copies the recorded values verbatim into PriceHistory and compares "
-        "them to the previous row with ``!=``, which separates None from 0.00 "
-        "correctly. A snapshot of what was recorded, not a reading of it.",
+        "THE OWNER. ``stored_pricing``'s ``.values('unit_cost', 'package_cost', "
+        "...)`` reads the pre-save row the derivation is a delta against (2); "
+        "``pricing_changed`` compares that row to the instance with ``!=`` (2); "
+        "``record_price_history`` snapshots the recorded values verbatim (2). "
+        "Both comparisons separate None from 0.00 correctly. ``derive_costs`` "
+        "itself contributes NONE of these six — it takes the pair as parameters "
+        "and never touches a model attribute, which is what makes it a pure "
+        "definition of the columns rather than a reading of them.",
     ),
     "inventory/serializers.py": (
         4,

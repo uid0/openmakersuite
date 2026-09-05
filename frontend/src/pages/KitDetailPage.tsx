@@ -83,7 +83,6 @@ const KitDetailPage: React.FC = () => {
       })),
     );
     setSupplierSku(next.supplier_sku ?? '');
-    setUnitCost(next.unit_cost ?? '');
   }, []);
 
   useEffect(() => {
@@ -146,7 +145,7 @@ const KitDetailPage: React.FC = () => {
             supplier_terms: {
               supplier: Number(supplierId),
               supplier_sku: supplierSku,
-              unit_cost: unitCost === '' ? '0' : String(unitCost),
+              unit_cost: unitCost === '' ? null : String(unitCost),
             },
           }
         : {}),
@@ -154,8 +153,8 @@ const KitDetailPage: React.FC = () => {
 
     try {
       const res = isNew
-        ? await kitAPI.createKit(payload as never)
-        : await kitAPI.updateKit(kitId as string, payload as never);
+        ? await kitAPI.createKit(payload)
+        : await kitAPI.updateKit(kitId as string, payload);
       // Patch straight from the response — no refetch, no loading placeholder.
       applyKit(res.data);
       setSavedAt(new Date().toISOString());
@@ -182,6 +181,31 @@ const KitDetailPage: React.FC = () => {
   // vendor names to a logged-out visitor.
   const kitSupplierName = chosenSupplierName(kit?.supplier_choice);
   const kitAlternativeText = alternativeSupplierNamesText(kit?.supplier_choice);
+
+  // What the kit costs today, read-only. The Unit cost BOX no longer seeds from
+  // this: it held the CHOSEN supplier's figure while the Supplier box named
+  // whoever the operator typed, so a save wrote one vendor's price onto
+  // another's link — filed in docs/oms-supplier-cost-write-path-record.md. A
+  // blank box writes nothing, but the price still has to be READABLE, and to
+  // everyone: it is a number that names no vendor, which is the same boundary
+  // the card's other comment draws.
+  const storedUnitCost =
+    kit?.unit_cost === null || kit?.unit_cost === undefined ? null : Number(kit.unit_cost);
+  const storedUnitCostText =
+    storedUnitCost === null || Number.isNaN(storedUnitCost)
+      ? 'No price on file'
+      : `$${storedUnitCost.toFixed(2)} per unit`;
+
+  // Whether the Supplier box names someone other than the link these terms came
+  // from. The SKU box still seeds from the chosen link, so retargeting silently
+  // carries that vendor's part number across; this says so rather than moving it.
+  const chosenLinkId = kit?.supplier_choice?.item_supplier_id ?? null;
+  const chosenLinkSupplier =
+    chosenLinkId === null
+      ? null
+      : ((kit?.suppliers ?? []).find((row) => row.id === chosenLinkId)?.supplier ?? null);
+  const namingAnotherSupplier =
+    supplierId !== '' && chosenLinkSupplier !== null && supplierId !== chosenLinkSupplier;
 
   if (loading) {
     return (
@@ -263,6 +287,9 @@ const KitDetailPage: React.FC = () => {
               What the supplier charges for one kit. This is the price that lands on the
               purchase-order line.
             </Text>
+            <Text size="sm" data-testid="kit-unit-cost-current">
+              {storedUnitCostText}
+            </Text>
             {/* Whose terms are on screen. Without it the SKU below is one
                 vendor's part number with no vendor attached — and a SKU gets
                 pasted into an order form, so an unattributed one is
@@ -323,11 +350,20 @@ const KitDetailPage: React.FC = () => {
                       data-testid="kit-supplier-sku"
                     />
                   </Grid.Col>
+                  {namingAnotherSupplier && (
+                    <Grid.Col span={12}>
+                      <Text size="sm" c="dimmed" data-testid="kit-supplier-differs">
+                        The price shown above is a different supplier&rsquo;s. Enter this
+                        supplier&rsquo;s own SKU and price.
+                      </Text>
+                    </Grid.Col>
+                  )}
                 </>
               )}
               <Grid.Col span={{ base: 12, sm: 4 }}>
                 <NumberInput
                   label="Unit cost"
+                  description="Per unit. The case price is derived from it."
                   prefix="$"
                   decimalScale={2}
                   value={unitCost}

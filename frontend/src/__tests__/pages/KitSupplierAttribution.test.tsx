@@ -280,10 +280,17 @@ describe('what a logged-out visitor sees on the kit surfaces', () => {
   // The kit list has always shown this same visitor the same $42.00 one click
   // earlier; withholding it here would make the two screens disagree about one
   // kit, and it is not disclosure the acceptance record asks to narrow.
+  //
+  // The assertion MOVED from the editable Unit cost box to the read-only line
+  // beside it, because the box no longer seeds from the kit: it held the CHOSEN
+  // supplier's figure while the Supplier box named whoever was typed, so a save
+  // wrote one vendor's price onto another's link. The intent is unchanged — an
+  // anonymous visitor still sees what the kit costs, and this still fails if the
+  // price stops being displayed. Only the element carrying it moved.
   it('CONTROL: the kit form still shows a logged-out visitor the unit cost', async () => {
     await renderFormAnonymously();
 
-    expect(screen.getByTestId('kit-unit-cost')).toHaveValue('$42');
+    expect(screen.getByTestId('kit-unit-cost-current')).toHaveTextContent('$42.00 per unit');
     expect(screen.getByText('Purchase terms')).toBeInTheDocument();
   });
 

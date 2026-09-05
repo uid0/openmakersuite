@@ -169,6 +169,7 @@ export const SupplierRelationshipForm: React.FC<SupplierRelationshipFormProps> =
               <Group grow>
                 <TextInput
                   label="Unit Cost"
+                  description="Derived from package cost ÷ quantity per package."
                   type="number"
                   value={rel.unit_cost || ''}
                   onChange={(e) =>
@@ -180,6 +181,7 @@ export const SupplierRelationshipForm: React.FC<SupplierRelationshipFormProps> =
                 />
                 <TextInput
                   label="Package Cost"
+                  description="What you pay per package. Governs if both are set."
                   type="number"
                   value={rel.package_cost || ''}
                   onChange={(e) =>

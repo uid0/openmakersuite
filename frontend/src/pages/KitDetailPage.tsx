@@ -146,7 +146,7 @@ const KitDetailPage: React.FC = () => {
             supplier_terms: {
               supplier: Number(supplierId),
               supplier_sku: supplierSku,
-              unit_cost: unitCost === '' ? '0' : String(unitCost),
+              unit_cost: unitCost === '' ? null : String(unitCost),
             },
           }
         : {}),
@@ -154,8 +154,8 @@ const KitDetailPage: React.FC = () => {
 
     try {
       const res = isNew
-        ? await kitAPI.createKit(payload as never)
-        : await kitAPI.updateKit(kitId as string, payload as never);
+        ? await kitAPI.createKit(payload)
+        : await kitAPI.updateKit(kitId as string, payload);
       // Patch straight from the response — no refetch, no loading placeholder.
       applyKit(res.data);
       setSavedAt(new Date().toISOString());
@@ -328,6 +328,7 @@ const KitDetailPage: React.FC = () => {
               <Grid.Col span={{ base: 12, sm: 4 }}>
                 <NumberInput
                   label="Unit cost"
+                  description="Per unit. The case price is derived from it."
                   prefix="$"
                   decimalScale={2}
                   value={unitCost}

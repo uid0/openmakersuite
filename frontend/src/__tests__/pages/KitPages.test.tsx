@@ -238,3 +238,74 @@ describe('AC-34 / AC-46 — kit mutations are reactive', () => {
     expect(screen.getByTestId('kit-component-editor-empty')).toBeInTheDocument();
   });
 });
+
+describe('the kit form never invents a price the operator did not give', () => {
+  /**
+   * A blank cost box used to send the string `'0'`. That stores a real recorded
+   * price of zero — a free item — which the order pad, the stock-value reports
+   * and the public transparency feed then present and sum as money. "No price on
+   * file" and "this supplier gives it away" are different facts.
+   *
+   * This guard was written once, on `oms-falsy-zero-money-guards`, and removed as
+   * collateral when that branch reverted its whole supplier-terms attempt, so the
+   * defect reached main. It is restored here with the write path it belongs to.
+   */
+  // The Supplier / SKU boxes are signed-in only (`showSupplierAttribution`
+  // reads `isAuthenticated`, which reads a token out of localStorage), and the
+  // payload only carries `supplier_terms` when both are filled in.
+  beforeEach(() => localStorage.setItem('token', 'test-token'));
+  afterEach(() => localStorage.removeItem('token'));
+
+  const saveWithTerms = async (typeCost?: string) => {
+    const user = userEvent.setup();
+    (kitAPI.updateKit as ReturnType<typeof vi.fn>).mockResolvedValue({ data: KIT });
+
+    renderDetail();
+    await waitFor(() => expect(screen.getByTestId('kit-detail-page')).toBeInTheDocument());
+
+    await user.type(screen.getByTestId('kit-supplier'), '7');
+    const cost = screen.getByTestId('kit-unit-cost');
+    await user.clear(cost);
+    if (typeCost !== undefined) await user.type(cost, typeCost);
+
+    await user.click(screen.getByTestId('kit-save'));
+    await waitFor(() => expect(kitAPI.updateKit).toHaveBeenCalled());
+    return (kitAPI.updateKit as ReturnType<typeof vi.fn>).mock.calls[0][1];
+  };
+
+  it('BEFORE/AFTER: a blank cost box sends null, not a fabricated "0"', async () => {
+    const payload = await saveWithTerms();
+
+    expect(payload.supplier_terms.unit_cost).toBeNull();
+    expect(payload.supplier_terms.unit_cost).not.toBe('0');
+  });
+
+  it('CONTROL: a typed 0 is a real price and is still sent', async () => {
+    const payload = await saveWithTerms('0');
+
+    expect(payload.supplier_terms.unit_cost).toBe('0');
+  });
+
+  it('CONTROL: an ordinary typed price is unchanged', async () => {
+    const payload = await saveWithTerms('12.50');
+
+    expect(payload.supplier_terms.unit_cost).toBe('12.5');
+  });
+
+  it('CONTROL: a save that never touches the purchase terms sends none at all', async () => {
+    const user = userEvent.setup();
+    (kitAPI.updateKit as ReturnType<typeof vi.fn>).mockResolvedValue({ data: KIT });
+
+    renderDetail();
+    await waitFor(() => expect(screen.getByTestId('kit-detail-page')).toBeInTheDocument());
+
+    const name = screen.getByTestId('kit-name');
+    await user.clear(name);
+    await user.type(name, 'Renamed');
+    await user.click(screen.getByTestId('kit-save'));
+
+    await waitFor(() => expect(kitAPI.updateKit).toHaveBeenCalled());
+    const payload = (kitAPI.updateKit as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(payload).not.toHaveProperty('supplier_terms');
+  });
+});

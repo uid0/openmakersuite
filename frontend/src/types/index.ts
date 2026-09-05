@@ -2628,7 +2628,10 @@ export interface Kit extends InventoryItem {
 export interface KitSupplierTerms {
   supplier: number;
   supplier_sku: string;
-  unit_cost: string | number;
+  /** `null` when the cost box is blank: that is no price on file, and it stores
+   * NULL. Sending `'0'` recorded a real price of zero — a free item — which the
+   * order pad and the stock-value reports then present and sum as money. */
+  unit_cost: string | number | null;
   supplier_url?: string;
   average_lead_time?: number;
 }

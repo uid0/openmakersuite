@@ -1499,10 +1499,16 @@ const InventoryItemDetailPage: React.FC = () => {
         onCounted={loadData}
       />
 
+      {/* `unitCost={item.unit_cost ?? null}` collapses "withheld" into the
+          modal's existing "no price on file" branch, which is right HERE and
+          only here: logging usage is a signed-in action, so the withheld case
+          is unreachable from this modal, and its no-price hint is the honest
+          fallback if it ever were. A surface that RENDERS the price has to tell
+          the two apart — see the Unit Cost row above. */}
       <LogUsageModal
         itemId={item.id}
         itemName={item.name}
-        unitCost={item.unit_cost}
+        unitCost={item.unit_cost ?? null}
         packCounted={packCounted}
         countUnit={countUnit}
         packBaseUnits={countLevelOf(item)?.base_units ?? 1}

@@ -16,7 +16,10 @@ from rest_framework import serializers
 # related querysets here. Safe at module top: serializers import only after all
 # app models are loaded, so there is no import cycle.
 from electrical_circuits.models import Disconnect, PowerBreaker
-from inventory.services.vendor_visibility import VendorGatedSerializerMixin
+from inventory.services.vendor_visibility import (
+    VendorGatedSerializerMixin,
+    vendor_visibility_from_context,
+)
 from membership.actor import actor_display
 
 from .models import (
@@ -725,9 +728,16 @@ class SupplierChoiceSerializer(serializers.Serializer):
         FAILS CLOSED. A serializer with no ``request`` in context — a shell, a
         management command, a nested render somebody built by hand — has not
         proven anybody is authenticated, so it gets the restricted form.
+
+        Delegates to :mod:`inventory.services.vendor_visibility` rather than
+        keeping its own copy of that rule (op-anonymous-read-posture). It had
+        one, spelled identically; two spellings of one access rule is a place
+        for the two to disagree, and the whole point of that module is that
+        "who is asking" has a single answer. The narrower question this method
+        names — WHICH keys the answer gates — stays here, in
+        :attr:`OPERATOR_ONLY_FIELDS`.
         """
-        user = getattr(self.context.get("request"), "user", None)
-        return bool(user and user.is_authenticated)
+        return vendor_visibility_from_context(self.context)
 
     def to_representation(self, instance):
         """Flatten the choice, tolerating the no-supplier case (see above)."""

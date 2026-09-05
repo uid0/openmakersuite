@@ -54,12 +54,22 @@ explicitly (with auth) if you need operator access through the public LB.
 | Path        | Backed by                            | Served by | Cache                         |
 |-------------|--------------------------------------|-----------|-------------------------------|
 | `/static/`  | `static_volume` / `oms-static` PVC   | nginx (Compose) or backend (k8s) | `Cache-Control: public, max-age=31536000` is reasonable; static names include hashes. |
-| `/media/`   | `media_volume` / `oms-media` PVC     | nginx (Compose) or backend (k8s) | `Cache-Control: private, max-age=300` — uploads include user-attributed photos and PDFs. |
+| `/media/`   | `media_volume` / `oms-media` PVC     | nginx (Compose) or backend (k8s) | `Cache-Control: private, max-age=300` — uploads include user-attributed photos and PDFs. The vendor-paperwork prefixes are the exception: they are `private, no-store` and require a session (see below). |
 | `/django-static/` | same volume, alias path | nginx | Same as `/static/`. |
 
 Media URLs are guessable but not enumerable through the API. Don't host the
 media path on a CDN that allows directory listing. If you offload to S3,
 follow §6 of [BACKUP_RESTORE.md](BACKUP_RESTORE.md) for versioning + lifecycle.
+
+Not every prefix under `/media/` is public: the ones holding vendor paperwork
+(supplier agreements, PO attachments, receipts, index cards and the rest) are
+gated on a Django session — by `auth_request` in the Compose nginx template, and
+by `config.protected_media` wherever Django answers `/media/` itself, which is
+what k8s and the dev server do. The prefix list, the gate and its reasons are
+owned by
+[`docs/API_PERMISSION_MATRIX.md`](../docs/API_PERMISSION_MATRIX.md) under
+"Protected media"; an S3 offload has to reproduce that gate rather than assume
+the whole path is public.
 
 ## TLS / certificate handling
 

@@ -72,7 +72,7 @@ These five must be healthy for the app to serve any request.
 - **Volumes:** `static_volume` (Django collectstatic output), `frontend_build` (Vite output), `media_volume` (uploads), `letsencrypt_*` (TLS chain), `certbot_challenges`
 - **Healthcheck:** `wget --spider http://127.0.0.1/health`
 - **Backup priority:** **none** for the volumes it consumes (all regenerable). The `letsencrypt_*` volumes are easy to regenerate via ACME but cause user-visible TLS errors during the gap.
-- **Notes:** all `/admin/`, `/api/`, `/auth/passkey/`, `/webhooks/`, `/flower/`, `/mqttadmin/`, `/django-static/`, `/media/` paths route to the backend container; `/` falls back to the SPA shell.
+- **Notes:** all `/admin/`, `/api/`, `/auth/passkey/`, `/webhooks/`, `/flower/`, `/mqttadmin/` paths proxy to the backend container; `/django-static/` and `/media/` are served by nginx off the mounted volumes; `/` falls back to the SPA shell. The vendor-paperwork prefixes under `/media/` are still served here but only after an `auth_request` session check against the backend — see [`API_PERMISSION_MATRIX.md`](API_PERMISSION_MATRIX.md) "Protected media".
 
 ### `backend` — Django (gunicorn 4w/8t)
 

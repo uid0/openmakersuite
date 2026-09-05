@@ -601,9 +601,9 @@ def test_both_servers_hand_a_refused_reader_a_page_they_can_read(
         text = body.decode()
         assert "Sign in required" in text, f"{name} refuses {uri} with no remedy"
         assert f'href="{REAUTH_PATH}"' in text, f"{name} refuses {uri} with no way in"
-        assert "oms_pending_return_to" in text, (
-            f"{name} refuses {uri} without recording where to return to"
-        )
+        assert (
+            "oms_pending_return_to" in text
+        ), f"{name} refuses {uri} without recording where to return to"
 
 
 @pytest.mark.integration

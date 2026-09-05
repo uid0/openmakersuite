@@ -35,7 +35,7 @@ mobile-first.
 | Scan MakerBox, lookup contents | `/facilities/maker-boxes/scan` (`MakerBoxScanPage.tsx`) | public | Camera-denied → code-entry fallback within page |
 | Manual code entry (camera-free fallback) | `/inventory/scan` (`CodeEntryPage.tsx`) | public | Camera-free path; client-side validation of 6-char code; shows specific not-found error |
 | Public reorder thanks confirmation | `/thanks` (`ThanksPage.tsx`) | public | Final confirmation surface — submitted scans should land here, not on a half-submitted form |
-| Public transparency dashboard | `/inventory/transparency` (`TransparencyPage.tsx`) | public | Public read-only; no member data; offline shows informative error |
+| Public transparency dashboard | `/inventory/transparency` (`TransparencyPage.tsx`) | public | Public read-only; offline shows informative error. A caller with no session keeps the aggregate totals, items, quantities, dates and `po_number` and loses supplier names, all per-order money and the vendor reference numbers and links (`invoice_number`, `order_number`, the invoice / PO / supplier URLs) — said once above the table, never as `N/A` down a column, because those keys are ABSENT rather than null. The field list is owned by [`API_PERMISSION_MATRIX.md`](API_PERMISSION_MATRIX.md) |
 | Tax receipt self-service lookup | `/settings/tax-receipt/lookup` (`TaxReceiptLookupPage.tsx`) | public | Public donor lookup; never lists other donors |
 
 Tests: `e2e/asset-scan.spec.ts`, `e2e/code-entry-fallback.spec.ts`,
@@ -60,8 +60,8 @@ Authenticated staff and members manage the inventory catalog and reorder workflo
 
 | Journey | Entry route(s) | Auth | Key resilience expectations |
 | --- | --- | --- | --- |
-| Browse and search inventory list | `/inventory/items` (`InventoryListPage.tsx`) | public route, member-gated export columns | Loading skeleton; empty-state with "Add item"; auth expiration preserves filter context. The route is not behind `RequireAuth` and the list endpoint is `AllowAny`, so the CSV export decides its audience at press time: a signed-in operator gets `Other Suppliers` / `Supplier Chosen By` / `Supplier Caveats` beside `Supplier`, a logged-out visitor gets the single `Supplier` name and nothing more |
-| View inventory item detail | `/inventory/items/:id` (`InventoryItemDetailPage.tsx`) | public route, member-gated sections | Forbidden state for staff-only fields; missing-item state. The route is not behind `RequireAuth`, so a signed-out visitor reaches it: they still get a single supplier name, now read off `supplier_choice` and headed "We order this from" rather than "Primary Supplier" (a scored pick is not the operator's standing decision), followed by a COUNT of the other suppliers on offer and never their names, while the Suppliers table (every `suppliers[]` link with that supplier's own SKU, UPCs and lead time) renders only when signed in |
+| Browse and search inventory list | `/inventory/items` (`InventoryListPage.tsx`) | public route, member-gated export columns | Loading skeleton; empty-state with "Add item"; auth expiration preserves filter context. The route is not behind `RequireAuth` and the list endpoint is `AllowAny`, so the audience is decided off the rows' own `vendor_data_withheld` marker (never `isAuthenticated()`, so the file and the table it came from cannot disagree): the CSV carries `Unit Cost` / `Supplier` / `Other Suppliers` / `Supplier Chosen By` / `Supplier Caveats` for a signed-in operator and drops all five for a logged-out visitor, as the table drops its own `Unit Cost` column — DROPPED, not blanked, because a blank cell here already means "nothing on file" |
+| View inventory item detail | `/inventory/items/:id` (`InventoryItemDetailPage.tsx`) | public route, member-gated sections | Forbidden state for staff-only fields; missing-item state. The route is not behind `RequireAuth`, so a signed-out visitor reaches it and gets the item, its stock and its reorder figures and no vendor fact at all: the server omits `unit_cost`, `supplier_choice` and `suppliers[]` from their payload, so the Unit Cost row says "Sign in to see supplier and pricing information" instead of "no price on file" (a claim about the item, where the truth is a fact about the reader) and neither the one-supplier block nor the Suppliers table renders. Signed in, the Suppliers table carries every `suppliers[]` link with that supplier's own SKU, UPCs and lead time |
 | Create / edit inventory item | `/inventory/items/new`, `/inventory/items/:id/edit` (`InventoryItemFormPage.tsx`) | staff | Form save errors surface field-level validation; auth expiration returns to attempted edit. The save spans more than the item: the supplier-relationship editor is written back through `item-suppliers` (one request per changed row — removals first, then the primary promotion ahead of the rows the server demotes with it — and no request at all for a row left alone). A rejected row is named with the server's own field reason and holds the page instead of navigating, with everything typed still on screen EXCEPT on the rows that did land, which are rebuilt from the write response — the server derives one cost from the other, so a box left holding the superseded figure would re-price the other one on the retry. Those landed rows are also remembered so a retry patches them rather than re-posting into the `(item, supplier)` uniqueness constraint |
 | Browse and search categories | `/inventory/categories` (`CategoryListPage.tsx`) | staff | Standard list resilience |
 | Create / edit category | `/inventory/categories/new`, `/inventory/categories/:id/edit` (`CategoryFormPage.tsx`) | staff | Same as above |
@@ -88,6 +88,12 @@ today.
 ## Purchasing
 
 Staff create purchase orders, receive deliveries, and track supplier relationships.
+
+Every route in this table is behind `RequireAuth`, and so are the item/kit
+create-and-edit routes above: each page reads an endpoint that refuses a caller
+with no session, so the guard sends a logged-out visitor to the sign-in surface
+before the page mounts instead of rendering a shell of 401s. The guard is not
+the boundary — the endpoints are ([`API_PERMISSION_MATRIX.md`](API_PERMISSION_MATRIX.md)).
 
 | Journey | Entry route(s) | Auth | Key resilience expectations |
 | --- | --- | --- | --- |
@@ -245,6 +251,7 @@ These are not single-page workflows but underpin every journey above.
 | Command palette (keyboard-driven nav) | `CommandPalette.tsx` (Ctrl/Cmd+K) | mixed | Keyboard accessible; results filtered by role |
 | Notification banner / center | `NotificationBanner.tsx`, `NotificationCenter.tsx` | mixed | Inline error / success surface; respects `prefers-reduced-motion` |
 | Auth section (login / register / logout) | `AuthSection.tsx` | mixed | Inline login on home; session-expired prompt returns user to attempted route |
+| Re-sign-in after a refused document download | `/reauth` (`ReauthPage.tsx`) | public | A gated `/media/` download is a browser navigation, so no interceptor sees the refusal and no session-expired banner fires; the refusal page links here. The page drops the stale local auth state — otherwise `/` greets the visitor as signed in and offers no form — while the refusal page records the document in `oms_pending_return_to`, which `AuthSection` opens after a successful sign-in |
 | Offline indicator | `OfflineIndicator.tsx` (driven by `useOnlineStatus`) | mixed | Visible whenever `navigator.onLine` is false |
 | Install prompt (PWA) | `InstallPrompt.tsx` | mixed | Dismissible; respects user preference |
 | Error fallback (Sentry boundary) | `ErrorFallback.tsx` | mixed | Catches React render exceptions; shows recovery action |
@@ -256,6 +263,7 @@ Tests: `__tests__/components/Sidebar.test.tsx`,
 `__tests__/components/NotificationBanner.test.tsx`,
 `__tests__/components/NotificationBadge.test.tsx`,
 `__tests__/components/AuthSection.test.tsx`,
+`__tests__/pages/ReauthPage.test.tsx`,
 `__tests__/components/SessionExpiredBanner.test.tsx`,
 `__tests__/components/StatusState.test.tsx`,
 `__tests__/components/CommandPalette.test.tsx`,

@@ -172,6 +172,14 @@ unauthorized or anonymous caller who supplies a committee gets `403`. With **no*
 `charged_group` the endpoint behaves exactly as before — same stock math, same
 (public) permissions, no ledger entry.
 
+What the RESPONSE carries now depends on the reader: `UsageLogSerializer`
+withholds the `unit_cost` / `total_cost` snapshot from a caller with no session
+(the row says `vendor_data_withheld: true` instead), because a vendor's price is
+behind a login. The `UsageLog` row itself, the stock movement, the ledger entry
+and the `warning` above are unchanged, as is a signed-in caller's payload. The
+gate and its field lists are owned by
+[`API_PERMISSION_MATRIX.md`](API_PERMISSION_MATRIX.md).
+
 ## PO receipt → committee purchasing (Phase 2)
 
 The mirror bookend of the chargeback. When inventory is received against a

@@ -93,7 +93,8 @@ does not do.
 | POST | `auth/register/` | public | New user signup. **Abuse control:** required (account creation throttle). |
 | POST | `auth/login/` | public | Issues session/token. **Abuse control:** required (login attempt throttle). |
 | POST | `auth/logout/` | public | Destroys the Django session; safe no-op for anonymous callers. |
-| POST | `auth/refresh/` | public | Refresh access token using a refresh token. **Abuse control:** required (refresh throttle). |
+| POST | `auth/refresh/` | public | Refresh access token using a refresh token. Also slides the expiry of a Django session the caller already presents for that same user — never mints one from a bearer token — because the `/media/` gate runs on that cookie and it would otherwise lapse under a still-valid JWT (see "Protected media"). A failed slide does not fail the refresh. **Abuse control:** required (refresh throttle). |
+| GET | `auth/media-access/` | member | nginx `auth_request` target for the gated `/media/` prefixes, not a browsing endpoint: 204 for a caller with a session, 403 otherwise, `never_cache`. A plain Django view, so it carries no `permission_classes` and does not appear in the YAML snapshot. See "Protected media" below. |
 | POST | `auth/test-membership/` | public (DEBUG only) | Test fixture used by E2E suites. The view is `AllowAny` but returns 403 unless `settings.DEBUG` is true; production deployments MUST set `DEBUG=False`. |
 | POST | `auth/test-invite-code/` | public (DEBUG only) | Test fixture used by mobile invite-redeem E2E. Mints an open `InviteCode` so Playwright can drive the full public redeem path. Returns 403 unless `settings.DEBUG` is true. |
 | any | `auth/passkey/...` | public/member | Passkey (WebAuthn) registration and assertion flows. **Abuse control:** required on registration; assertion is signed. |

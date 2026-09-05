@@ -643,9 +643,13 @@ class TestInvariantClearingAPriceIsObservable:
         branch used to hand back NULL/NULL — the recorded price destroyed, plus a
         history row asserting the supplier withdrew it. "A derived figure cannot be
         cleared on its own" reads the same way with no survivor: hold what is
-        stored. The shape is legacy (symptom 4's end state) and cannot be created
-        through any write site today, so it is built here with a queryset UPDATE
-        that bypasses ``save()``, which is how such a row reaches disk.
+        stored. At a pack size of 1 the shape cannot be created through any write
+        site — the derivation always fills the twin — so it is built here with a
+        queryset UPDATE that bypasses ``save()``, which is how such a legacy row
+        (symptom 4's end state) reaches disk. It is NOT legacy-only in general: at
+        ``quantity_per_package`` 0 a supported endpoint produces it, because the
+        hand-rolled item-create path never runs the field's ``MinValueValidator``
+        — see the parametrised test below.
 
         ``test_clearing_the_case_price_clears_both`` above is the control for the
         other half: clearing the case price on a link that has both still clears
@@ -738,6 +742,57 @@ class TestInvariantClearingAPriceIsObservable:
 
         assert response.status_code == 200
         assert stored_pair(link) == (Decimal("1.00"), None, 0)
+        assert history_rows(link) == before
+
+    @pytest.mark.parametrize(
+        "stored_unit,stored_package,pack",
+        [
+            (Decimal("3.33"), LOSSY_PACKAGE_COST, LOSSY_PACK_SIZE),
+            (Decimal("5.00"), None, LOSSY_PACK_SIZE),
+            (Decimal("1.00"), Decimal("5.00"), 0),
+            (Decimal("1.00"), None, 0),
+        ],
+        ids=[
+            "divides-and-survives",
+            "divides-no-survivor",
+            "no-divide-survives",
+            "no-divide-no-survivor",
+        ],
+    )
+    def test_a_cleared_unit_price_is_never_stored_as_null(
+        self, item, supplier, authenticated_client, stored_unit, stored_package, pack
+    ):
+        """The whole rule, over every combination it has to answer.
+
+        Three earlier statements of "clearing the unit price alone never destroys
+        it" each answered one combination and left a neighbour storing NULL: the
+        re-derive alone was false with no survivor; the hold added for that arm
+        stopped at a usable pack size; extending it to pack < 1 again covered only
+        its no-survivor arm. So this asserts all four — (pack divides / does not)
+        by (a case price survives / does not) — and asserts BOTH halves of the
+        defect in each: the recorded figure is intact AND no price-history row
+        claims the supplier withdrew it.
+
+        The pairs are self-consistent, so "intact" means the same thing whether
+        the rule re-derives the figure or holds it.
+        """
+        link = make_link(item, supplier)
+        ItemSupplier.objects.filter(pk=link.pk).update(
+            unit_cost=stored_unit, package_cost=stored_package, quantity_per_package=pack
+        )
+        link.refresh_from_db()
+        assert stored_pair(link) == (stored_unit, stored_package, pack)
+        before = history_rows(link)
+
+        client, _ = authenticated_client
+        response = client.patch(
+            reverse("itemsupplier-detail", args=[link.pk]),
+            {"unit_cost": None},
+            format="json",
+        )
+
+        assert response.status_code == 200
+        assert stored_pair(link) == (stored_unit, stored_package, pack)
         assert history_rows(link) == before
 
 

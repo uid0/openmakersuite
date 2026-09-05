@@ -832,13 +832,13 @@ The rule, decided by the operator and pinned in
   columns clear.
 - only `unit_cost` moved — it governs; the case price re-derives. This is the
   ordinary case: every form sends both boxes and the operator edits one.
-- only `unit_cost` cleared — it re-derives, because it is a derived figure:
-  from the surviving `package_cost`, or, when the link has no case price to
-  re-derive from, the stored unit cost is HELD rather than destroyed — at every
-  pack size, including the `< 1` sizes that run no derivation at all. The cost of
-  that is one unreachable state, deliberately: a unit-only link's price cannot be
-  cleared through this path — set a case price and clear that instead, which
-  clears both. The
+- only `unit_cost` cleared — it is a derived figure, so it is NEVER stored as
+  NULL: re-derived from the case price where one survives and the pack size can
+  divide, and otherwise held exactly as stored. No pack size and no link shape is
+  an exception, and `derive_costs` decides this in one place so none can be
+  missed. The cost of that is one unreachable state, deliberately: a unit-only
+  link's price cannot be cleared through this path — set a case price and clear
+  that instead, which clears both. The
   write response carries the value it came back as, and the item form's
   relationship editor labels both of its boxes with the rule. The KIT form's box
   does NOT yet, so ruling (C)'s presentation condition is met on one surface and

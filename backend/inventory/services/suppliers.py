@@ -104,18 +104,18 @@ def derive_costs(*, unit_cost, package_cost, quantity_per_package, stored=None):
       is the ordinary case on every form: they all send both boxes and the
       operator edits one.
     * only ``unit_cost`` cleared — it is a derived figure and cannot be cleared
-      on its own, so it comes back: re-derived from the surviving
-      ``package_cost``, or, when there is no case price to re-derive FROM, held
-      exactly as stored — at every pack size, including the ``< 1`` sizes that
-      run no derivation at all. Destroying the figure instead would be the silent loss
-      this function exists to end, and the same rule reads the same way either
-      way — it still cannot be cleared on its own. The write response carries
-      the value it came back as. That leaves ONE thing unreachable, deliberately:
-      a link holding only a unit cost, with no case price, cannot have its price
-      cleared through this path at all, not even by sending both as null, because
-      an explicitly-null ``package_cost`` is indistinguishable from one that was
-      already null. That shape is legacy — symptom 4's end state, fixed going
-      forward, so new links carry both or neither — and the remedy is to set a
+      on its own, so IT IS NEVER STORED AS NULL. It comes back re-derived from
+      the case price when there is one and the pack size can divide; otherwise
+      the stored pair is held exactly as it was. There is no pack size and no
+      link shape where clearing it alone destroys the recorded figure, so there
+      is no qualifying clause to state. That is decided in ONE place, above the
+      divide-by-zero guard — three earlier statements of this rule each answered
+      one combination and left a neighbouring one storing NULL, so a second site
+      deciding a cleared unit cost is that mistake repeating. The write response
+      carries the value it came back as. It follows that a link holding only a
+      unit cost cannot have its price cleared through this path at all, not even
+      by sending both as null, because an explicitly-null ``package_cost`` is
+      indistinguishable from one that was already null; the remedy is to set a
       case price and then clear THAT, which clears both. On presenting the box as
       derived, the surfaces disagree: see the open list in
       ``docs/oms-supplier-cost-write-path-record.md``.
@@ -127,22 +127,33 @@ def derive_costs(*, unit_cost, package_cost, quantity_per_package, stored=None):
     unit_cost = quantize_cost(unit_cost)
     package_cost = quantize_cost(package_cost)
 
-    # The model validates >= 1, but a bypassed validator must not divide by zero.
-    if not quantity_per_package or quantity_per_package < 1:
-        if stored is not None and unit_cost is None and package_cost is None:
-            stored_package = quantize_cost(stored.get("package_cost"))
-            # Holding is not arithmetic, so the divide this guard exists to avoid
-            # is not in reach; a cleared unit cost with no survivor is held here
-            # for the same reason it is held below.
-            if stored_package is None:
-                return quantize_cost(stored.get("unit_cost")), stored_package
-        return unit_cost, package_cost
-
     def from_package(package):
         return quantize_cost(package / quantity_per_package), package
 
     def from_unit(unit):
         return unit, quantize_cost(unit * quantity_per_package)
+
+    stored_unit = quantize_cost(stored.get("unit_cost")) if stored is not None else None
+    stored_package = quantize_cost(stored.get("package_cost")) if stored is not None else None
+    divides = bool(quantity_per_package) and quantity_per_package >= 1
+
+    # THE ONE PLACE a cleared ``unit_cost`` is decided. It sits above the
+    # divide-by-zero guard on purpose: holding performs no arithmetic, so the
+    # guard has no claim on it, and every combination of pack size and surviving
+    # case price is answered here rather than in an arm somewhere below.
+    if (
+        stored is not None
+        and unit_cost is None
+        and stored_unit is not None
+        and package_cost == stored_package
+    ):
+        if stored_package is not None and divides:
+            return from_package(stored_package)
+        return stored_unit, stored_package
+
+    # The model validates >= 1, but a bypassed validator must not divide by zero.
+    if not divides:
+        return unit_cost, package_cost
 
     if stored is None:
         if package_cost is not None:
@@ -151,8 +162,6 @@ def derive_costs(*, unit_cost, package_cost, quantity_per_package, stored=None):
             return from_unit(unit_cost)
         return None, None
 
-    stored_unit = quantize_cost(stored.get("unit_cost"))
-    stored_package = quantize_cost(stored.get("package_cost"))
     package_moved = package_cost != stored_package
     unit_moved = unit_cost != stored_unit
     pack_moved = quantity_per_package != stored.get("quantity_per_package")
@@ -174,15 +183,6 @@ def derive_costs(*, unit_cost, package_cost, quantity_per_package, stored=None):
         # The authoritative cost was emptied and nothing else was named: that is
         # how "I no longer know what this costs" is said, and it has to be sayable.
         return None, None
-
-    if unit_moved:
-        # The derived box was emptied on its own; it re-derives from the survivor.
-        # With no survivor there is nothing to re-derive FROM, and the same rule
-        # still says a derived figure cannot be cleared on its own — so the stored
-        # pair is held rather than destroyed.
-        if package_cost is not None:
-            return from_package(package_cost)
-        return stored_unit, stored_package
 
     if pack_moved:
         if package_cost is not None:

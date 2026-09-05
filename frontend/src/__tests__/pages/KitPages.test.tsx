@@ -386,10 +386,14 @@ describe('the kit form shows the terms of the supplier it will write', () => {
     renderDetail();
     await waitFor(() => expect(screen.getByTestId('kit-detail-page')).toBeInTheDocument());
 
-    // Nothing is named yet, so the screen shows the CHOSEN vendor's terms — which
-    // is what the attribution line beside them says, and no write can carry them.
-    expect(screen.getByTestId('kit-supplier-sku')).toHaveValue('T3200');
+    // The kit names its chosen vendor on load, so the box holds ACME's OWN link
+    // SKU — the terms shown belong to the supplier named beside them.
+    await waitFor(() =>
+      expect(screen.getByTestId('kit-supplier')).toHaveValue('50'),
+    );
+    expect(screen.getByTestId('kit-supplier-sku')).toHaveValue('ACME-INK-9');
 
+    await user.clear(screen.getByTestId('kit-supplier'));
     await user.type(screen.getByTestId('kit-supplier'), '51');
 
     // Beta is named now, so Beta's part number is what is on screen — not Acme's.
@@ -418,6 +422,7 @@ describe('the kit form shows the terms of the supplier it will write', () => {
     renderDetail();
     await waitFor(() => expect(screen.getByTestId('kit-detail-page')).toBeInTheDocument());
 
+    await user.clear(screen.getByTestId('kit-supplier'));
     await user.type(screen.getByTestId('kit-supplier'), '99');
 
     // No link for 99, so there are no terms to show for it. Blank, not Acme's.
@@ -432,5 +437,35 @@ describe('the kit form shows the terms of the supplier it will write', () => {
     expect(payload.supplier_terms.supplier_sku).toBe('NEW-1');
     // Blank stays blank: "no price on file", never a recorded zero.
     expect(payload.supplier_terms.unit_cost).toBeNull();
+  });
+  it('attributes the terms to the supplier currently named, not the chosen one', async () => {
+    const user = userEvent.setup();
+    (inventoryAPI.listSuppliers as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { results: [{ id: 50, name: 'Acme Supplies' }, { id: 51, name: 'Beta Parts' }] },
+    });
+    (kitAPI.getKit as ReturnType<typeof vi.fn>).mockResolvedValue({ data: KIT_TWO_VENDORS });
+
+    renderDetail();
+    await waitFor(() => expect(screen.getByTestId('kit-detail-page')).toBeInTheDocument());
+
+    // Acme is the chosen supplier and the boxes hold Acme's terms, so the line names Acme.
+    await waitFor(() =>
+      expect(screen.getByTestId('kit-supplier-attribution')).toHaveTextContent(
+        /Showing Acme Supplies/,
+      ),
+    );
+
+    await user.clear(screen.getByTestId('kit-supplier'));
+    await user.type(screen.getByTestId('kit-supplier'), '51');
+
+    // The boxes now hold Beta's terms, so the label has to name Beta. A part
+    // number shown under the wrong vendor's name is worse than an unattributed
+    // one: it gets pasted into an order form with no cue that it is wrong.
+    await waitFor(() =>
+      expect(screen.getByTestId('kit-supplier-attribution')).toHaveTextContent(
+        /Showing Beta Parts/,
+      ),
+    );
+    expect(screen.getByTestId('kit-supplier-attribution')).not.toHaveTextContent(/Acme/);
   });
 });

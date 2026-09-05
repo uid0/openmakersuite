@@ -62,6 +62,22 @@ const termsForSupplier = (
   return { supplierSku: link?.supplier_sku ?? '', unitCost: link?.unit_cost ?? '' };
 };
 
+/**
+ * The supplier a loaded kit names by default: the CHOSEN link's own vendor.
+ *
+ * Seeded into the Supplier box so an existing kit never shows populated term
+ * boxes beside an empty Supplier field — that gap is what let a figure typed
+ * before any supplier was named get overwritten by the first naming.
+ *
+ * `''` when the kit names nobody (a new kit, or a payload without the chosen
+ * link), which keeps the Supplier box empty and `supplier_terms` off the wire.
+ */
+const chosenSupplierId = (kit: Kit): number | '' => {
+  const chosenLink = kit.supplier_choice?.item_supplier_id ?? null;
+  if (chosenLink === null) return '';
+  return (kit.suppliers ?? []).find((row) => row.id === chosenLink)?.supplier ?? '';
+};
+
 const KitDetailPage: React.FC = () => {
   const { kitId } = useParams<{ kitId: string }>();
   const navigate = useNavigate();
@@ -95,7 +111,13 @@ const KitDetailPage: React.FC = () => {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
 
-  /** Fold a server kit into the form. Shared by load and every save. */
+  /** Fold a server kit into the form. Shared by load and every save.
+   *
+   * `named` is the supplier the form is currently pointed at; `''` means "take
+   * the kit's own choice", which is what a fresh load wants. A save passes the
+   * supplier it just wrote to, so folding the response back in cannot silently
+   * un-name it.
+   */
   const applyKit = useCallback((next: Kit, named: number | '') => {
     setKit(next);
     setName(next.name ?? '');
@@ -110,7 +132,9 @@ const KitDetailPage: React.FC = () => {
         quantity: row.quantity,
       })),
     );
-    const terms = termsForSupplier(next, named);
+    const showing = named === '' ? chosenSupplierId(next) : named;
+    setSupplierId(showing);
+    const terms = termsForSupplier(next, showing);
     setSupplierSku(terms.supplierSku);
     setUnitCost(terms.unitCost);
   }, []);
@@ -209,7 +233,16 @@ const KitDetailPage: React.FC = () => {
   // it at every use — the attribution note, the Supplier input and the Supplier
   // SKU input. Rendering either one anywhere else in this card publishes the
   // vendor names to a logged-out visitor.
-  const kitSupplierName = chosenSupplierName(kit?.supplier_choice);
+  // Attribute to the supplier the box NAMES, because that is whose terms the
+  // boxes hold and whose link a save writes. Falls back to the kit's chosen
+  // supplier only when the box names nobody. A supplier the loaded list cannot
+  // name resolves to null and the line does not render: refusing to attribute
+  // is honest, whereas naming the chosen vendor over another vendor's part
+  // number is the misattribution this follows the box to avoid.
+  const kitSupplierName =
+    supplierId === ''
+      ? chosenSupplierName(kit?.supplier_choice)
+      : (suppliers.find((row) => row.id === supplierId)?.name ?? null);
   const kitAlternativeText = alternativeSupplierNamesText(kit?.supplier_choice);
 
   if (loading) {
@@ -296,11 +329,16 @@ const KitDetailPage: React.FC = () => {
                 vendor's part number with no vendor attached — and a SKU gets
                 pasted into an order form, so an unattributed one is
                 actionable-wrong in a way an unattributed price is not
-                (op-3xsp). It ATTRIBUTES and nothing more: it does not fill
-                Supplier in, and it does not describe how to write. Changing
-                Supplier here is not a supported way to retarget these terms —
-                the save writes this vendor's SKU and price onto whichever
-                vendor the field names. */}
+                (op-3xsp). A MISattributed one is worse still, which is why this
+                line names the supplier the Supplier box names rather than the
+                kit's chosen one.
+
+                The Supplier box names whose terms these are and whose link the
+                save writes. Naming a different supplier re-seeds the SKU and
+                cost boxes from that supplier's own link, and a supplier with no
+                link yet starts both blank. The old behaviour — writing the
+                CHOSEN vendor's SKU and price onto whichever vendor the field
+                named — was the defect that replaced. */}
             {showSupplierAttribution && kitSupplierName && (
               <Text size="sm" c="dimmed" data-testid="kit-supplier-attribution">
                 Showing {kitSupplierName}&rsquo;s terms
@@ -330,8 +368,13 @@ const KitDetailPage: React.FC = () => {
                       onChange={(event) => {
                         const next = event.currentTarget.value;
                         const named = next === '' ? '' : Number(next);
+                        const previous = supplierId;
                         setSupplierId(named);
-                        if (kit) {
+                        // Re-seed only when RETARGETING — one named supplier to
+                        // a different named one. Clearing the box names nobody,
+                        // so there is no other vendor's terms to replace and
+                        // nothing typed should be thrown away.
+                        if (kit && previous !== '' && named !== '' && named !== previous) {
                           const terms = termsForSupplier(kit, named);
                           setSupplierSku(terms.supplierSku);
                           setUnitCost(terms.unitCost);

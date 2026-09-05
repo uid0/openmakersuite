@@ -1454,7 +1454,10 @@ class ItemSupplier(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
-        help_text="Cost per individual unit from this supplier (auto-calculated from package cost)",
+        help_text=(
+            "Cost per individual unit from this supplier. Derived from the package "
+            "cost; changing it re-prices the package."
+        ),
     )
     package_cost = models.DecimalField(
         max_digits=10,

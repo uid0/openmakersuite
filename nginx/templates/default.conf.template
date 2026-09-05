@@ -159,6 +159,7 @@ server {
     # `location` does not inherit them from a sibling.
     location ^~ /media/supplier_agreements/ {
         auth_request /_vendor_media_auth;
+        error_page 401 403 = @vendor_media_denied;
         alias /app/media/supplier_agreements/;
         expires -1;
         add_header Cache-Control "private, no-store";
@@ -167,6 +168,7 @@ server {
 
     location ^~ /media/purchase_orders/attachments/ {
         auth_request /_vendor_media_auth;
+        error_page 401 403 = @vendor_media_denied;
         alias /app/media/purchase_orders/attachments/;
         expires -1;
         add_header Cache-Control "private, no-store";
@@ -175,6 +177,7 @@ server {
 
     location ^~ /media/work_orders/receipts/ {
         auth_request /_vendor_media_auth;
+        error_page 401 403 = @vendor_media_denied;
         alias /app/media/work_orders/receipts/;
         expires -1;
         add_header Cache-Control "private, no-store";
@@ -183,6 +186,7 @@ server {
 
     location ^~ /media/index_cards/ {
         auth_request /_vendor_media_auth;
+        error_page 401 403 = @vendor_media_denied;
         alias /app/media/index_cards/;
         expires -1;
         add_header Cache-Control "private, no-store";
@@ -191,6 +195,7 @@ server {
 
     location ^~ /media/third_party_work_orders/ {
         auth_request /_vendor_media_auth;
+        error_page 401 403 = @vendor_media_denied;
         alias /app/media/third_party_work_orders/;
         expires -1;
         add_header Cache-Control "private, no-store";
@@ -199,6 +204,7 @@ server {
 
     location ^~ /media/inventory/maintenance_records/ {
         auth_request /_vendor_media_auth;
+        error_page 401 403 = @vendor_media_denied;
         alias /app/media/inventory/maintenance_records/;
         expires -1;
         add_header Cache-Control "private, no-store";
@@ -207,6 +213,7 @@ server {
 
     location ^~ /media/work_orders/attachments/ {
         auth_request /_vendor_media_auth;
+        error_page 401 403 = @vendor_media_denied;
         alias /app/media/work_orders/attachments/;
         expires -1;
         add_header Cache-Control "private, no-store";
@@ -215,6 +222,7 @@ server {
 
     location ^~ /media/work_orders/submissions/ {
         auth_request /_vendor_media_auth;
+        error_page 401 403 = @vendor_media_denied;
         alias /app/media/work_orders/submissions/;
         expires -1;
         add_header Cache-Control "private, no-store";
@@ -223,10 +231,30 @@ server {
 
     location ^~ /media/work_orders/scans/ {
         auth_request /_vendor_media_auth;
+        error_page 401 403 = @vendor_media_denied;
         alias /app/media/work_orders/scans/;
         expires -1;
         add_header Cache-Control "private, no-store";
         add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.sentry-cdn.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com https:; font-src 'self' data:; connect-src 'self' wss: https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://sentry.io https://${SENTRY_HOST}; frame-src 'self' https://www.wunderground.com https://embed.waze.com https://www.youtube.com https://www.youtube-nocookie.com; worker-src 'self' blob:; media-src 'self' https:;" always;
+    }
+
+    # A REFUSAL CARRIES A REMEDY (op-anonymous-read-posture).
+    #
+    # These URLs are followed by a browser from an <a href>, so nginx's stock
+    # 403 body is the whole of what the person sees — no SPA error handler runs
+    # downstream. An operator whose Django session lapsed under them has done
+    # nothing wrong and needs to be told what to do, not shown a blank wall.
+    # `config.protected_media._forbidden_with_remedy` returns the same page for
+    # the deployment that reaches /media/ without nginx in front.
+    #
+    # It names NO path, NO filename, NO prefix and NO vendor: the reader knows
+    # what they clicked, and anyone else arriving here must learn nothing.
+    # `always` on the headers because this is served through error_page.
+    location @vendor_media_denied {
+        internal;
+        default_type text/html;
+        add_header Cache-Control "private, no-store" always;
+        return 403 '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Sign in required</title></head><body><h1>Sign in required</h1><p>This document is only available to signed-in members.</p><p><a href="/">Sign in</a>, then follow the link again.</p></body></html>';
     }
 
     # The subrequest the blocks above make. 204 for a signed-in caller,

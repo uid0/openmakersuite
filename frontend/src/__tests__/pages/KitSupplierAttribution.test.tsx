@@ -13,11 +13,17 @@
  * is new is the attribution: both screens now name the vendor the SKU is for.
  *
  * Neither kit route is behind `RequireAuth` and `KitViewSet` serves reads to
- * anyone, so both screens gate on a token: a logged-out visitor gets neither
- * the SKU nor the vendor. The kit's own unit cost is NOT in that set — a price
- * is a number that came from a supplier, not the naming of one — and both
- * screens keep showing it. The describes below sign in, because the columns
- * they exist to test are the signed-in ones.
+ * anyone, so a logged-out visitor reaches both screens and gets neither the SKU
+ * nor the vendor. The describes below sign in, because the columns they exist
+ * to test are the signed-in ones.
+ *
+ * WHERE THE UNIT COST GOES DIFFERS BY SCREEN, and the difference is the server
+ * (op-anonymous-read-posture). `unit_cost` is in
+ * `InventoryItemSerializer.VENDOR_ONLY_FIELDS`, which `KitSerializer` inherits,
+ * so the LIST — which renders a whole column of it — drops that column for a
+ * withheld payload, exactly as its sibling `InventoryListPage` does. The kit
+ * FORM still reads `kit.unit_cost` on its read-only line; that surface is not
+ * rebuilt here, so its anonymous cases still run against a signed-in fixture.
  */
 import { MantineProvider } from '@mantine/core';
 import { render, screen, waitFor, within } from '@testing-library/react';
@@ -207,10 +213,35 @@ describe('what a logged-out visitor sees on the kit surfaces', () => {
     }),
   };
 
+  /**
+   * WHAT THE SERVER ACTUALLY SENDS a logged-out reader of `/inventory/kits/`
+   * (op-anonymous-read-posture). `KitSerializer` inherits
+   * `InventoryItemSerializer.VENDOR_ONLY_FIELDS`, so `supplier_sku`,
+   * `supplier_choice` AND `unit_cost` are ABSENT, with `vendor_data_withheld`
+   * in their place.
+   *
+   * The anonymous list cases below used to feed `KIT_WITH_ALTERNATIVES` — a
+   * signed-in payload — and passed because the page read `isAuthenticated()`
+   * instead of the payload. That made them unable to fail for the real reason:
+   * the page now reads the marker off the rows, so a fixture carrying vendor
+   * keys and no marker would render the columns, which is exactly what these
+   * assert it must not do.
+   */
+  const WITHHELD_KIT = (() => {
+    const kit: Record<string, unknown> = {
+      ...KIT_WITH_ALTERNATIVES,
+      vendor_data_withheld: true,
+    };
+    for (const key of ['supplier_sku', 'supplier_choice', 'unit_cost']) {
+      delete kit[key];
+    }
+    return kit;
+  })();
+
   const renderListAnonymously = async () => {
     localStorage.removeItem('token');
     (kitAPI.listKits as ReturnType<typeof vi.fn>).mockResolvedValue({
-      data: { results: [KIT_WITH_ALTERNATIVES] },
+      data: { results: [WITHHELD_KIT] },
     });
     render(
       <MantineProvider>
@@ -276,14 +307,33 @@ describe('what a logged-out visitor sees on the kit surfaces', () => {
     expect(screen.queryByText('From')).not.toBeInTheDocument();
   });
 
-  // The rest of the row is what it always was — the gate withholds the SKU and
-  // its attribution, not the kit.
-  it('CONTROL: the kit itself, its cost and its status stay visible', async () => {
+  /**
+   * THE UNIT COST COLUMN DROPS TOO, and that is a change from what this case
+   * used to assert. `unit_cost` is in `VENDOR_ONLY_FIELDS`, so the key is
+   * absent for this reader and `kit.unit_cost != null ? ... : '—'` printed
+   * '—' in every row — "no price recorded" about the KIT, where the truth is
+   * about the READER. Its sibling `InventoryListPage` drops the same column
+   * for the same reason; the two screens have to agree.
+   */
+  it('drops the Unit cost column rather than dashing every row', async () => {
+    await renderListAnonymously();
+
+    expect(screen.queryByText('Unit cost')).not.toBeInTheDocument();
+    expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
+    // ...and the row loses the cell with it, so nothing slides left under the
+    // wrong header.
+    const headers = screen.getAllByRole('columnheader').length;
+    const cells = screen.getByTestId('kit-row-k1').querySelectorAll('td').length;
+    expect(cells).toBe(headers);
+  });
+
+  // The gate withholds the vendor block, not the kit.
+  it('CONTROL: the kit itself and its status stay visible', async () => {
     await renderListAnonymously();
 
     expect(screen.getByText('Ink Kit')).toBeInTheDocument();
-    expect(screen.getByText('$42.00')).toBeInTheDocument();
     expect(screen.getByText('Active')).toBeInTheDocument();
+    expect(screen.getByTestId('kit-row-k1')).toBeInTheDocument();
   });
 
   it('BEFORE/AFTER: the kit form shows a logged-out visitor no SKU and no vendor', async () => {

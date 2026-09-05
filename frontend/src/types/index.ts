@@ -498,19 +498,33 @@ export interface InventoryItemMetrics {
   committed_breakdown: CommittedBreakdownEntry[]; // which WOs/assets hold QC
   quantity_in_transit: number; // QIT — partially-received (⊆ QOO)
   reorder_point: number; // RP
-  lead_time_days: number | null; // Lead
-  unit_cost: string | null; // Cost — per-item, or per-case when case-based
-  cost_trend: InventoryCostTrend;
-  last_po_unit_cost: string | null;
   is_case_based: boolean;
-  case_size: number | null; // units per case
+  case_size: number | null; // units per case — a shelf fact, NOT withheld
+  /**
+   * THE SIX KEYS BELOW ARE OPTIONAL BECAUSE THE SERVER OMITS THEM
+   * (op-anonymous-read-posture). `metrics` stays `AllowAny` — it powers the
+   * strip an anonymous scanner reads — and withholds the vendor half instead,
+   * per `InventoryMetricsSerializer.VENDOR_ONLY_FIELDS`.
+   *
+   * Optional rather than `| null` on purpose, and that is the whole point of
+   * declaring them this way: `null` already means "nothing on file" here, so
+   * the compiler is what now stops a reader treating "we are not telling you"
+   * as the same fact. Ask `utils/vendorVisibility` before rendering any of
+   * them; `cost_trend` in particular must never index a label table before
+   * that question is answered.
+   */
+  vendor_data_withheld?: boolean;
+  lead_time_days?: number | null; // Lead
+  unit_cost?: string | null; // Cost — per-item, or per-case when case-based
+  cost_trend?: InventoryCostTrend;
+  last_po_unit_cost?: string | null;
   // Why Cost / Lead above may be blank or unbacked (op-2rsp). The supplier
   // scoring neither rewards nor punishes a missing price or an empty delivery
   // record, so a supplier can win WITH one — these say when it did, so a blank
   // Cost cell is not read as "no supplier". Both are false when an operator's
   // own flagged primary took the gate.
-  supplier_scored_without_price: boolean;
-  supplier_scored_without_history: boolean;
+  supplier_scored_without_price?: boolean;
+  supplier_scored_without_history?: boolean;
 }
 
 // Per-item purchase/receipt provenance (op-96uo) — payload of
@@ -554,6 +568,16 @@ export interface UsageLog {
   quantity_used: number;
   usage_date: string;
   notes: string;
+  /**
+   * The cost snapshot `log_usage` takes, WITHHELD from a caller with no session
+   * (op-anonymous-read-posture). `UsageLogSerializer` is `fields = "__all__"`,
+   * so both keys have always been on the wire and this type simply did not
+   * declare them — which would have gone on hiding the gated pair from every
+   * reader. `recent_usage` on the item payload nests this same shape.
+   */
+  vendor_data_withheld?: boolean;
+  unit_cost?: string | null;
+  total_cost?: string | null;
 }
 
 // Stock-history DTO (op-2dqu) — payload of GET /inventory/items/{id}/stock_history/.

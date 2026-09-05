@@ -16,11 +16,23 @@ THE SHAPE OF THE FIX, and why it is this shape:
   vendor prefixes below carry ``auth_request`` pointing at
   :func:`media_access_check`. The path a client uses does not change, so no
   payload, no stored ``file_url``, and no consumer moves.
-* The check is a session check, and that works because ``auth_views.login_user``
-  already establishes a Django session cookie alongside the JWT (its own
-  docstring says the cookie exists so "the same credentials also grant access").
-  A browser following ``<a href="/media/...">`` sends that cookie; an anonymous
-  visitor sends nothing and gets 403 from nginx before a byte is read.
+* The check is a session check, and it has to be: a browser following
+  ``<a href="/media/...">`` sends cookies and no ``Authorization`` header, so
+  the JWT the SPA runs on never reaches this request.
+  ``auth_views.login_user`` establishes that cookie alongside the JWT.
+* THE TWO LIFETIMES ARE RECONCILED IN ``auth_views.refresh_token``, and that is
+  load-bearing rather than incidental. The session cookie expires at Django's
+  default ``SESSION_COOKIE_AGE`` (14 days) and is not slid forward
+  (``SESSION_SAVE_EVERY_REQUEST`` is left at ``False``), while
+  ``SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"]`` is 30 days — so an operator whose
+  API calls kept working would have hit a bare 403 on every invoice from day
+  15. ``refresh_token`` now renews the session when it mints an access token;
+  its docstring records which two alternative fixes were rejected and why.
+  ``config/tests/test_media_session_lifetime.py`` exercises that sequence.
+* A REFUSAL CARRIES A REMEDY. Both servers answer 403 with a small page that
+  says how to get in, because these are ordinary browser navigations and a
+  stock 403 body is the end of the road for whoever clicked. What it must
+  never carry is what was asked for — see :func:`_forbidden_with_remedy`.
 * Django's own ``static()`` media serving — development, and anything that
   reaches ``/media/`` without nginx in front — is replaced by
   :func:`serve_media`, which applies the SAME prefix list. Two servers with one
@@ -130,6 +142,32 @@ def media_access_check(request):
     return HttpResponseForbidden()
 
 
+#: What a refused ``/media/`` request gets INSTEAD OF A BLANK WALL.
+#:
+#: These URLs are followed by a browser from an ``<a href>``, so there is no
+#: SPA error handler downstream — whatever the server returns is the whole of
+#: what the person sees. A stock 403 body names no remedy, and the operator
+#: whose session lapsed under them has done nothing wrong.
+#:
+#: IT NAMES NO PATH, NO FILENAME, NO PREFIX AND NO VENDOR. The reader already
+#: knows what they clicked; anyone else reaching this page must learn nothing
+#: from it, and a refusal that echoes the request is a refusal that leaks.
+FORBIDDEN_REMEDY_HTML = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Sign in required</title></head>
+<body>
+<h1>Sign in required</h1>
+<p>This document is only available to signed-in members.</p>
+<p><a href="/">Sign in</a>, then follow the link again.</p>
+</body></html>
+"""
+
+
+def _forbidden_with_remedy():
+    """403 with :data:`FORBIDDEN_REMEDY_HTML`."""
+    return HttpResponseForbidden(FORBIDDEN_REMEDY_HTML, content_type="text/html; charset=utf-8")
+
+
 @never_cache
 def serve_media(request, path):
     """Django's development media serving, with the vendor prefixes gated.
@@ -145,7 +183,12 @@ def serve_media(request, path):
     :data:`VENDOR_MEDIA_PREFIXES`, and both exercised:
     ``config/tests/test_protected_media.py`` requests through this one and
     asserts the nginx template gates the same prefixes.
+
+    Refuses with :func:`_forbidden_with_remedy` rather than a bare 403, because
+    "two servers, one rule" has to cover what the refused caller is TOLD as
+    well as whether they are let in; the nginx half returns the same page from
+    its ``error_page 401 403`` for these prefixes.
     """
     if is_vendor_media(path) and not request.user.is_authenticated:
-        return HttpResponseForbidden()
+        return _forbidden_with_remedy()
     return django_static_serve(request, path, document_root=settings.MEDIA_ROOT)

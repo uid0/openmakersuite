@@ -20,6 +20,29 @@
  * This module does NOT read auth state. The server has already decided, and the
  * payload says so; a second, client-side derivation of the same answer is how
  * the two come to disagree.
+ *
+ * WHAT A SURFACE DOES ABOUT IT LIVES HERE TOO, because there are exactly two
+ * right answers and the bug is always picking neither. This class has now been
+ * missed on five separate screens, each of which hand-rolled its own decision:
+ *
+ * - **DROP** — a table column or a CSV column. The header AND every cell go.
+ *   An absent column cannot be misread as an empty value. Ask
+ *   {@link vendorColumnsDropped} with the rows you are about to render.
+ * - **LABEL** — a single detail row or cell, where dropping would leave a hole
+ *   the reader cannot interpret. Render {@link VENDOR_WITHHELD_TEXT}. Ask
+ *   {@link labelIfWithheld}.
+ *
+ * Choose by whether the surface repeats: a column repeats down a table and its
+ * absence is legible; one cell on a detail card does not, so it says so.
+ *
+ * TWO THINGS A SURFACE MUST NEVER DO:
+ *
+ * 1. **Never render `—`, `-`, `N/A` or a blank for a WITHHELD value.** Every
+ *    one of those means "nothing on file" — a claim about the ITEM where the
+ *    truth is a fact about the READER. That single sentence is the whole class.
+ * 2. **Never index a lookup table with a possibly-withheld key.**
+ *    `TREND_LABEL[metrics.cost_trend]` printed the literal string `undefined`
+ *    into a tooltip. Guard on the marker BEFORE the lookup, not after.
  */
 
 /** Any payload that may carry the server's withheld marker. */
@@ -36,5 +59,32 @@ export interface MaybeVendorGated {
 export const vendorDataWithheld = (payload: MaybeVendorGated | null | undefined): boolean =>
   payload?.vendor_data_withheld === true;
 
-/** What a surface says in place of a withheld vendor figure. */
+/** What a surface says in place of a withheld vendor figure — the LABEL shape. */
 export const VENDOR_WITHHELD_TEXT = 'Sign in to see supplier and pricing information';
+
+/**
+ * DROP: whether a table must render its vendor columns at all.
+ *
+ * `some` rather than row 0, because one response is gated as a whole — so this
+ * agrees with row 0 whenever there is one, and stays `false` for an empty list,
+ * where a dropped column would say nothing to nobody.
+ *
+ * Takes the rows a surface is ABOUT TO RENDER, never `isAuthenticated()`: a
+ * token in localStorage is not the same answer as the payload's, and the
+ * response interceptor clears that token on any background refresh failure, so
+ * the two do come apart while a table is on screen.
+ */
+export const vendorColumnsDropped = (rows: readonly (MaybeVendorGated | null | undefined)[]) =>
+  rows.some(vendorDataWithheld);
+
+/**
+ * LABEL: {@link VENDOR_WITHHELD_TEXT} where the gate ran, otherwise `render()`.
+ *
+ * `render` is a THUNK so the withheld branch never evaluates it — that is what
+ * keeps a lookup, a `.toFixed()` or a template read off a key the server did
+ * not send. Constraint 2 in the module header is the bug this shape prevents.
+ */
+export const labelIfWithheld = <T,>(
+  payload: MaybeVendorGated | null | undefined,
+  render: () => T
+): T | string => (vendorDataWithheld(payload) ? VENDOR_WITHHELD_TEXT : render());

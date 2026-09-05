@@ -1477,10 +1477,21 @@ const InventoryItemDetailPage: React.FC = () => {
 
       {/* `unitCost={item.unit_cost ?? null}` collapses "withheld" into the
           modal's existing "no price on file" branch, which is right HERE and
-          only here: logging usage is a signed-in action, so the withheld case
-          is unreachable from this modal, and its no-price hint is the honest
-          fallback if it ever were. A surface that RENDERS the price has to tell
-          the two apart — see the Unit Cost row above. */}
+          only here.
+
+          NOT because logging usage needs a login — it does not: `log_usage` is
+          in `InventoryItemViewSet.get_permissions`'s AllowAny set and the
+          button above carries no `isLoggedIn` guard on a route with no
+          `RequireAuth`, so an anonymous visitor can open this and submit. What
+          makes the collapse harmless is narrower: the only place `unitCost`
+          changes what the modal SAYS is its no-price hint, and that hint sits
+          behind a chosen committee. `sigAPI.listMySIGs()` reads
+          `/membership/sigs/`, which is `IsAuthenticated`, so for exactly the
+          caller whose price is withheld the fetch 401s, the picker stays empty
+          and `chargedGroup` stays null — the hint never renders.
+
+          A surface that RENDERS the price has to tell the two apart; see the
+          Unit Cost row above. */}
       <LogUsageModal
         itemId={item.id}
         itemName={item.name}

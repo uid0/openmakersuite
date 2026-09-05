@@ -5547,6 +5547,17 @@ export interface ScanDispatchResult {
   target_name?: string;
   target_url?: string;
   message?: string;
+  /**
+   * The two keys `ResolvedScan.VENDOR_ONLY_KEYS` withholds from a caller with
+   * no session (op-anonymous-read-posture). `dispatch_scan` stays `AllowAny` —
+   * it is what a barcode gun hits — but a UPC is printed on the outside of the
+   * box, so anyone holding one could otherwise turn it into the name of the
+   * vendor we buy that item from.
+   *
+   * `vendor_data_withheld` is what tells the two absences apart: withheld from
+   * you, versus this scan resolved no supplier link at all.
+   */
+  vendor_data_withheld?: boolean;
   item_supplier_id?: number;
   supplier_name?: string;
   item_id?: string;

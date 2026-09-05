@@ -16,6 +16,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from config.api_errors import ErrorCode, error_response
 from config.tokens import CustomRefreshToken
@@ -28,6 +29,29 @@ def _tokens_for(user):
     """Return (access, refresh) JWTs for the given user."""
     refresh = CustomRefreshToken.for_user(user)
     return str(refresh.access_token), str(refresh)
+
+
+def _renew_session_from_token(request, access):
+    """Re-establish the Django session for the user a fresh access token names.
+
+    Called by :func:`refresh_token`; see its docstring for why the session has
+    to track the JWT's life rather than its own. Best effort by design — the
+    caller has already proven possession of a valid refresh token, so nothing
+    here can widen access, and a caller with no session support (ScanTTY, a
+    script) simply gets no cookie, as before.
+    """
+    try:
+        user = JWTAuthentication().get_user(access)
+    except Exception:
+        # Resolved by the SAME code that resolves a Bearer token on any other
+        # request, so the session can never name a user the API would refuse.
+        return
+    if request.session.get("_auth_user_id") == str(user.pk):
+        # Already this user's session: cycling the key would invalidate the
+        # cookie the browser is holding. Re-save so the expiry moves forward.
+        request.session.modified = True
+        return
+    django_login(request, user)
 
 
 def _issue_session_and_tokens(request, user):
@@ -180,7 +204,35 @@ def logout_user(request):
 @permission_classes([AllowAny])
 def refresh_token(request):
     """
-    Refresh JWT access token.
+    Refresh JWT access token, and re-establish the Django session with it.
+
+    THE SESSION IS RENEWED HERE BECAUSE /media/ RUNS ON IT
+    (op-anonymous-read-posture). ``config.protected_media`` gates the vendor
+    prefixes on ``request.user.is_authenticated``, which a browser satisfies
+    with the session cookie ``login_user`` sets — a ``<a href="/media/...">``
+    carries no ``Authorization`` header. But the SPA runs on the JWT, whose
+    refresh lifetime is ``SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"]`` (30 days),
+    while the session cookie expires at Django's default ``SESSION_COOKIE_AGE``
+    (14 days) and is not slid forward, because ``SESSION_SAVE_EVERY_REQUEST``
+    is left at ``False``. So an operator who signed in once kept working
+    through the API for 30 days and, from day 15, got a bare 403 on every
+    supplier agreement, invoice and receipt.
+
+    Renewing here ties the cookie's life to the credential the app actually
+    runs on: the SPA refreshes to stay signed in, and the session it needs for
+    a file download is renewed by the same call.
+
+    TWO OTHER FIXES WERE REJECTED, and this note exists so neither is
+    "simplified" back in later: lengthening ``SESSION_COOKIE_AGE`` (or setting
+    ``SESSION_SAVE_EVERY_REQUEST``) extends a credential's lifetime, and
+    teaching the media gate to accept a JWT changes what the gate accepts.
+    Both are security-posture decisions and belong to the captain, not to a
+    regression fix.
+
+    A failed renewal does NOT fail the refresh: the access token is what the
+    caller asked for, and a session is a bonus that a caller without a cookie
+    (ScanTTY, curl) never had. ``config/tests/test_media_session_lifetime.py``
+    exercises the sequence this exists for.
     """
     refresh_token = request.data.get("refresh")
 
@@ -190,6 +242,8 @@ def refresh_token(request):
     try:
         refresh = CustomRefreshToken(refresh_token)
         access = refresh.access_token
+
+        _renew_session_from_token(request, access)
 
         return Response(
             {

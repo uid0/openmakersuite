@@ -98,13 +98,22 @@ class ResolvedScan:
         Today's one caller (``scanner.views.dispatch_scan``) passes it
         explicitly, so nothing changes now — this decides what the NEXT caller
         gets for saying nothing.
+
+        Withholding SAYS SO, with the same ``vendor_data_withheld`` marker
+        every other gated payload carries. Popping the keys silently would
+        leave a consumer unable to tell "withheld from you" from "this scan
+        resolved no supplier" — a UPC that matched no ``ItemSupplier`` produces
+        the second, and the two need different words on screen.
         """
+        from inventory.services.vendor_visibility import VENDOR_WITHHELD_KEY
+
         # DRF JSONRenderer handles dataclass-to-dict via vars(), but
         # being explicit lets us drop None fields for a tidier response.
         data = {k: v for k, v in vars(self).items() if v is not None}
         if not include_vendor_data:
             for key in self.VENDOR_ONLY_KEYS:
                 data.pop(key, None)
+            data[VENDOR_WITHHELD_KEY] = True
         return data
 
 

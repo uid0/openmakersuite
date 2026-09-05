@@ -49,8 +49,18 @@ row happens to sit at today — a damaged row keeps moving. Both signatures are
 named in the output, in the text report and in the JSON payload, so a count can
 never be read as covering something narrower or broader than it does:
 
-  * orders — ``status`` past ``draft`` with ``sent_at`` NULL
-  * requests — ``reviewed_by`` set with ``reviewed_at`` NULL
+  * requests — ``reviewed_by`` set with ``reviewed_at`` NULL, at ANY status.
+    A request bulk-approved before the fix is carried on to ``ordered`` and
+    ``received`` by paths that never touch the review columns, so status tells
+    you nothing about whether the row is damaged. This signature is exact.
+  * orders — ``status`` in ``sent``/``confirmed``/``partially_received``/
+    ``received`` with ``sent_at`` NULL. This one CANNOT be made
+    status-independent, and the difference is not an oversight. A null
+    ``sent_at`` on a cancelled or voided order is most likely the truth — the
+    order never went out — and no column distinguishes that from an order sent
+    before the fix and cancelled afterwards. Reporting those rows would call
+    clean records damaged, so they are excluded and the order count is a FLOOR.
+    The output says so on the line beside the number.
 
 This command is deliberately, permanently READ-ONLY. There is no ``--fix`` and
 no ``--backfill``: there is nothing truthful to write. Do not add one.
@@ -81,9 +91,18 @@ SENT_ONWARD_STATUSES = (
 )
 
 #: The two damage signatures, stated in the output so the number a reader takes
-#: away is inseparable from the population it covers.
-ORDER_SIGNATURE = "status past draft ({}) with sent_at NULL".format(
-    ", ".join(status.value for status in SENT_ONWARD_STATUSES)
+#: away is inseparable from the population it covers. They are not symmetrical,
+#: and the order one says so: a request's signature is genuinely
+#: status-independent, an order's is not, because a cancelled or voided order
+#: that never went out has a null ``sent_at`` that is the truth and no column
+#: separates it from one that did. The count is therefore a floor on the order
+#: side, and the printed line has to admit that rather than imply it covers a
+#: row whatever it has since become.
+ORDER_SIGNATURE = (
+    "status in ({}) with sent_at NULL; cancelled and voided orders are excluded, "
+    "because there a null sent_at is more likely the truth than damage".format(
+        ", ".join(status.value for status in SENT_ONWARD_STATUSES)
+    )
 )
 REQUEST_SIGNATURE = "reviewed_by set, reviewed_at NULL"
 
@@ -243,9 +262,11 @@ class Command(BaseCommand):
             f"POSITIVE FINDING: {totals['orders_sent_without_sent_at']} purchase order(s) "
             "reached the supplier with no sent_at."
         )
+        self.stdout.write(f"  signature: {signatures['orders_sent_without_sent_at']}")
         self.stdout.write(
-            f"  signature: {signatures['orders_sent_without_sent_at']} "
-            "(every such row, whatever it has since become)"
+            "  this number is therefore a FLOOR: an order sent before the fix and "
+            "since cancelled or voided is not counted here, because its null "
+            "sent_at can no longer be told apart from one that never went out."
         )
         for row in payload["orders_sent_without_sent_at"]:
             name = row["po_number"] or "#{}".format(row["id"])

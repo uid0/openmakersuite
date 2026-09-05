@@ -21,6 +21,7 @@ from inventory.tests.factories import InventoryItemFactory, ItemSupplierFactory,
 from reorder_queue.management.commands.report_unstamped_transitions import (
     ORDER_SIGNATURE,
     REQUEST_SIGNATURE,
+    SENT_ONWARD_STATUSES,
     lines_owed_a_lead_time_log,
     orders_sent_without_a_moment,
     requests_reviewed_without_a_moment,
@@ -276,3 +277,36 @@ def test_the_report_states_the_signature_each_count_covers():
     printed = text.getvalue()
     assert "reviewed_by set, reviewed_at NULL" in printed
     assert "sent_at NULL" in printed
+
+
+def test_the_order_signature_admits_the_rows_it_cannot_count():
+    """The order count is a floor, and the report has to say so.
+
+    Unlike the request signature, the order one is not status-independent and
+    cannot be made so: an order sent before the fix and later voided or
+    cancelled still carries a null ``sent_at``, but so does an order that was
+    cancelled before it ever went out, and no column separates them. The filter
+    stays narrow — reporting the second kind would call clean rows damaged —
+    so the OUTPUT carries the exclusion, or the number reads as a complete
+    count of a population it does not cover.
+    """
+    voided_after_a_damaged_send, _ = order_with_line(
+        status=PurchaseOrder.Status.VOIDED, sent_at=None
+    )
+
+    assert voided_after_a_damaged_send not in list(orders_sent_without_a_moment())
+
+    out = StringIO()
+    call_command("report_unstamped_transitions", "--format", "json", stdout=out)
+    signature = json.loads(out.getvalue())["signatures"]["orders_sent_without_sent_at"]
+
+    for excluded in (PurchaseOrder.Status.CANCELLED, PurchaseOrder.Status.VOIDED):
+        assert excluded.value in signature
+    for counted in SENT_ONWARD_STATUSES:
+        assert counted.value in signature
+
+    text = StringIO()
+    call_command("report_unstamped_transitions", stdout=text)
+    printed = text.getvalue()
+    assert signature in printed
+    assert "whatever it has since become" not in printed

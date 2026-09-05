@@ -956,12 +956,21 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         number to an already-SENT/confirmed/received PO never re-stamps or
         downgrades it. Wrapped defensively so a failure in the transition never
         breaks the create/update that triggered it (oms-qdxss).
+
+        The re-read on that failure path is the other half of the guarantee.
+        ``services.mark_sent`` mutates the instance BEFORE its transaction
+        writes, and this is the same object DRF renders the response from, so a
+        rolled-back send would otherwise answer the caller with
+        ``status: sent`` and a ``sent_at`` over a row that is still DRAFT. The
+        write that triggered the send still succeeds — that is what the catch
+        is for — but the response has to describe what the database now holds.
         """
         if purchase_order.status != PurchaseOrder.Status.DRAFT:
             return
         try:
             self._mark_sent(purchase_order, self.request.user)
-        except Exception:  # pragma: no cover - defensive: never break the write
+        except Exception:
+            purchase_order.refresh_from_db()
             import logging
 
             logging.getLogger(__name__).exception(

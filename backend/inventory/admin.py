@@ -1955,54 +1955,30 @@ class AssetProblemAdmin(admin.ModelAdmin):
 
     actions = ["mark_resolved", "mark_closed"]
 
-    def _settle(self, request, queryset, *, new_status, settleable=None, is_new_resolution):
+    def _settle(self, request, queryset, *, new_status, settleable=None):
         """Move each selected report to ``new_status``, stamping the resolution.
 
-        The stamp every other route to ``resolved``/``closed`` writes:
-        ``AssetViewSet.resolve_problem`` and ``AssetProblemViewSet.resolve``
-        both take ``closed`` explicitly and set ``resolved_at``/``resolved_by``
-        for it, and ``services.problem_auto_resolve`` — the one function every
-        work-order completion path calls — sets both too. ``mark_closed`` used
-        a bare ``queryset.update(status=...)``, so a report closed from this
-        changelist showed as closed with no resolution date and no resolver on
-        the API and in ScanTTY, which decode both fields; ``mark_resolved``
-        stamped the date and left the resolver blank.
-
-        ``is_new_resolution`` is why the two actions differ, and it is not a
-        style choice:
-
-          * ``mark_resolved`` (``True``) asserts that the work has just been
-            done, so it stamps ``resolved_at``/``resolved_by`` UNCONDITIONALLY.
-            A report whose status was edited back to ``reported`` still carries
-            the previous occurrence's ``resolved_at``; inheriting it would put
-            a months-old resolution date and somebody else's name on a
-            resolution that happened today — a false record of exactly the kind
-            this change exists to remove.
-          * ``mark_closed`` (``False``) is a FILING change, not a resolution:
-            it keeps the ``if not problem.resolved_at`` guard both API routes
-            and ``problem_auto_resolve``'s "already-resolved reports are left
-            alone" rule carry, because filing away a report somebody else
-            resolved must not steal their credit. A report that carries no
-            stamp at all is still stamped, since closing it is then the only
-            settlement it ever got.
+        The stamp is not defined here. It is
+        :func:`inventory.services.problem_settlement.settle_problem`, which the
+        two API resolve routes call as well — a new resolution restamps, a
+        close preserves an existing stamp. This action used to carry its own
+        copy: ``mark_closed`` did a bare ``queryset.update(status=...)``, so a
+        report closed from this changelist showed as closed with no resolution
+        date and no resolver on the API and in ScanTTY, which decode both
+        fields, and ``mark_resolved`` stamped the date and left the resolver
+        blank. A fourth copy of the rule is how they came to disagree.
 
         ``settleable`` is the status precondition, or ``None`` for "no
         precondition" — each action keeps exactly the population it had before,
         so this change is the stamp and nothing else. Returns how many rows
         moved.
         """
-        from django.utils import timezone
-
-        from membership.actor import actor_display
+        from inventory.services.problem_settlement import settle_problem
 
         rows = queryset if settleable is None else queryset.filter(status__in=settleable)
         count = 0
         for problem in rows:
-            problem.status = new_status
-            if is_new_resolution or not problem.resolved_at:
-                problem.resolved_at = timezone.now()
-                problem.resolved_by = actor_display(request.user)
-            problem.save()
+            settle_problem(problem, new_status=new_status, actor=request.user)
             count += 1
         return count
 
@@ -2019,7 +1995,6 @@ class AssetProblemAdmin(admin.ModelAdmin):
             queryset,
             new_status=AssetProblem.Status.RESOLVED,
             settleable=(AssetProblem.Status.REPORTED,),
-            is_new_resolution=True,
         )
         self.message_user(
             request,
@@ -2043,7 +2018,6 @@ class AssetProblemAdmin(admin.ModelAdmin):
             request,
             queryset,
             new_status=AssetProblem.Status.CLOSED,
-            is_new_resolution=False,
         )
         self.message_user(
             request,

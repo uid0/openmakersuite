@@ -37,6 +37,15 @@ def resolve_problems_for_work_order(work_order, *, actor=None, notes: str = "") 
     completed work order can't overwrite the original resolution stamp with a
     later timestamp. ``notes`` (the work order's completion notes) is copied
     into ``resolution_notes`` only when the report has none of its own.
+
+    Consistent with — rather than a caller of —
+    :func:`inventory.services.problem_settlement.settle_problem`, the rule the
+    two API routes and the admin actions share. It only ever settles into
+    ``resolved`` and it stamps unconditionally, which is exactly what that rule
+    says a new resolution does; it keeps its own loop for the four things it
+    does that the rule has no opinion on: one moment shared across the batch,
+    the ``SYSTEM_ACTOR`` fallback for an actor-less background completion, the
+    ``update_fields`` save, and the open-status filter above.
     """
     from inventory.models import AssetProblem
 

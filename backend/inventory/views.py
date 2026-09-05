@@ -136,6 +136,7 @@ from .services.packaging import (
 )
 from .services.pricing import package_price_of, price_float, unit_price_of
 from .services.problem_auto_resolve import resolve_problems_for_work_order
+from .services.problem_settlement import settle_problem
 from .services.supplier_selection import item_suppliers_prefetch
 from .services.work_order_tools import create_work_order_tools
 
@@ -3092,22 +3093,12 @@ class AssetViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        problem.status = new_status
         problem.resolution_notes = request.data.get(
             "resolution_notes", problem.resolution_notes or ""
         )
-
-        # Set resolved_at and resolved_by if resolving for the first time
-        if (
-            new_status in [AssetProblem.Status.RESOLVED, AssetProblem.Status.CLOSED]
-            and not problem.resolved_at
-        ):
-            problem.resolved_at = timezone.now()
-            # Set resolved_by using handle or username
-            if request.user.is_authenticated:
-                problem.resolved_by = request.user.handle or request.user.username
-
-        problem.save()
+        # The stamp is settle_problem's rule, shared with the admin actions and
+        # AssetProblemViewSet.resolve: resolving restamps, closing preserves.
+        settle_problem(problem, new_status=new_status, actor=request.user)
 
         serializer = AssetProblemSerializer(problem, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -3511,8 +3502,10 @@ class AssetProblemViewSet(viewsets.ReadOnlyModelViewSet):
     def resolve(self, request, pk=None):
         """Mark this asset problem resolved or closed.
 
-        Same stamp as ``AssetViewSet.resolve_problem``, reachable from the
-        problem itself so web and ScanTTY don't need the asset in hand.
+        Same stamp as ``AssetViewSet.resolve_problem`` — literally the same,
+        now that both call
+        :func:`inventory.services.problem_settlement.settle_problem` — reachable
+        from the problem itself so web and ScanTTY don't need the asset in hand.
         """
         problem = self.get_object()
         new_status = request.data.get("status", AssetProblem.Status.RESOLVED)
@@ -3527,14 +3520,10 @@ class AssetProblemViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        problem.status = new_status
         problem.resolution_notes = request.data.get(
             "resolution_notes", problem.resolution_notes or ""
         )
-        if not problem.resolved_at:
-            problem.resolved_at = timezone.now()
-            problem.resolved_by = actor_display(request.user)
-        problem.save()
+        settle_problem(problem, new_status=new_status, actor=request.user)
 
         serializer = AssetProblemSerializer(problem, context={"request": request})
         return Response(serializer.data)

@@ -14,11 +14,13 @@ feed no longer double-counting a promoted report.
 
 import io
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
 from django.utils.crypto import get_random_string
 
 import pytest
@@ -541,3 +543,118 @@ class TestActiveMaintenanceFeed:
 
         resp = staff_client.get("/api/inventory/maintenance/active/")
         assert [row["kind"] for row in resp.json()["results"]].count("asset_problem") == 0
+
+
+class TestSettleStampRule:
+    """A new resolution restamps; a close preserves. Both API routes, one rule.
+
+    ``AssetProblemViewSet.resolve`` (the route ScanTTY uses) and
+    ``AssetViewSet.resolve_problem`` each carried their own copy of the stamp,
+    and each stamped only ``if not problem.resolved_at``. Nothing clears
+    ``resolved_at`` when a recurrence is put back to ``reported`` from the admin
+    change form, so a resolve of that row inherited the previous occurrence's
+    date and resolver — a resolution dated months before the work, shown on
+    ``AssetProblemSerializer`` and decoded by ScanTTY, with no error.
+
+    The rule now lives in ``services.problem_settlement.settle_problem`` and
+    these drive the real DRF routes, one pair each, so a route that stops
+    calling it fails here.
+    """
+
+    @staticmethod
+    def reopened(problem, *, resolved_by, resolved_at):
+        """A report resolved once, then edited back to ``reported``."""
+        problem.status = AssetProblem.Status.RESOLVED
+        problem.resolved_by = resolved_by
+        problem.resolved_at = resolved_at
+        problem.save()
+        AssetProblem.objects.filter(pk=problem.pk).update(status=AssetProblem.Status.REPORTED)
+        problem.refresh_from_db()
+        return problem
+
+    def test_problem_route_restamps_a_reopened_report(self, staff_client, staff, problem):
+        stale = timezone.now() - timedelta(days=238)
+        self.reopened(problem, resolved_by="dana", resolved_at=stale)
+
+        resp = staff_client.post(
+            f"/api/inventory/asset-problems/{problem.id}/resolve/",
+            {"resolution_notes": "Bearing replaced again"},
+            format="json",
+        )
+        assert resp.status_code == 200, resp.content
+
+        problem.refresh_from_db()
+        assert problem.status == AssetProblem.Status.RESOLVED
+        assert problem.resolved_by == (staff.handle or staff.username)
+        assert problem.resolved_at > stale
+
+    def test_asset_route_restamps_a_reopened_report(self, staff_client, staff, asset, problem):
+        stale = timezone.now() - timedelta(days=238)
+        self.reopened(problem, resolved_by="dana", resolved_at=stale)
+
+        resp = staff_client.post(
+            f"/api/inventory/assets/{asset.id}/resolve_problem/",
+            {"problem_id": str(problem.id)},
+            format="json",
+        )
+        assert resp.status_code == 200, resp.content
+
+        problem.refresh_from_db()
+        assert problem.status == AssetProblem.Status.RESOLVED
+        assert problem.resolved_by == (staff.handle or staff.username)
+        assert problem.resolved_at > stale
+
+    def test_problem_route_close_keeps_a_prior_resolvers_credit(self, staff_client, problem):
+        """Filing is not resolving: closing must not take somebody else's name."""
+        original = timezone.now() - timedelta(days=3)
+        problem.status = AssetProblem.Status.RESOLVED
+        problem.resolved_by = "dana"
+        problem.resolved_at = original
+        problem.save()
+
+        resp = staff_client.post(
+            f"/api/inventory/asset-problems/{problem.id}/resolve/",
+            {"status": AssetProblem.Status.CLOSED},
+            format="json",
+        )
+        assert resp.status_code == 200, resp.content
+
+        problem.refresh_from_db()
+        assert problem.status == AssetProblem.Status.CLOSED
+        assert problem.resolved_by == "dana"
+        assert problem.resolved_at == original
+
+    def test_asset_route_close_keeps_a_prior_resolvers_credit(self, staff_client, asset, problem):
+        original = timezone.now() - timedelta(days=3)
+        problem.status = AssetProblem.Status.RESOLVED
+        problem.resolved_by = "dana"
+        problem.resolved_at = original
+        problem.save()
+
+        resp = staff_client.post(
+            f"/api/inventory/assets/{asset.id}/resolve_problem/",
+            {"problem_id": str(problem.id), "status": AssetProblem.Status.CLOSED},
+            format="json",
+        )
+        assert resp.status_code == 200, resp.content
+
+        problem.refresh_from_db()
+        assert problem.status == AssetProblem.Status.CLOSED
+        assert problem.resolved_by == "dana"
+        assert problem.resolved_at == original
+
+    def test_close_of_an_unstamped_report_still_records_the_settlement(
+        self, staff_client, staff, problem
+    ):
+        """A close is the only settlement an unresolved report ever got."""
+        resp = staff_client.post(
+            f"/api/inventory/asset-problems/{problem.id}/resolve/",
+            {"status": AssetProblem.Status.CLOSED},
+            format="json",
+        )
+        assert resp.status_code == 200, resp.content
+
+        problem.refresh_from_db()
+        assert problem.status == AssetProblem.Status.CLOSED
+        assert problem.resolved_at is not None
+        assert problem.resolved_by == (staff.handle or staff.username)

@@ -250,8 +250,18 @@ server {
     # It names NO path, NO filename, NO prefix and NO vendor: the reader knows
     # what they clicked, and anyone else arriving here must learn nothing.
     # `always` on the headers because this is served through error_page.
+    #
+    # `types { }` IS LOAD-BEARING, NOT TIDINESS. nginx resolves the content type
+    # from the URI extension at the GATED location, and the internal redirect
+    # here carries that resolved type with it — so `default_type` alone never
+    # applies and the remedy went out as application/pdf or image/jpeg, which a
+    # browser hands to its PDF or image viewer instead of rendering. Emptying
+    # the MIME map in this location leaves nothing to resolve, so `default_type`
+    # is what the reader gets. `config/tests/test_protected_media.py` asserts a
+    # refused .pdf, .jpg and extension-less path through a running nginx.
     location @vendor_media_denied {
         internal;
+        types { }
         default_type text/html;
         add_header Cache-Control "private, no-store" always;
         return 403 '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Sign in required</title></head><body><h1>Sign in required</h1><p>This document is only available to signed-in members.</p><p><a href="/reauth">Sign in</a> to open it.</p><script>try{sessionStorage.setItem("oms_pending_return_to",window.location.pathname)}catch(e){}</script></body></html>';

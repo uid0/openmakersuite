@@ -33,10 +33,17 @@ transcript is in the PR body; what CI can re-run on its own is below.
 
 from __future__ import annotations
 
+import contextlib
+import http.server
 import re
 import shutil
+import socket
 import subprocess  # nosec B404 — `nginx -t` on a test-owned rendered config
 import tempfile
+import threading
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from django.core.files.base import ContentFile
@@ -387,6 +394,216 @@ def test_the_rendered_config_is_valid_nginx():
     if "cannot load certificate" in result.stderr or "BIO_new_file" in result.stderr:
         pytest.skip("nginx reached the TLS certificate paths, which this box has no copy of")
     assert result.returncode == 0, f"`nginx -t` rejected the rendered template:\n{result.stderr}"
+
+
+def _free_port() -> int:
+    with contextlib.closing(socket.socket()) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def _mime_types(binary: str) -> Path | None:
+    """The MIME map the installed nginx's own ``nginx.conf`` includes.
+
+    Load-bearing for the test below rather than incidental: the bug it covers is
+    that a type was resolved FROM the map at the gated location, so a harness
+    that ran without one would answer ``text/html`` for every extension and
+    could never see it. ``nginx/nginx.conf`` includes ``mime.types`` at ``http``
+    level in production, and so does the config assembled here.
+    """
+    probe = subprocess.run(  # nosec B603 — fixed binary, no caller input
+        [binary, "-V"], capture_output=True, text=True
+    )
+    match = re.search(r"--conf-path=(\S+)", probe.stderr)
+    if match is None:
+        return None
+    candidate = Path(match.group(1)).parent / "mime.types"
+    return candidate if candidate.is_file() else None
+
+
+#: What a refused caller has to be handed, whatever they asked for.
+REFUSED_DOCUMENTS = [
+    "supplier_agreements/zzqq-standing-quote.pdf",
+    "work_orders/receipts/2026/09/zzqq-receipt.jpg",
+    "supplier_agreements/zzqq-scan-noextension",
+]
+
+SENTINEL = b"ZZQQ-REFUSED-DOCUMENT-BODY"
+
+
+class _DenyingAuthStub(http.server.BaseHTTPRequestHandler):
+    """Stands in for ``/api/auth/media-access/`` answering an anonymous caller.
+
+    403 is what that endpoint really returns without a session — asserted by
+    ``test_the_auth_request_endpoint_answers_the_way_nginx_needs`` below, which
+    is what keeps this stub honest.
+    """
+
+    def do_GET(self):  # noqa: N802 — BaseHTTPRequestHandler's spelling
+        self.send_response(403)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture(scope="module")
+def refusing_nginx():
+    """A real nginx serving THIS repo's template, with every caller refused.
+
+    Only the deployment details a developer box cannot have are substituted —
+    the listen port, the upstream addresses, the TLS material and the container
+    media root. Every ``/media/`` location block, the ``@vendor_media_denied``
+    named location and the ``http``-level MIME map are the file's own.
+    """
+    binary = shutil.which("nginx")
+    if binary is None:
+        pytest.skip("nginx is not installed on this machine")
+    mime_types = _mime_types(binary)
+    if mime_types is None:
+        pytest.skip("the installed nginx ships no mime.types to include")
+
+    stub = http.server.HTTPServer(("127.0.0.1", 0), _DenyingAuthStub)
+    threading.Thread(target=stub.serve_forever, daemon=True).start()
+    port = _free_port()
+
+    rendered = render(NGINX_TEMPLATE.read_text(), TEMPLATE_VARIABLES)
+    rendered = rendered.replace("server backend:8000;", f"server 127.0.0.1:{stub.server_port};")
+    rendered = rendered.replace("server emqx:18083;", f"server 127.0.0.1:{_free_port()};")
+    rendered = rendered.replace("listen 443 ssl http2;", f"listen 127.0.0.1:{port};")
+    rendered = rendered.replace("listen 80;", f"listen 127.0.0.1:{_free_port()};")
+    # The certificates are issued into the deployed container and nginx OPENS
+    # them at startup. Dropping the two paths is what lets this run at all; it
+    # touches no location block and no header.
+    rendered = "\n".join(line for line in rendered.splitlines() if "ssl_certificate" not in line)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        media = root / "media"
+        for document in REFUSED_DOCUMENTS:
+            path = media / document
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(SENTINEL)
+        (root / "frontend").mkdir()
+        rendered = rendered.replace("/app/media/", f"{media}/")
+        rendered = rendered.replace("/app/frontend", str(root / "frontend"))
+
+        (root / "conf.d").mkdir()
+        (root / "conf.d" / "default.conf").write_text(rendered)
+        (root / "nginx.conf").write_text(
+            "events {}\n"
+            "http {\n"
+            f"    include {mime_types};\n"
+            "    default_type application/octet-stream;\n"
+            "    access_log off;\n"
+            f"    include {root}/conf.d/*.conf;\n"
+            "}\n"
+        )
+
+        server = subprocess.Popen(  # nosec B603 — fixed binary, test-owned config
+            [binary, "-c", str(root / "nginx.conf"), "-p", str(root), "-g", "daemon off;"],
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                if server.poll() is not None:
+                    raise AssertionError(f"nginx would not start:\n{server.stderr.read()}")
+                with contextlib.closing(socket.socket()) as probe:
+                    if probe.connect_ex(("127.0.0.1", port)) == 0:
+                        break
+                time.sleep(0.05)
+            else:
+                raise AssertionError("nginx never accepted a connection")
+
+            def get(uri: str):
+                """``(status, content_type, body)`` for an unauthenticated GET."""
+                request = urllib.request.Request(f"http://127.0.0.1:{port}{uri}")
+                try:
+                    with urllib.request.urlopen(request) as allowed:  # nosec B310
+                        return (
+                            allowed.status,
+                            allowed.headers.get("Content-Type"),
+                            allowed.read(),
+                        )
+                except urllib.error.HTTPError as refused:
+                    return refused.code, refused.headers.get("Content-Type"), refused.read()
+
+            yield get
+        finally:
+            server.terminate()
+            server.wait(timeout=10)
+            stub.shutdown()
+
+
+def _media_type(content_type: str | None) -> str | None:
+    """``text/html; charset=utf-8`` and ``text/html`` are the same answer."""
+    return None if content_type is None else content_type.split(";")[0].strip().lower()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("document", REFUSED_DOCUMENTS)
+def test_both_servers_hand_a_refused_reader_a_page_they_can_read(
+    document, refusing_nginx, db, tmp_path, settings
+):
+    """The remedy has to RENDER, and both servers have to render the same one.
+
+    nginx resolves a content type from the URI extension at the gated location
+    and the internal redirect to ``@vendor_media_denied`` carries it, so
+    ``default_type text/html`` there did nothing: a refused supplier agreement
+    went out ``403 application/pdf`` and a work-order receipt ``403 image/jpeg``.
+    Chrome handed both to its PDF/image viewer — "Failed to load PDF document"
+    instead of the remedy — and the inline script that records
+    ``oms_pending_return_to`` never ran, so the way back to the document after
+    signing in was dead too. Only an extension-less path got ``text/html``,
+    which is why the extensions are the parameter here: one case would have
+    missed it.
+
+    Both halves are asserted together because "two servers, one rule" is this
+    module's design and the two have now disagreed three times in the nginx
+    direction. The gate itself is asserted alongside: the bytes must not come
+    back either way — only what the reader is handed changes.
+    """
+    settings.MEDIA_ROOT = tmp_path
+    served = tmp_path / document
+    served.parent.mkdir(parents=True, exist_ok=True)
+    served.write_bytes(SENTINEL)
+    uri = f"/media/{document}"
+
+    nginx_status, nginx_type, nginx_body = refusing_nginx(uri)
+    django_response = APIClient().get(uri)
+    django_body = (
+        b"".join(django_response.streaming_content)
+        if django_response.streaming
+        else django_response.content
+    )
+
+    # The gate holds on both, first: a readable remedy over a leaked document
+    # would be the worse bug.
+    assert nginx_status == 403, f"nginx answered {nginx_status} for {uri}"
+    assert django_response.status_code == 403, f"Django answered {django_response.status_code}"
+    assert SENTINEL not in nginx_body and SENTINEL not in django_body
+
+    assert _media_type(nginx_type) == "text/html", (
+        f"nginx serves the refusal for {uri} as {nginx_type}, so a browser hands "
+        "it to a viewer instead of rendering the remedy"
+    )
+    assert _media_type(django_response.headers.get("Content-Type")) == "text/html"
+    assert _media_type(nginx_type) == _media_type(django_response.headers.get("Content-Type")), (
+        "the two servers disagree about what a refused reader is handed:\n"
+        f"  nginx:  {nginx_type}\n"
+        f"  django: {django_response.headers.get('Content-Type')}"
+    )
+
+    for name, body in (("nginx", nginx_body), ("django", django_body)):
+        text = body.decode()
+        assert "Sign in required" in text, f"{name} refuses {uri} with no remedy"
+        assert f'href="{REAUTH_PATH}"' in text, f"{name} refuses {uri} with no way in"
+        assert "oms_pending_return_to" in text, (
+            f"{name} refuses {uri} without recording where to return to"
+        )
 
 
 @pytest.mark.integration

@@ -536,6 +536,34 @@ class TestInvariantClearingAPriceIsObservable:
         assert Decimal(response.data["unit_cost"]) == LOSSY_UNIT_COST
         assert Decimal(response.data["package_cost"]) == LOSSY_PACKAGE_COST
 
+    def test_emptying_the_case_price_while_typing_a_unit_price_keeps_what_was_typed(
+        self, item, supplier, authenticated_client
+    ):
+        """CONTROL: a supplied VALUE beats a clear, whichever box it came from.
+
+        Verified passing on base, and it is a control for a reason: the FIRST cut
+        of the delta rule took the clear first and handed back NULL/NULL, dropping
+        the figure the operator had just typed. That is operator input silently
+        discarded, arriving through the fix for operator input being silently
+        discarded — a regression this branch would have shipped. Both boxes are on
+        screen together on every surface that edits these, so emptying one while
+        filling the other is an ordinary thing to do.
+        """
+        client, _ = authenticated_client
+        link = make_link(item, supplier)
+
+        response = client.patch(
+            reverse("itemsupplier-detail", args=[link.pk]),
+            {"package_cost": None, "unit_cost": "4.00"},
+            format="json",
+        )
+
+        assert response.status_code == 200
+        link.refresh_from_db()
+        assert link.unit_cost == Decimal("4.00")
+        assert link.package_cost == Decimal("12.00")
+        assert Decimal(response.data["package_cost"]) == Decimal("12.00")
+
     def test_the_write_response_carries_the_re_derived_case_price(
         self, item, supplier, authenticated_client
     ):

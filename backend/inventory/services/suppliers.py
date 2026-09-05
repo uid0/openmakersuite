@@ -99,8 +99,13 @@ def derive_costs(*, unit_cost, package_cost, quantity_per_package, stored=None):
     * nothing moved — derive nothing. Both stored prices stay byte-identical,
       because editing a SKU or a flag is not a price edit.
     * ``package_cost`` moved to a value — it governs; ``unit_cost`` re-derives.
-    * ``package_cost`` cleared — the authoritative cost is gone, so both clear.
-      That is how an operator says "I no longer know what this costs".
+    * ``package_cost`` cleared and nothing else named — the authoritative cost is
+      gone, so both clear. That is how an operator says "I no longer know what
+      this costs", and it has to stay sayable.
+    * ``package_cost`` cleared but ``unit_cost`` given — the supplied VALUE wins.
+      They emptied one box and typed in the other; discarding what they typed
+      because of the box they emptied would be the same silent loss by a
+      different route.
     * only ``unit_cost`` moved to a value — the operator named a unit price and
       nothing contradicts it, so it governs and the case price re-derives. This
       is the ordinary case on every form: they all send both boxes and the
@@ -139,14 +144,22 @@ def derive_costs(*, unit_cost, package_cost, quantity_per_package, stored=None):
     unit_moved = unit_cost != stored_unit
     pack_moved = quantity_per_package != stored.get("quantity_per_package")
 
-    if package_moved:
-        if package_cost is None:
-            return None, None
+    # A supplied VALUE beats a clear, whichever box it came from. Taking the
+    # clears first would mean an operator who empties the case-price box AND
+    # types a unit price gets NULL/NULL — their typed figure discarded without a
+    # word, which is the defect class this whole path is being fixed for.
+    if package_moved and package_cost is not None:
         return from_package(package_cost)
 
+    if unit_moved and unit_cost is not None:
+        return from_unit(unit_cost)
+
+    if package_moved:
+        # The authoritative cost was emptied and nothing else was named: that is
+        # how "I no longer know what this costs" is said, and it has to be sayable.
+        return None, None
+
     if unit_moved:
-        if unit_cost is not None:
-            return from_unit(unit_cost)
         # The derived box was emptied on its own; it re-derives from the survivor.
         if package_cost is not None:
             return from_package(package_cost)

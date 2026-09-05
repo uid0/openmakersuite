@@ -26,6 +26,7 @@ import { InventoryItemFormData, inventoryItemSchema } from '../utils/formSchemas
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 import {
   relationshipChanged,
+  relationshipFromSaved,
   relationshipPayload,
   relationshipWriteOrder,
   supplierWriteError,
@@ -233,19 +234,7 @@ const InventoryItemFormPage: React.FC = () => {
 
       // Map supplier relationships
       if (suppliers.length > 0) {
-        setSupplierRelationships(
-          suppliers.map((s) => ({
-            id: s.id,
-            supplier: s.supplier,
-            supplier_sku: s.supplier_sku,
-            supplier_url: s.supplier_url,
-            unit_cost: s.unit_cost,
-            package_cost: s.package_cost,
-            quantity_per_package: s.quantity_per_package,
-            average_lead_time: s.average_lead_time,
-            is_primary: s.is_primary,
-          }))
-        );
+        setSupplierRelationships(suppliers.map(relationshipFromSaved));
       }
 
       setItemSuppliers(suppliers);
@@ -373,7 +362,7 @@ const InventoryItemFormPage: React.FC = () => {
             const created = await inventoryAPI.createItemSupplier(
               relationshipPayload(relationship, savedItem.id)
             );
-            nextRelationships[index] = { ...relationship, id: created.data.id };
+            nextRelationships[index] = relationshipFromSaved(created.data);
             nextSaved = [...nextSaved, created.data];
           } else if (
             relationshipChanged(
@@ -385,6 +374,7 @@ const InventoryItemFormPage: React.FC = () => {
               relationship.id,
               relationshipPayload(relationship)
             );
+            nextRelationships[index] = relationshipFromSaved(updated.data);
             nextSaved = nextSaved.map((saved) =>
               saved.id === relationship.id ? updated.data : saved
             );

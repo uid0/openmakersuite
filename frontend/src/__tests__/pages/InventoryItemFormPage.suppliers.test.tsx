@@ -774,3 +774,99 @@ describe('InventoryItemFormPage — supplier relationships', { timeout: 30000 },
     expect(supplierWrites('post')).toHaveLength(0);
   });
 });
+
+describe('InventoryItemFormPage — derived costs after a partial save', { timeout: 30000 }, () => {
+  /**
+   * A retry after a partial save must not re-send the pre-derivation unit cost.
+   *
+   * `ItemSupplier.save()` derives from the DELTA against the stored row
+   * (`inventory.services.suppliers.derive_costs`), so a cost box holding a
+   * figure the server has already superseded is not inert — it MOVED, and a
+   * moved unit cost governs and re-prices the case price. The trace:
+   *
+   * stored (unit 3.33, package 10.00, pack 3); the operator raises only the
+   * case price to 12.00; the server derives and returns (4.00, 12.00); a later
+   * row in the same save fails, so the page stays mounted and tells the
+   * operator to fix that row and save again. If the Unit Cost box still holds
+   * 3.33 on that retry, the row looks dirty, the PATCH carries 3.33, and the
+   * case price the operator just set is silently re-priced to 3.33 x 3 = 9.99.
+   *
+   * That is symptom 5 arriving through the fix for symptom 5, so it is pinned
+   * here rather than left to the derivation's own suite: the defect is that
+   * this screen keeps a figure the write response already corrected.
+   */
+  const staleRow = (overrides: Record<string, unknown> = {}) =>
+    itemSupplier({
+      id: 91,
+      supplier: 1,
+      supplier_name: 'Acme Fasteners',
+      supplier_sku: 'ACME-1',
+      unit_cost: '3.33',
+      package_cost: '10.00',
+      quantity_per_package: 3,
+      is_primary: true,
+      ...overrides,
+    });
+
+  const failingRow = () =>
+    itemSupplier({
+      id: 92,
+      supplier: 2,
+      supplier_name: 'Bolt Depot',
+      supplier_sku: 'BOLT-9',
+      unit_cost: '5.00',
+      package_cost: '5.00',
+      quantity_per_package: 1,
+      is_primary: false,
+    });
+
+  /** PATCHes the page sent to the row whose costs the server re-derived. */
+  const writesToStaleRow = () =>
+    mock.history.patch.filter((request) =>
+      /\/inventory\/item-suppliers\/91\/$/.test(request.url ?? '')
+    );
+
+  it('adopts the derived unit cost so a retry does not re-price the package', async () => {
+    // The server's answer to "package cost moved to 12.00 at pack 3": the case
+    // price stands and the unit cost is re-derived from it.
+    mock
+      .onPatch(/\/inventory\/item-suppliers\/91\/$/)
+      .reply(200, staleRow({ unit_cost: '4.00', package_cost: '12.00' }));
+    // The second row fails, which is what keeps the page mounted: `onSubmit`
+    // reports and returns without navigating.
+    mock.onPatch(/\/inventory\/item-suppliers\/92\/$/).reply(400, {
+      error: { code: 'validation_failed', message: 'nope', details: { supplier_sku: ['taken'] } },
+    });
+    renderEdit([staleRow(), failingRow()]);
+
+    await waitFor(() => expect(screen.getByDisplayValue('ACME-1')).toBeInTheDocument());
+
+    fireEvent.change(screen.getAllByLabelText(/^Package Cost$/)[0], {
+      target: { value: '12.00' },
+    });
+    // Make the second row dirty too, so it is actually written and can fail.
+    fireEvent.change(screen.getAllByLabelText(/Supplier SKU/)[1], {
+      target: { value: 'BOLT-10' },
+    });
+    save();
+
+    await waitFor(() =>
+      expect(screen.getByText(/supplier relationship did not/)).toBeInTheDocument()
+    );
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(writesToStaleRow()).toHaveLength(1);
+
+    // The screen must now show what the server stored, not what was typed:
+    // this is the value the write response carries so the re-derivation is
+    // observable, and the box is what the next save reads from.
+    expect(screen.getAllByLabelText(/^Unit Cost$/)[0]).toHaveValue(4);
+
+    save();
+
+    // The operator fixed nothing on row 91, so the retry has nothing to say
+    // about it. Before the fix the box still held 3.33, the row looked dirty,
+    // and this second PATCH re-priced the case price to 9.99.
+    await waitFor(() => expect(writesToStaleRow().length).toBeGreaterThanOrEqual(1));
+    expect(writesToStaleRow()).toHaveLength(1);
+  });
+});

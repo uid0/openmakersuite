@@ -591,7 +591,7 @@ class TestInvariantClearingAPriceIsObservable:
     def test_emptying_the_case_price_while_typing_a_unit_price_keeps_what_was_typed(
         self, item, supplier, authenticated_client
     ):
-        """CONTROL: a supplied VALUE beats a clear, whichever box it came from.
+        """CONTROL: a value that MOVED beats a clear, whichever box it came from.
 
         Verified passing on base, and it is a control for a reason: the FIRST cut
         of the delta rule took the clear first and handed back NULL/NULL, dropping
@@ -680,6 +680,44 @@ class TestInvariantASaveWithNoPriceIntentFilesNoHistory:
         link.package_cost = Decimal("12.00")
         link.save()
 
+        assert history_rows(link) == [("updated", Decimal("4.00"), Decimal("12.00"), 3)]
+
+    def test_a_retry_after_a_partial_save_neither_re_prices_nor_files_a_row(
+        self, item, supplier, authenticated_client
+    ):
+        """CONTROL: the backend half of the item form's partial-save retry.
+
+        The frontend regression is pinned by "adopts the derived unit cost so a
+        retry does not re-price the package" in
+        ``frontend/src/__tests__/pages/InventoryItemFormPage.suppliers.test.tsx``:
+        the form used to keep the pre-derivation unit cost in its box after a
+        partial save, so the retry re-sent 3.33 against a stored 4.00 — a MOVED
+        unit cost, which governs and drops the case price to 9.99.
+
+        This replays the two requests as the FIXED form now sends them: the first
+        raises the case price, the second echoes what the write response came
+        back with. The case price must survive the echo, and the echo must file
+        no second history row — the captain reads that history.
+        """
+        client, _ = authenticated_client
+        link = make_link(item, supplier)
+        PriceHistory.objects.filter(item_supplier=link).delete()
+        url = reverse("itemsupplier-detail", args=[link.pk])
+
+        first = client.patch(url, {"unit_cost": "3.33", "package_cost": "12.00"}, format="json")
+
+        assert first.status_code == 200
+        assert Decimal(first.data["unit_cost"]) == Decimal("4.00")
+        assert Decimal(first.data["package_cost"]) == Decimal("12.00")
+
+        retry = client.patch(
+            url,
+            {"unit_cost": first.data["unit_cost"], "package_cost": first.data["package_cost"]},
+            format="json",
+        )
+
+        assert retry.status_code == 200
+        assert stored_pair(link) == (Decimal("4.00"), Decimal("12.00"), 3)
         assert history_rows(link) == [("updated", Decimal("4.00"), Decimal("12.00"), 3)]
 
     def test_a_pack_size_change_alone_still_files_its_history_row(self, item, supplier):

@@ -263,9 +263,16 @@ def test_every_send_path_stamps_the_whole_transition(send, staff):
     assert order.status == PurchaseOrder.Status.SENT
     assert order.sent_by == staff
     assert order.sent_at is not None
-    assert PurchaseOrderAuditEvent.objects.filter(
-        purchase_order=order, action=PurchaseOrderAuditEvent.Action.PO_SEND
-    ).exists()
+    # EXACTLY one, not merely one-or-more. The audit call moved from
+    # ``views._mark_sent`` into ``services.mark_sent`` so the third caller could
+    # not miss it; a count guards the other end of that move, where the view's
+    # copy comes back and every send is filed twice.
+    assert (
+        PurchaseOrderAuditEvent.objects.filter(
+            purchase_order=order, action=PurchaseOrderAuditEvent.Action.PO_SEND
+        ).count()
+        == 1
+    )
 
 
 # ── The same shape on the reorder-request actions ───────────────────────────

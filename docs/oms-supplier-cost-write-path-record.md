@@ -293,6 +293,52 @@ would otherwise have shipped, in the same defect class it exists to close — wh
 is the argument for the invariants being written first and measured against base,
 rather than for trusting the fix because it is "at the root".
 
+## The kit `'0'` guard: why it was reverted, and why it comes back
+
+`d07f0528` changed `KitDetailPage.handleSave` from `unitCost === '' ? '0'` to
+`? null`. `6c2adc10` put `'0'` back. **It was not reverted because it was wrong.**
+The reason is stated in that commit's own `AGENTS.md` edit:
+
+> The kit / supplier-terms **WRITE path has NO entry here, because it moves no
+> figure at all.** `KitSerializer._apply_supplier_terms`,
+> `KitDetailPage.handleSave`, `ItemSupplierSerializer` / `ItemSupplierViewSet`
+> and `inventory/services/suppliers.py` are byte-identical to base `7c078de`.
+
+That branch had withdrawn its whole write-path attempt and needed the path
+provably byte-identical to base for its change list to be true. The frontend
+guard went with it as collateral, and the `'0'` was re-filed in the same commit as
+a BASE DEFECT, filed not fixed — still acknowledged as a defect, just not that
+branch's to carry. The reason was branch scope, not correctness.
+
+Restoring it does not reintroduce that reason, because this branch **is** the
+write-path branch: "byte-identical to base" is not a claim it makes or wants.
+And the one real dependency the guard had is now satisfied. The earlier record
+noted the guard made a defect reachable — "Reachable because a blank cost box now
+correctly stores NULL" — namely that a costless link later given a unit cost ends
+at `unit_cost 5.00 / package_cost NULL`, because `update_or_create` restricts
+`update_fields`. That is symptom 4, fixed here and pinned by
+`test_a_derived_case_price_is_persisted_on_a_restricted_update`.
+
+## A masking guard removed, and replaced by a fix rather than by nothing
+
+Dropping `_apply_supplier_terms`' `setdefault("quantity_per_package", 1)` is
+right — supplying a pack size the operator never gave is the fabrication in
+symptom 2 — but that setdefault was **also masking** a defect the earlier branch
+measured and then declared dissolved:
+
+> an uncoerced string cost reaches `save()`'s back-fill as STRING REPETITION —
+> `"5" * 6 == "555555"`, a valid decimal … That needs a pack size above 1 on a
+> costless link, which only became reachable because the partial revert had
+> dropped base's forced `setdefault(..., 1)`.
+
+At pack 1 the product is `"5" * 1` and the bug is invisible; that is the only
+reason it dissolved. **This branch makes the precondition reachable again**, so
+the masking is replaced by an actual fix: `quantize_cost` coerces to `Decimal`
+before any arithmetic touches the value. Pinned by
+`test_a_string_unit_cost_on_a_case_packed_link_is_not_repeated` on the record's
+exact fixture, and mutation-checked — deleting the coercion makes that link store
+`Decimal('555555.00')` and the test catch it.
+
 ## Still open, filed not fixed
 
 Carried from the earlier record, verified still true, and deliberately NOT taken:

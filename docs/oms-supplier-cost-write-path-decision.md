@@ -40,6 +40,21 @@ Under a delta rule:
 Rows 2 and 3 need no decision, and they are the common case: every form on every
 surface seeds both boxes from the stored row and the operator edits one of them.
 
+**Corrected after the fact — rows 2 and 3 each split on VALUE vs CLEAR too.**
+"Moved" covers moving to a value and moving to NULL, and the two do not have the
+same answer, so neither row is the single unambiguous case it claims to be.
+
+- Row 2 holds where `unit_cost` moved to a VALUE. Where it moved to a CLEAR the
+  outcome is the OPPOSITE of "unit governs": stored (unit 3.33, package 10.00,
+  pack 3) with `{unit_cost: null, package_cost: "10.00"}` re-derives the unit
+  cost from the surviving case price and 3.33 comes back. The derived box cannot
+  be cleared on its own. Pinned by
+  `test_clearing_only_the_unit_price_re_derives_it_and_says_so_in_the_response`.
+- Row 3 holds where `package_cost` moved to a VALUE. Where it moved to a CLEAR
+  the unit cost does not re-derive — both columns clear, because the
+  authoritative cost is gone and "no price on file" has to stay sayable. Pinned
+  by `test_clearing_the_case_price_clears_both`.
+
 **Corrected after the fact — row 4 is not one case but two.** As written it
 routes the cleared-package / moved-unit edit to (A), whose answer is "package
 governs", which for a CLEARED package means both columns clear. That is the

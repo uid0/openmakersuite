@@ -299,6 +299,58 @@ class TestInvariantAnAbsentValueIsNeverFabricated:
         assert stored_pair(link) == before
 
 
+class TestAStringCostIsANumberBeforeItIsMultiplied:
+    """The defect base's ``setdefault("quantity_per_package", 1)`` was masking.
+
+    ``supplier_terms`` is a pass-through ``DictField``, so a cost can reach the
+    model as the STRING ``"5"``. Python's ``*`` on a string repeats it:
+    ``"5" * 6 == "555555"``, which is a valid decimal, so a costless link at pack
+    6 could store a fabricated case price of 555555.00 and file it to
+    ``PriceHistory`` as a real supplier price.
+
+    `oms-falsy-zero-money-guards` measured this and recorded that it was only
+    reachable once base's forced ``setdefault(..., 1)`` was dropped — at pack 1
+    the product is ``"5" * 1``, the same string Django coerces on save. **This
+    branch drops that setdefault**, because supplying a pack size the operator
+    never gave is the fabrication in symptom 2. So the precondition is reachable
+    again here, and the masking has to be replaced by an actual fix:
+    ``quantize_cost`` turns the value into a ``Decimal`` before any arithmetic
+    touches it.
+    """
+
+    def test_a_string_unit_cost_on_a_case_packed_link_is_not_repeated(self, item, supplier):
+        """AFTER: the record's exact fixture — costless link, pack 6, ``"5"``."""
+        link = make_link(item, supplier, unit_cost=None, package_cost=None, quantity_per_package=6)
+        PriceHistory.objects.filter(item_supplier=link).delete()
+
+        ItemSupplier.objects.update_or_create(
+            item=link.item,
+            supplier_id=link.supplier_id,
+            defaults={"unit_cost": "5", "supplier_sku": "STR-COST", "is_primary": True},
+        )
+
+        link.refresh_from_db()
+        assert link.unit_cost == Decimal("5.00")
+        # 5 x 6, as arithmetic. NOT "5" * 6 == "555555".
+        assert link.package_cost == Decimal("30.00")
+        assert link.package_cost != Decimal("555555")
+        assert history_rows(link) == [("updated", Decimal("5.00"), Decimal("30.00"), 6)]
+
+    def test_a_string_case_cost_divides_rather_than_raising(self, item, supplier):
+        """CONTROL: the other direction of the same coercion."""
+        link = make_link(item, supplier, unit_cost=None, package_cost=None, quantity_per_package=4)
+
+        ItemSupplier.objects.update_or_create(
+            item=link.item,
+            supplier_id=link.supplier_id,
+            defaults={"package_cost": "10", "supplier_sku": "STR-PKG", "is_primary": True},
+        )
+
+        link.refresh_from_db()
+        assert link.package_cost == Decimal("10.00")
+        assert link.unit_cost == Decimal("2.50")
+
+
 class TestInvariantOperatorInputIsNotDiscarded:
     """A price the operator names governs. Neither half is inert."""
 

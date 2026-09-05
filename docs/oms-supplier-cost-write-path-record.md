@@ -117,7 +117,27 @@ Both halves are pinned: `test_flag_only_save_writes_no_price_history_row` and
 `test_marking_a_supplier_discontinued_files_no_price_change`.
 
 **Existing corrupted rows are NOT rewritten.** A data migration is not this
-branch's to authorise. The query that finds affected links:
+branch's to authorise.
+
+**CORRECTION, and it matters: an earlier revision of this section introduced the
+query below as "the query that finds affected links". That framing was WRONG,**
+and a captain acting on it would have worked from close to the opposite of the
+remediation set. The predicate finds links whose pair cannot round-trip — links
+that were AT RISK — not links that were damaged. It MISSES every link the two
+corrupting symptoms actually damaged, and it LISTS healthy ones. What replaced it
+is below: the same SQL, relabelled to what it really returns, plus two
+history-signature queries and an explicit statement of what none of them prove.
+
+**The corrupted set is NOT recoverable from `inventory_itemsupplier` alone.** A
+link corrupted by symptom 5 holds (`package_cost` 9.99, `unit_cost` 3.33, pack
+3). That is byte-identical to the row of a supplier who genuinely charges 9.99
+for a 3-pack. Current state cannot tell the two apart, because after the drift
+the pair is self-consistent — `ROUND(9.99 / 3, 2) * 3 = 9.99`. Only
+`PriceHistory` carries the SHAPE of the change, which is why the queries that
+follow read history rather than the link table.
+
+Links whose pair cannot round-trip — **AT RISK** from these defects, **NOT known
+to be corrupted**:
 
 ```sql
 SELECT id, item_id, supplier_id, unit_cost, package_cost, quantity_per_package
@@ -128,8 +148,58 @@ WHERE  package_cost IS NOT NULL
        <> package_cost;
 ```
 
-and the history rows that may be false — an `updated` row whose figures match the
-row before it:
+A link that was ALREADY corrupted does not appear here. After the drift its pair
+is self-consistent, so it round-trips cleanly and the predicate passes over it —
+(9.99, 3.33, 3) is invisible to this query, and symptom 2's (10.00, 10.00, 1) is
+excluded outright by `quantity_per_package > 1`. What this returns is (10.00,
+3.33, 3) and its kin: healthy links, where 10.00 is exactly what was paid and
+3.33 is the correct rounded derivation, which were merely exposed to the defect.
+
+**A REVIEW LIST of links that may have been corrupted** has to come from
+`PriceHistory`. The symptom-5 shape is a case price that moved while the rounded
+unit price did not:
+
+```sql
+SELECT ph.item_supplier_id, ph.id, ph.recorded_at,
+       prev.package_cost AS package_before, ph.package_cost AS package_after,
+       ph.unit_cost, ph.quantity_per_package
+FROM   inventory_pricehistory ph
+JOIN   LATERAL (
+         SELECT unit_cost, package_cost, quantity_per_package
+         FROM   inventory_pricehistory prev
+         WHERE  prev.item_supplier_id = ph.item_supplier_id
+           AND  prev.recorded_at < ph.recorded_at
+         ORDER  BY prev.recorded_at DESC
+         LIMIT  1
+       ) prev ON TRUE
+WHERE  ph.change_type = 'updated'
+  AND  ph.package_cost IS DISTINCT FROM prev.package_cost
+  AND  ph.unit_cost IS NOT DISTINCT FROM prev.unit_cost
+  AND  ph.quantity_per_package = prev.quantity_per_package;
+```
+
+and the symptom-2 shape is a pack size dropping to 1 while the case price held —
+same `LATERAL` join, with:
+
+```sql
+WHERE  ph.change_type = 'updated'
+  AND  ph.quantity_per_package = 1
+  AND  prev.quantity_per_package > 1
+  AND  ph.package_cost IS NOT DISTINCT FROM prev.package_cost;
+```
+
+**NEITHER QUERY IS PROOF.** Their output is a REVIEW LIST, not a set that is safe
+to bulk-correct. A supplier can legitimately re-quote a case price without the
+rounded unit price moving, and that legitimate change matches the symptom-5
+signature EXACTLY. Measured: at `quantity_per_package` 100, a case price moving
+12.99 -> 13.00 leaves `unit_cost` at 0.13 in both rows, so a genuine re-quote is
+indistinguishable from the defect by this signature. Every row has to be read
+against what that supplier actually charged. Anyone bulk-correcting from this
+output would be doing the same thing this branch exists to stop: moving stored
+money on a rule that cannot tell two cases apart.
+
+Separately, the history rows that may be false — an `updated` row whose figures
+match the row before it:
 
 ```sql
 SELECT ph.id, ph.item_supplier_id, ph.recorded_at, ph.unit_cost, ph.package_cost
@@ -148,9 +218,15 @@ WHERE  ph.change_type = 'updated'
   AND  ph.quantity_per_package = prev.quantity_per_package;
 ```
 
-Neither has been run against production — there is no production data on this
-machine (`makerspace_inventory` is empty locally), so the counts are the
-captain's to obtain.
+That last one covers a DIFFERENT shape from the two above — the flag-only save,
+where nothing moved at all and a row was filed anyway. It does NOT catch symptom
+5, whose false row differs from its predecessor precisely because the case price
+drifted.
+
+None of these has been run against production — there is no production data on
+this machine (`makerspace_inventory` is empty locally), so the counts are the
+captain's to obtain, and so is any decision to act on them. Nothing here
+authorises a data migration.
 
 ## Cross-project: ScanTTY
 
@@ -278,14 +354,19 @@ a test-database collision from running two pytest sessions at once; two gate
 counts; formatting.
 
 **A second self-inflicted one, also caught before it shipped.** The first cut of
-the delta rule tested the two "cleared" cases before the two "supplied a value"
+the delta rule tested the two "cleared" cases before the two "moved to a value"
 cases. That ordering means an operator who empties the case-price box AND types a
 unit price gets `NULL`/`NULL` — the figure they just typed discarded without a
 word. Every surface that edits these puts both boxes on screen together, so doing
 that is ordinary. Base handled it correctly, so the guard ships as a CONTROL:
 `test_emptying_the_case_price_while_typing_a_unit_price_keeps_what_was_typed`
-passes on base and on the fix, and fails on the ordering it replaces. A supplied
-value now beats a clear, whichever box it came from.
+passes on base and on the fix, and fails on the ordering it replaces. A value
+that MOVED now beats a clear, whichever box it came from — MOVED, not merely
+present: the branch is `if unit_moved and unit_cost is not None`, so an ECHOED
+unchanged unit cost does not qualify. Stored (`package_cost` 10.00, `unit_cost`
+3.33, pack 3), the operator empties only the Package Cost box, and the form sends
+every offered field, so the request carries an unchanged `unit_cost` of 3.33 —
+nothing moved in that box, and both columns clear.
 
 Round 2's findings are predominantly artefacts of round 2's own changes, which is
 the stop condition. Both artefacts that mattered were regressions this branch

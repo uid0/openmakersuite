@@ -40,9 +40,34 @@ Under a delta rule:
 Rows 2 and 3 need no decision, and they are the common case: every form on every
 surface seeds both boxes from the stored row and the operator edits one of them.
 
+**Corrected after the fact — row 4 is not one case but two.** As written it
+routes the cleared-package / moved-unit edit to (A), whose answer is "package
+governs", which for a CLEARED package means both columns clear. That is the
+opposite of what shipped. Row 4 holds only where `package_cost` moved to a
+VALUE; where it moved to a CLEAR and `unit_cost` moved to a value, the unit
+price governs and the case price re-derives from it. Trace: stored (10.00, 3.33,
+pack 3), request `{package_cost: null, unit_cost: "4.00"}` stores (4.00, 12.00),
+pinned by
+`test_emptying_the_case_price_while_typing_a_unit_price_keeps_what_was_typed`.
+See (A) below.
+
 ## (A) Both costs moved in one request, and they disagree
 
 **Recommendation: `package_cost` governs; `unit_cost` re-derives from it.**
+
+**Corrected after the fact, against what shipped:** this holds where
+`package_cost` moved to a VALUE. It does NOT hold where the operator CLEARED the
+case-price box and typed a unit price in the same edit — there the typed
+`unit_cost` governs and the case price re-derives from it. Reading (A) as
+covering that case too would mean discarding a figure the operator had just
+typed, which is the defect class this work exists to close, and the first cut of
+the delta rule did exactly that before it was caught. The shipped rule is "a
+value that MOVED beats a clear, whichever box it came from"; stored (10.00, 3.33,
+pack 3) with `{package_cost: null, unit_cost: "4.00"}` stores (4.00, 12.00),
+pinned by
+`test_emptying_the_case_price_while_typing_a_unit_price_keeps_what_was_typed`.
+An ECHOED unit cost is not a moved one, so clearing the case price on its own
+still clears both. The reasoning below stands for the case it actually decides.
 
 Four independent surfaces already assert this, none of them added by this work:
 

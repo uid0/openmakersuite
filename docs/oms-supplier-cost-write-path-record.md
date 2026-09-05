@@ -375,6 +375,20 @@ it does NOT stop another transaction committing between that `SELECT` and the
 stale, so base loses the same update; this branch neither introduces nor widens
 the window.
 
+**One consequence that IS new: the audit trace narrows in this race.** On base,
+`pricing_changed` issued its OWN `SELECT` later in the transaction
+(`ItemSupplier.objects.get(pk=...)`), and under READ COMMITTED each statement
+takes a fresh snapshot — so with B's 12.00 / 4.00 already committed, base
+compared its re-derived figures against B's values, reported a change, and filed
+a `PriceHistory` row. That row was an accidental trace of the reversal, not a
+designed guarantee: it existed only because base read the row twice and the
+second read was stale in a different way. This branch reuses the single earlier
+read, which the derivation requires, so in that same race `pricing_changed`
+compares 10.00 / 3.33 against 10.00 / 3.33 and files nothing — the reversal is
+silent where base sometimes left a row. Sharing the read is not the thing to
+undo; whoever takes the row-locking branch should know the trace disappears with
+it, because locking the read closes both halves at once.
+
 The fix is `select_for_update()` on the read in `stored_pricing`. The operator
 deferred it to its own branch and its own review rather than taking it here: row
 locking on every `ItemSupplier.save()` is a blast radius of its own, and an

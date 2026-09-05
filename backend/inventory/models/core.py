@@ -1579,8 +1579,11 @@ class ItemSupplier(models.Model):
             # This does NOT isolate the read from a concurrent writer: the SELECT
             # takes no row lock, so under PostgreSQL's default READ COMMITTED
             # another transaction can still commit between it and the UPDATE. The
-            # resulting lost-update window is pre-existing and filed as an open
-            # defect in docs/oms-supplier-cost-write-path-record.md.
+            # lost update itself is pre-existing, but the history behaviour in
+            # that race is NOT identical to base: sharing this one read also means
+            # pricing_changed cannot see such a writer, where base's own separate
+            # later SELECT sometimes did and filed a row. Both halves are filed as
+            # one open defect in docs/oms-supplier-cost-write-path-record.md.
             stored = stored_pricing(self)
             supplied_unit, supplied_package = self.unit_cost, self.package_cost
             self.unit_cost, self.package_cost = derive_costs(

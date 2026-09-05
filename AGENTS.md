@@ -928,6 +928,49 @@ Two consequences worth keeping in mind when touching this path:
   derivation is exact and NO defect on this path is reachable. That is how five
   symptoms reached main under a green suite.
 
+### A status transition owes a SET of facts, and every path owes all of it
+
+A transition is never just `status=`. It carries a moment, sometimes an actor,
+often linked records and an audit row. The failure mode is not forgetting the
+set — it is writing the set out by hand at a SECOND call site, which then joins
+it incompletely. Two live examples, both found this way and both fixed:
+
+- `reorder_queue.admin.mark_as_sent` set `status`/`sent_by` with
+  `queryset.update()` beside `services.mark_sent`. No `sent_at`, so
+  `services.receiving.create_lead_time_log` returned early and a delivery
+  against that order wrote NO `LeadTimeLog` — in the table
+  `inventory.services.supplier_selection` scores suppliers from. It also skipped
+  the reorder-request sweep and the `po_send` audit row.
+- `inventory.admin.mark_closed` set `status` alone where all three other routes
+  to `resolved`/`closed` stamp `resolved_at`/`resolved_by`.
+
+The rules that follow:
+
+- **The service function owns the transition; admin actions call it.** N queries
+  for a checkbox selection is what the record costs. `services.mark_sent`,
+  `services.confirm_order`, `services.reorder_requests.approve_request` /
+  `cancel_request` and `inventory.admin.AssetProblemAdmin._settle` are the
+  definitions.
+- **A transition with more than one performer owns its audit row too**, hence
+  `mark_sent` recording `po_send` itself — the one documented exception to the
+  #883 split (views keep their own `record_audit_event` calls). Pin it with a
+  COUNT, not `.exists()`, or the caller's copy can come back unnoticed.
+- **`queryset.update()` never moves an `auto_now` `updated_at`.** That alone
+  makes a bulk status action show a stale "Updated" on the admin and in ScanTTY.
+  Reach for `.update()` only where you can say what you are bypassing;
+  `services.purchase_orders.void_po` is the example that can.
+- **Preserve each action's population when you convert it.** `mark_closed` is
+  deliberately unfiltered — narrowing it removes an operator's ability to file
+  away a resolved report.
+
+`reorder_queue/management/commands/report_unstamped_transitions.py` names the
+rows written before the fix. It is permanently read-only, and the reason is the
+general one: **a moment nobody recorded cannot be recovered from a moment nobody
+recorded.** `order_date` is a different, editable fact and `updated_at` has been
+overwritten; back-filling either into `LeadTimeLog` would put invented numbers
+into the column that chooses suppliers, which is worse than the honest gap
+(`DeliveryRecord.factor` already returns 1 for "no history" on purpose).
+
 ### The pre-send boundary: when a PO is still the shop's own document
 
 `PurchaseOrder.PRE_SUPPLIER_STATUSES` is the ONE definition of "the supplier has

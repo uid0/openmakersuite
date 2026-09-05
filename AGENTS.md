@@ -781,7 +781,18 @@ string and must move with it: the `log_usage` docstring (~:1199),
 APPROVED BY THE OPERATOR and deferred only because the phase that found it
 could not make functional changes — NOT declined.
 
-### oms-supplier-terms-write-path — CLOSED at the derivation, not at the callers
+### oms-supplier-terms-write-path — the DERIVATION is closed; some surfaces are not
+
+**The derivation is closed and has one owner. The kit form's supplier-terms
+surface is NOT.** A fix for it was attempted on this branch and SPLIT OUT after
+three rounds that each produced the next round's defect. Its window — naming one
+supplier while the boxes hold another's figures — is filed, with the trace and
+with the reason the next attempt must not begin by seeding the supplier id, in
+[`docs/oms-supplier-cost-write-path-record.md`](docs/oms-supplier-cost-write-path-record.md)
+under "Still open, filed not fixed". That list also holds the lost-update window
+on `stored_pricing` and the `supplier_terms` `DictField` 500s. **Read it before
+touching the kit form**: "closed" below is about the derivation, not about every
+screen that reaches it.
 
 **One rule, in one place: `inventory.services.suppliers.derive_costs`, called
 from `ItemSupplier.save()`.** `unit_cost` and `package_cost` are derived from

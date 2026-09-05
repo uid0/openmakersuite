@@ -755,9 +755,15 @@ class TestTheKitResponseCarriesWhatWasStored:
     """The operator's condition, on the other surface that edits these costs.
 
     ``KitSerializer`` inherits ``suppliers`` from ``InventoryItemSerializer``, so
-    a kit save echoes the link rows back. That is what the kit form re-seeds its
-    cost box from, which is what makes a re-derived figure explicable rather than
-    a number that silently reappeared.
+    a kit save echoes the link rows back carrying the STORED, derived pair. An
+    API caller reading that array sees what was stored rather than what it sent,
+    which is what makes a re-derived figure explicable rather than a number that
+    silently reappeared.
+
+    The kit FORM does not read that array. It shows the top-level ``unit_cost``
+    property (``order_unit_price``, i.e. the chosen link's figure) on a read-only
+    line; its editable cost box seeds from nothing at all. So this is the API
+    contract, not the form's.
     """
 
     def test_a_kit_save_echoes_the_derived_case_price(self, supplier, staff_client):

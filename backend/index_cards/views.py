@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 
 from inventory.models import InventoryItem
 from inventory.services.supplier_selection import item_suppliers_prefetch
+from inventory.services.vendor_visibility import may_see_vendor_data
 
 from .serializers import IndexCardBatchSerializer, IndexCardPreviewSerializer, TestSheetSerializer
 from .services import IndexCardRenderer, TestSheetRenderer, build_preview_payload
@@ -30,7 +31,11 @@ class IndexCardPreviewView(APIView):
 
         item = get_object_or_404(InventoryItem, id=serializer.validated_data["item_id"])
         blank_card = serializer.validated_data.get("blank_card", False)
-        renderer = IndexCardRenderer(blank_cards=blank_card)
+        # ``include_vendor_data`` defaults to False on the renderer, so the
+        # operator surfaces that SHOULD print lead times have to say so.
+        renderer = IndexCardRenderer(
+            blank_cards=blank_card, include_vendor_data=may_see_vendor_data(request)
+        )
         payload = build_preview_payload(item, renderer, blank_card)
 
         return Response(payload, status=status.HTTP_200_OK)
@@ -69,7 +74,9 @@ class IndexCardBatchGenerateView(APIView):
         items.sort(key=lambda item: item_ids.index(str(item.id)))
 
         blank_cards = serializer.validated_data.get("blank_cards", False)
-        renderer = IndexCardRenderer(blank_cards=blank_cards)
+        renderer = IndexCardRenderer(
+            blank_cards=blank_cards, include_vendor_data=may_see_vendor_data(request)
+        )
         generated = renderer.render_batch_to_storage(
             items,
             filename=serializer.validated_data.get("filename"),

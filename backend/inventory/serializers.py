@@ -16,6 +16,7 @@ from rest_framework import serializers
 # related querysets here. Safe at module top: serializers import only after all
 # app models are loaded, so there is no import cycle.
 from electrical_circuits.models import Disconnect, PowerBreaker
+from inventory.services.vendor_visibility import VendorGatedSerializerMixin
 from membership.actor import actor_display
 
 from .models import (
@@ -730,7 +731,21 @@ class SupplierChoiceSerializer(serializers.Serializer):
         return data
 
 
-class InventoryItemSerializer(serializers.ModelSerializer):
+class InventoryItemSerializer(VendorGatedSerializerMixin, serializers.ModelSerializer):
+    """The item catalogue payload, and the surface the QR-scan flow reads.
+
+    PUBLICLY REACHABLE, BUT NOT ITS VENDOR BLOCK (op-anonymous-read-posture).
+    ``InventoryItemViewSet.get_permissions`` serves ``list``/``retrieve``/
+    ``metrics``/``scan``/``low_stock``/``reordered``/``kits``/``download_card``
+    to anyone, because a member with no account has to be able to scan a shelf
+    label, know they have the right item and file a reorder. That is a designed
+    feature and closing this endpoint would break it.
+
+    So the gate is on the FIELDS, per :attr:`VENDOR_ONLY_FIELDS` below — the
+    same shape ``dashboard.views.get_inventory_summary`` already uses for its
+    valuation, and for the same reason: the endpoint must stay open.
+    """
+
     # Primary-supplier compat fields (issue #882). ``supplier_name`` here and the
     # flat ``supplier_sku`` / ``supplier_url`` / ``unit_cost`` / ``package_cost``
     # / ``quantity_per_package`` / ``average_lead_time`` keys listed in
@@ -902,6 +917,38 @@ class InventoryItemSerializer(serializers.ModelSerializer):
         help_text="Set current_stock as a count of whole count_level packs "
         "(e.g. 3 cases). Converted to base units on save; only valid for an item "
         "counted in packs, and not alongside current_stock.",
+    )
+
+    #: Everything on this payload that names a vendor or quotes their money.
+    #:
+    #: * the seven flat primary-supplier compat keys — ``supplier_name`` is the
+    #:   vendor's name, ``supplier_sku`` their part number, ``supplier_url``
+    #:   their product page, and the rest are their prices and lead time.
+    #:   ``quantity_per_package`` is deliberately NOT here — see
+    #:   :attr:`InventoryMetricsSerializer.VENDOR_ONLY_FIELDS` for why a pack
+    #:   size is a shelf fact rather than a vendor one;
+    #: * ``suppliers`` — the full ``ItemSupplier`` roster, every vendor's name,
+    #:   SKU, both UPCs, both costs and lead time;
+    #: * ``supplier_choice`` — names the chosen vendor and the alternatives. Its
+    #:   own four operator-only keys stay (see ``SupplierChoiceSerializer``);
+    #:   they are a narrower gate INSIDE a key that is now withheld whole from
+    #:   the same audience, so they remain the answer for the signed-in reader
+    #:   and are never reached by an anonymous one;
+    #: * ``total_value`` — stock × the vendor's unit price. Withheld because
+    #:   ``current_stock`` is public beside it, so leaving this is leaving the
+    #:   unit price behind one division. That is the same "still derivable"
+    #:   objection review raised against the ``get_inventory_summary`` gate,
+    #:   answered here rather than restated.
+    VENDOR_ONLY_FIELDS = (
+        "supplier_name",
+        "supplier_sku",
+        "supplier_url",
+        "unit_cost",
+        "package_cost",
+        "average_lead_time",
+        "suppliers",
+        "supplier_choice",
+        "total_value",
     )
 
     class Meta:
@@ -1236,7 +1283,21 @@ class InventoryItemSerializer(serializers.ModelSerializer):
 
 
 class InventoryItemDetailSerializer(InventoryItemSerializer):
-    """Extended serializer with related data and full supplier details including price history."""
+    """Extended serializer with related data and full supplier details including price history.
+
+    Adds three more vendor keys to the parent's withheld block: ``supplier_details``
+    (the vendor record), ``all_suppliers`` (the roster WITH each vendor's price
+    history) and ``price_trend_summary`` (how a vendor's price moved).
+    """
+
+    #: The parent block plus this serializer's own three additions. Spelled as a
+    #: sum rather than re-listed, so a key added to the parent is withheld here
+    #: too without a second edit.
+    VENDOR_ONLY_FIELDS = InventoryItemSerializer.VENDOR_ONLY_FIELDS + (
+        "supplier_details",
+        "all_suppliers",
+        "price_trend_summary",
+    )
 
     recent_usage = UsageLogSerializer(source="usage_logs", many=True, read_only=True)
     supplier_details = SupplierSerializer(source="supplier", read_only=True)
@@ -1568,7 +1629,7 @@ class KitSerializer(InventoryItemSerializer):
         return instance
 
 
-class KitSummarySerializer(serializers.ModelSerializer):
+class KitSummarySerializer(VendorGatedSerializerMixin, serializers.ModelSerializer):
     """Compact "this component comes in these kits" row (op-8n0).
 
     Used by ``/api/inventory/items/{id}/kits/`` and the item detail page's
@@ -1582,6 +1643,14 @@ class KitSummarySerializer(serializers.ModelSerializer):
     supplier_sku = serializers.SerializerMethodField()
     unit_cost = serializers.SerializerMethodField()
     component_count = serializers.SerializerMethodField()
+
+    #: ``/api/inventory/items/{id}/kits/`` is ``AllowAny`` — "which kits supply
+    #: this cartridge?" is reorder triage shown beside stock — so this compact
+    #: row is served to anonymous callers and its three vendor keys are gated
+    #: like the item payload's (op-anonymous-read-posture). What survives is
+    #: what the card is for: which kit, how many it contains, and whether it is
+    #: still stocked.
+    VENDOR_ONLY_FIELDS = ("supplier_name", "supplier_sku", "unit_cost")
 
     class Meta:
         model = InventoryItem
@@ -1733,7 +1802,7 @@ class CommittedBreakdownEntrySerializer(serializers.Serializer):
     quantity = serializers.FloatField()
 
 
-class InventoryMetricsSerializer(serializers.Serializer):
+class InventoryMetricsSerializer(VendorGatedSerializerMixin, serializers.Serializer):
     """Computed stock + cost metrics for the inventory-item detail view.
 
     Powers the ``SKU · QOH · QOO · QA · QC · QIT · RP · Lead · Cost`` row on
@@ -1776,6 +1845,36 @@ class InventoryMetricsSerializer(serializers.Serializer):
     # gate, because nothing was weighed against anything there.
     supplier_scored_without_price = serializers.BooleanField()
     supplier_scored_without_history = serializers.BooleanField()
+
+    #: ``metrics`` is ``AllowAny`` — it powers the item-detail row an anonymous
+    #: scanner reads — so the vendor half of this row is withheld from a caller
+    #: with no session (op-anonymous-read-posture).
+    #:
+    #: What SURVIVES is the whole stock half: QOH, QOO, QA, QC and its
+    #: breakdown, QIT, RP, and the case shape. Those describe the shelf, not the
+    #: vendor, and are what sizes an anonymous reorder.
+    #:
+    #: ``case_size`` deliberately STAYS. It is a pack size, and this repo already
+    #: answered that question the other way for the same column: the pack-size
+    #: derivation (op-c1ke) records that "how many units are in a box on the
+    #: shelf ... has nothing to do with who we buy from", which is why
+    #: ``InventoryItem.current_cases`` is excluded from the supplier derivation.
+    #: It is on none of the lists the captain's decision names, and the public
+    #: ``current_cases`` / ``on_hand_display`` / ``reorder_display`` keys already
+    #: depend on it. It also re-derives nothing: both costs are withheld, so
+    #: ``package_cost / case_size`` has no left-hand side.
+    #:
+    #: THE SCANTTY CONTRACT IS UNCHANGED BY THIS. No key is renamed or removed;
+    #: they are withheld from callers with no session, and ScanTTY sends a
+    #: Bearer token. See the branch's cross-project note.
+    VENDOR_ONLY_FIELDS = (
+        "lead_time_days",
+        "unit_cost",
+        "cost_trend",
+        "last_po_unit_cost",
+        "supplier_scored_without_price",
+        "supplier_scored_without_history",
+    )
 
 
 class ItemOrderCostSerializer(serializers.Serializer):

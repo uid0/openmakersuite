@@ -141,10 +141,19 @@ from .services.work_order_tools import create_work_order_tools
 
 
 class SupplierViewSet(viewsets.ModelViewSet):
-    """API endpoint for suppliers."""
+    """API endpoint for suppliers.
+
+    AUTHENTICATED READS. Every row here is a vendor's identity — name, website,
+    account number — and the detail serializer nests that vendor's per-item
+    SKUs, UPCs, costs and lead times. There is no non-vendor half to keep
+    public, so this is closed outright rather than field-filtered; contrast
+    ``InventoryItemViewSet``, which must stay open for the QR-scan flow and so
+    gates the vendor block inside its payload instead.
+    (op-anonymous-read-posture; ``inventory.services.vendor_visibility``.)
+    """
 
     queryset = Supplier.objects.prefetch_related("supplier_items").all()
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAuthenticated]
 
     def get_serializer_class(self):
         """Use detail serializer for retrieve action."""
@@ -309,8 +318,12 @@ class SupplierAgreementViewSet(viewsets.ModelViewSet):
 
     queryset = SupplierAgreement.objects.select_related("supplier").all()
     serializer_class = SupplierAgreementSerializer
-    # Mirrors SupplierViewSet: agreements are supplier reference data.
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    # Mirrors SupplierViewSet: agreements are supplier reference data, and the
+    # captain's decision names agreements explicitly, so reads are authenticated
+    # (op-anonymous-read-posture). The signed paperwork each row points at is
+    # closed separately — a FileField URL is served by nginx, not by DRF; see
+    # ``SupplierAgreementViewSet.document`` and ``nginx/templates``.
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         """Filter agreements by supplier and/or active flag."""
@@ -789,13 +802,18 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             return self.get_paginated_response(data)
         return Response(data)
 
-    @staticmethod
-    def _annotate_metrics(data, items):
+    def _annotate_metrics(self, data, items):
         """Attach a ``metrics`` object to each serialized row for ``items``.
 
         ``data`` and ``items`` are positionally aligned (the serializer keeps
         input order), so rows are matched to items by index rather than by id —
         robust regardless of the item PK type.
+
+        No longer a ``staticmethod``: the nested metrics serializer decides its
+        audience from ``request.user`` and fails closed, so this needs the
+        view's serializer context (op-anonymous-read-posture). Without it the
+        ``?with_metrics=1`` rows would withhold the vendor half from signed-in
+        callers too — the same trap ``get_supplier_choice`` documents.
         """
         from .services.item_metrics import compute_item_metrics_batch
 
@@ -803,7 +821,9 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         for row, item in zip(data, items):
             payload = metrics_by_id.get(item.id)
             row["metrics"] = (
-                InventoryMetricsSerializer(payload).data if payload is not None else None
+                InventoryMetricsSerializer(payload, context=self.get_serializer_context()).data
+                if payload is not None
+                else None
             )
 
     def create(self, request, *args, **kwargs):
@@ -1105,7 +1125,14 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         name="Download Card",
     )
     def download_card(self, request, pk=None):
-        """Generate and download Avery 5388 compatible index card PDF."""
+        """Generate and download Avery 5388 compatible index card PDF.
+
+        ``AllowAny`` (see ``get_permissions``), so the card's lead-time lines —
+        vendor facts, and unrecallable once printed — are rendered only for a
+        signed-in caller (op-anonymous-read-posture). Everything that makes the
+        card usable on a shelf is unchanged for everyone: the QR code, the item
+        name, SKU, location and reorder point.
+        """
         item = self.get_object()
 
         # Check if blank card is requested
@@ -1114,7 +1141,11 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         # Generate PDF using the index cards system
         from index_cards.services import IndexCardRenderer
 
-        renderer = IndexCardRenderer(blank_cards=blank_card)
+        from .services.vendor_visibility import may_see_vendor_data
+
+        renderer = IndexCardRenderer(
+            blank_cards=blank_card, include_vendor_data=may_see_vendor_data(request)
+        )
         pdf_bytes = renderer.render_preview(item, blank_card=blank_card)
 
         card_type = "blank" if blank_card else "detailed"
@@ -1522,7 +1553,13 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
 
         item = self.get_object()
         payload = compute_item_metrics(item)
-        return Response(InventoryMetricsSerializer(payload).data)
+        # ``context`` is not optional here: ``InventoryMetricsSerializer`` reads
+        # its audience off ``request.user`` and FAILS CLOSED, so a hand-built
+        # instance without it withholds the vendor half from everyone, signed in
+        # or not.
+        return Response(
+            InventoryMetricsSerializer(payload, context=self.get_serializer_context()).data
+        )
 
     @action(detail=True, methods=["get"], permission_classes=[IsAuthenticated])
     def stock_history(self, request, pk=None):
@@ -1912,7 +1949,10 @@ class ItemSupplierViewSet(viewsets.ModelViewSet):
         .all()
     )
     serializer_class = ItemSupplierSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    # A row here IS the vendor relationship — who, their part number, their
+    # UPCs, their price and their lead time. Authenticated reads
+    # (op-anonymous-read-posture).
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -1971,7 +2011,8 @@ class PriceHistoryViewSet(viewsets.ReadOnlyModelViewSet):
         "item_supplier__item", "item_supplier__supplier"
     ).all()
     serializer_class = PriceHistorySerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    # Price history is vendor money by definition (op-anonymous-read-posture).
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -4114,13 +4155,24 @@ class FixtureViewSet(viewsets.ModelViewSet):
         name="Download Fixture Card",
     )
     def download_card(self, request, pk=None):
-        """Generate and download a fixture refill request card."""
+        """Generate and download a fixture refill request card.
+
+        A GET on an ``IsAuthenticatedOrReadOnly`` viewset, so a caller with no
+        session reaches it — and the card is rendered from the fixture's
+        ``refill_item`` through ``IndexCardRenderer``, lead-time lines included.
+        Gated like ``InventoryItemViewSet.download_card``
+        (op-anonymous-read-posture).
+        """
         fixture = self.get_object()
 
         from index_cards.services import FixtureCardRenderer
 
+        from .services.vendor_visibility import may_see_vendor_data
+
         renderer = FixtureCardRenderer()
-        pdf_bytes = renderer.render_preview(fixture)
+        pdf_bytes = renderer.render_preview(
+            fixture, include_vendor_data=may_see_vendor_data(request)
+        )
         identifier = fixture.asset_tag or fixture.id
         filename = f"fixture_card_{identifier}.pdf"
 

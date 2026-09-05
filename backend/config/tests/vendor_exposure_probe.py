@@ -39,8 +39,13 @@ VENDOR_SENTINELS = {
     "AGREEMENT_DOC": "zzqq-agreement-scan",
     "INVOICE_DOC": "zzqq-invoice-scan",
     "PO_TOTAL": "9313.37",
-    "PO_NUMBER": "ZZQQ-PO-40021",
     "PO_LINE_COST": "313.37",
+    # ``ReorderRequest.order_number`` is operator-typed free text with no help
+    # text, filed AFTER an order is placed with a vendor — so in practice it
+    # holds the vendor's reference as often as anything else. Treated as vendor
+    # data because the ambiguity has to fall closed. Its unambiguous sibling
+    # ``PurchaseOrder.po_number`` is in PUBLIC_SENTINELS; see there.
+    "REORDER_ORDER_NUMBER": "ZZQQ-VENDOR-REF-40021",
     "SUPPLIER_ORDER_NUMBER": "ZZQQ-VENDOR-ORDER-88123",
     "INVOICE_NUMBER": "ZZQQ-INVOICE-55501",
     "INVOICE_URL": "https://zzqq-vendor-identity.example.com/invoice/55501",
@@ -53,6 +58,11 @@ VENDOR_SENTINELS = {
 PUBLIC_SENTINELS = {
     "ITEM_NAME": "PublicItemFilamentSpool",
     "ITEM_SKU": "PUBLIC-PART-0001",
+    # This makerspace's OWN purchase-order reference, not the vendor's — the
+    # vendor's lives beside it in ``PurchaseOrder.supplier_order_number``, which
+    # IS a vendor sentinel. It names nobody and quotes no price, and the
+    # transparency feed needs some way to refer to an order, so it stays public.
+    "PO_NUMBER": "ZZQQ-PO-40021",
 }
 
 
@@ -63,6 +73,7 @@ def seed_vendor_fixture():
 
     from inventory.models import (
         Category,
+        Fixture,
         InventoryItem,
         ItemSupplier,
         Location,
@@ -148,7 +159,7 @@ def seed_vendor_fixture():
         username="zzqq-buyer", password="zzqq-not-a-real-password"  # nosec B106
     )
     po = PurchaseOrder.objects.create(
-        po_number=s["PO_NUMBER"],
+        po_number=PUBLIC_SENTINELS["PO_NUMBER"],
         supplier=supplier,
         supplier_agreement=agreement,
         status="sent",
@@ -171,12 +182,24 @@ def seed_vendor_fixture():
         f"{s['INVOICE_DOC']}.pdf", ContentFile(b"ZZQQ-INVOICE-PDF-BODY"), save=True
     )
 
+    # A fixture whose refill item is the seeded one. ``FixtureViewSet`` is
+    # ``IsAuthenticatedOrReadOnly`` and its ``download_card`` is a GET, so it
+    # renders that item's card — lead times and all — to a caller with no
+    # session. Seeded because the crawl cannot invent a fixture: without this
+    # row that path answers 404 and would be recorded as clean.
+    fixture = Fixture.objects.create(
+        name="ZZQQ Glue Dispenser",
+        location=loc,
+        refill_item=item,
+        asset_tag="ZZQQ-FIX-1",
+    )
+
     reorder_request = ReorderRequest.objects.create(
         item=item,
         quantity=20,
         status="ordered",
         requested_by="anonymous scanner",
-        order_number=s["PO_NUMBER"],
+        order_number=s["REORDER_ORDER_NUMBER"],
         actual_cost=Decimal("3133.70"),
         invoice_number=s["INVOICE_NUMBER"],
         invoice_url=s["INVOICE_URL"],
@@ -188,6 +211,7 @@ def seed_vendor_fixture():
         "agreement": agreement,
         "attachment": attachment,
         "category": cat,
+        "fixture": fixture,
         "item": item,
         "link": link,
         "link_2": link_2,

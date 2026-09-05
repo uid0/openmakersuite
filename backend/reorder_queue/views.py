@@ -822,31 +822,33 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     )
 
     def get_permissions(self):
+        """Every action requires a signed-in caller, reads included.
+
+        `list` and `retrieve` used to be ``AllowAny``, and a purchase order is
+        vendor identity and vendor money in one document: the supplier's name,
+        the agreement it was placed under, their order number, the payment
+        terms, and every line's cost. There is no non-vendor half of it to keep
+        public (op-anonymous-read-posture).
+
+        This override is exactly the shape ``docs/API_PERMISSION_MATRIX.md``
+        cannot see — it snapshots DECLARED ``permission_classes``, not what
+        ``get_permissions`` returns — so what this method does is pinned by a
+        real unauthenticated request in
+        ``config/tests/test_anonymous_vendor_exposure.py``, not by that matrix.
         """
-        Allow public access for viewing active and settled purchase orders.
-        Require authentication for creating, updating, or viewing draft/cancelled orders.
-        """
-        if self.action in ["list", "retrieve"]:
-            return [AllowAny()]
         return [IsAuthenticated()]
 
     def get_queryset(self):
-        """
-        For public access, only show active and settled orders.
-        For authenticated users, show all orders.
+        """Order-visibility filtering for the signed-in caller.
+
+        The former anonymous branch — "show a caller with no session only SENT/
+        CONFIRMED/PARTIALLY_RECEIVED/RECEIVED orders" — is gone with the
+        ``AllowAny`` it qualified. It was never a confidentiality boundary: it
+        narrowed WHICH orders an anonymous caller saw while serving the full
+        vendor payload for each one. ``get_permissions`` above now settles the
+        question before a queryset is built.
         """
         queryset = super().get_queryset()
-
-        # If user is not authenticated, only show active and settled orders
-        if not self.request.user.is_authenticated:
-            queryset = queryset.filter(
-                status__in=[
-                    PurchaseOrder.Status.SENT,
-                    PurchaseOrder.Status.CONFIRMED,
-                    PurchaseOrder.Status.PARTIALLY_RECEIVED,
-                    PurchaseOrder.Status.RECEIVED,
-                ]
-            )
 
         # Apply status filter if provided
         status_filter = self.request.query_params.get("status")
@@ -3340,6 +3342,72 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
         return Response(order_data)
 
 
+#: The transparency feed's vendor block, per array (op-anonymous-read-posture).
+#:
+#: Withheld from a caller with no session, and named here rather than inline so
+#: the three arrays cannot drift: ``orders`` and ``ledger`` are the same order
+#: rendered twice, and a key dropped from one and left on the other is a leak
+#: that reads as a fix.
+#:
+#: What each entry is, and why it is on the list:
+#:
+#: * ``supplier_name`` / ``supplier_url`` — the vendor's identity, and a link to
+#:   their listing for the item;
+#: * ``invoice_number`` / ``invoice_url`` / ``purchase_order_url`` — the
+#:   paperwork the captain's decision names outright;
+#: * ``estimated_cost`` / ``actual_cost`` / ``cost_per_unit`` / ``cost_variance``
+#:   and ``estimated_total`` / ``actual_total`` — what we paid a vendor for one
+#:   order. ``cost_variance`` is on the list because it is the difference of two
+#:   figures that are: publishing it beside either would reconstruct the other;
+#: * ``order_number`` — ``ReorderRequest.order_number``, which is operator-typed
+#:   free text with no help text, filed after an order is placed with a vendor.
+#:   It holds the VENDOR'S reference at least as often as anything else, and an
+#:   ambiguous field has to fall closed. Not to be confused with
+#:   ``po_number`` below, which is a different model's field and unambiguous.
+#:
+#: DELIBERATELY NOT ON THE LIST, and this is the line this branch drew:
+#:
+#: * ``summary.total_amount_spent`` / ``total_po_amount_spent``, the aggregates.
+#:   They name no vendor and quote no vendor's price — they are what the space
+#:   spent in total, which is the accountability the page exists to provide, and
+#:   they are on none of the lists the captain's decision enumerates;
+#: * ``po_number`` — ``PurchaseOrder``'s own reference. The vendor's number for
+#:   the same order is ``PurchaseOrder.supplier_order_number``, a separate field
+#:   this payload has never carried, and that separation is what makes this one
+#:   unambiguously ours;
+#: * ``item_name`` / ``item_category`` / ``quantity_ordered`` and the dates —
+#:   the item and the timeline, not the vendor.
+ORDER_VENDOR_KEYS = (
+    "supplier_name",
+    "supplier_url",
+    "invoice_number",
+    "invoice_url",
+    "purchase_order_url",
+    "order_number",
+    "estimated_cost",
+    "actual_cost",
+    "cost_per_unit",
+    "cost_variance",
+)
+
+#: ``ledger`` is the same order with fewer keys, so its block is the subset of
+#: :data:`ORDER_VENDOR_KEYS` it actually carries.
+LEDGER_VENDOR_KEYS = (
+    "supplier_name",
+    "invoice_number",
+    "order_number",
+    "estimated_cost",
+    "actual_cost",
+)
+
+#: ``purchase_orders`` is a different model with its own money field names.
+PO_VENDOR_KEYS = (
+    "supplier_name",
+    "estimated_total",
+    "actual_total",
+)
+
+
 class AnalyticsViewSet(viewsets.ViewSet):
     """Analytics and reporting endpoints."""
 
@@ -3483,14 +3551,35 @@ class AnalyticsViewSet(viewsets.ViewSet):
 
         return Response(trend_data)
 
-    @action(detail=False, methods=["get"], permission_classes=[AllowAny], authentication_classes=[])
+    @action(detail=False, methods=["get"], permission_classes=[AllowAny])
     def transparency(self, request):
-        """
-        Public transparency endpoint showing financial information about orders.
+        """Public transparency feed — the ledger, with the vendor half gated.
 
-        Open by default for makerspace transparency - shows costs, invoices,
-        purchase orders, and delivery information for community visibility.
+        STAYS ``AllowAny``. Publishing what the makerspace spends is the point
+        of the page and the captain did not close it; what changed is that a
+        caller with no session no longer learns WHO we buy from or WHAT WE PAY
+        THEM per order (op-anonymous-read-posture). They keep the aggregate
+        totals, the item, the quantity, the dates and the status — spending
+        accountability without vendor identity or a vendor price.
+
+        ``authentication_classes=[]`` WAS REMOVED and that is the load-bearing
+        edit. It disabled authentication for this action, so ``request.user``
+        was ``AnonymousUser`` for EVERY caller including a signed-in one; the
+        gate below could not have distinguished them. A signed-in caller now
+        gets the payload unchanged, which is what makes this a gate rather than
+        a deletion.
+
+        The per-order keys are OMITTED, not nulled, for the reason recorded on
+        ``inventory.services.vendor_visibility.VENDOR_WITHHELD_KEY``: ``null``
+        already means "no figure recorded" in this payload, and a consumer's
+        ``?? 0`` would render a withheld cost as a real $0.00.
         """
+        from inventory.services.vendor_visibility import (
+            VENDOR_WITHHELD_KEY,
+            may_see_vendor_data,
+        )
+
+        may_see_vendors = may_see_vendor_data(request)
         try:
             # Get orders with transparency data (recent first)
             transparency_orders = (
@@ -3528,7 +3617,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 supplier_name = supplier.name if supplier else None
 
                 # Public transparency information
-                order_data = {
+                order_data: dict = {
                     "id": order.id,
                     "item_id": str(order.item.id),
                     "item_name": order.item.name,
@@ -3563,6 +3652,10 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     # Supplier info
                     "supplier_name": supplier_name,
                 }
+                if not may_see_vendors:
+                    for key in ORDER_VENDOR_KEYS:
+                        order_data.pop(key, None)
+                    order_data[VENDOR_WITHHELD_KEY] = True
 
                 transparency_data.append(order_data)
 
@@ -3587,6 +3680,10 @@ class AnalyticsViewSet(viewsets.ViewSet):
                         "invoice_number": order.invoice_number,
                     }
                 )
+                if not may_see_vendors:
+                    for key in LEDGER_VENDOR_KEYS:
+                        ledger_entries[-1].pop(key, None)
+                    ledger_entries[-1][VENDOR_WITHHELD_KEY] = True
 
             # Get purchase orders for transparency
             purchase_orders = (
@@ -3615,7 +3712,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 total_items = active_items.count()
                 total_quantity = sum(item.quantity_ordered for item in active_items)
 
-                po_data = {
+                po_data: dict = {
                     "id": str(po.id),
                     "po_number": po.po_number,
                     "supplier_name": po.supplier.name,
@@ -3633,6 +3730,10 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     "total_quantity": total_quantity,
                     "is_fully_received": po.is_fully_received,
                 }
+                if not may_see_vendors:
+                    for key in PO_VENDOR_KEYS:
+                        po_data.pop(key, None)
+                    po_data[VENDOR_WITHHELD_KEY] = True
 
                 po_transparency_data.append(po_data)
 
@@ -3642,7 +3743,17 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 "total_purchase_orders": len(po_transparency_data),
                 "total_po_amount_spent": float(po_total_spent),
                 "last_updated": timezone.now().isoformat(),
-                "transparency_note": "Dallas Makerspace operates with full financial transparency. All purchase information is publicly available.",
+                "transparency_note": (
+                    "Dallas Makerspace publishes what it spends. Totals, items, "
+                    "quantities and dates are public; supplier names and "
+                    "per-order costs are shown to signed-in members."
+                    if not may_see_vendors
+                    else (
+                        "Dallas Makerspace operates with full financial "
+                        "transparency. All purchase information is publicly "
+                        "available."
+                    )
+                ),
             }
 
             return Response(

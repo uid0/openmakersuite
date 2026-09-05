@@ -51,6 +51,7 @@ def anonymous():
 def _fill(objs):
     return {
         "__uuid__": str(objs["item"].id),
+        "fixture_pk": str(objs["fixture"].id),
         "__default_pk__": str(objs["supplier"].id),
         "item_id": str(objs["item"].id),
         "location_id": str(objs["location"].id),
@@ -139,6 +140,9 @@ def test_vendor_only_endpoints_require_authentication(vendor_fixture, anonymous,
         "/api/inventory/items/{item}/",
         "/api/inventory/items/{item}/metrics/",
         "/api/inventory/items/{item}/download_card/",
+        "/api/inventory/fixtures/{fixture}/download_card/",
+        "/api/inventory/items/{item}/kits/",
+        "/api/inventory/items/?with_metrics=1",
         "/api/inventory/items/low_stock/",
         "/api/inventory/items/reordered/",
         "/api/reorders/analytics/transparency/",
@@ -150,7 +154,9 @@ def test_public_surfaces_stay_reachable_but_drop_vendor_fields(
     """These must stay open — the scan path and the transparency feed run on
     them — so the gate is on the FIELDS, exactly as ``get_inventory_summary``
     already gates its valuation."""
-    path = path_template.format(item=vendor_fixture["item"].id)
+    path = path_template.format(
+        item=vendor_fixture["item"].id, fixture=vendor_fixture["fixture"].id
+    )
     response = anonymous.get(path)
     assert response.status_code == 200, f"{path} is no longer publicly reachable"
     assert sentinels_in(response) == [], f"{path} still discloses vendor data"
@@ -171,6 +177,46 @@ def test_an_authenticated_caller_still_sees_vendor_data(vendor_fixture, django_u
     suppliers = client.get("/api/inventory/suppliers/")
     assert suppliers.status_code == 200
     assert "VENDOR_NAME" in sentinels_in(suppliers)
+
+    # Every surface this branch gated, proven still whole for a signed-in reader.
+    # Withheld, not deleted, is the difference between a gate and a regression.
+    for path, expected in [
+        (f"/api/inventory/items/{vendor_fixture['item'].id}/metrics/", "UNIT_COST"),
+        ("/api/inventory/items/?with_metrics=1", "UNIT_COST"),
+        (f"/api/inventory/items/{vendor_fixture['item'].id}/download_card/", "LEAD_TIME"),
+        (f"/api/inventory/fixtures/{vendor_fixture['fixture'].id}/download_card/", "LEAD_TIME"),
+        (f"/api/inventory/items/{vendor_fixture['item'].id}/kits/", None),
+        ("/api/inventory/item-suppliers/", "SUPPLIER_SKU"),
+        ("/api/inventory/price-history/", "PRICE_HISTORY_COST"),
+        ("/api/inventory/supplier-agreements/", "AGREEMENT_NAME"),
+        ("/api/reorders/purchase-orders/", "SUPPLIER_ORDER_NUMBER"),
+        ("/api/reorders/analytics/transparency/", "VENDOR_NAME"),
+    ]:
+        response = client.get(path)
+        assert response.status_code == 200, f"{path} broke for a signed-in caller"
+        if expected is not None:
+            assert expected in sentinels_in(response), f"a signed-in caller lost {expected} on {path}"
+
+
+@pytest.mark.integration
+def test_the_withheld_marker_says_the_omission_is_policy(vendor_fixture, anonymous):
+    """A missing ``supplier_name`` must not read as "this item has no supplier".
+
+    ``null`` already means "nothing on file" throughout this payload family, so
+    the keys are omitted and this flag is what tells a client the difference.
+    """
+    from inventory.services.vendor_visibility import VENDOR_WITHHELD_KEY
+
+    body = anonymous.get(f"/api/inventory/items/{vendor_fixture['item'].id}/").json()
+    assert body[VENDOR_WITHHELD_KEY] is True
+    for withheld in ("supplier_name", "suppliers", "supplier_choice", "unit_cost", "total_value"):
+        assert withheld not in body, f"{withheld} was nulled rather than omitted"
+
+    signed_in = APIClient()
+    signed_in.force_authenticate(user=vendor_fixture["staff"])
+    theirs = signed_in.get(f"/api/inventory/items/{vendor_fixture['item'].id}/").json()
+    assert VENDOR_WITHHELD_KEY not in theirs, "the marker leaked into an authenticated payload"
+    assert theirs["supplier_name"] == VENDOR_SENTINELS["VENDOR_NAME"]
 
 
 # --- The other half of the decision: what must NOT break.

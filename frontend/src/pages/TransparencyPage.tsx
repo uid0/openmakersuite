@@ -7,6 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import { analyticsAPI } from '../services/api';
+import { vendorDataWithheld } from '../utils/vendorVisibility';
 import '../styles/TransparencyPage.css';
 
 interface TransparencyOrder {
@@ -19,18 +20,25 @@ interface TransparencyOrder {
   requested_at: string;
   ordered_at: string | null;
   delivered_at: string | null;
-  estimated_cost: number | null;
-  actual_cost: number | null;
-  cost_per_unit: number | null;
-  cost_variance: number | null;
-  order_number: string;
-  invoice_number: string;
-  invoice_url: string;
-  purchase_order_url: string;
-  delivery_tracking_url: string;
-  supplier_url: string;
+  /**
+   * The vendor block: ABSENT for a caller with no session
+   * (op-anonymous-read-posture), with `vendor_data_withheld: true` in its place.
+   * Optional here so the compiler makes a reader handle the third state —
+   * `null` still means "no figure recorded", which is a claim about the ORDER.
+   */
+  vendor_data_withheld?: boolean;
+  estimated_cost?: number | null;
+  actual_cost?: number | null;
+  cost_per_unit?: number | null;
+  cost_variance?: number | null;
+  order_number?: string;
+  invoice_number?: string;
+  invoice_url?: string;
+  purchase_order_url?: string;
+  delivery_tracking_url?: string;
+  supplier_url?: string;
   public_notes: string;
-  supplier_name: string | null;
+  supplier_name?: string | null;
 }
 
 interface TransparencySummary {
@@ -44,16 +52,18 @@ interface LedgerEntry {
   id: number;
   item_id: string;
   item_name: string;
-  supplier_name: string | null;
   quantity: number;
   requested_at: string;
   ordered_at: string | null;
   delivered_at: string | null;
-  actual_cost: number | null;
-  estimated_cost: number | null;
   status: string;
-  order_number: string;
-  invoice_number: string;
+  /** Withheld from an anonymous caller — see `TransparencyOrder`. */
+  vendor_data_withheld?: boolean;
+  supplier_name?: string | null;
+  actual_cost?: number | null;
+  estimated_cost?: number | null;
+  order_number?: string;
+  invoice_number?: string;
 }
 
 interface TransparencyData {
@@ -110,8 +120,12 @@ const TransparencyPage: React.FC = () => {
     return { className: 'on-budget', sign: '', note: ' on budget' };
   };
 
-  const formatCurrency = (amount: number | null) => {
-    if (amount === null) return 'N/A';
+  const formatCurrency = (amount: number | null | undefined) => {
+    // `undefined` as well as `null`: the server WITHHOLDS the per-order money
+    // keys from a caller with no session rather than nulling them
+    // (op-anonymous-read-posture), and `amount === null` alone let `undefined`
+    // through to `Intl.NumberFormat().format()`, which renders "$NaN".
+    if (amount === null || amount === undefined) return 'N/A';
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD'
@@ -169,6 +183,12 @@ const TransparencyPage: React.FC = () => {
     );
   }
 
+  // Read off the payload, not off auth state: the server has already decided,
+  // and a second client-side derivation of the same answer is how the two come
+  // to disagree. Either array carrying the marker means the same gate ran.
+  const vendorWithheld =
+    vendorDataWithheld(data.orders[0]) || vendorDataWithheld(data.ledger[0]);
+
   return (
     <WorkspacePage
       testId="transparency-page"
@@ -206,6 +226,16 @@ const TransparencyPage: React.FC = () => {
           <p className="section-subtitle">
             Chronological record of purchases handled by the logistics team to keep our community informed.
           </p>
+          {/* Said once, above the table, rather than repeated as "N/A" down a
+              column. The page still publishes what the space spent in total —
+              that is what it is for — and the per-order breakdown is a member
+              view (op-anonymous-read-posture). */}
+          {vendorWithheld && (
+            <p className="section-subtitle" data-testid="ledger-vendor-withheld">
+              Supplier names and per-order costs are shown to signed-in members.
+              Totals, items, quantities and dates are public.
+            </p>
+          )}
         </div>
         {data.ledger.length === 0 ? (
           <div className="empty-ledger">
@@ -221,8 +251,16 @@ const TransparencyPage: React.FC = () => {
                   <th>Delivered</th>
                   <th>Item</th>
                   <th>Qty</th>
-                  <th>Supplier</th>
-                  <th>Cost</th>
+                  {/* Dropped, not blanked, for a caller with no session
+                      (op-anonymous-read-posture). The server withholds
+                      `supplier_name` and the per-order costs, so these columns
+                      would read "N/A" and "$NaN" on every row — "no supplier on
+                      file" and a nonsense figure, both claims about the ORDER
+                      rather than about the reader. An absent column cannot be
+                      misread as an empty value; the note above the table says
+                      where the numbers went. */}
+                  {!vendorWithheld && <th>Supplier</th>}
+                  {!vendorWithheld && <th>Cost</th>}
                   <th>Status</th>
                 </tr>
               </thead>
@@ -265,8 +303,10 @@ const TransparencyPage: React.FC = () => {
                       </div>
                     </td>
                     <td>{entry.quantity}</td>
-                    <td>{entry.supplier_name || 'N/A'}</td>
-                    <td>{formatCurrency(entry.actual_cost ?? entry.estimated_cost)}</td>
+                    {!vendorWithheld && <td>{entry.supplier_name || 'N/A'}</td>}
+                    {!vendorWithheld && (
+                      <td>{formatCurrency(entry.actual_cost ?? entry.estimated_cost ?? null)}</td>
+                    )}
                     <td>
                       <span className={`ledger-status status-${entry.status}`}>
                         {formatStatus(entry.status)}
@@ -424,10 +464,18 @@ const TransparencyPage: React.FC = () => {
       </div>
 
       <footer className="transparency-footer">
+        {/* "ALL financial information is made available" stopped being true for
+            a reader with no session (op-anonymous-read-posture). A page whose
+            whole subject is accountability cannot carry a claim its own payload
+            no longer honours, so it is worded for the reader it has — the same
+            edit the server makes to `summary.transparency_note`. */}
         <p>
           This transparency page reflects our commitment to open operations.
-          All financial information is made available to promote trust and accountability
-          within the makerspace community.
+          {vendorWithheld
+            ? ' What the makerspace spends is published here; supplier names and ' +
+              'per-order costs are shown to signed-in members.'
+            : ' All financial information is made available to promote trust and ' +
+              'accountability within the makerspace community.'}
         </p>
         <p>
           <a href="/tv-dashboard">← Back to Dashboard</a>

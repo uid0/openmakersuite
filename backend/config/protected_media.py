@@ -144,6 +144,23 @@ def media_access_check(request):
     return HttpResponseForbidden()
 
 
+#: Where the remedy sends a refused reader, and it is NOT ``/``.
+#:
+#: The population that reaches this page is the one whose session cookie has
+#: lapsed while a refresh token is still in ``localStorage``: every API call
+#: still works, so the SPA considers them signed in and ``/`` renders
+#: "Welcome back" with a Logout button and no sign-in form. A remedy pointing
+#: there told them to do something the app gave them no way to do. This route
+#: clears the stale local auth state first and then presents the form —
+#: ``frontend/src/pages/ReauthPage.tsx``, registered in ``App.tsx`` and covered
+#: by ``frontend/src/__tests__/pages/ReauthPage.test.tsx``, which also pins the
+#: control that ``/`` shows "Welcome back" to that same visitor.
+#:
+#: The string is spelled here and in the SPA route, and no check spans both
+#: languages; each end is held by the tests named above and by
+#: ``config/tests/test_protected_media.py``.
+REAUTH_PATH = "/reauth"
+
 #: What a refused ``/media/`` request gets INSTEAD OF A BLANK WALL.
 #:
 #: These URLs are followed by a browser from an ``<a href>``, so there is no
@@ -153,14 +170,20 @@ def media_access_check(request):
 #:
 #: IT NAMES NO PATH, NO FILENAME, NO PREFIX AND NO VENDOR. The reader already
 #: knows what they clicked; anyone else reaching this page must learn nothing
-#: from it, and a refusal that echoes the request is a refusal that leaks.
-FORBIDDEN_REMEDY_HTML = """<!DOCTYPE html>
+#: from it, and a refusal that echoes the request is a refusal that leaks. That
+#: is also why the destination is carried by the SCRIPT rather than by the
+#: server: the browser is already holding the address, so the document this
+#: page returns can stay constant. ``oms_pending_return_to`` is the channel
+#: ``RequireAuth`` and ``SessionExpiredBanner`` already use, and ``AuthSection``
+#: consumes it on a successful sign-in, so the document opens by itself.
+FORBIDDEN_REMEDY_HTML = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <title>Sign in required</title></head>
 <body>
 <h1>Sign in required</h1>
 <p>This document is only available to signed-in members.</p>
-<p><a href="/">Sign in</a>, then follow the link again.</p>
+<p><a href="{REAUTH_PATH}">Sign in</a> to open it.</p>
+<script>try{{sessionStorage.setItem("oms_pending_return_to",window.location.pathname)}}catch(e){{}}</script>
 </body></html>
 """
 
@@ -188,8 +211,10 @@ def serve_media(request, path):
 
     Refuses with :func:`_forbidden_with_remedy` rather than a bare 403, because
     "two servers, one rule" has to cover what the refused caller is TOLD as
-    well as whether they are let in; the nginx half returns the same page from
-    its ``error_page 401 403`` for these prefixes.
+    well as whether they are let in. The nginx half returns the same page from
+    its ``error_page 401 403`` for these prefixes, and
+    ``test_protected_media.py::test_both_servers_refuse_with_the_same_document``
+    compares the two bodies rather than trusting that they were kept in step.
     """
     if is_vendor_media(path) and not request.user.is_authenticated:
         return _forbidden_with_remedy()

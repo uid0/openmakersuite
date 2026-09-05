@@ -290,8 +290,15 @@ def test_no_anonymous_write_names_a_vendor_in_its_reply(vendor_fixture, anonymou
     """
     from config.tests.vendor_exposure_probe import anonymous_write_surfaces
 
+    writes, unclassified = anonymous_write_surfaces(vendor_fixture, _fill(vendor_fixture))
+    assert not unclassified, (
+        "an anonymous write is neither issued nor classified, so nothing here "
+        "reads it:\n" + "\n".join(f"  {line}" for line in unclassified)
+    )
+    assert len(writes) >= 11, f"the derivation found almost nothing: {writes}"
+
     disclosures = []
-    for path, body, fmt in anonymous_write_surfaces(vendor_fixture):
+    for path, body, fmt in writes:
         response = anonymous.post(path, body, format=fmt)
         leaked = [
             name

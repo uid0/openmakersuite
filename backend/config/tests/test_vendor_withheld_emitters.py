@@ -85,25 +85,40 @@ HAND_ROLLED_EMITTERS: dict[str, str] = {
 }
 
 
-def _import_every_serializer_module() -> None:
-    """Import ``<app>.serializers`` for every installed app.
+def _import_every_serializer_module() -> set[str]:
+    """Import ``<app>.serializers`` for every installed app, and say which.
 
     ``__subclasses__()`` below can only see classes Python has imported, so the
     walk is exactly as wide as this is. An app with no such module is normal and
     ignored; an app whose module raises on import is NOT ignored, because a
     gated serializer could be hiding behind that error.
+
+    THE RETURN VALUE IS THE WITNESS. Asking ``sys.modules`` afterwards proves
+    nothing about this call: importing ``config.urls`` pulls in every app's
+    serializers through the router, so the answer is already yes before the
+    walk narrows to anything at all. Only what this call itself reached can
+    show how wide it reached.
     """
+    reached: set[str] = set()
     for config in apps.get_app_configs():
+        name = f"{config.name}.serializers"
         try:
-            importlib.import_module(f"{config.name}.serializers")
+            importlib.import_module(name)
         except ModuleNotFoundError as exc:
-            if exc.name != f"{config.name}.serializers":
+            if exc.name != name:
                 raise
+            continue
+        reached.add(name)
+    return reached
 
 
-def _mixin_subclasses() -> dict[str, str]:
-    """Every ``VendorGatedSerializerMixin`` subclass, mapped to its module."""
-    _import_every_serializer_module()
+def _mixin_subclasses() -> tuple[dict[str, str], set[str]]:
+    """Every ``VendorGatedSerializerMixin`` subclass, mapped to its module.
+
+    Returns it with the set of serializer modules the walk was widened over, so
+    a caller can check the widening rather than assume it.
+    """
+    reached = _import_every_serializer_module()
 
     found: dict[str, str] = {}
 
@@ -113,12 +128,12 @@ def _mixin_subclasses() -> dict[str, str]:
             walk(sub)
 
     walk(VendorGatedSerializerMixin)
-    return found
+    return found, reached
 
 
 @pytest.mark.unit
 def test_every_gated_serializer_names_the_typescript_type_it_feeds():
-    declared = _mixin_subclasses()
+    declared, _reached = _mixin_subclasses()
 
     # A DISAPPEARANCE has to fail too, so the guard names what it expects rather
     # than counting. "Non-empty" would have been satisfied by the inventory
@@ -150,28 +165,29 @@ def test_the_walk_reaches_serializers_outside_inventory():
 
     Every mixin subclass lives in ``inventory.serializers`` today, so a walk
     that had silently narrowed to that one module would look identical from the
-    outside. What has to be shown is that a FIRST-PARTY app other than
-    inventory was reached: ``rest_framework.serializers`` is in ``sys.modules``
-    the moment any serializer module is imported at all, so counting
-    "non-inventory" modules would pass for a walk that had narrowed all the way
-    back down.
-    """
-    _import_every_serializer_module()
+    outside. Two things have to be true, and both were once asserted by a check
+    that could not fail:
 
-    import sys
+    * the widening runs THROUGH :func:`_mixin_subclasses`, which is what the
+      gate above calls — asking the import helper directly proved the helper
+      worked, not that anything used it;
+    * the answer comes from what THIS CALL reached, not from ``sys.modules``,
+      which by the time any test runs already holds every serializer module the
+      URL conf imported — and holds ``rest_framework.serializers`` regardless.
+      Both spellings passed with the walk narrowed all the way back down.
+    """
+    _declared, reached = _mixin_subclasses()
 
     first_party = {
         f"{config.name}.serializers"
         for config in apps.get_app_configs()
         if BACKEND in pathlib.Path(config.path).resolve().parents
     }
-    reached = {
-        name for name in first_party if name in sys.modules and not name.startswith("inventory.")
-    }
-    assert reached, (
-        "No first-party serializers module outside inventory was imported, so "
-        "a gated serializer landing in any other app would be invisible to "
-        "this gate."
+    outside = sorted(name for name in reached & first_party if not name.startswith("inventory."))
+    assert outside, (
+        "The walk widened over no first-party serializers module outside "
+        f"inventory (it reached {sorted(reached)}), so a gated serializer "
+        "landing in any other app would be invisible to this gate."
     )
 
 

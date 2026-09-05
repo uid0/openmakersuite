@@ -154,3 +154,38 @@ def test_the_crawl_actually_gets_answers_rather_than_errors():
         "the format-suffix TypeError has spread to a route without a suffix, which "
         f"is a different bug: {[p for p in erroring if not p.endswith('.json')]}"
     )
+
+
+@pytest.mark.integration
+@pytest.mark.django_db
+def test_the_crawl_could_read_every_pdf_it_was_served():
+    """A PDF the probe could not decode is a "could not tell", not a pass.
+
+    ``download_card`` is the surface the decoding exists for: its leak lives in
+    a compressed content stream, so a raw byte grep over an undecoded PDF finds
+    nothing and reports it clean. The extraction is allowed to fail — encrypted,
+    malformed, a future PDF version — but it is not allowed to fail QUIETLY,
+    because a green crawl is only evidence if every response in it was actually
+    read.
+    """
+    objs = seed_vendor_fixture()
+    fill = {
+        "__uuid__": str(objs["item"].id),
+        "__default_pk__": str(objs["supplier"].id),
+        "__pk_by_prefix__": {
+            "inventory/^items/": str(objs["item"].id),
+            "inventory/^fixtures/": str(objs["fixture"].id),
+        },
+        "item_id": str(objs["item"].id),
+        "location_id": str(objs["location"].id),
+        "supplier_id": str(objs["supplier"].id),
+        "fixture_pk": str(objs["fixture"].id),
+    }
+
+    _disclosures, transcript, _unreachable = crawl_anonymously(APIClient(), fill)
+
+    unreadable = [entry[0] for entry in transcript if entry[6]]
+    assert not unreadable, (
+        "the crawl was served a PDF it could not decode, so those responses "
+        f"were searched as raw bytes and prove nothing: {unreadable}"
+    )

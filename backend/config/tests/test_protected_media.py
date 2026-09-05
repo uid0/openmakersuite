@@ -33,6 +33,7 @@ transcript is in the PR body; what CI can re-run on its own is below.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess  # nosec B404 — `nginx -t` on a test-owned rendered config
 import tempfile
@@ -43,7 +44,12 @@ from django.core.files.base import ContentFile
 import pytest
 from rest_framework.test import APIClient
 
-from config.protected_media import VENDOR_MEDIA_PREFIXES, is_vendor_media
+from config.protected_media import (
+    FORBIDDEN_REMEDY_HTML,
+    REAUTH_PATH,
+    VENDOR_MEDIA_PREFIXES,
+    is_vendor_media,
+)
 from config.tests.nginx_config import parse, render, servers
 
 NGINX_TEMPLATE = (
@@ -207,6 +213,11 @@ def test_the_nginx_template_gates_every_protected_prefix():
         ), f"{target} does not reach the Django gate"
 
 
+def _one_line(html: str) -> str:
+    """``html`` with the whitespace BETWEEN tags collapsed away."""
+    return re.sub(r">\s+<", "><", html.strip())
+
+
 @pytest.mark.unit
 def test_every_protected_prefix_refuses_with_a_remedy():
     """The nginx half of "a refusal carries a remedy".
@@ -253,13 +264,42 @@ def test_every_protected_prefix_refuses_with_a_remedy():
     body = " ".join(returns[0].args)
     assert "403" in returns[0].args, f"{REMEDY_LOCATION} does not answer 403"
     assert "Sign in" in body, f"{REMEDY_LOCATION} names no remedy"
-    assert 'href="/"' in body, f"{REMEDY_LOCATION} links nowhere"
+    assert f'href="{REAUTH_PATH}"' in body, (
+        f"{REMEDY_LOCATION} does not link to {REAUTH_PATH}. Linking to `/` is a "
+        "dead end for the one population that reaches this page: their token is "
+        "still in localStorage, so `/` greets them as signed in."
+    )
 
     # A refusal that echoes the request is a refusal that leaks. The reader
     # already knows what they clicked; anyone else must learn nothing.
     assert "$request_uri" not in body and "$uri" not in body
     for prefix in VENDOR_MEDIA_PREFIXES:
         assert prefix not in body, f"{REMEDY_LOCATION} echoes the {prefix} prefix"
+
+
+@pytest.mark.unit
+def test_both_servers_refuse_with_the_same_document():
+    """ "Two servers, one rule" has to cover what the refused caller is TOLD.
+
+    The refusal page is written twice — as a Python constant and as an nginx
+    ``return 403`` string — and nothing but this compared them, so the two
+    could drift into telling the same visitor different things. Whitespace
+    between tags is the one difference allowed: the Python literal is wrapped
+    for reading and the nginx one cannot be.
+    """
+    server = _tls_server()
+    remedy = next(
+        (loc for loc in server.locations if loc.args == (REMEDY_LOCATION,)),
+        None,
+    )
+    assert remedy is not None
+
+    served = " ".join(remedy.effective("return")[0].args[1:])
+    assert _one_line(served) == _one_line(FORBIDDEN_REMEDY_HTML), (
+        "nginx and config.protected_media refuse with different documents:\n"
+        f"  nginx:  {_one_line(served)}\n"
+        f"  django: {_one_line(FORBIDDEN_REMEDY_HTML)}"
+    )
 
 
 @pytest.mark.unit

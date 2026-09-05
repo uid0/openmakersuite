@@ -254,7 +254,7 @@ server {
         internal;
         default_type text/html;
         add_header Cache-Control "private, no-store" always;
-        return 403 '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Sign in required</title></head><body><h1>Sign in required</h1><p>This document is only available to signed-in members.</p><p><a href="/">Sign in</a>, then follow the link again.</p></body></html>';
+        return 403 '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Sign in required</title></head><body><h1>Sign in required</h1><p>This document is only available to signed-in members.</p><p><a href="/reauth">Sign in</a> to open it.</p><script>try{sessionStorage.setItem("oms_pending_return_to",window.location.pathname)}catch(e){}</script></body></html>';
     }
 
     # The subrequest the blocks above make. 204 for a signed-in caller,

@@ -886,6 +886,23 @@ walks the tree with the AST and fails on any `upload_to` that is neither gated
 nor carried in its `OPEN_PREFIXES` with a written reason. Add an upload field
 and that test tells you to classify it.
 
+**A CHECK THAT CANNOT FAIL IS WORSE THAN NO CHECK**, because it reads as
+evidence. This branch produced nine, in three shapes: checks that ASSERTED
+NOTHING (the nginx refusal remedy enforced nowhere; a write-surface list whose
+docstring called it derived while the body returned eleven literals; an
+undecodable-PDF branch whose comment said it reported); checks GUARDED ON
+SOMETHING ALWAYS TRUE (`sys.modules` holds `rest_framework.serializers` no
+matter what; a first-party path filter that skips every app on a `/tmp` vs
+`/private/tmp` mismatch and passes having inspected nothing); and checks that
+READ NOTHING (a crawl 404ing on an untyped router pk, a nested serializer over
+an empty relation, a fixture feeding a signed-in payload to a logged-out
+render). Two habits catch all three and both are cheap: MUTATION-PROVE a new
+guard against the exact reversion it names — make the reversion, watch it fail,
+restore — and give every derived set an ANTI-VACUITY FLOOR, a floor on how much
+it reached (`statuses[200] >= 50`) or a known member it must contain
+(`inventory.SupplierAgreement.document`). This is not tidying: three of this
+branch's real disclosures were found only after a vacuous check was repaired.
+
 **ScanTTY is unaffected.** Verified against `uid0/scantty` `main` at
 `ca71ba2a` (SHA confirmed through the GitHub API): its root shows the login
 screen unless a token is cached (`internal/tui/app.go:139`), every request from

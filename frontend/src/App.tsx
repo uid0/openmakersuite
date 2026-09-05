@@ -55,6 +55,8 @@ import ForgeKeyEPaperPanelsPage from './pages/ForgeKeyEPaperPanelsPage';
 import ForgeKeyEPaperServicePage from './pages/ForgeKeyEPaperServicePage';
 import ForgeKeyFirmwareRolloutsPage from './pages/ForgeKeyFirmwareRolloutsPage';
 import HomePage from './pages/HomePage';
+import ReauthPage from './pages/ReauthPage';
+import { REAUTH_PATH } from './services/authStorage';
 import LockersPage from './pages/LockersPage';
 import PurchasingOverviewPage from './pages/PurchasingOverviewPage';
 import ReportsOverviewPage from './pages/ReportsOverviewPage';
@@ -221,6 +223,11 @@ function AppContent() {
         <Routes>
           {/* Home/Landing */}
           <Route path="/" element={<HomePage />} />
+          {/* Where a refused /media/ download sends people. It is NOT `/`:
+              their session cookie has lapsed but the refresh token is still in
+              localStorage, so `/` greets them as signed in and offers no form
+              to sign in with (config/protected_media.py REAUTH_PATH). */}
+          <Route path={REAUTH_PATH} element={<ReauthPage />} />
           <Route path="/scan" element={<WorkspaceLayout><UniversalScannerPage /></WorkspaceLayout>} />
 
           {/* Anonymous invite redemption: outside person creates their own account */}

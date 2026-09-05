@@ -35,6 +35,8 @@ import pytest
 from freezegun import freeze_time
 from rest_framework.test import APIClient
 
+from config.protected_media import REAUTH_PATH
+
 pytestmark = pytest.mark.django_db
 
 #: The calendar the failing sequence is told on. Day 0 sign-in, a weekly-ish
@@ -281,13 +283,21 @@ def test_a_refused_download_names_a_remedy_and_leaks_nothing(agreement):
     These are ordinary browser navigations, so no SPA error handler runs
     downstream — the body is the whole of what the person sees. It must offer a
     way in, and it must not echo what was asked for.
+
+    The way in is NOT ``/``. The reader who lands here is the one whose session
+    lapsed while a refresh token stayed in ``localStorage``, and ``/`` greets
+    that visitor as signed in; ``REAUTH_PATH`` clears the stale local state
+    first. The destination is carried on ``oms_pending_return_to`` — read from
+    the browser's own address bar, so this document names no path.
     """
     response = APIClient().get(agreement.document.url)
 
     assert response.status_code == 403
     body = response.content.decode()
     assert "Sign in" in body
-    assert 'href="/"' in body
+    assert f'href="{REAUTH_PATH}"' in body
+    assert "oms_pending_return_to" in body
+    assert "window.location.pathname" in body
 
     # Nothing about the request: not the filename, not the prefix, not the
     # vendor whose paperwork it is.

@@ -20,6 +20,8 @@ from django.core.files.base import ContentFile
 from django.urls import URLPattern, URLResolver, get_resolver
 from django.utils import timezone
 
+from config.permission_matrix import EndpointKey, introspect_endpoints
+
 #: Sentinel values seeded into the database, one per class of vendor fact the
 #: captain's decision names. Each is unmistakable in a response body, so a hit
 #: is a disclosure and not a coincidence.
@@ -341,6 +343,18 @@ def routed_get_urls(fill: dict):
     return reachable, unreachable
 
 
+#: Stamped into the searchable bytes when a PDF response could not be decoded.
+#:
+#: The raw bytes are still searched, but a PDF keeps its text in compressed
+#: streams, so that search proves nothing — the response is a "could not tell",
+#: and this module runs on the rule that a "could not tell" is never counted as
+#: a "found nothing". :func:`crawl_anonymously` carries the flag out on every
+#: transcript row and
+#: ``test_anonymous_vendor_exposure_coverage.py::test_the_crawl_could_read_every_pdf_it_was_served``
+#: fails on any that are set.
+UNDECODABLE_PDF = b"<<UNDECODABLE-PDF>>"
+
+
 def searchable_bytes(body: bytes, content_type: str = "") -> bytes:
     """The bytes a sentinel search should run against.
 
@@ -355,8 +369,8 @@ def searchable_bytes(body: bytes, content_type: str = "") -> bytes:
 
         text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(body)).pages)
         return body + b"\n" + text.encode("utf-8", "replace")
-    except Exception:  # a PDF we cannot decode is reported, not silently passed
-        return body + b"\n<<UNDECODABLE-PDF>>"
+    except Exception:
+        return body + b"\n" + UNDECODABLE_PDF
 
 
 def response_body(response) -> tuple[bytes, str]:
@@ -368,10 +382,16 @@ def response_body(response) -> tuple[bytes, str]:
     return body, str(response.headers.get("Content-Type", ""))
 
 
-def sentinels_in(response, sentinels=None) -> list[str]:
-    """Names of the sentinels disclosed by ``response``."""
-    body, content_type = response_body(response)
-    haystack = searchable_bytes(body, content_type)
+def sentinels_in(response, sentinels=None, haystack: bytes | None = None) -> list[str]:
+    """Names of the sentinels disclosed by ``response``.
+
+    ``haystack`` lets a caller that already decoded the body pass it back in, so
+    the PDF extraction runs once per response rather than once per question
+    asked about it.
+    """
+    if haystack is None:
+        body, content_type = response_body(response)
+        haystack = searchable_bytes(body, content_type)
     return sorted(
         name
         for name, value in (sentinels or VENDOR_SENTINELS).items()
@@ -393,56 +413,234 @@ def crawl_anonymously(client, fill: dict):
         # proxy; neither is a project DRF surface.
         if path.startswith(("/admin/", "/flower/")):
             continue
+        undecodable = False
         try:
             response = client.get(path)
             status = response.status_code
-            leaked = sentinels_in(response)
+            body, content_type = response_body(response)
+            haystack = searchable_bytes(body, content_type)
+            undecodable = UNDECODABLE_PDF in haystack
+            leaked = sentinels_in(response, haystack=haystack)
         except Exception as exc:  # a 500 is data about the surface, not a crash
             status, leaked = f"EXC:{type(exc).__name__}", []
-        transcript.append((path, view_path, action, status, leaked, route))
+        transcript.append((path, view_path, action, status, leaked, route, undecodable))
         if leaked and isinstance(status, int) and status < 400:
             disclosures.append((path, view_path, action, status, leaked))
     return disclosures, transcript, unreachable
 
 
-def anonymous_write_surfaces(objs) -> list[tuple[str, dict, str]]:
-    """Every anonymous WRITE, as (path, body, format).
+#: Why a derived anonymous write is NOT issued by this probe. An entry is a
+#: statement that somebody looked at the route and decided against exercising
+#: it — the same shape as ``test_upload_field_classification.OPEN_PREFIXES``,
+#: and for the same reason: a route that is neither exercised nor classified is
+#: a hole nothing fails on.
+NO_FIXTURE_ROW = (
+    "This probe seeds no row this route can act on, so the request it could "
+    "build would 404 before reaching any serializer — a 'could not tell', not "
+    "a 'found nothing'. Its GET twin, where it has one, is covered by the crawl."
+)
+DEVICE_CHANNEL = (
+    "A ForgeKey device/firmware channel. Deliberately AllowAny with a reason "
+    "stated at the view, and not a vendor surface: it reads no supplier, no "
+    "item-supplier link and no price. Every ForgeKey GET is crawled."
+)
+CREDENTIAL_CHANNEL = (
+    "Takes credentials or a token, not item data, and reads no vendor table. "
+    "Issuing it here would either mint auth state the rest of the probe "
+    "assumes absent, or exercise a login flow that is its own test suite."
+)
+INBOUND_WEBHOOK = (
+    "A machine-to-machine ingest channel whose caller is a mail relay, an MQTT "
+    "bridge or a kiosk, and whose reply is an ack. Reaching it needs a signed "
+    "or provider-shaped payload this probe does not construct."
+)
+MEMBER_REPORT = (
+    "Writes a member's own report or check-in. Its reply echoes the submission "
+    "and the serializer names no supplier field; the row it writes carries no "
+    "vendor foreign key."
+)
+
+#: Every derived anonymous write this probe does NOT issue, with its reason.
+ANONYMOUS_WRITES_NOT_ISSUED: dict[EndpointKey, str] = {
+    EndpointKey("auth_views.create_test_invite_code", None): CREDENTIAL_CHANNEL,
+    EndpointKey("auth_views.create_test_membership", None): CREDENTIAL_CHANNEL,
+    EndpointKey("auth_views.login_user", None): CREDENTIAL_CHANNEL,
+    EndpointKey("auth_views.logout_user", None): CREDENTIAL_CHANNEL,
+    EndpointKey("auth_views.refresh_token", None): CREDENTIAL_CHANNEL,
+    EndpointKey("auth_views.register_user", None): CREDENTIAL_CHANNEL,
+    EndpointKey("membership.views.redeem_invite_code", None): CREDENTIAL_CHANNEL,
+    EndpointKey("checklists.views.ChecklistCompletionViewSet", "complete"): NO_FIXTURE_ROW,
+    EndpointKey("checklists.views.ChecklistCompletionViewSet", "scan"): NO_FIXTURE_ROW,
+    EndpointKey("checklists.views.ChecklistViewSet", "start"): NO_FIXTURE_ROW,
+    EndpointKey("customization.views.site_settings", None): NO_FIXTURE_ROW,
+    EndpointKey("donations.views.lookup_donation_item_by_code", None): NO_FIXTURE_ROW,
+    EndpointKey("inventory.views.AssetProblemViewSet", "upload_photo"): NO_FIXTURE_ROW,
+    EndpointKey("inventory.views.AssetViewSet", "generate_qr"): NO_FIXTURE_ROW,
+    EndpointKey("inventory.views.AssetViewSet", "scan"): NO_FIXTURE_ROW,
+    EndpointKey("project_storage.views.ProjectStorageStintViewSet", "mark_printed"): NO_FIXTURE_ROW,
+    EndpointKey("project_storage.views.ProjectStorageStintViewSet", "start"): NO_FIXTURE_ROW,
+    EndpointKey("forgekey.views.EPaperDisplayBatteryView", None): DEVICE_CHANNEL,
+    EndpointKey("forgekey.views.EPaperDisplayCommandAckView", None): DEVICE_CHANNEL,
+    EndpointKey("forgekey.views.EPaperDisplayDesiredView", None): DEVICE_CHANNEL,
+    EndpointKey("forgekey.views.EPaperDisplayFirmwareStatusView", None): DEVICE_CHANNEL,
+    EndpointKey("forgekey.views.EPaperDisplayHealthView", None): DEVICE_CHANNEL,
+    EndpointKey("forgekey.views.EPaperDisplayImageView", None): DEVICE_CHANNEL,
+    EndpointKey("forgekey.views.EPaperFirmwareCheckView", None): DEVICE_CHANNEL,
+    EndpointKey("forgekey.views.EPaperServiceInfoView", None): DEVICE_CHANNEL,
+    EndpointKey("forgekey.views.ForgeKeyCertificateRevocationListView", None): DEVICE_CHANNEL,
+    EndpointKey("forgekey.views.ForgeKeyDeviceEnrollView", None): DEVICE_CHANNEL,
+    EndpointKey("forgekey.views.ForgeKeyDevicePhotoUploadView", None): DEVICE_CHANNEL,
+    EndpointKey("forgekey.views.ForgeKeyFirmwareDownloadView", None): DEVICE_CHANNEL,
+    EndpointKey("forgekey.views.ForgeKeyFirmwarePublicKeyView", None): DEVICE_CHANNEL,
+    EndpointKey("forgekey.views.ForgeKeyJWKSView", None): DEVICE_CHANNEL,
+    EndpointKey("forgekey.views.ForgeKeyOmsCommandPublicKeyView", None): DEVICE_CHANNEL,
+    EndpointKey("forgekey.views.MqttWebhookView", None): DEVICE_CHANNEL,
+    EndpointKey("inventory.views.postmark_inbound_work_order", None): INBOUND_WEBHOOK,
+    EndpointKey("location_checkins.views.location_ping_webhook", None): INBOUND_WEBHOOK,
+    EndpointKey("screens.views.kiosk_heartbeat", None): INBOUND_WEBHOOK,
+    EndpointKey("location_checkins.views.LocationCheckInViewSet", "checkin"): MEMBER_REPORT,
+    EndpointKey("location_checkins.views.LocationCheckInViewSet", "create"): MEMBER_REPORT,
+    EndpointKey("location_checkins.views.LocationFeedbackViewSet", "create"): MEMBER_REPORT,
+    EndpointKey("location_checkins.views.LocationFeedbackViewSet", "submit"): MEMBER_REPORT,
+    EndpointKey("location_checkins.views.SecurityReportViewSet", "create"): MEMBER_REPORT,
+    EndpointKey("location_checkins.views.SecurityReportViewSet", "report"): MEMBER_REPORT,
+}
+
+
+def _write_bodies(objs) -> dict[EndpointKey, list[tuple[dict, str]]]:
+    """The request bodies for the writes this probe DOES issue.
+
+    Keyed by the permission snapshot's own ``(view_path, action)``, because
+    that is what the derivation below produces; the PATH comes from the route,
+    never from here, so a moved URL cannot leave a request pointing at nothing.
+
+    A derivation can find the routes. It cannot invent a payload a serializer
+    will accept, which is why this half is written down — and why a derived
+    route with no entry here and no entry in
+    :data:`ANONYMOUS_WRITES_NOT_ISSUED` fails.
+    """
+    item, fixture = objs["item"], objs["fixture"]
+    return {
+        EndpointKey("scanner.views.dispatch_scan", None): [
+            ({"payload": VENDOR_SENTINELS["PACKAGE_UPC"]}, "json"),
+            ({"payload": VENDOR_SENTINELS["UNIT_UPC"]}, "json"),
+            ({"payload": f"/inventory/scan/{item.id}"}, "json"),
+        ],
+        EndpointKey("inventory.views.InventoryItemViewSet", "scan"): [({}, "json")],
+        EndpointKey("inventory.views.InventoryItemViewSet", "generate_qr"): [({}, "json")],
+        EndpointKey("inventory.views.InventoryItemViewSet", "log_usage"): [
+            ({"quantity": 1}, "json")
+        ],
+        EndpointKey("inventory.views.LocationViewSet", "generate_qr"): [({}, "json")],
+        EndpointKey("inventory.views.LocationViewSet", "report_problem"): [
+            ({"description": "shelf empty", "severity": "medium"}, "multipart")
+        ],
+        EndpointKey("inventory.views.FixtureViewSet", "scan"): [({}, "json")],
+        EndpointKey("inventory.views.FixtureRefillRequestViewSet", "create"): [
+            ({"fixture": str(fixture.id), "notes": "empty"}, "json")
+        ],
+        EndpointKey("reorder_queue.views.ReorderRequestViewSet", "create"): [
+            ({"item": str(item.id), "quantity": 5, "requested_by": "anon"}, "json")
+        ],
+    }
+
+
+#: HTTP methods that read. Anything else is a write for the purposes below.
+_READ_METHODS = ("get", "head", "options")
+
+
+def routed_anonymous_writes() -> dict[EndpointKey, str]:
+    """Every routed non-GET surface that resolves to ``AllowAny``, as key -> route.
+
+    DERIVED, not listed. The routes are walked here rather than taken from
+    :func:`~config.permission_matrix.introspect_endpoints` alone because that
+    snapshot keeps one example method per action and drops the callback, and
+    both are needed: the callback says which HTTP methods a function-based view
+    accepts, and without it every AllowAny GET-only function view would be
+    counted as a write. The PERMISSION answer still comes from the snapshot,
+    which resolves ``get_permissions`` and applies an ``@action`` override the
+    way DRF does.
+    """
+    snapshots = introspect_endpoints()
+    found: dict[EndpointKey, str] = {}
+
+    def walk(patterns, prefix=""):
+        for pattern in patterns:
+            if isinstance(pattern, URLResolver):
+                walk(pattern.url_patterns, prefix + str(pattern.pattern))
+                continue
+            if not isinstance(pattern, URLPattern):
+                continue
+            route = prefix + str(pattern.pattern)
+            callback = pattern.callback
+            view_cls = (
+                getattr(callback, "cls", None) or getattr(callback, "view_class", None) or callback
+            )
+            view_path = (
+                f"{getattr(view_cls, '__module__', '?')}.{getattr(view_cls, '__name__', '?')}"
+            )
+            actions = getattr(callback, "actions", None) or {}
+            if actions:
+                # HEAD is excluded because DRF ADDS IT: ``ViewSetMixin.as_view``
+                # copies ``actions["get"]`` onto ``actions["head"]`` the first
+                # time the route is dispatched, in place, on the same dict this
+                # reads. Filtering only "get" therefore counted every AllowAny
+                # READ as a write — but only once some earlier test in the run
+                # had requested it, which is the order-dependence a gate can
+                # least afford.
+                names = {name for method, name in actions.items() if method not in _READ_METHODS}
+            else:
+                writes = [
+                    method
+                    for method in getattr(view_cls, "http_method_names", [])
+                    if method not in _READ_METHODS
+                ]
+                names = {None} if writes else set()
+            for name in names:
+                key = EndpointKey(view_path, name)
+                snapshot = snapshots.get(key)
+                if snapshot is None or snapshot.permission_classes != ("AllowAny",):
+                    continue
+                found.setdefault(key, route)
+
+    walk(get_resolver().url_patterns)
+    return found
+
+
+def anonymous_write_surfaces(objs, fill) -> tuple[list[tuple[str, dict, str]], list[str]]:
+    """Every anonymous WRITE, as ``([(path, body, format)], unclassified)``.
 
     The GET crawl cannot exercise these — it would be writing to the database —
     and that blind spot hid a real disclosure: ``POST /api/scanner/dispatch/``
     is ``AllowAny`` by design (a barcode gun's entry point) and answered a UPC
     scan with the vendor's name. A UPC is printed on the outside of the box.
 
-    So the writes are exercised too, by hand, from the same seeded fixture. The
-    list is derived from the permission snapshot rather than invented: every
-    routed non-GET action that resolves to ``AllowAny``, plus the function-based
-    ``dispatch_scan``, which the snapshot files under ``*`` and which is exactly
-    the one that was missed. A 4xx here is a fine outcome — the point is that
-    whatever comes back names no vendor.
+    THE SET IS DERIVED, THE PAYLOADS ARE NOT, and the two halves are held
+    together here: :func:`routed_anonymous_writes` finds every AllowAny non-GET
+    route, :func:`_write_bodies` says what to send to the ones this probe
+    issues, and :data:`ANONYMOUS_WRITES_NOT_ISSUED` says why each of the rest is
+    left alone. Anything in neither comes back in ``unclassified`` — a new
+    anonymous write cannot be skipped silently, which is what a hand-written
+    list of paths allowed.
+
+    A 4xx is a fine outcome for an issued write: the point is that whatever
+    comes back names no vendor.
     """
-    item, location, fixture = objs["item"], objs["location"], objs["fixture"]
-    return [
-        ("/api/scanner/dispatch/", {"payload": VENDOR_SENTINELS["PACKAGE_UPC"]}, "json"),
-        ("/api/scanner/dispatch/", {"payload": VENDOR_SENTINELS["UNIT_UPC"]}, "json"),
-        ("/api/scanner/dispatch/", {"payload": f"/inventory/scan/{item.id}"}, "json"),
-        (f"/api/inventory/items/{item.id}/scan/", {}, "json"),
-        (f"/api/inventory/items/{item.id}/generate_qr/", {}, "json"),
-        (f"/api/inventory/items/{item.id}/log_usage/", {"quantity": 1}, "json"),
-        (f"/api/inventory/locations/{location.id}/generate_qr/", {}, "json"),
-        (
-            f"/api/inventory/locations/{location.id}/report_problem/",
-            {"description": "shelf empty", "severity": "medium"},
-            "multipart",
-        ),
-        (f"/api/inventory/fixtures/{fixture.id}/scan/", {}, "json"),
-        (
-            "/api/inventory/fixture-refill-requests/",
-            {"fixture": str(fixture.id), "notes": "empty"},
-            "json",
-        ),
-        (
-            "/api/reorders/requests/",
-            {"item": str(item.id), "quantity": 5, "requested_by": "anon"},
-            "json",
-        ),
-    ]
+    bodies = _write_bodies(objs)
+    requests: list[tuple[str, dict, str]] = []
+    unclassified: list[str] = []
+
+    for key, route in sorted(routed_anonymous_writes().items(), key=lambda kv: str(kv[0])):
+        if key in bodies:
+            path = concrete_path(route, fill)
+            if path is None:
+                unclassified.append(f"{key}: route {route} could not be turned into a request")
+                continue
+            requests.extend((path, body, fmt) for body, fmt in bodies[key])
+        elif key not in ANONYMOUS_WRITES_NOT_ISSUED:
+            unclassified.append(
+                f"{key} ({route}): an anonymous write with no body in _write_bodies and no "
+                "reason in ANONYMOUS_WRITES_NOT_ISSUED. Exercise it, or say why not."
+            )
+
+    return requests, unclassified

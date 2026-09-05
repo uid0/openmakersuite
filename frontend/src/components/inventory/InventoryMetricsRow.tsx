@@ -11,6 +11,7 @@ import { Group, Paper, Stack, Text } from '@mantine/core';
 import React from 'react';
 
 import { InventoryCostTrend, InventoryItemMetrics } from '../../types';
+import { VENDOR_WITHHELD_TEXT, vendorDataWithheld } from '../../utils/vendorVisibility';
 
 interface InventoryMetricsRowProps {
   sku: string;
@@ -39,7 +40,7 @@ const TREND_LABEL: Record<InventoryCostTrend, string> = {
   no_history: 'No purchase-order history yet',
 };
 
-const formatMoney = (value: string | null): string =>
+const formatMoney = (value: string | null | undefined): string =>
   value == null ? '—' : `$${parseFloat(value).toFixed(2)}`;
 
 const formatQuantity = (value: number): string =>
@@ -64,24 +65,54 @@ const MetricCell: React.FC<MetricCellProps> = ({ label, value, tooltip, testId }
 );
 
 const InventoryMetricsRow: React.FC<InventoryMetricsRowProps> = ({ sku, metrics }) => {
+  // THIS STRIP IS ON A PUBLIC ROUTE, so a withheld vendor half is the ordinary
+  // case and not an edge one: `/inventory/items/:id` carries no `RequireAuth`
+  // and `metrics` is `AllowAny`, so it loads for a logged-out scanner with the
+  // six vendor keys ABSENT. Asked once, before anything reads them — a lookup
+  // on an absent `cost_trend` printed the literal string "undefined" into the
+  // Cost cell's tooltip, and '—' in Lead and Cost claimed the ITEM has no lead
+  // time and no price when the truth was about the READER
+  // (op-anonymous-read-posture). LABEL rather than DROP because these are two
+  // cells in a fixed strip: dropping them leaves a gap a reader cannot read.
+  const vendorWithheld = vendorDataWithheld(metrics);
+
   const costLabel = metrics.is_case_based ? 'Cost/case' : 'Cost';
   const costTooltipBase = metrics.is_case_based
     ? `Cost per case${metrics.case_size ? ` of ${metrics.case_size}` : ''}`
     : 'Cost per unit';
-  const trendArrow = TREND_ARROW[metrics.cost_trend];
-  const trendColor = TREND_COLOR[metrics.cost_trend];
+  const trend = metrics.cost_trend;
+  const trendArrow = vendorWithheld || !trend ? '' : TREND_ARROW[trend];
+  const trendColor = vendorWithheld || !trend ? undefined : TREND_COLOR[trend];
 
-  const costValue = (
+  const costValue = vendorWithheld ? (
+    <Text size="sm" c="dimmed" data-testid="metric-cost-withheld">
+      {VENDOR_WITHHELD_TEXT}
+    </Text>
+  ) : (
     <>
       {formatMoney(metrics.unit_cost)}
       {trendArrow && (
-        <Text span c={trendColor} data-testid={`cost-trend-${metrics.cost_trend}`}>
+        <Text span c={trendColor} data-testid={`cost-trend-${trend}`}>
           {' '}
           {trendArrow}
         </Text>
       )}
     </>
   );
+
+  const leadValue = vendorWithheld ? (
+    <Text size="sm" c="dimmed" data-testid="metric-lead-withheld">
+      {VENDOR_WITHHELD_TEXT}
+    </Text>
+  ) : metrics.lead_time_days == null ? (
+    '—'
+  ) : (
+    `${metrics.lead_time_days}d`
+  );
+
+  const costTooltip = vendorWithheld
+    ? `${costTooltipBase} — ${VENDOR_WITHHELD_TEXT}`
+    : `${costTooltipBase} — ${trend ? TREND_LABEL[trend] : TREND_LABEL.no_history}`;
 
   // What the scoring shrugged off to pick this supplier. The rule does not
   // punish a missing price (op-2rsp), so a supplier can win carrying one — and a
@@ -90,7 +121,7 @@ const InventoryMetricsRow: React.FC<InventoryMetricsRowProps> = ({ sku, metrics 
   // ``supplier_scored_without_history`` stays on the wire for API consumers, but
   // it is true for nearly every link, so a note carrying it here would say
   // nothing while crowding out the rarer message.
-  const showSupplierGap = metrics.supplier_scored_without_price;
+  const showSupplierGap = !vendorWithheld && metrics.supplier_scored_without_price;
 
   return (
     <Paper withBorder p="md" radius="md" data-testid="inventory-metrics-row">
@@ -135,14 +166,14 @@ const InventoryMetricsRow: React.FC<InventoryMetricsRowProps> = ({ sku, metrics 
         <MetricCell
           testId="metric-lead"
           label="Lead"
-          value={metrics.lead_time_days == null ? '—' : `${metrics.lead_time_days}d`}
-          tooltip="Lead time in days"
+          value={leadValue}
+          tooltip={vendorWithheld ? VENDOR_WITHHELD_TEXT : 'Lead time in days'}
         />
         <MetricCell
           testId="metric-cost"
           label={costLabel}
           value={costValue}
-          tooltip={`${costTooltipBase} — ${TREND_LABEL[metrics.cost_trend]}`}
+          tooltip={costTooltip}
         />
       </Group>
       {showSupplierGap && (

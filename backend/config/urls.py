@@ -3,9 +3,8 @@ URL configuration for makerspace inventory management system.
 """
 
 from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
 
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
@@ -18,6 +17,7 @@ from auth_views import (
     register_user,
 )
 from config.health import livez, readyz
+from config.protected_media import media_access_check, serve_media
 from electrical_circuits.urls import (
     asset_power_chain_urlpatterns as electrical_asset_power_chain_urls,
 )
@@ -41,6 +41,9 @@ urlpatterns = [
     path("api/auth/login/", login_user, name="login"),
     path("api/auth/logout/", logout_user, name="logout"),
     path("api/auth/refresh/", refresh_token, name="refresh"),
+    # nginx ``auth_request`` target for the vendor-paperwork media prefixes.
+    # Not a browsing endpoint — see ``config.protected_media``.
+    path("api/auth/media-access/", media_access_check, name="media-access-check"),
     path("api/auth/test-membership/", create_test_membership, name="test_membership"),
     path("api/auth/test-invite-code/", create_test_invite_code, name="test_invite_code"),
     # Passkey/WebAuthn endpoints
@@ -86,6 +89,17 @@ urlpatterns = [
     path("flower/", include("config.flower_urls")),
 ]
 
-# Serve media files during development
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Media. Registered UNCONDITIONALLY, not under ``if settings.DEBUG``: the
+# vendor prefixes in ``config.protected_media`` must be gated wherever
+# ``/media/`` is answered, and a rule that only exists in development is one
+# nothing in CI can exercise. In production nginx answers these paths first (and
+# applies the same prefix list via ``auth_request``), so this view is what runs
+# for the development server, the test client, and any deployment without the
+# nginx layer in front.
+urlpatterns += [
+    re_path(
+        r"^%s(?P<path>.*)$" % settings.MEDIA_URL.lstrip("/"),
+        serve_media,
+        name="media",
+    ),
+]

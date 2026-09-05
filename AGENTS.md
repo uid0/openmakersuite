@@ -749,15 +749,18 @@ authenticated caller's payload is unchanged. Absent rather than `null`, because
 rationale live in `docs/API_PERMISSION_MATRIX.md`'s
 `dashboard/inventory-summary/` row and the view's own docstring.
 
-**STILL OPEN, and deliberately untouched — the rest of the anonymous money
-surface.** In production `REST_FRAMEWORK.DEFAULT_PERMISSION_CLASSES` is
-`IsAuthenticatedOrReadOnly` (`config/settings.py`), so every viewset that does
-not override it serves anonymous GETs. Purchase orders, item and supplier
-costs, price history, asset purchase prices and maintenance estimates all reach
-a caller with no session; `reorders/analytics/transparency/` does so by design.
-The full derivation is in the `fm/oms-public-inventory-valuation` PR body.
-Queued as `oms-anonymous-read-posture` — a captain decision, not an
-implementation one. Do not narrow any of it without that decision.
+**DECIDED AND DONE — the rest of the anonymous vendor surface
+(`oms-anonymous-read-posture`).** This entry used to say the question was still
+open. The captain decided it: *"Vendor names should not be public, same with
+Vendor Pricing. They should always be behind user auth."* That covers vendor
+names, supplier SKUs, supplier UPCs, lead times, and every form of vendor money,
+on every surface. See "Vendor identity and vendor pricing are behind a login"
+below for what that means in code.
+
+In production `REST_FRAMEWORK.DEFAULT_PERMISSION_CLASSES` is still
+`IsAuthenticatedOrReadOnly` (`config/settings.py`), so a viewset that overrides
+neither it nor `get_permissions` STILL serves anonymous GETs. That default is
+unchanged and remains the thing to check first when adding a viewset.
 
 **FILED, APPROVED, NOT DONE — `log_usage`'s "no unit cost" warning. Recorded so
 the branch's "the derived set AND its deliberate exclusions both reported with
@@ -780,6 +783,99 @@ string and must move with it: the `log_usage` docstring (~:1199),
 `backend/inventory/tests/test_log_usage_charge.py`, which asserts it.
 APPROVED BY THE OPERATOR and deferred only because the phase that found it
 could not make functional changes — NOT declined.
+
+### Vendor identity and vendor pricing are behind a login (op-anonymous-read-posture)
+
+The captain's decision: vendor names and vendor pricing are always behind user
+auth. That covers vendor names, supplier SKUs, supplier UPCs, lead times, and
+every form of vendor money, on every surface. WHICH keys that is on each
+payload, which media prefixes are gated and what stays open with its reason are
+owned by [`docs/API_PERMISSION_MATRIX.md`](docs/API_PERMISSION_MATRIX.md); the
+branch's own evidence is in
+[`docs/oms-anonymous-read-posture-record.md`](docs/oms-anonymous-read-posture-record.md).
+What follows is only what a future session needs and cannot derive.
+
+`inventory.services.vendor_visibility` is the ONE answer to "may this caller see
+vendor data". It is the sibling of `supplier_selection` and `pack_size` and the
+same discipline: it decides WHO is asking; each serializer decides WHICH of its
+own keys are vendor facts, in its `VENDOR_ONLY_FIELDS`. It FAILS CLOSED, so a
+serializer built without `context` restricts rather than discloses — which means
+a view that hand-builds one MUST pass `self.get_serializer_context()`, and one
+that forgets silently withholds vendor data from a signed-in operator. That trap
+is live: `_annotate_metrics` was a `@staticmethod` and had to stop being one.
+
+Two shapes, and which a route gets is not a style choice: an endpoint whose
+every row IS vendor data is CLOSED OUTRIGHT; an endpoint the anonymous QR-scan
+flow or the public transparency page runs on keeps `AllowAny` and WITHHOLDS THE
+FIELDS — the same shape `dashboard/inventory-summary/` already uses for its
+valuation. Closing a scan-path endpoint is the wrong end of it: anonymous
+scanning is a designed feature, and anonymous scan-to-reorder and issue
+reporting are pinned end to end in
+`config/tests/test_anonymous_vendor_exposure.py`.
+
+**Keys are OMITTED, not nulled**, and the payload carries
+`vendor_data_withheld: true`. `null` already means "nothing on file" here
+(op-9m2v), so nulling would say something false about the item instead of
+something true about the reader. The cost lands on consumers: a guard spelled
+`=== null` does NOT catch the withheld case, and that is exactly how
+`item.unit_cost.toFixed(2)` came to run on `undefined` and blank the item page
+for a logged-out visitor. The web asks `utils/vendorVisibility` before rendering
+a vendor row. A CSV drops the vendor COLUMNS rather than emptying them, for the
+same reason the server drops the keys.
+
+**Where the line was drawn, so it is not redrawn by accident.** `total_value` is
+withheld because `current_stock` is public beside it. `quantity_per_package` /
+`case_size` are NOT: a pack size is a shelf fact, which is the call op-c1ke
+already made for `current_cases`, and anonymous reorder sizing depends on it.
+An ambiguous field falls closed — `ReorderRequest.order_number` is
+operator-typed free text that holds the vendor's reference as often as not,
+while `PurchaseOrder.po_number` is ours, with `supplier_order_number` beside it
+as the vendor's. The full exclusion list, each with its reason, is the matrix's.
+
+**The gate is a crawl, not a list.** `config/tests/test_anonymous_vendor_exposure.py`
+walks the live URL conf, issues real unauthenticated requests, and fails on any
+response carrying a seeded vendor sentinel — so a viewset added later, or one
+whose `get_permissions` quietly widens, fails there. It does NOT read
+`permission_classes`, and that is the point: a matrix that snapshots declared
+classes misreports every `get_permissions` override by construction, which is
+how a screen was once reported anonymously readable when it was not. The matrix
+resolves what is ENFORCED now and is evidence again, but confirm anything
+load-bearing with a request.
+
+**A `FileField` URL is answered by nginx, not Django.** No `permission_classes`
+change reaches `/media/`. `config.protected_media.VENDOR_MEDIA_PREFIXES` owns
+the list of prefixes that hold vendor paperwork; nginx gates each with
+`auth_request`, and the same list is enforced in Python for every deployment
+without nginx in front. That Python view is registered unconditionally, not
+under `if settings.DEBUG` — a rule that exists only in development is how the
+dev server and production came to disagree about who may read an invoice.
+
+**THE UNIT OF THAT DERIVATION IS AN UPLOAD FIELD, NOT A URL PREFIX**, and this
+is the part worth carrying forward. Answering "which prefixes have I already
+seen?" stops early; asking "where can a vendor document be STORED?" over every
+`upload_to` under `backend/` reaches the callable-valued fields a string-literal
+sweep cannot see and the roots fed by inbound mail, whose contents are whatever
+a vendor emailed in and cannot be narrowed by argument. Per this file's own
+"when a hand sweep misses TWICE, build the gate" rule, the classification is
+enforced rather than remembered:
+`backend/config/tests/test_upload_field_classification.py` walks the tree with
+the AST and fails on any `upload_to` that is neither gated nor carried in its
+`OPEN_PREFIXES` with a written reason. Add an upload field and that test tells
+you to classify it.
+
+**A CHECK THAT CANNOT FAIL IS WORSE THAN NO CHECK**, because it reads as
+evidence. Three shapes recur: checks that ASSERT NOTHING (a remedy present in a
+template no test reads), checks GUARDED ON SOMETHING ALWAYS TRUE (a
+`sys.modules` probe every DRF import satisfies), and checks that READ NOTHING (a
+crawl 404ing on an untyped router pk). Two habits catch all three and both are
+cheap: MUTATION-PROVE a new guard against the exact reversion it names —
+make the reversion, watch it fail, restore — and give every derived set an
+ANTI-VACUITY FLOOR, a floor on how much it reached (`statuses[200] >= 50`) or a
+known member it must contain (`inventory.SupplierAgreement.document`). This is
+not tidying: three of this branch's real disclosures were found only after a
+vacuous check was repaired, and the case histories, grouped by shape, are in the
+branch record. The lesson generalises: when a check comes back clean, ask what
+it could not have seen.
 
 ### oms-supplier-terms-write-path — the DERIVATION is closed; some surfaces are not
 

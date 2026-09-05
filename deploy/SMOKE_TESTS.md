@@ -190,7 +190,12 @@ curl -fsS -o /dev/null -w '%{http_code}\n' "$SCHEME://$HOST/media/"
   `collectstatic` didn't run or the static volume isn't mounted into the
   serving container.
 - **Pass (media):** any non-5xx response. A 5xx means the media PVC isn't
-  mounted (Pod will usually fail to start) or permissions are wrong.
+  mounted (Pod will usually fail to start) or permissions are wrong. Pick a
+  public upload (an item photo, a QR code) for the uploaded-file check: the
+  vendor-paperwork prefixes answer 403 without a session cookie by design, so a
+  403 there is a pass, not a mount failure. Which prefixes those are is owned by
+  [`../docs/API_PERMISSION_MATRIX.md`](../docs/API_PERMISSION_MATRIX.md) under
+  "Protected media".
 
 ## 8. Unauthenticated public makerspace workflow
 

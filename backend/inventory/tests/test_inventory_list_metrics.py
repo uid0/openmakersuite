@@ -56,6 +56,21 @@ METRICS_FIELDS = {
 }
 
 
+@pytest.fixture
+def metrics_reader(authenticated_client):
+    """A signed-in client for ``?with_metrics=1``.
+
+    The annotated row's vendor half (`lead_time_days`, `unit_cost`,
+    `cost_trend`, `last_po_unit_cost`, the two `supplier_scored_without_*`
+    flags) is withheld from a caller with no session
+    (op-anonymous-read-posture), so the tests asserting those values read as a
+    signed-in operator. The anonymous shape is pinned in
+    ``inventory/tests/test_inventory_metrics.py``.
+    """
+    client, _user = authenticated_client
+    return client
+
+
 def _list_url(*, with_metrics=False):
     url = reverse("inventoryitem-list")
     return f"{url}?with_metrics=1" if with_metrics else url
@@ -124,11 +139,11 @@ class TestListMetricsOptIn:
         assert results
         assert all("metrics" not in row for row in results)
 
-    def test_with_metrics_annotates_every_item_with_full_contract(self, api_client):
+    def test_with_metrics_annotates_every_item_with_full_contract(self, metrics_reader):
         InventoryItemFactory(image=None, current_stock=10, reorder_quantity=4)
         InventoryItemFactory(image=None, current_stock=7, reorder_quantity=2)
 
-        results = _results(api_client.get(_list_url(with_metrics=True)))
+        results = _results(metrics_reader.get(_list_url(with_metrics=True)))
 
         assert len(results) == 2
         for row in results:
@@ -218,7 +233,7 @@ class TestListMetricsValues:
         assert mb["quantity_committed"] == 0.0
         assert mb["committed_breakdown"] == []
 
-    def test_case_based_item_reports_case_cost_and_size(self, api_client):
+    def test_case_based_item_reports_case_cost_and_size(self, metrics_reader):
         item = InventoryItemFactory(
             image=None,
             reorder_quantity=1,
@@ -228,14 +243,14 @@ class TestListMetricsValues:
             quantity_per_package=12,
         )
 
-        results = _results(api_client.get(_list_url(with_metrics=True)))
+        results = _results(metrics_reader.get(_list_url(with_metrics=True)))
         metrics = _row_for(results, item)["metrics"]
 
         assert metrics["is_case_based"] is True
         assert metrics["case_size"] == 12
         assert Decimal(metrics["unit_cost"]) == Decimal("24.00")  # per-case cost
 
-    def test_list_metrics_match_detail_endpoint(self, api_client):
+    def test_list_metrics_match_detail_endpoint(self, metrics_reader):
         """The list annotation and the /metrics/ action share one implementation."""
         item = InventoryItemFactory(
             image=None, current_stock=12, reorder_quantity=3, unit_cost=Decimal("5.00")
@@ -247,17 +262,17 @@ class TestListMetricsValues:
             unit_cost_ordered=Decimal("4.0000"),
         )
 
-        results = _results(api_client.get(_list_url(with_metrics=True)))
+        results = _results(metrics_reader.get(_list_url(with_metrics=True)))
         list_metrics = _row_for(results, item)["metrics"]
-        detail_metrics = api_client.get(_detail_metrics_url(item)).json()
+        detail_metrics = metrics_reader.get(_detail_metrics_url(item)).json()
 
         assert list_metrics == detail_metrics
         assert list_metrics["cost_trend"] == "up"  # current 5.00 > last PO 4.00
 
 
-def _count_queries(api_client, url):
+def _count_queries(metrics_reader, url):
     with CaptureQueriesContext(connection) as ctx:
-        response = api_client.get(url)
+        response = metrics_reader.get(url)
         assert response.status_code == status.HTTP_200_OK
     return len(ctx.captured_queries)
 

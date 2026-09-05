@@ -656,7 +656,10 @@ const WorkOrderPage: React.FC = () => {
         setItemOptions(items.map((item) => ({ value: item.id, label: item.name })));
         setItemCosts(
           items.reduce<Record<string, number | null>>((acc, item) => {
-            acc[item.id] = item.unit_cost;
+            // `?? null`: this page is staff-or-SIG-admin, so a withheld price
+            // cannot reach it — and if it did, "unknown" is the honest reading
+            // for a material-cost prefill (op-anonymous-read-posture).
+            acc[item.id] = item.unit_cost ?? null;
             return acc;
           }, {}),
         );

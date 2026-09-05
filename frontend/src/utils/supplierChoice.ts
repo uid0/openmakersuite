@@ -13,22 +13,22 @@
  * in their own column. What a surface supplies is the label and the container;
  * every name, count and sentence about the choice comes from here.
  *
- * AUDIENCE lives here too, and is not the caller's to word. `/inventory/scan`,
- * `/inventory/items` and both kit routes are reachable logged out, and most of
- * what this field carries is addressed to whoever maintains the supplier links
- * — "your flagged primary supplier cannot be ordered from" means nothing to a
- * member who has no flagged primary and no way to order. So a caller decides
- * WHO is reading ({@link SupplierAudience}) and asks for that reader's wording
- * — {@link supplierChoiceNote} / {@link alternativeSupplierNamesText} for an
- * operator, {@link publicSupplierChoiceNote} / {@link anonymousAlternativesNote}
- * for a visitor — and renders what comes back. It never assembles, joins,
- * counts or trims the wording itself.
+ * EVERYTHING HERE IS NOW OPERATOR WORDING, and that changed under this module's
+ * feet rather than inside it. `/inventory/scan`, `/inventory/items` and the kit
+ * detail route are still reachable logged out, but the server no longer sends
+ * `supplier_choice` to a caller with no session — it is in
+ * `InventoryItemSerializer.VENDOR_ONLY_FIELDS` (op-anonymous-read-posture) — so
+ * every function below answers null for an anonymous payload because the field
+ * is absent, not because a branch here decides so. That is why the two
+ * anonymous-audience wordings this module used to carry are gone: they could
+ * only ever have rendered for a reader the server had already decided must not
+ * see a vendor's name.
  *
- * What each audience is granted is a decision this module records, not one it
- * makes: an operator gets the alternatives BY NAME; an anonymous visitor gets
- * a count on the item detail page and NOTHING about the alternatives anywhere
- * else, because widening anonymous disclosure is the requester's to authorise.
- * A surface that wants a count therefore has to ask for one by name.
+ * {@link SupplierAudience} therefore survives for the CSV export alone, which
+ * is a pure function that cannot look at a payload's marker for itself; its
+ * caller reads `utils/vendorVisibility.vendorDataWithheld` off the rows and
+ * passes the answer in. A surface with the rows in hand asks that module
+ * directly and never re-derives an audience here.
  *
  * The reason a shared reading is needed at all: the flat `item.supplier_name`
  * key these surfaces used to render is the same winner with the derivation
@@ -41,12 +41,11 @@
 import { SupplierChoice } from '../types';
 
 /**
- * Who is reading a surface, which decides which wording it may render.
+ * Who is reading a surface, which decides which COLUMNS an export may carry.
  *
- * The caller resolves this — a route component from `isAuthenticated()`, a pure
- * function such as the CSV export from its own caller — and passes it in. This
- * module never reads auth state, and nothing that takes an audience may guess
- * one by defaulting.
+ * The caller resolves this from the payload — `vendorDataWithheld` off the rows
+ * being exported — and passes it in. This module never reads auth state, and
+ * nothing that takes an audience may guess one by defaulting.
  */
 export type SupplierAudience = 'operator' | 'anonymous';
 
@@ -63,20 +62,6 @@ export const SUPPLIER_CHOICE_UNKNOWN = 'Supplier information was not included in
 const NO_SUPPLIER_TEXT: Record<string, string> = {
   no_suppliers: 'No supplier is linked to this item.',
   none_orderable: 'No supplier here can be ordered from — every link is inactive or discontinued.',
-};
-
-/**
- * The same two facts for a visitor who is not signed in.
- *
- * Still two distinct answers, because "we never recorded where this comes from"
- * and "we did, and none of it can be bought right now" are different things to
- * be told. What is dropped is the LINK STATE: an anonymous reader learns that
- * the item cannot be ordered, not how many vendors exist or why each was
- * rejected. Naming no vendor and describing no link is the whole difference.
- */
-const PUBLIC_NO_SUPPLIER_TEXT: Record<string, string> = {
-  no_suppliers: 'No supplier is listed for this item.',
-  none_orderable: 'This item cannot currently be ordered.',
 };
 
 /**
@@ -133,39 +118,17 @@ export const alternativeSupplierNames = (choice: SupplierChoice | undefined): st
  * The other suppliers as one readable run of names — "Beta Parts, Gamma
  * Wholesale" — or null where there were none.
  *
- * FOR OPERATORS. Null rather than an empty string so a caller renders nothing
- * at all instead of a dangling "also available from"; the caller supplies that
- * lead-in and the markup around it, and never the joining or the emptiness
- * test, which is how the same list came to be joined three different ways.
+ * Null rather than an empty string so a caller renders nothing at all instead
+ * of a dangling "also available from"; the caller supplies that lead-in and the
+ * markup around it, and never the joining or the emptiness test, which is how
+ * the same list came to be joined three different ways.
  *
- * A public surface asks {@link anonymousAlternativesNote} instead, and gets a
- * count or nothing — never these names.
+ * There is no public counterpart: an anonymous payload carries no
+ * `supplier_choice`, so this answers null for one without a branch.
  */
 export const alternativeSupplierNamesText = (choice: SupplierChoice | undefined): string | null => {
   const names = alternativeSupplierNames(choice);
   return names.length === 0 ? null : names.join(', ');
-};
-
-/**
- * How many OTHER suppliers stock this item, in words — "2 other suppliers also
- * stock this item." — or null where there were none.
- *
- * FOR A VISITOR WHO IS NOT SIGNED IN, and granted on ONE surface: the item
- * detail page. It says there were others without saying who, which is the
- * furthest anonymous disclosure has been authorised. The scan page is not
- * granted it — a logged-out scanner sees the chosen name, the lead time and
- * the price, exactly what they saw before `supplier_choice` existed, and no
- * indication that any other vendor exists.
- *
- * It lives here, rather than in the page, because it was written twice and the
- * two copies had already drifted apart by a full stop.
- */
-export const anonymousAlternativesNote = (choice: SupplierChoice | undefined): string | null => {
-  const others = alternativeSupplierNames(choice).length;
-  if (others === 0) return null;
-  return others === 1
-    ? '1 other supplier also stocks this item.'
-    : `${others} other suppliers also stock this item.`;
 };
 
 /**
@@ -201,10 +164,15 @@ export const supplierChoiceCaveats = (choice: SupplierChoice | undefined): strin
  * One line covering whichever of the three states this item is in: no field on
  * the wire, no supplier to buy from, or a supplier with caveats.
  *
- * FOR OPERATORS — a signed-in surface. Returns null for the uneventful case (a
- * supplier was chosen and nothing qualifies it) so a caller can render nothing
- * at all rather than noise. A public surface asks
- * {@link publicSupplierChoiceNote} instead.
+ * Returns null for the uneventful case (a supplier was chosen and nothing
+ * qualifies it) so a caller can render nothing at all rather than noise.
+ *
+ * The three caveats report on the DERIVATION and are addressed to whoever
+ * maintains the supplier links, which is why there is no anonymous counterpart
+ * — and why callers on public routes ask this only when signed in. Given an
+ * anonymous payload it answers `SUPPLIER_CHOICE_UNKNOWN`, diagnostic copy about
+ * the response rather than a fact about the item, which is not what a scanner
+ * should be shown.
  */
 export const supplierChoiceNote = (choice: SupplierChoice | undefined): string | null => {
   if (!choice) return SUPPLIER_CHOICE_UNKNOWN;
@@ -216,25 +184,4 @@ export const supplierChoiceNote = (choice: SupplierChoice | undefined): string |
   }
   const caveats = supplierChoiceCaveats(choice);
   return caveats.length === 0 ? null : caveats.join('; ');
-};
-
-/**
- * The same line for a visitor who is not signed in — the no-supplier fact only.
- *
- * Null wherever a supplier WAS chosen, however it was chosen: the three
- * caveats report on the derivation and are addressed to whoever maintains the
- * links, so an anonymous reader gets the chosen name, the lead time and the
- * price exactly as they did before, and nothing about how that name was
- * reached. Null too when the field never arrived — "not included in this
- * response" is diagnostic copy about the payload, not a fact about the item.
- *
- * NOT null when there is nothing to buy from, which is the one half a member
- * can act on. An absent row there would make "we cannot get you this" look
- * like an ordinary item; stating the absence is the same discipline the rest
- * of this module keeps.
- */
-export const publicSupplierChoiceNote = (choice: SupplierChoice | undefined): string | null => {
-  if (!choice || chosenSupplierName(choice) !== null) return null;
-  const reason = choice.reason ?? null;
-  return reason === null ? null : (PUBLIC_NO_SUPPLIER_TEXT[reason] ?? null);
 };

@@ -118,8 +118,9 @@ const baseItem = {
   last_counted_at: null,
   days_since_last_count: null,
   suppliers: [] as ReturnType<typeof supplierLink>[],
-  // Which link the API says to buy through, and why (op-3xsp). Named apart
-  // from `supplier_name` above on purpose: the anonymous block reads this one.
+  // Which link the API says to buy through, and why (op-3xsp). Present on a
+  // SIGNED-IN payload only — `anonymousItem` below strips it, which is what the
+  // server does (op-anonymous-read-posture).
   supplier_choice: {
     item_supplier_id: 1,
     supplier_name: 'Derived Supply Co.',
@@ -156,8 +157,8 @@ describe('InventoryItemDetailPage — suppliers card', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     // The card is signed-in only: this route is not behind RequireAuth, and a
-    // logged-out visitor keeps the single legacy supplier name they saw before
-    // it existed. The JWT in localStorage is the app's auth signal.
+    // logged-out visitor gets a payload the server has already stripped of
+    // every vendor key. The JWT in localStorage is the app's auth signal.
     localStorage.setItem('token', 'test-access-token');
     (api.inventoryAPI.getItemMetrics as jest.Mock).mockResolvedValue({ data: null });
     (api.inventoryAPI.getUsageLogs as jest.Mock).mockResolvedValue({ data: { results: [] } });
@@ -233,114 +234,82 @@ describe('InventoryItemDetailPage — suppliers card', () => {
     expect(screen.queryByText('Legacy Accessor Co.')).not.toBeInTheDocument();
   });
 
-  it('shows a logged-out visitor one supplier name and no suppliers card', async () => {
-    // `/inventory/items/:id` is not behind RequireAuth, so an anonymous visitor
-    // reaches this page. They still see ONE name and not the sourcing table —
-    // widening that is deliberately out of scope here (op-3xsp).
-    localStorage.removeItem('token');
-    renderWith([
-      supplierLink({ id: 1, supplier_name: 'Acme Supplies', is_primary: true }),
-      supplierLink({ id: 2, supplier_name: 'Beta Parts' }),
-    ]);
+  /**
+   * A LOGGED-OUT VISITOR NOW GETS NO VENDOR NAME AT ALL
+   * (op-anonymous-read-posture).
+   *
+   * There used to be six cases here pinning an anonymous-only block that named
+   * ONE supplier off `item.supplier_choice` (op-3xsp), each feeding a mock
+   * payload that carried that key. The captain put vendor identity behind a
+   * login, `supplier_choice` is in `InventoryItemSerializer.VENDOR_ONLY_FIELDS`,
+   * and an anonymous payload no longer carries it — so those mocks asserted a
+   * payload shape the server had stopped producing, and the block they exercised
+   * could only ever have rendered for a caller the server had already decided
+   * must not see a vendor's name.
+   *
+   * `anonymousItem` is what the server actually sends now: the vendor keys are
+   * ABSENT, not null, with `vendor_data_withheld: true` in their place.
+   */
+  const anonymousItem = () => {
+    const item: Record<string, unknown> = { ...baseItem, vendor_data_withheld: true };
+    for (const key of [
+      'supplier_choice',
+      'supplier_name',
+      'supplier_sku',
+      'supplier_url',
+      'unit_cost',
+      'average_lead_time',
+      'total_value',
+      'suppliers',
+    ]) {
+      delete item[key];
+    }
+    return item;
+  };
 
-    await waitFor(() =>
-      expect(screen.getByTestId('anonymous-supplier-block')).toBeInTheDocument()
+  it('names no supplier anywhere for a logged-out visitor', async () => {
+    localStorage.removeItem('token');
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({ data: anonymousItem() });
+    render(
+      <MantineProvider>
+        <NotificationProvider>
+          <MemoryRouter initialEntries={['/inventory/items/test-id']}>
+            <Routes>
+              <Route path="/inventory/items/:id" element={<InventoryItemDetailPage />} />
+            </Routes>
+          </MemoryRouter>
+        </NotificationProvider>
+      </MantineProvider>
     );
 
+    await waitFor(() => expect(screen.getByText('Test Item')).toBeInTheDocument());
+
+    expect(screen.queryByTestId('anonymous-supplier-block')).not.toBeInTheDocument();
     expect(screen.queryByTestId('item-suppliers-card')).not.toBeInTheDocument();
-    expect(screen.queryByText('Acme Supplies')).not.toBeInTheDocument();
-    expect(screen.queryByText('Beta Parts')).not.toBeInTheDocument();
-  });
-
-  it('BEFORE/AFTER: the anonymous block names the derived supplier, not the legacy key', async () => {
-    localStorage.removeItem('token');
-    renderWith([supplierLink({ id: 1, supplier_name: 'Acme Supplies', is_primary: true })]);
-
-    await waitFor(() =>
-      expect(screen.getByTestId('anonymous-supplier-block')).toBeInTheDocument()
-    );
-
-    expect(screen.getByTestId('anonymous-supplier-block')).toHaveTextContent(
-      'Derived Supply Co.'
-    );
+    expect(screen.queryByText('Derived Supply Co.')).not.toBeInTheDocument();
     expect(screen.queryByText('Legacy Accessor Co.')).not.toBeInTheDocument();
+    expect(screen.queryByText('We order this from')).not.toBeInTheDocument();
   });
 
-  /**
-   * "Primary Supplier" was a claim the derivation does not make: a primary is a
-   * GATE an operator sets, most items have none, and the name under that
-   * heading was usually the winner of a price/lead-time/delivery score being
-   * labelled as somebody's standing decision.
-   */
-  it('BEFORE/AFTER: does not label a scored pick as the operator’s "Primary Supplier"', async () => {
+  it('says the price was withheld rather than that none is recorded', async () => {
+    // The two are different facts, and '-' / "no price on file" would state the
+    // one about the ITEM where the truth is about the READER.
     localStorage.removeItem('token');
-    renderWith([supplierLink({ id: 1, supplier_name: 'Acme Supplies', is_primary: false })]);
-
-    await waitFor(() =>
-      expect(screen.getByTestId('anonymous-supplier-block')).toBeInTheDocument()
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({ data: anonymousItem() });
+    render(
+      <MantineProvider>
+        <NotificationProvider>
+          <MemoryRouter initialEntries={['/inventory/items/test-id']}>
+            <Routes>
+              <Route path="/inventory/items/:id" element={<InventoryItemDetailPage />} />
+            </Routes>
+          </MemoryRouter>
+        </NotificationProvider>
+      </MantineProvider>
     );
 
-    expect(screen.queryByText('Primary Supplier')).not.toBeInTheDocument();
-    expect(screen.getByText('We order this from')).toBeInTheDocument();
-  });
-
-  it('BEFORE/AFTER: tells an anonymous visitor there ARE others, without naming them', async () => {
-    localStorage.removeItem('token');
-    renderWith([supplierLink({ id: 1, supplier_name: 'Acme Supplies' })], {
-      supplier_choice: {
-        ...baseItem.supplier_choice,
-        alternatives: [
-          { id: 2, supplier_name: 'Beta Parts' },
-          { id: 3, supplier_name: 'Gamma Wholesale' },
-        ],
-      },
-    });
-
-    await waitFor(() =>
-      expect(screen.getByTestId('anonymous-supplier-alternatives')).toBeInTheDocument()
-    );
-
-    expect(screen.getByTestId('anonymous-supplier-alternatives')).toHaveTextContent(
-      '2 other suppliers also stock this item.'
-    );
-    // The count, and NOT the names: the sourcing table stays behind the login.
-    expect(screen.queryByText('Beta Parts')).not.toBeInTheDocument();
-    expect(screen.queryByText('Gamma Wholesale')).not.toBeInTheDocument();
-  });
-
-  /**
-   * This route is public, so a payload shape the page did not expect blanks the
-   * block for the very visitors it exists to serve. `supplier_choice` without
-   * an `alternatives` array threw before the guard — the same shape the shared
-   * reader in `utils/supplierChoice.ts` already tolerates.
-   */
-  it('still names the supplier when the choice carries no alternatives array', async () => {
-    localStorage.removeItem('token');
-    const choiceWithoutAlternatives = { ...baseItem.supplier_choice };
-    delete (choiceWithoutAlternatives as { alternatives?: unknown }).alternatives;
-    renderWith([supplierLink({ id: 1, supplier_name: 'Acme Supplies' })], {
-      supplier_choice: choiceWithoutAlternatives,
-    });
-
-    await waitFor(() =>
-      expect(screen.getByTestId('anonymous-supplier-block')).toBeInTheDocument()
-    );
-
-    expect(screen.getByTestId('anonymous-supplier-block')).toHaveTextContent(
-      'Derived Supply Co.'
-    );
-    expect(screen.queryByTestId('anonymous-supplier-alternatives')).not.toBeInTheDocument();
-  });
-
-  it('CONTROL: a sole supplier gets no "others" line', async () => {
-    localStorage.removeItem('token');
-    renderWith([supplierLink({ id: 1, supplier_name: 'Acme Supplies' })]);
-
-    await waitFor(() =>
-      expect(screen.getByTestId('anonymous-supplier-block')).toBeInTheDocument()
-    );
-
-    expect(screen.queryByTestId('anonymous-supplier-alternatives')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('unit-cost-withheld')).toBeInTheDocument());
+    expect(screen.queryByText('no price on file')).not.toBeInTheDocument();
   });
 
   it('shows a signed-in visitor the suppliers card instead of the legacy line', async () => {

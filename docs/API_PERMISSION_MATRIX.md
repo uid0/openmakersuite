@@ -50,6 +50,32 @@ The Markdown table below is the human-readable contract. Each row should
 match the YAML; when they disagree, the YAML wins and this document is
 fixed in the same PR.
 
+#### The snapshot records what is ENFORCED, not what is declared (op-anonymous-read-posture)
+
+Until this branch, `introspect_endpoints` read `view.permission_classes` and
+nothing else. For a view overriding `get_permissions` that is not an incomplete
+answer, it is the WRONG one: 103 `(view, action)` entries were recorded with a
+different class from the one the server applies, and several with the opposite
+meaning — `PurchaseOrderViewSet#list` said `IsAuthenticatedOrReadOnly` while
+`get_permissions` returned `AllowAny`, and `InventoryItemViewSet#list` said the
+settings default while it returned `AllowAny`. A permission document that
+misstates permissions is worse than none, and this one was cited as evidence
+that a screen was anonymously readable when it was not.
+
+`_perm_names` now resolves the real answer: it instantiates the view, sets the
+action, applies any `@action(permission_classes=[...])` the way DRF applies
+route `initkwargs`, and calls `get_permissions()`. Applying the action override
+first is load-bearing — without it the resolution reports the class default for
+every decorated action and would record the public `analytics/transparency/`
+feed as `IsAuthenticated`. A `get_permissions` that needs something absent from
+a bare instance raises, and the entry falls back to the declared classes with an
+explicit `(unresolved)` marker rather than a guess.
+
+`config/tests/test_permission_matrix.py::test_the_matrix_records_what_is_enforced_not_what_is_declared`
+pins six of those rows against BOTH the snapshot and a live unauthenticated
+request, so this document cannot drift back into describing something the server
+does not do.
+
 ## Health and infrastructure
 
 | Method | Path | Class | Purpose | Abuse Control |
@@ -67,7 +93,8 @@ fixed in the same PR.
 | POST | `auth/register/` | public | New user signup. **Abuse control:** required (account creation throttle). |
 | POST | `auth/login/` | public | Issues session/token. **Abuse control:** required (login attempt throttle). |
 | POST | `auth/logout/` | public | Destroys the Django session; safe no-op for anonymous callers. |
-| POST | `auth/refresh/` | public | Refresh access token using a refresh token. **Abuse control:** required (refresh throttle). |
+| POST | `auth/refresh/` | public | Refresh access token using a refresh token. Also slides the expiry of a Django session the caller already presents for that same user — never mints one from a bearer token — because the `/media/` gate runs on that cookie and it would otherwise lapse under a still-valid JWT (see "Protected media"). A failed slide does not fail the refresh. **Abuse control:** required (refresh throttle). |
+| GET | `auth/media-access/` | member | nginx `auth_request` target for the gated `/media/` prefixes, not a browsing endpoint: 204 for a caller with a session, 403 otherwise, `never_cache`. A plain Django view, so it carries no `permission_classes` and does not appear in the YAML snapshot. See "Protected media" below. |
 | POST | `auth/test-membership/` | public (DEBUG only) | Test fixture used by E2E suites. The view is `AllowAny` but returns 403 unless `settings.DEBUG` is true; production deployments MUST set `DEBUG=False`. |
 | POST | `auth/test-invite-code/` | public (DEBUG only) | Test fixture used by mobile invite-redeem E2E. Mints an open `InviteCode` so Playwright can drive the full public redeem path. Returns 403 unless `settings.DEBUG` is true. |
 | any | `auth/passkey/...` | public/member | Passkey (WebAuthn) registration and assertion flows. **Abuse control:** required on registration; assertion is signed. |
@@ -79,12 +106,33 @@ endpoints. Generic CRUD on items, locations, suppliers, and assets is
 member/staff/admin; only the explicit scan and public-report actions
 below are public.
 
+**Vendor identity and vendor pricing are behind a login, everywhere
+(op-anonymous-read-posture).** The captain's decision — "Vendor names should not
+be public, same with Vendor Pricing" — covers vendor names, supplier SKUs,
+supplier UPCs, lead times, and every form of vendor money, on every surface. Two
+shapes implement it, and which shape a route gets is not a style choice:
+
+* an endpoint whose every row IS vendor data is closed outright —
+  `inventory/suppliers/`, `inventory/supplier-agreements/`,
+  `inventory/item-suppliers/`, `inventory/price-history/` and
+  `reorders/purchase-orders/`, all now `IsAuthenticated` for reads too;
+* an endpoint that must stay publicly reachable because the anonymous QR-scan
+  flow runs on it keeps its `AllowAny` and withholds the vendor FIELDS —
+  `inventory/items/` and its `metrics`/`kits`/`download_card` actions, and
+  `reorders/analytics/transparency/`. See "Field-level withholding: the vendor
+  block" below.
+
+Vendor paperwork under `/media/` is closed at the web server, not in Django —
+see "Protected media" at the end of this document.
+
 | Method | Path | Class | Purpose | Abuse Control |
 | --- | --- | --- | --- | --- |
 | POST | `inventory/items/<id>/scan/` | public | Increment scan count when a member scans a QR code. | Required: per-IP throttle + duplicate-submit dedupe. |
 | GET  | `inventory/items/<id>/public/` | public | Public read of scannable item fields (no cost/supplier data). | Not required (read). |
-| GET  | `inventory/items/<id>/kits/` | public | Kits that supply this component — reorder-triage context shown beside stock (op-8n0). Read-only, informational: it never creates an order. | Not required (read). |
-| GET  | `inventory/items/<id>/metrics/` | public | Computed stock + cost metrics row (QOH/QOO/QA/QC/QIT/RP/Lead/Cost + trend). Mirrors `retrieve`'s exposure — includes cost. | Not required (read). |
+| POST | `inventory/items/<id>/log_usage/` | public (vendor block withheld) | `AllowAny` — recording that you took something off a shelf is the other half of the QR-scan flow. The reply is a `UsageLogSerializer` row, and that serializer is `fields = "__all__"`, so it carried `unit_cost` (the primary supplier's price, snapshotted at consume time) and `total_cost` (that times the quantity — publishing either reconstructs the other). Both withheld from a caller with no session; the consumption record, the stock movement and the `warning` are unchanged. The SAME serializer is nested on the item payload as `recent_usage`, which `retrieve` serves anonymously, so the gate is on the serializer rather than on either path. |
+| GET  | `inventory/items/<id>/download_card/` | public (vendor block withheld) | Avery 5388 index-card PDF. **Anonymous:** the `Avg Lead` / `Max Lead` lines are omitted — a lead time is vendor data the captain's decision names, and a printed card cannot be recalled. The QR code, name, SKU, location and reorder point are unchanged for everyone. `IndexCardRenderer(include_vendor_data=...)` defaults to False, so an operator surface that should print them says so. The same gate covers `inventory/fixtures/<id>/download_card/`, which renders the refill item through the same renderer. | Not required (read). |
+| GET  | `inventory/items/<id>/kits/` | public (vendor block withheld) | Kits that supply this component — reorder-triage context shown beside stock (op-8n0). Read-only, informational: it never creates an order. **Anonymous:** `supplier_name`, `supplier_sku` and `unit_cost` are ABSENT with `"vendor_data_withheld": true`; which kit, how many it contains and whether it is stocked all remain. | Not required (read). |
+| GET  | `inventory/items/<id>/metrics/` | public (vendor block withheld) | Computed stock metrics row (QOH/QOO/QA/QC/QIT/RP + case shape). Mirrors `retrieve`'s exposure. **Anonymous:** `lead_time_days`, `unit_cost`, `cost_trend`, `last_po_unit_cost` and the two `supplier_scored_without_*` flags are ABSENT, replaced by `"vendor_data_withheld": true`. `case_size` and `is_case_based` stay — a pack size is a shelf fact, not a vendor one (op-c1ke), and the public `current_cases` already depends on it. **Authenticated:** unchanged, which is why the pinned ScanTTY contract survives. | Not required (read). |
 | GET  | `inventory/items/by-qr/<qr>/` | public | Resolve a QR code to a public item view. | Not required (read). |
 | POST | `inventory/items/<id>/report-need/` | public | Member reports the bin needs restocking. | Required: per-IP throttle + dedupe per (item, day). |
 | POST | `inventory/items/<id>/report-problem/` | public | Member reports a problem with the item. | Required: per-IP throttle + dedupe per (item, day). |
@@ -93,7 +141,7 @@ below are public.
 | POST | `inventory/work-orders/<id>/upload/` | public | Upload a completed paper work-order PDF for ingest. | Required: PDF is signed by AcroForm field; rate-limit per-IP. |
 | GET  | `inventory/health/` | public | Inventory app health summary. | Not required. |
 | any  | `inventory/kits/...` (CRUD) | member-rw | `IsAuthenticatedOrReadOnly` — kit SKUs are a facade over the `is_kit=True` slice of `InventoryItem` (op-8n0), so they read as publicly as the items they contain and write requires login. The bill of materials is nested-writable on the kit; there is deliberately no `kit-components/` route. |
-| any  | `inventory/items/...` (CRUD) | member-rw | No class-level `permission_classes`; `InventoryItemViewSet.get_permissions` returns `AllowAny` for the public actions (`list`, `retrieve`, `metrics`, `low_stock` and the rest of that list) and `IsAuthenticated` for everything else — so list/retrieve are open to anonymous callers and write requires login. The YAML snapshots the declared attribute and so records the settings default for these actions; `get_permissions` is what governs. Staff-level gating is enforced inside `perform_create/_update/_destroy` via `_check_staff()`. |
+| any  | `inventory/items/...` (CRUD) | public read (vendor block withheld) / member write | No class-level `permission_classes`; `InventoryItemViewSet.get_permissions` returns `AllowAny` for the public actions (`list`, `retrieve`, `metrics`, `low_stock` and the rest of that list) and `IsAuthenticated` for everything else — so list/retrieve are open to anonymous callers and write requires login. The YAML now records that resolved answer rather than the declared attribute (see "Drift detection"). The endpoint STAYS open because anonymous QR scanning runs on it; what an anonymous caller no longer gets is the vendor block — see "Field-level withholding: the vendor block". Staff-level gating is enforced inside `perform_create/_update/_destroy` via `_check_staff()`. |
 | GET  | `inventory/items/<id>/stock_history/` | member | `IsAuthenticated` on `stock_history` (op-izy5) — weekly `StockLevelSnapshot` series plus reorder-request and cycle-count (`StockReconciliation`) event overlays and the reorder-point/desired thresholds, powering the item Stock-History chart. Auth-required (unlike the public `metrics`/`retrieve` reads) because it surfaces reorder + reconciliation history. | Not required (read). |
 | POST | `inventory/items/<id>/pack-container/` | member | `IsAuthenticated` on `pack_container` (op-ev14) — the two container moves of an `open_closed` item: `{"transition": "open"}` breaks into a sealed pack (stock down one pack's base units, open tally up one, a `UsageLog` written) and `{"transition": "finish"}` retires the emptied one (open tally down one, stock untouched). Auth-required rather than following the public `log_usage` path, since it is a new capability and `log_usage` remains the anonymous way to record consumption. 400 for a non-`open_closed` item, no sealed pack left, or no open pack. | Not required (mutates one item's own stock; no cross-item effects). |
 | GET  | `inventory/items/<id>/purchase_history/` | member | `IsAuthenticated` on `purchase_history` (op-96uo) — the item's order + receipt provenance: one `order_costs` row per `PurchaseOrderItem` (unit cost the order was placed at) and one `deliveries` row per `DeliveryItem` (tracking number, carrier, quantity, receipt notes). Auth-required (unlike the public `metrics`/`retrieve` reads) because it surfaces supplier pricing and shipment history. | Not required (read). |
@@ -102,7 +150,10 @@ below are public.
 | POST/DELETE | `inventory/work-orders/<id>/materials/` + `…/materials/<usage_id>/` | staff-or-sig-admin | `add_material` / `remove_material` (op-768w) inherit the viewset gate, same as the sibling `materials/<usage_id>/toggle/`. They record the materials **actually** used or bought — real `unit_cost` and an optional `receipt_image` for out-of-pocket buys — so they carry purchasing-sensitive data and are deliberately not loosened to plain `IsAuthenticated`. `remove_material` deletes ad-hoc lines only, and never one with a live stock decrement. |
 | POST/PATCH/DELETE | `inventory/work-orders/<id>/tools/` + `…/tools/<tool_id>/` | staff-or-sig-admin | `add_tool` / `tool_detail` (op-0v4) inherit the viewset gate, exactly as the sibling material actions do. They edit the job's own tool list — `POST` adds an ad-hoc tool (the only kind a corrective work order can have), `PATCH` restages any row for this job by setting `location_hint`, `DELETE` removes ad-hoc rows only. Not loosened to plain `IsAuthenticated`: the list is what a tech gathers from, so rewriting it is a write on the work order like any other. Tools are never consumed, so unlike materials these carry no stock, cost or purchase-order effect. |
 | any  | `inventory/work-order-attachments/...` (CRUD, `?work_order=`, `?kind=`) | member / staff-or-sig-admin | `IsAuthenticatedOrStaffSigAdminWrite` on `WorkOrderAttachmentViewSet` (op-7pjj) — the standard work order's generic attachments list (multipart upload of photos/documents hung off one WO). Read follows the parent `WorkOrderViewSet` so a volunteer who can see a work order can open its paperwork; upload and delete stay staff / Logistics / SIG-admin. The third-party equivalent is read-gated instead (`IsStaffOrSigAdmin`), because third-party WOs are hidden from volunteers entirely (gh #374). |
-| any  | `inventory/supplier-agreements/...` (CRUD, `?supplier=`, `?is_active=`) | member-rw | `IsAuthenticatedOrReadOnly` on `SupplierAgreementViewSet` (op-yoos) — mirrors `SupplierViewSet`, since a purchase/pricing agreement is supplier reference data. Holds a name, terms notes and an optional uploaded document; a purchase order points at the agreement it was placed under. Reads are open like the rest of the supplier catalog; create/update/delete need login. |
+| any  | `inventory/suppliers/...` (CRUD + `analytics/`) | member | `IsAuthenticated` on `SupplierViewSet` (op-anonymous-read-posture, was `IsAuthenticatedOrReadOnly`). Every row is a vendor's identity — name, website, account number — and `SupplierDetailSerializer` nests that vendor's per-item SKUs, UPCs, costs and lead times. There is no non-vendor half to keep public, so reads are closed outright rather than field-filtered. |
+| any  | `inventory/item-suppliers/...` (CRUD + `price_history/`, `mark_discontinued/`) | member | `IsAuthenticated` on `ItemSupplierViewSet` (op-anonymous-read-posture, was `IsAuthenticatedOrReadOnly`). A row here IS the vendor relationship: who, their part number, both UPCs, their price and their lead time. |
+| any  | `inventory/price-history/...` (+ `recent_changes/`) | member | `IsAuthenticated` on `PriceHistoryViewSet` (op-anonymous-read-posture, was `IsAuthenticatedOrReadOnly`). Price history is vendor money by definition. |
+| any  | `inventory/supplier-agreements/...` (CRUD, `?supplier=`, `?is_active=`) | member | `IsAuthenticated` on `SupplierAgreementViewSet` (op-yoos; closed by op-anonymous-read-posture, was `IsAuthenticatedOrReadOnly`) — mirrors `SupplierViewSet`, since a purchase/pricing agreement is supplier reference data. Holds a name, terms notes and an optional uploaded document; a purchase order points at the agreement it was placed under. The agreement's `document` FileField is served by nginx, not DRF, and is closed separately — see "Protected media". |
 | any  | `inventory/maintenance-*` (CRUD) | member-rw | `IsAuthenticated` for log/task/dashboard; `IsAuthenticatedOrReadOnly` for the material and tool catalogs. |
 | GET  | `inventory/assets/<id>/maintenance-history/` | member | `IsAuthenticated` — unified per-asset history (backdated `MaintenanceRecord` rows + closed third-party work orders) with `since`/`until`/`source` filters. |
 | any  | `inventory/maintenance-records/...` (CRUD) | staff-or-sig-admin | `IsAuthenticatedOrStaffSigAdminWrite` — anyone authenticated can read; staff and SIG leaders can create/update; staff-only delete. |
@@ -142,16 +193,55 @@ built without context serves the narrow form. A view that hand-builds
 silently hands an operator the anonymous view — a real defect fixed in
 `reorder_queue/views.py` when this field shipped.
 
-**Every other anonymous protection around supplier attribution is CLIENT-SIDE
-ONLY.** The React gates on the item, scan and kit pages narrow what a visitor is
-handed, not what a client can fetch: `InventoryItemViewSet.get_permissions`
-returns `AllowAny` for `list`/`retrieve` (the class default snapshotted in the
-YAML never governs those reads) and `KitViewSet` is `IsAuthenticatedOrReadOnly`,
-so both serve reads to anonymous callers, and `suppliers[]` on the same payload
-still carries every vendor name, SKU, UPC, cost and lead time to an
-unauthenticated caller. That posture predates op-3xsp, is documented in-code at
-`InventoryItemDetailPage.tsx` as a deliberately partial gate, and is not closed
-here. Do not describe those browser gates as if they protected data.
+**That paragraph used to end by saying the browser gates were the only
+protection, and it was right: `suppliers[]` on the same payload carried every
+vendor name, SKU, UPC, cost and lead time to an unauthenticated caller. That is
+closed (op-anonymous-read-posture) — see the next section.**
+
+### Field-level withholding: the vendor block (op-anonymous-read-posture)
+
+`InventoryItemViewSet` and `KitViewSet` still serve reads to anonymous callers,
+because the anonymous QR-scan flow runs on them and closing the endpoint would
+break the feature the printed shelf codes exist for. So the gate is on the
+FIELDS, the same shape `dashboard/inventory-summary/` already uses for its
+valuation.
+
+`inventory.services.vendor_visibility` is the ONE answer to "may this caller see
+vendor data" — it answers WHO is asking, and fails closed for a serializer built
+without `context`. Each serializer declares WHICH of its own keys are vendor
+facts in `VENDOR_ONLY_FIELDS`:
+
+| Serializer | Withheld from an anonymous caller |
+| --- | --- |
+| `InventoryItemSerializer` (items, kits, and nested `item_details`) | `supplier_name`, `supplier_sku`, `supplier_url`, `unit_cost`, `package_cost`, `average_lead_time`, `suppliers`, `supplier_choice`, `total_value` |
+| `InventoryItemDetailSerializer` | the above plus `supplier_details`, `all_suppliers`, `price_trend_summary` |
+| `InventoryMetricsSerializer` (`items/<id>/metrics/`, `items/?with_metrics=1`) | `lead_time_days`, `unit_cost`, `cost_trend`, `last_po_unit_cost`, `supplier_scored_without_price`, `supplier_scored_without_history` |
+| `KitSummarySerializer` (`items/<id>/kits/`) | `supplier_name`, `supplier_sku`, `unit_cost` |
+| `UsageLogSerializer` (`items/<id>/log_usage/` reply, and `recent_usage` nested on the item payload) | `unit_cost`, `total_cost` |
+| `ResolvedScan` (`scanner/dispatch/`) | `supplier_name`, `item_supplier_id` |
+
+Keys are OMITTED, not nulled, and the payload carries
+`"vendor_data_withheld": true` in their place. `null` already means "nothing on
+file" throughout this payload family (op-9m2v), so nulling would state something
+false about the item instead of something true about the reader, and a
+consumer's `?? 0` would render a withheld price as a real $0.00.
+
+`total_value` is withheld because `current_stock` is public beside it, so
+leaving it would leave the unit price one division away. `quantity_per_package`
+and `case_size` are NOT withheld: a pack size is a shelf fact, not a vendor one
+— the same call the pack-size derivation (op-c1ke) already made for
+`InventoryItem.current_cases` — and the public `current_cases` /
+`on_hand_display` / `reorder_display` keys depend on it.
+
+`SupplierChoiceSerializer`'s four operator-only keys (above) are now a narrower
+gate inside a key withheld whole from the same audience. They still decide what
+a signed-in reader sees and are never reached by an anonymous one.
+
+What an anonymous scanner KEEPS is everything needed to identify an item and
+file a request: name, SKU, description, image, category, location, stock, the
+case shape, reorder point and quantity, hazard information, and the anonymous
+`scan/`, `log_usage/` and reorder-request paths. Pinned by
+`config/tests/test_anonymous_vendor_exposure.py::test_anonymous_scan_to_reorder_still_works_end_to_end`.
 
 
 ## Membership (`/api/membership/`)
@@ -175,9 +265,10 @@ here. Do not describe those browser gates as if they protected data.
 | --- | --- | --- | --- |
 | POST | `reorders/requests/` (create only) | public | `AllowAny` on `ReorderRequestViewSet.create` — required for the QR-scan reorder flow on printed shelf labels. The create input + response use `ReorderRequestCreateSerializer`, which only exposes `id`, `item`, `quantity`, `requested_by`, `request_notes`, `priority`, `status` — admin / cost / invoice / supplier-URL fields cannot be set or read by an anonymous caller. Authenticated callers additionally pass `can_create_reorder_request`, and a caller who is already an approver for the item (`can_manage_sig_inventory`) has their request stamped `approved` on create (op-tm70) — anonymous scans and non-approver members stay `pending`. `status` is read-only on this serializer, so no caller can ask for that itself. |
 | any | `reorders/requests/...` (everything else: list, retrieve, update, workflow `@action`s) | member | `IsAuthenticated` on `ReorderRequestViewSet` since gh #327 / PR #341 — every read or admin action rejects anonymous callers because `ReorderRequestSerializer` carries purchasing-sensitive fields (`actual_cost`, `invoice_number`, `supplier_url`). `requests/<id>/approve/` narrows further in the view body (op-tm70): only an approver for that request's item (`can_manage_sig_inventory` — staff/superuser, Logistics, the item's SIG admins, or any member for a space-owned item) may sign a request off; other members get a 403. Approval is what makes a request eligible to be purchased, so this is a spend gate, not just a status flip. `PUT`/`PATCH` on the row cannot go around that gate (op-xj1i): `status`, `reviewed_by`, `reviewed_at` and `ordered_at` are read-only on `ReorderRequestSerializer`, so workflow state moves only through the actions that check permissions and stamp the timestamps — for every caller, staff included. A write to one of those fields is ignored (DRF read-only semantics), not rejected; the response echoes the true state. The rest of the row (quantity, priority, admin/public notes, transparency + tracking fields) stays editable — that is the dashboard's Update-Tracking `PATCH`. |
-| any | `reorders/purchase-orders/...` | member-rw | `IsAuthenticatedOrReadOnly` — anonymous reads exist for the queue dashboard; writes need login. Cost data is filtered in the serializer. The per-line-item receive action (`purchase-orders/<id>/receive/`, POST) is a write and requires login, like whole-PO `mark_delivered/`. The order-pad export (`purchase-orders/<id>/export-order/`, GET) is a login-required read — it exposes every line's supplier part number, so it is gated like the other non-list `@action`s rather than left anonymous. Adding a line to a draft order (`purchase-orders/<id>/items/`, POST) and its identifier lookup (`purchase-orders/<id>/item-lookup/`, GET) are both login-required for the same reason — the lookup returns supplier SKUs and costs — and the add additionally refuses any order that is not `DRAFT`. Repricing a line (`purchase-orders/<id>/items/<item_id>/`, PATCH carrying a *changed* `unit_cost_ordered`) is gated the same way as the add: login plus `DRAFT` only — the ordered price is what the supplier was quoted, so once the order has gone out it is a matter of record, unlike the quantity edit on the same PATCH. Echoing back the price already on the line is not a change and is not refused. Deleting a line (`purchase-orders/<id>/items/<item_id>/`, DELETE) is gated the same way — login plus the order's pre-send statuses (`PurchaseOrder.PRE_SUPPLIER_STATUSES`), served to clients as `can_delete_items` — because it destroys the line outright; once the supplier holds a copy the line can only be struck off with `purchase-orders/<id>/items/<item_id>/void/` (POST), which the refusal names. The receiving workflow's four additional actions are gated identically — `purchase-orders/<id>/receiving/` (GET) is a login-required read because the worksheet exposes supplier SKUs and barcodes, and `close-short/`, `reopen-short/` and `mark-received/` (POST) are writes that settle lines, correct a settlement, and advance the order. `reopen-short/` is the only receiving write accepted on an already-`received` order, because a line closed short in error is usually noticed after that close settled the order; it still refuses draft, cancelled and voided orders. See [PO_RECEIVING_API.md](PO_RECEIVING_API.md). |
+| any | `reorders/purchase-orders/...` | member | `IsAuthenticated` on every action, reads included (op-anonymous-read-posture). **This row previously said `IsAuthenticatedOrReadOnly` with "anonymous reads exist for the queue dashboard; writes need login. Cost data is filtered in the serializer." All three clauses were false and the last was the most dangerous: `get_permissions` returned `AllowAny` for `list`/`retrieve`, no serializer filtered anything, and an unauthenticated GET returned the supplier's name, the agreement, their order number, the payment terms and every line's cost.** A purchase order is vendor identity and vendor money in one document, with no non-vendor half, so it is closed outright. The former anonymous queryset narrowing (show a caller with no session only SENT/CONFIRMED/PARTIALLY_RECEIVED/RECEIVED) is gone with the `AllowAny` it qualified; it was never a confidentiality boundary, since it chose WHICH orders an anonymous caller saw while serving the full vendor payload for each. The per-line-item receive action (`purchase-orders/<id>/receive/`, POST) is a write and requires login, like whole-PO `mark_delivered/`. The order-pad export (`purchase-orders/<id>/export-order/`, GET) is a login-required read — it exposes every line's supplier part number, so it is gated like the other non-list `@action`s rather than left anonymous. Adding a line to a draft order (`purchase-orders/<id>/items/`, POST) and its identifier lookup (`purchase-orders/<id>/item-lookup/`, GET) are both login-required for the same reason — the lookup returns supplier SKUs and costs — and the add additionally refuses any order that is not `DRAFT`. Repricing a line (`purchase-orders/<id>/items/<item_id>/`, PATCH carrying a *changed* `unit_cost_ordered`) is gated the same way as the add: login plus `DRAFT` only — the ordered price is what the supplier was quoted, so once the order has gone out it is a matter of record, unlike the quantity edit on the same PATCH. Echoing back the price already on the line is not a change and is not refused. Deleting a line (`purchase-orders/<id>/items/<item_id>/`, DELETE) is gated the same way — login plus the order's pre-send statuses (`PurchaseOrder.PRE_SUPPLIER_STATUSES`), served to clients as `can_delete_items` — because it destroys the line outright; once the supplier holds a copy the line can only be struck off with `purchase-orders/<id>/items/<item_id>/void/` (POST), which the refusal names. The receiving workflow's four additional actions are gated identically — `purchase-orders/<id>/receiving/` (GET) is a login-required read because the worksheet exposes supplier SKUs and barcodes, and `close-short/`, `reopen-short/` and `mark-received/` (POST) are writes that settle lines, correct a settlement, and advance the order. `reopen-short/` is the only receiving write accepted on an already-`received` order, because a line closed short in error is usually noticed after that close settled the order; it still refuses draft, cancelled and voided orders. See [PO_RECEIVING_API.md](PO_RECEIVING_API.md). |
 | any | `reorders/order-receipts/...` | member | `IsAuthenticated` on `OrderReceiptViewSet`. |
 | any | `reorders/analytics/...` | member-rw | `IsAuthenticated` for the API; the `kanban-print` and `kanban-multi-print` `@action`s are explicitly `AllowAny` so kiosks can render PDFs without a session. |
+| GET | `reorders/analytics/transparency/` | public (vendor block withheld) | The public spending feed, and it STAYS public — publishing what the makerspace spends is the point of the page. **Anonymous:** the `summary` aggregates (`total_amount_spent`, `total_po_amount_spent`, the counts) are unchanged, and each row keeps its item, category, quantity, status and dates. Withheld per row, with `"vendor_data_withheld": true` in their place: `supplier_name`, `supplier_url`, `invoice_number`, `invoice_url`, `purchase_order_url`, `order_number`, `estimated_cost`, `actual_cost`, `cost_per_unit`, `cost_variance` (a difference that would reconstruct either operand), and on the `purchase_orders` block `supplier_name`, `estimated_total` and `actual_total`. `transparency_note` is reworded for that reader rather than left making a claim the payload no longer honours. **`po_number` is deliberately kept** — it is this makerspace's own reference; the vendor's number for the same order is `supplier_order_number`, which this payload has never carried. **`order_number` is deliberately withheld** — `ReorderRequest.order_number` is operator-typed free text with no help text, filed after an order is placed with a vendor, so it holds the vendor's reference at least as often as anything else and an ambiguous field falls closed. **`authentication_classes=[]` was REMOVED from the action**, which is the load-bearing edit: it disabled authentication, so `request.user` was `AnonymousUser` for every caller including a signed-in one and no gate here could have worked. An authenticated caller's payload is unchanged. | Not required (read). |
 | any | `reorders/webhooks/...` | member | `IsAuthenticated` on `WebHookViewSet`. |
 | any | `reorders/reports/...` | member | `IsAuthenticated` on `PurchasingReportViewSet`. |
 
@@ -284,7 +375,7 @@ here. Do not describe those browser gates as if they protected data.
 
 | Method | Path | Class | Notes |
 | --- | --- | --- | --- |
-| POST | `scanner/dispatch/` | public | `AllowAny` so the workshop kiosk can scan without a JWT. Read-only: never mutates state — side effects happen via the per-entity endpoints (reorder / asset.scan / location-checkins.create) which enforce their own auth. |
+| POST | `scanner/dispatch/` | public (vendor block withheld) | `AllowAny` so the workshop kiosk can scan without a JWT, and it stays that way. Read-only: never mutates state — side effects happen via the per-entity endpoints (reorder / asset.scan / location-checkins.create) which enforce their own auth. **A UPC payload resolves through `ItemSupplier`, so the reply used to carry `supplier_name` and `item_supplier_id` — and a UPC is printed on the outside of the box, so anyone holding one could turn it into the name of the vendor we buy that item from.** Both keys are withheld from a caller with no session (`ResolvedScan.VENDOR_ONLY_KEYS`, op-anonymous-read-posture); the action, the item, its name and its stock still reach everyone, and a signed-in receiver still gets the link it resolved. `raw_payload` deliberately still echoes the scan — that is the caller's own input. Found by exercising the anonymous WRITE surfaces, not by the GET crawl, which issues no writes. |
 
 ## Notifications (`/api/notifications/`)
 
@@ -454,3 +545,99 @@ expectation; the implementation may use any of:
 
 When a public write endpoint does not yet have an abuse control, file a
 follow-up bead under AC-6.
+
+### Deliberate exclusions from the vendor gate, with reasons
+
+Named here because a derivation that reports only what it closed is not a
+derivation. Each of these IS money, or IS near a supplier, and each stays
+anonymously readable on purpose. **The question this branch answers is "what can
+someone with no login learn about a VENDOR'S IDENTITY, or about WHAT WE PAY
+THEM?" — not "what money is public?"** The earlier `fm/oms-public-inventory-valuation`
+derivation asked the second question and so listed some of these; a different
+question is entitled to a different answer, and this records why.
+
+| Left open | Why |
+| --- | --- |
+| `Asset.amount_paid` on `inventory/assets/` | What the space paid for a machine. The `Asset` model has **no supplier relation at all** — nothing attributes this to a vendor — and it is on none of the lists the captain's decision enumerates. `donor_name` beside it is a donor, not a vendor. Verified that assets nest no vendor data either: `AssetSerializer.parts` → `AssetPartSerializer.part_details` carries the inventory item's own name, SKU and stock, and `part_sku` is **our** SKU, not the supplier's. |
+| `MaintenanceItem.estimated_cost` | A maintenance budget the space sets for a task, not a price a vendor quoted. AGENTS.md already separates these two under op-9m2v, and this follows that line rather than drawing a new one. |
+| `summary.total_amount_spent` / `total_po_amount_spent` on the transparency feed | Aggregates across every vendor. They name none and quote no vendor's price, and they are the accountability the page exists to provide. |
+| `PurchaseOrder.po_number` on the transparency feed | This makerspace's own reference. The vendor's number for the same order is `supplier_order_number`, a separate field this payload has never carried — that separation is what makes this one unambiguously ours. Contrast `ReorderRequest.order_number`, which IS withheld. |
+| `quantity_per_package` / `case_size` | A pack size is a shelf fact. op-c1ke already answered this for the same column when it excluded `InventoryItem.current_cases` from the supplier derivation, and the public `current_cases` / `on_hand_display` / `reorder_display` keys — which size an anonymous reorder — depend on it. It re-derives nothing once both costs are withheld. |
+| `scanner/dispatch/`'s `raw_payload` | The caller's own scan, echoed back. They supplied it. |
+| ForgeKey's `AllowAny` device endpoints | Checked rather than assumed, as the brief required: the anonymous crawl exercises every one of them and finds no vendor sentinel, and `grep` over `forgekey/views.py` finds no supplier, cost or lead-time read. They are not a vendor surface. |
+| `assets/documents/` (`AssetDocument.file`) | Its Category choices are Manual / CAD Source / Wiring Diagram / Cut Sheet-Spec / Photo / **Other**: technical documentation a member needs to work on a machine. **Residual risk, stated rather than argued away:** the `Other` category means a purchase document COULD be filed here. Closing the prefix was rejected because it would take manuals and wiring diagrams away from the people the space serves. |
+| `assets/manuals/` (`Asset.manual_pdf`) | A manufacturer's manual. A manufacturer is not a vendor relationship, and a manual is not a name, a price, an invoice or an agreement. |
+| `inventory/msds/` (`InventorySafetyProfile.msds_file`) | Safety data sheets, on the anonymous scan path and protected by the brief outright. |
+| `donations/tax_receipts/` (`TaxReceipt.pdf_file`) | A receipt this makerspace **issues to a donor**. A donor is not a vendor and the document is outbound. |
+| `location_problems/paper/` (`LocationProblem.paper_form_attachment`) | A scanned member problem-report form. |
+| `signatures/` (`membership`) | Member PII rather than vendor data, and out of this branch's scope by the captain's decision. Listed rather than silently omitted: an unclassified prefix and a prefix somebody decided about look identical from outside. |
+| Every remaining upload field | Item / asset / location / donation / project-storage QR codes and images, site logo and favicon, checklist and maintenance and work-order evidence photos, electrical outlet/drop/disconnect photos, ForgeKey device and enrollment photos and firmware, storage-vision captures and crops. None can hold a vendor's identity or a vendor's price. Each is named individually with its reason in `config/tests/test_upload_field_classification.py`'s `OPEN_PREFIXES`, which is the copy CI enforces. |
+
+## Protected media (`/media/`) — op-anonymous-read-posture
+
+A `FileField` URL is answered by **nginx, not Django**, so no
+`permission_classes` change reaches it. `nginx/templates/default.conf.template`
+had a single `location /media/ { alias /app/media/; expires 7d; }` serving every
+upload to anyone and caching it publicly for a week. Verified rather than
+assumed: nginx rendered from that template, with a real Django process behind
+it, answered an anonymous GET for a seeded supplier agreement with HTTP 200 and
+the file's bytes.
+
+**The unit of this derivation is an upload field, not a URL prefix.** The first
+pass enumerated the prefixes it had already found and stopped, which left five
+roots open — two of them fed by unfiltered inbound mail. `config/tests/test_upload_field_classification.py`
+now parses every `upload_to` under `backend/` (string literals *and* callables:
+`ThirdPartyWorkOrderAttachment`'s is a callable, and a string-only walk is
+exactly what missed it) and fails the build on a prefix that is neither gated
+below nor carried in that module's `OPEN_PREFIXES` with a written reason. Its
+two limits are named there: `backend/` only, and a callable's prefix has to be
+resolvable statically.
+
+These prefixes hold vendor identity or vendor money as files. Each has its own
+`location ^~` block carrying `auth_request /_vendor_media_auth`, a
+`private, no-store` cache policy, and no `expires 7d`:
+
+| Prefix | Written by | Why it is vendor data |
+| --- | --- | --- |
+| `supplier_agreements/` | `inventory.SupplierAgreement.document` | The scanned contract or standing quote: names the vendor, states the terms. |
+| `purchase_orders/attachments/` | `reorder_queue.PurchaseOrderAttachment.file` | Where supplier invoices are filed. |
+| `work_orders/receipts/` | `inventory.WorkOrderMaterialUsage.receipt_image` | "Photo of the receipt backing an out-of-pocket purchase" — a vendor's name and their prices, in an image. |
+| `index_cards/` | `IndexCardRenderer.render_batch_to_storage` | Batch card PDFs, which carry the lead-time lines because the authenticated view that generates them prints those. A generated artefact inherits the audience of its contents, not of its generator. |
+| `third_party_work_orders/` | `maintenance_orders.ThirdPartyWorkOrderAttachment.file` | Its `KIND_CHOICES` are Invoice, Field Service Report, Photo, Quote, Paper Form, Other. |
+| `inventory/maintenance_records/` | `inventory.MaintenanceRecord.attachment` | "Invoice PDF, receipt photo, etc.", on a model that also carries a `vendor` FK, a `cost` and an `invoice_number`. |
+| `work_orders/attachments/` | `inventory.WorkOrderAttachment.file` | Its own docstring says it exists because "a supplier receipt, a datasheet page, a torque spec, a photo of the nameplate" had nowhere to live. |
+| `work_orders/submissions/` | `inventory.WorkOrderSubmission.attachment` | "The raw PDF attachment as received from the email" — unfiltered inbound mail through the Postmark webhook. Whatever a vendor emails in is stored verbatim, so the contents cannot be narrowed by argument. |
+| `work_orders/scans/` | `inventory.WorkOrder.completed_scan` | A completed paper work order arriving down that same inbound path, carrying the job's material costs. |
+
+`GET /api/auth/media-access/` (`config.protected_media.media_access_check`) is
+the `auth_request` target: 204 for a signed-in caller, 403 otherwise, and
+`never_cache` because a cached allow would open the door for everyone behind the
+proxy. It is a **session** check, which works because `auth_views.login_user`
+already sets a Django session cookie alongside the JWT — that is what a browser
+sends when it follows `<a href="/media/...">`. The path a client requests does
+not change, so no payload, no stored `file_url` and no consumer moves.
+
+`config.protected_media.serve_media` enforces the same prefix list in Python and
+is registered **unconditionally** in `config/urls.py`, replacing the previous
+`if settings.DEBUG: static(...)`. A rule that exists only in development is how
+the dev server and production came to disagree about who may read an invoice,
+and it is what left CI unable to exercise any of this.
+
+Everything else under `/media/` is untouched and stays public: item photos, QR
+codes, MSDS sheets, location-problem snapshots, asset manuals. Those are on the
+anonymous scan path or are safety information, and closing them would break the
+flow the printed QR codes exist for. Each is classified by name, with its
+reason, in the exclusions table above and in `OPEN_PREFIXES`.
+
+`config/tests/test_protected_media.py` checks the nginx half by **parsing**, not
+by grepping: `config/tests/nginx_config.py` applies the `${VAR}` substitution the
+container entrypoint does, builds a location/directive model, and the assertions
+ask that model which block nginx would *select* for a real URI under each prefix
+and whether the `expires` and `Cache-Control` **effective** there (nginx's
+inheritance rule, not a line in the block) leave the response publicly cacheable.
+Where an nginx binary is on PATH the rendered config is additionally run through
+`nginx -t`.
+
+Pinned by `config/tests/test_protected_media.py`, which exercises the Python
+half with real requests and asserts the nginx template gates the same prefixes,
+reading the list from `VENDOR_MEDIA_PREFIXES` rather than restating it.

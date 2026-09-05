@@ -26,8 +26,10 @@ pytestmark = pytest.mark.django_db
 class TestSupplierAPI:
     """Tests for Supplier API endpoints."""
 
-    def test_list_suppliers(self, api_client):
-        """Test listing suppliers."""
+    def test_list_suppliers(self, authenticated_client):
+        """Test listing suppliers. Reads need a session since
+        op-anonymous-read-posture — a supplier row is a vendor's identity."""
+        api_client, _user = authenticated_client
         SupplierFactory.create_batch(3)
         url = reverse("supplier-list")
         response = api_client.get(url)
@@ -145,16 +147,30 @@ class TestInventoryItemAPI:
         assert response.status_code == status.HTTP_200_OK
         assert [r["name"] for r in response.data["results"]] == ["Apple", "Banana"]
 
-    def test_retrieve_item(self, api_client):
+    def test_retrieve_item(self, authenticated_client):
         """Test retrieving a single item with details."""
+        client, _user = authenticated_client
+        item = InventoryItemFactory()
+        url = reverse("inventoryitem-detail", kwargs={"pk": str(item.id)})
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["name"] == item.name
+        assert "supplier_details" in response.data
+        assert "category_details" in response.data
+
+    def test_retrieve_item_anonymously_keeps_the_item_and_drops_the_vendor(self, api_client):
+        """The endpoint stays open for the QR-scan flow; ``supplier_details`` is
+        the vendor record and goes (op-anonymous-read-posture)."""
         item = InventoryItemFactory()
         url = reverse("inventoryitem-detail", kwargs={"pk": str(item.id)})
         response = api_client.get(url)
 
         assert response.status_code == status.HTTP_200_OK
         assert response.data["name"] == item.name
-        assert "supplier_details" in response.data
         assert "category_details" in response.data
+        assert "supplier_details" not in response.data
+        assert response.data["vendor_data_withheld"] is True
 
     def test_create_item_requires_auth(self, api_client):
         """Test creating item requires authentication."""
@@ -381,7 +397,8 @@ class TestInventoryItemAPI:
         mock_instance.generate_for_item.assert_called_once()
 
     def test_download_card_endpoint(self, api_client, mocker):
-        """Test PDF card download endpoint."""
+        """Test PDF card download endpoint. Still anonymous — the card is what a
+        member prints for a shelf — but rendered WITHOUT the vendor lines."""
         item = InventoryItemFactory()
 
         # Mock PDF generation (the actual method used in the view)
@@ -394,11 +411,29 @@ class TestInventoryItemAPI:
 
         assert response.status_code == status.HTTP_200_OK
         assert response["Content-Type"] == "application/pdf"
-        mock_renderer.assert_called_once_with(blank_cards=False)
+        mock_renderer.assert_called_once_with(blank_cards=False, include_vendor_data=False)
         mock_instance.render_preview.assert_called_once_with(item, blank_card=False)
 
+    def test_download_card_prints_the_vendor_lines_for_a_signed_in_caller(
+        self, authenticated_client, mocker
+    ):
+        """CONTROL: the lead times are gated on the reader, not deleted from the
+        card (op-anonymous-read-posture)."""
+        client, _user = authenticated_client
+        item = InventoryItemFactory()
+
+        mock_renderer = mocker.patch("index_cards.services.IndexCardRenderer")
+        mock_renderer.return_value.render_preview.return_value = b"fake pdf content"
+
+        url = reverse("inventoryitem-download_card", kwargs={"pk": str(item.id)})
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        mock_renderer.assert_called_once_with(blank_cards=False, include_vendor_data=True)
+
     def test_fixture_download_card_endpoint(self, api_client, mocker):
-        """Test fixture card download endpoint."""
+        """Test fixture card download endpoint. Renders the refill item through
+        ``IndexCardRenderer``, so it carries the same gate."""
         fixture = FixtureFactory()
 
         mock_renderer = mocker.patch("index_cards.services.FixtureCardRenderer")
@@ -411,7 +446,24 @@ class TestInventoryItemAPI:
         assert response.status_code == status.HTTP_200_OK
         assert response["Content-Type"] == "application/pdf"
         mock_renderer.assert_called_once_with()
-        mock_instance.render_preview.assert_called_once_with(fixture)
+        mock_instance.render_preview.assert_called_once_with(fixture, include_vendor_data=False)
+
+    def test_fixture_download_card_prints_the_vendor_lines_for_a_signed_in_caller(
+        self, authenticated_client, mocker
+    ):
+        client, _user = authenticated_client
+        fixture = FixtureFactory()
+
+        mock_renderer = mocker.patch("index_cards.services.FixtureCardRenderer")
+        mock_renderer.return_value.render_preview.return_value = b"fixture pdf"
+
+        url = reverse("fixture-download_card", kwargs={"pk": str(fixture.id)})
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        mock_renderer.return_value.render_preview.assert_called_once_with(
+            fixture, include_vendor_data=True
+        )
 
     def test_log_usage_endpoint(self, authenticated_client):
         """Test logging item usage."""

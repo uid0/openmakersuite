@@ -382,6 +382,11 @@ class TestKitApiSurface:
     def test_ac15_component_detail_lists_supplying_kits_anonymously(
         self, anon_client, eufy_kit, ink_components
     ):
+        """Still anonymous — "which kits supply this cartridge?" is reorder
+        triage beside stock — but the kit's VENDOR keys are withheld
+        (op-anonymous-read-posture). Which kit and how many it holds is the
+        answer the card exists to give, and that is unchanged.
+        """
         supplier = SupplierFactory(name="Eufy Direct")
         ItemSupplierFactory(
             item=eufy_kit, supplier=supplier, supplier_sku="T3200", unit_cost=Decimal("89.99")
@@ -395,8 +400,37 @@ class TestKitApiSurface:
         row = response.data[0]
         assert row["name"] == "Eufy Ink Kit"
         assert row["quantity_in_kit"] == 1
-        assert row["supplier_sku"] == "T3200"
         assert row["component_count"] == 5
+        assert "supplier_sku" not in row
+        assert "supplier_name" not in row
+        assert "unit_cost" not in row
+        assert row["vendor_data_withheld"] is True
+        assert b"Eufy Direct" not in response.content
+        assert b"T3200" not in response.content
+
+    def test_ac15_a_signed_in_caller_still_gets_the_kit_supplier_keys(
+        self, api_client, django_user_model, eufy_kit, ink_components
+    ):
+        """CONTROL for the assertions removed above: withheld, not deleted."""
+        from django.utils.crypto import get_random_string
+
+        supplier = SupplierFactory(name="Eufy Direct")
+        ItemSupplierFactory(
+            item=eufy_kit, supplier=supplier, supplier_sku="T3200", unit_cost=Decimal("89.99")
+        )
+        api_client.force_authenticate(
+            user=django_user_model.objects.create_user(
+                username="kit-reader", password=get_random_string(24)
+            )
+        )
+
+        response = api_client.get(reverse("inventoryitem-kits", args=[ink_components[0].pk]))
+
+        assert response.status_code == status.HTTP_200_OK
+        row = response.data[0]
+        assert row["supplier_sku"] == "T3200"
+        assert row["supplier_name"] == "Eufy Direct"
+        assert "vendor_data_withheld" not in row
 
     def test_ac15_item_in_no_kits_returns_empty(self, anon_client):
         lonely = InventoryItemFactory(name="Unbundled", image=None)

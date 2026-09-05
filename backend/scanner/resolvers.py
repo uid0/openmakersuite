@@ -75,10 +75,46 @@ class ResolvedScan:
     current_stock: Optional[int] = None
     raw_payload: str = ""
 
-    def to_dict(self) -> dict:
+    #: The two keys on this result that name a vendor (op-anonymous-read-posture).
+    #:
+    #: ``dispatch_scan`` is ``AllowAny`` by design — it is what a barcode gun
+    #: hits, and the anonymous QR-scan flow runs through it. But a UPC is
+    #: printed on the outside of the box, so anyone holding one could turn it
+    #: into the name of the vendor the makerspace buys that item from. The
+    #: resolver still finds the link (receiving needs it); the VIEW decides who
+    #: is told about it.
+    #:
+    #: ``raw_payload`` is deliberately NOT here: it is the caller's own scan
+    #: echoed back, which they already had.
+    VENDOR_ONLY_KEYS = ("supplier_name", "item_supplier_id")
+
+    def to_dict(self, *, include_vendor_data: bool = False) -> dict:
+        """This result as a response body, WITHOUT the vendor keys by default.
+
+        The default is ``False`` for the reason
+        ``inventory.services.vendor_visibility`` gives for its own: a caller
+        that has not proven anybody is signed in must restrict rather than
+        disclose. ``IndexCardRenderer`` defaults the same flag the same way.
+        Today's one caller (``scanner.views.dispatch_scan``) passes it
+        explicitly, so nothing changes now — this decides what the NEXT caller
+        gets for saying nothing.
+
+        Withholding SAYS SO, with the same ``vendor_data_withheld`` marker
+        every other gated payload carries. Popping the keys silently would
+        leave a consumer unable to tell "withheld from you" from "this scan
+        resolved no supplier" — a UPC that matched no ``ItemSupplier`` produces
+        the second, and the two need different words on screen.
+        """
+        from inventory.services.vendor_visibility import VENDOR_WITHHELD_KEY
+
         # DRF JSONRenderer handles dataclass-to-dict via vars(), but
         # being explicit lets us drop None fields for a tidier response.
-        return {k: v for k, v in vars(self).items() if v is not None}
+        data = {k: v for k, v in vars(self).items() if v is not None}
+        if not include_vendor_data:
+            for key in self.VENDOR_ONLY_KEYS:
+                data.pop(key, None)
+            data[VENDOR_WITHHELD_KEY] = True
+        return data
 
 
 def _strip_url(payload: str) -> tuple[str, bool]:

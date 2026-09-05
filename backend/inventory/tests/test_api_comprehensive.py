@@ -117,7 +117,21 @@ class InventoryAPIComprehensiveTest(APITestCase):
         self.assertEqual(response.data["id"], self.category.id)
 
     def test_supplier_list_and_detail(self):
-        """Test supplier list and detail endpoints."""
+        """Test supplier list and detail endpoints.
+
+        Signed in, because both need a session since op-anonymous-read-posture —
+        a supplier row is a vendor's identity, and the detail serializer nests
+        their SKUs, prices and lead times.
+        """
+        from django.contrib.auth import get_user_model
+        from django.utils.crypto import get_random_string
+
+        self.client.force_login(
+            get_user_model().objects.create_user(
+                username="comprehensive-supplier-reader", password=get_random_string(24)
+            )
+        )
+
         # Test list
         url = reverse("supplier-list")
         response = self.client.get(url)
@@ -127,6 +141,19 @@ class InventoryAPIComprehensiveTest(APITestCase):
         url = reverse("supplier-detail", kwargs={"pk": self.supplier.id})
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_supplier_endpoints_refuse_an_anonymous_caller(self):
+        """The boundary the test above used to sit on the wrong side of."""
+        for url in (
+            reverse("supplier-list"),
+            reverse("supplier-detail", kwargs={"pk": self.supplier.id}),
+        ):
+            response = self.client.get(url)
+            self.assertIn(
+                response.status_code,
+                (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN),
+                url,
+            )
 
     def test_pagination(self):
         """Test API pagination."""

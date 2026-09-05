@@ -284,11 +284,20 @@ describe('CSV Export Utilities', () => {
         expect(csvText()).not.toMatch(/price, lead time and delivery record/);
       });
 
-      it('CONTROL: the one supplier name anonymous could always export is still there', () => {
+      it('drops the vendor COLUMNS from an anonymous export, rather than blanking them', () => {
+        // This test asserted the opposite — "the one supplier name anonymous
+        // could always export is still there" — until the captain closed vendor
+        // identity and pricing (op-anonymous-read-posture). The columns go
+        // rather than emptying, because a blank `Supplier` cell already means
+        // "nobody has said where this comes from" and a blank `Unit Cost` means
+        // "nobody recorded a price" (op-9m2v). Keeping them would state both
+        // about every item, in the one file that leaves the system and gets
+        // ordered from. An absent column cannot be misread as an empty value.
         exportInventoryItemsToCSV([disclosingItem], 'anonymous');
 
-        expect(headerRow()).toContain('Supplier');
-        expect(dataRow()).toContain('Acme Supplies');
+        expect(headerRow()).not.toContain('Supplier');
+        expect(headerRow()).not.toContain('Unit Cost');
+        expect(csvText()).not.toContain('Acme Supplies');
       });
 
       it('CONTROL: a signed-in export is unchanged — all four supplier columns', () => {
@@ -305,7 +314,7 @@ describe('CSV Export Utilities', () => {
 
       // The gate is a column gate, not a row gate: an anonymous export must
       // still be a usable inventory file, not a supplier-shaped hole.
-      it('CONTROL: an anonymous export keeps every non-supplier column', () => {
+      it('CONTROL: an anonymous export keeps every non-vendor column', () => {
         exportInventoryItemsToCSV([disclosingItem], 'anonymous');
 
         for (const column of [
@@ -316,13 +325,18 @@ describe('CSV Export Utilities', () => {
           'Current Stock',
           'Minimum Stock',
           'Reorder Quantity',
-          'Unit Cost',
           'Needs Reorder',
           'Is Active',
         ]) {
           expect(headerRow()).toContain(column);
         }
         expect(dataRow()).toContain('Three Sources');
+      });
+
+      it('CONTROL: a signed-in export still carries Unit Cost', () => {
+        exportInventoryItemsToCSV([disclosingItem], 'operator');
+
+        expect(headerRow()).toContain('Unit Cost');
       });
     });
   });

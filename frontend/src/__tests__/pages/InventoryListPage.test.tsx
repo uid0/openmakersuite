@@ -9,6 +9,7 @@ import SessionExpiredBanner, {
 } from '../../components/SessionExpiredBanner';
 import InventoryListPage from '../../pages/InventoryListPage';
 import * as api from '../../services/api';
+import { exportInventoryItemsToCSV } from '../../utils/csvExport';
 import { showError, showInfo, showSuccess } from '../../utils/dialogs';
 
 // Mock the API
@@ -607,6 +608,97 @@ describe('InventoryListPage', () => {
       await renderPriced(15.99);
 
       expect(costCell()).toHaveTextContent('$15.99');
+    });
+  });
+
+  describe('a caller the server withheld the vendor block from', () => {
+    /**
+     * REGRESSION (op-anonymous-read-posture). `/inventory/items` is not behind
+     * RequireAuth and its list endpoint is AllowAny, so a logged-out visitor
+     * reaches this table — and their rows carry no `unit_cost` key at all.
+     * `item.unit_cost != null ? ... : '-'` therefore printed '-' in every row,
+     * which in THIS table means "no price recorded": a claim about the ITEM
+     * where the truth is a fact about the READER. The three CONTROL cases just
+     * above are what make that dash unusable for anything else.
+     *
+     * `csvExport` already drops the same column for the same audience ("an
+     * absent COLUMN cannot be misread as an empty VALUE"), so the screen and
+     * the file exported from it have to agree.
+     */
+    const anonymousRows = () =>
+      mockItems.map((item) => {
+        const row: Record<string, unknown> = { ...item, vendor_data_withheld: true };
+        for (const key of ['unit_cost', 'supplier_name', 'supplier_sku', 'supplier_url', 'total_value']) {
+          delete row[key];
+        }
+        return row;
+      });
+
+    it('drops the Unit Cost column rather than dashing every row', async () => {
+      (api.inventoryAPI.listItems as jest.Mock).mockResolvedValue(
+        fullPage(anonymousRows() as unknown as typeof mockItems)
+      );
+      renderPage();
+
+      await screen.findByText('Test Item 1');
+
+      expect(screen.queryByRole('columnheader', { name: 'Unit Cost' })).not.toBeInTheDocument();
+      // ...and the row loses the cell with it, so the remaining columns do not
+      // slide one place left under their own headers.
+      const headers = screen.getAllByRole('columnheader').length;
+      const cells = screen.getByText('Test Item 1').closest('tr')!.querySelectorAll('td').length;
+      expect(cells).toBe(headers);
+    });
+
+    it('CONTROL: a signed-in caller still gets the column', async () => {
+      renderPage();
+
+      await screen.findByText('Test Item 1');
+
+      expect(screen.getByRole('columnheader', { name: 'Unit Cost' })).toBeInTheDocument();
+      expect(screen.getByText('$15.99')).toBeInTheDocument();
+    });
+
+    /**
+     * The export audience comes off THE ROWS, not off auth state, so the file
+     * and the table it was exported from cannot disagree.
+     *
+     * `isAuthenticated()` is only "is there a token in localStorage", and the
+     * response interceptor clears that token whenever a refresh fails on any
+     * request — including a background one. An operator whose refresh failed
+     * while this table sat on screen showing real prices would then have
+     * exported a file with the Unit Cost and Supplier COLUMNS missing, which is
+     * the same falsehood the column-dropping above exists to avoid, moved into
+     * a file that leaves the system and gets ordered from.
+     */
+    const clickExport = async () => {
+      renderPage();
+      await screen.findByText('Test Item 1');
+      // The bulk bar, and with it Export, appears only once rows are selected —
+      // which is the sequence the finding describes.
+      fireEvent.click(screen.getAllByRole('checkbox')[0]);
+      fireEvent.click(await screen.findByText('Export CSV'));
+      await waitFor(() => expect(exportInventoryItemsToCSV).toHaveBeenCalled());
+      return (exportInventoryItemsToCSV as jest.Mock).mock.calls[0];
+    };
+
+    it('exports the vendor columns for unmarked rows even with no token', async () => {
+      localStorage.removeItem('token');
+
+      const [, audience] = await clickExport();
+
+      expect(audience).toBe('operator');
+    });
+
+    it('drops them when the rows carry the marker', async () => {
+      localStorage.setItem('token', 'a-token-the-payload-disagrees-with');
+      (api.inventoryAPI.listItems as jest.Mock).mockResolvedValue(
+        fullPage(anonymousRows() as unknown as typeof mockItems)
+      );
+
+      const [, audience] = await clickExport();
+
+      expect(audience).toBe('anonymous');
     });
   });
 });

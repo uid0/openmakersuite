@@ -55,6 +55,8 @@ import ForgeKeyEPaperPanelsPage from './pages/ForgeKeyEPaperPanelsPage';
 import ForgeKeyEPaperServicePage from './pages/ForgeKeyEPaperServicePage';
 import ForgeKeyFirmwareRolloutsPage from './pages/ForgeKeyFirmwareRolloutsPage';
 import HomePage from './pages/HomePage';
+import ReauthPage from './pages/ReauthPage';
+import { REAUTH_PATH } from './services/authStorage';
 import LockersPage from './pages/LockersPage';
 import PurchasingOverviewPage from './pages/PurchasingOverviewPage';
 import ReportsOverviewPage from './pages/ReportsOverviewPage';
@@ -221,6 +223,11 @@ function AppContent() {
         <Routes>
           {/* Home/Landing */}
           <Route path="/" element={<HomePage />} />
+          {/* Where a refused /media/ download sends people. It is NOT `/`:
+              their session cookie has lapsed but the refresh token is still in
+              localStorage, so `/` greets them as signed in and offers no form
+              to sign in with (config/protected_media.py REAUTH_PATH). */}
+          <Route path={REAUTH_PATH} element={<ReauthPage />} />
           <Route path="/scan" element={<WorkspaceLayout><UniversalScannerPage /></WorkspaceLayout>} />
 
           {/* Anonymous invite redemption: outside person creates their own account */}
@@ -248,15 +255,42 @@ function AppContent() {
           {/* Kits (op-8n0): purchasable bundles that decompose on receipt. The
               "new" route is listed before ":kitId" so it is not swallowed as an id. */}
           <Route path="/inventory/kits" element={<WorkspaceLayout><KitListPage /></WorkspaceLayout>} />
-          <Route path="/inventory/kits/new" element={<WorkspaceLayout><KitDetailPage /></WorkspaceLayout>} />
+          {/* The CREATE and EDIT routes below are guarded; the two READ routes
+              beside them are not, and the difference is deliberate
+              (op-anonymous-read-posture).
+
+              `SupplierViewSet` is `IsAuthenticated` now, and each create/edit
+              page fetches `inventory/suppliers/` on mount. Unguarded, an
+              anonymous visitor got a 401 the page rendered as "Failed to load
+              form data" AND a SessionExpiredBanner telling them a session they
+              never had had expired. Item and kit writes are `IsAuthenticated`
+              server-side, so nobody could have saved from these pages anyway —
+              sending them to the login surface before the page mounts is what
+              this guard is for.
+
+              `/inventory/kits/:kitId` stays OPEN: `KitViewSet` is
+              `IsAuthenticatedOrReadOnly`, so kit detail is a deliberate public
+              read, and `KitDetailPage` skips the supplier fetch when logged
+              out rather than losing the page. */}
+          <Route path="/inventory/kits/new" element={<RequireAuth><WorkspaceLayout><KitDetailPage /></WorkspaceLayout></RequireAuth>} />
           <Route path="/inventory/kits/:kitId" element={<WorkspaceLayout><KitDetailPage /></WorkspaceLayout>} />
-          <Route path="/inventory/items/new" element={<WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout>} />
+          <Route path="/inventory/items/new" element={<RequireAuth><WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout></RequireAuth>} />
           <Route path="/inventory/items/:id" element={<WorkspaceLayout><InventoryItemDetailPage /></WorkspaceLayout>} />
-          <Route path="/inventory/items/:id/edit" element={<WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout>} />
-          <Route path="/inventory/suppliers" element={<WorkspaceLayout><SupplierListPage /></WorkspaceLayout>} />
-          <Route path="/inventory/suppliers/new" element={<WorkspaceLayout><SupplierFormPage /></WorkspaceLayout>} />
-          <Route path="/inventory/suppliers/:id" element={<WorkspaceLayout><SupplierDetailPage /></WorkspaceLayout>} />
-          <Route path="/inventory/suppliers/:id/edit" element={<WorkspaceLayout><SupplierFormPage /></WorkspaceLayout>} />
+          <Route path="/inventory/items/:id/edit" element={<RequireAuth><WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout></RequireAuth>} />
+          {/* Vendor pages, auth-guarded (op-anonymous-read-posture).
+
+              THIS GUARD IS NOT THE BOUNDARY and must not be described as one:
+              client-side routing cannot keep anything from anyone, and the
+              endpoints these pages read — `inventory/suppliers/`,
+              `item-suppliers/`, `price-history/`, `reorders/purchase-orders/` —
+              are what actually refuse a caller with no session. The guard is
+              here so a logged-out visitor is sent to the login surface BEFORE
+              the page mounts and fetches, instead of being shown a shell full
+              of 401 errors (the same reason `/dashboard` carries it, op-3er). */}
+          <Route path="/inventory/suppliers" element={<RequireAuth><WorkspaceLayout><SupplierListPage /></WorkspaceLayout></RequireAuth>} />
+          <Route path="/inventory/suppliers/new" element={<RequireAuth><WorkspaceLayout><SupplierFormPage /></WorkspaceLayout></RequireAuth>} />
+          <Route path="/inventory/suppliers/:id" element={<RequireAuth><WorkspaceLayout><SupplierDetailPage /></WorkspaceLayout></RequireAuth>} />
+          <Route path="/inventory/suppliers/:id/edit" element={<RequireAuth><WorkspaceLayout><SupplierFormPage /></WorkspaceLayout></RequireAuth>} />
           <Route path="/inventory/assets" element={<WorkspaceLayout><AssetsPage /></WorkspaceLayout>} />
           <Route path="/inventory/admin" element={<WorkspaceLayout><AdminDashboard /></WorkspaceLayout>} />
           <Route path="/facilities/forgekey-dashboard" element={<WorkspaceLayout><ForgeKeyDashboardPage /></WorkspaceLayout>} />
@@ -294,9 +328,11 @@ function AppContent() {
 
           {/* Purchasing Workspace */}
           <Route path="/purchasing" element={<WorkspaceLayout><PurchasingOverviewPage /></WorkspaceLayout>} />
-          <Route path="/purchasing/orders" element={<WorkspaceLayout><PurchaseOrderListPage /></WorkspaceLayout>} />
-          <Route path="/purchasing/orders/new" element={<WorkspaceLayout><PurchaseOrderFormPage /></WorkspaceLayout>} />
-          <Route path="/purchasing/orders/:orderId" element={<WorkspaceLayout><PurchaseOrderPage /></WorkspaceLayout>} />
+          {/* Purchase orders are vendor identity and vendor money end to end —
+              same guard, same reason as the supplier pages above. */}
+          <Route path="/purchasing/orders" element={<RequireAuth><WorkspaceLayout><PurchaseOrderListPage /></WorkspaceLayout></RequireAuth>} />
+          <Route path="/purchasing/orders/new" element={<RequireAuth><WorkspaceLayout><PurchaseOrderFormPage /></WorkspaceLayout></RequireAuth>} />
+          <Route path="/purchasing/orders/:orderId" element={<RequireAuth><WorkspaceLayout><PurchaseOrderPage /></WorkspaceLayout></RequireAuth>} />
 
           {/* Assets Workspace */}
           <Route path="/assets" element={<WorkspaceLayout><AssetsPage /></WorkspaceLayout>} />
@@ -393,7 +429,10 @@ function AppContent() {
           {/* Reports Workspace */}
           <Route path="/reports" element={<WorkspaceLayout><ReportsOverviewPage /></WorkspaceLayout>} />
           <Route path="/reports/inventory" element={<WorkspaceLayout><InventoryReportPage /></WorkspaceLayout>} />
-          <Route path="/reports/purchasing" element={<WorkspaceLayout><PurchasingReportPage /></WorkspaceLayout>} />
+          {/* Spend by supplier, price trends, lead-time analysis — every panel
+              names a vendor or quotes their price, and every endpoint behind
+              them is `IsAuthenticated`. */}
+          <Route path="/reports/purchasing" element={<RequireAuth><WorkspaceLayout><PurchasingReportPage /></WorkspaceLayout></RequireAuth>} />
           <Route path="/reports/assets" element={<WorkspaceLayout><AssetReportPage /></WorkspaceLayout>} />
           <Route path="/reports/cost-recovery" element={<WorkspaceLayout><AssetCostRecoveryPage /></WorkspaceLayout>} />
 

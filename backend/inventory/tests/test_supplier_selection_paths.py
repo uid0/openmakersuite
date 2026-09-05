@@ -281,10 +281,35 @@ def test_kanban_card_lead_time_comes_from_a_supplier_you_can_still_buy_from():
     _cheap_dead_dear_live(item)
 
     fresh = InventoryItem.objects.prefetch_related("item_suppliers__supplier").get(pk=item.pk)
-    lines = IndexCardRenderer(base_url="http://localhost:3000")._stock_info_lines(fresh)
+    # ``include_vendor_data=True``: the lead lines are vendor data and the
+    # renderer omits them by default now (op-anonymous-read-posture). This test
+    # is about WHICH supplier's lead time the card sources, so it asks for the
+    # card an operator prints — the one that has the lines at all.
+    lines = IndexCardRenderer(
+        base_url="http://localhost:3000", include_vendor_data=True
+    )._stock_info_lines(fresh)
 
     assert "Avg Lead: 20 days" in lines
     assert not any("Lead: 1 day" in line for line in lines)
+
+
+def test_kanban_card_prints_no_lead_time_at_all_for_an_anonymous_render():
+    """The default the anonymous ``download_card`` path takes.
+
+    A printed card cannot be recalled, so the renderer withholds by default and
+    an operator surface must ask for the lines. The reorder-point line stays —
+    it is a shelf threshold this makerspace set, not a wait a vendor quoted.
+    """
+    from index_cards.services import IndexCardRenderer
+
+    item = _item("Grommet")
+    _cheap_dead_dear_live(item)
+
+    fresh = InventoryItem.objects.prefetch_related("item_suppliers__supplier").get(pk=item.pk)
+    lines = IndexCardRenderer(base_url="http://localhost:3000")._stock_info_lines(fresh)
+
+    assert not any("Lead" in line for line in lines), lines
+    assert any(line.startswith("Reorder at:") for line in lines), lines
 
 
 # ── The two rules that used to disagree ─────────────────────────────────────

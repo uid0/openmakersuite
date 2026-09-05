@@ -504,48 +504,71 @@ def _caveated_item(name, **item_kwargs):
     return item
 
 
-def test_an_anonymous_item_read_carries_no_derivation_metadata(anon):
+# --- WHAT AN ANONYMOUS CALLER GETS CHANGED UNDER op-3xsp'S FEET.
+#
+# op-3xsp withheld FOUR keys inside ``supplier_choice`` from an anonymous
+# caller and deliberately kept ``supplier_name``, ``item_supplier_id``,
+# ``reason`` and ``alternatives`` — reasoning, correctly at the time, that every
+# name in ``alternatives`` was already in ``suppliers[]`` on the same payload,
+# so hiding one while the other sat beside it "would look like a protection and
+# be none".
+#
+# The captain then decided the other way for BOTH: "Vendor names should not be
+# public, same with Vendor Pricing." ``suppliers[]`` is withheld, and so is
+# ``supplier_choice`` whole. The four narrow keys still decide what a SIGNED-IN
+# reader sees, which is why the operator tests below are untouched — the gate
+# op-3xsp built is intact, it is simply no longer the outermost one.
+#
+# The three tests here previously asserted that an anonymous caller DID receive
+# the supplier's name and the alternatives. They are inverted rather than
+# deleted: the payload they described is exactly what must not happen now, and
+# a reader of this file should be able to see that it was checked.
+
+
+def test_an_anonymous_item_read_carries_no_supplier_choice_at_all(anon):
     item = _caveated_item("Detail")
 
     response = anon.get(f"/api/inventory/items/{item.id}/")
 
     assert response.status_code == 200, response.content
-    choice = response.data["supplier_choice"]
-    assert OPERATOR_ONLY_KEYS.isdisjoint(choice), choice
-    assert PUBLIC_KEYS <= set(choice), choice
+    # The endpoint stays open — this is the anonymous scan path.
+    assert response.data["name"] == "Detail"
+    # But the whole object is gone, not just its four caveats.
+    assert "supplier_choice" not in response.data
+    assert response.data["vendor_data_withheld"] is True
 
 
-def test_an_anonymous_item_read_still_names_the_supplier_and_the_others(anon):
-    """The gate closes the derivation detail, not the vendor roster.
+def test_an_anonymous_item_read_names_no_supplier_anywhere_in_the_payload(anon):
+    """The inversion of op-3xsp's "still names the supplier and the others".
 
-    ``suppliers[]`` on this same response already lists every one of these
-    names. Hiding ``alternatives`` while that array sits beside it would look
-    like a protection and be none.
+    Walks the whole decoded body rather than checking the one key, so the name
+    cannot reappear under another key — which is how ``suppliers[]`` came to be
+    the thing that made the older gate hollow.
     """
     item = _caveated_item("Roster")
 
     response = anon.get(f"/api/inventory/items/{item.id}/")
 
-    choice = response.data["supplier_choice"]
-    assert choice["supplier_name"] == "Roster Acme"
-    assert [a["supplier_name"] for a in choice["alternatives"]] == ["Roster Beta"]
-    assert choice["reason"] is None
-    assert choice["item_supplier_id"] is not None
+    assert response.status_code == 200, response.content
+    assert b"Roster Acme" not in response.content
+    assert b"Roster Beta" not in response.content
+    assert b"Roster Flagged" not in response.content
 
 
-def test_an_anonymous_list_read_carries_no_derivation_metadata(anon):
+def test_an_anonymous_list_read_carries_no_supplier_choice(anon):
     """The CSV export pages the LIST endpoint, and it is `AllowAny` too."""
     item = _caveated_item("Listed")
 
     response = anon.get("/api/inventory/items/")
 
     assert response.status_code == 200, response.content
-    choice = next(r for r in response.data["results"] if r["id"] == str(item.id))["supplier_choice"]
-    assert OPERATOR_ONLY_KEYS.isdisjoint(choice), choice
-    assert choice["supplier_name"] == "Listed Acme"
+    row = next(r for r in response.data["results"] if r["id"] == str(item.id))
+    assert "supplier_choice" not in row
+    assert row["vendor_data_withheld"] is True
+    assert b"Listed Acme" not in response.content
 
 
-def test_an_anonymous_kit_read_carries_no_derivation_metadata(anon):
+def test_an_anonymous_kit_read_carries_no_supplier_choice(anon):
     """``KitSerializer`` subclasses ``InventoryItemSerializer`` — confirmed, not assumed."""
     kit = _caveated_item("Kitted", is_kit=True, current_stock=0)
 
@@ -553,12 +576,14 @@ def test_an_anonymous_kit_read_carries_no_derivation_metadata(anon):
     listing = anon.get("/api/inventory/kits/")
 
     assert detail.status_code == 200, detail.content
-    assert OPERATOR_ONLY_KEYS.isdisjoint(detail.data["supplier_choice"])
-    assert detail.data["supplier_choice"]["supplier_name"] == "Kitted Acme"
+    assert "supplier_choice" not in detail.data
+    assert detail.data["vendor_data_withheld"] is True
+    assert b"Kitted Acme" not in detail.content
 
     assert listing.status_code == 200, listing.content
     row = next(r for r in listing.data["results"] if r["id"] == str(kit.id))
-    assert OPERATOR_ONLY_KEYS.isdisjoint(row["supplier_choice"])
+    assert "supplier_choice" not in row
+    assert b"Kitted Acme" not in listing.content
 
 
 def test_a_signed_in_item_read_still_carries_every_caveat(api):
@@ -738,23 +763,20 @@ def test_a_suppliers_recent_orders_tell_an_operator_the_caveats(api, purchaser):
     assert OPERATOR_ONLY_KEYS <= set(choice), choice
 
 
-def test_an_anonymous_caller_on_a_public_supplier_page_still_gets_the_narrow_view(
-    anon, api, purchaser
-):
-    """CONTROL: forwarding context did not widen anything.
+def test_an_anonymous_caller_cannot_reach_the_supplier_page_at_all(anon, api, purchaser):
+    """CONTROL, rewritten: this page is no longer public.
 
-    ``SupplierViewSet`` is ``IsAuthenticatedOrReadOnly``, so this page reads
-    publicly. Passing the request through changes what an OPERATOR sees; an
-    anonymous caller resolves to the same restricted form the missing context
-    used to produce for everybody.
+    It used to read publicly under ``IsAuthenticatedOrReadOnly``, and this test
+    asserted that forwarding request context had not widened what an anonymous
+    caller saw THERE. ``SupplierViewSet`` is ``IsAuthenticated`` now
+    (op-anonymous-read-posture) — the page is a vendor's identity with their
+    purchase orders and every line's cost nested inside it — so the narrower
+    question the test asked no longer has a caller to ask it about. What is
+    still worth pinning is that nothing leaks on the way to the refusal.
     """
     order, _, _ = _po_line_for(api, purchaser, "PublicRecent")
 
     response = anon.get(f"/api/inventory/suppliers/{order.supplier.id}/")
 
-    assert response.status_code == 200, response.content
-    lines = [line for entry in response.data["purchase_orders"] for line in entry["items"]]
-    for line in lines:
-        choice = line["item_details"]["supplier_choice"]
-        assert OPERATOR_ONLY_KEYS.isdisjoint(choice), choice
-        assert PUBLIC_KEYS <= set(choice), choice
+    assert response.status_code in (401, 403), response.content
+    assert order.supplier.name.encode() not in response.content

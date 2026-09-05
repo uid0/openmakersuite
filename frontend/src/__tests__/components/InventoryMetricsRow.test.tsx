@@ -132,4 +132,82 @@ describe('InventoryMetricsRow', () => {
 
     expect(screen.queryByTestId('metric-supplier-gaps')).not.toBeInTheDocument();
   });
+
+  /**
+   * THIS STRIP IS ON A PUBLIC ROUTE (op-anonymous-read-posture).
+   * `/inventory/items/:id` carries no `RequireAuth` and `metrics` is
+   * `AllowAny`, so a logged-out scanner renders this with the six vendor keys
+   * ABSENT — pinned server-side by
+   * `test_inventory_metrics.py::test_endpoint_is_still_public_and_serves_the_shelf_half`.
+   *
+   * Two things went wrong before this asked: `'-'` in Lead and Cost claimed
+   * the ITEM has no lead time and no price when the truth was about the
+   * READER, and `TREND_LABEL[undefined]` printed the literal string
+   * "undefined" into the Cost cell's tooltip.
+   */
+  describe('a caller the server withheld the vendor half from', () => {
+    const anonymousMetrics = () => {
+      const metrics: Record<string, unknown> = {
+        ...buildMetrics(),
+        vendor_data_withheld: true,
+      };
+      for (const key of [
+        'lead_time_days',
+        'unit_cost',
+        'cost_trend',
+        'last_po_unit_cost',
+        'supplier_scored_without_price',
+        'supplier_scored_without_history',
+      ]) {
+        delete metrics[key];
+      }
+      return metrics as unknown as InventoryItemMetrics;
+    };
+
+    it('never prints the string "undefined" anywhere, tooltips included', () => {
+      const { container } = renderRow(anonymousMetrics());
+
+      expect(container.innerHTML).not.toContain('undefined');
+    });
+
+    it('says the figures are withheld rather than dashing them', () => {
+      renderRow(anonymousMetrics());
+
+      expect(screen.getByTestId('metric-lead-withheld')).toBeInTheDocument();
+      expect(screen.getByTestId('metric-cost-withheld')).toBeInTheDocument();
+      expect(screen.getByTestId('metric-lead')).not.toHaveTextContent('\u2014');
+      expect(screen.getByTestId('metric-cost')).not.toHaveTextContent('\u2014');
+      expect(screen.getByTestId('metric-cost')).not.toHaveTextContent('$');
+    });
+
+    it('renders no trend arrow off a key that never arrived', () => {
+      renderRow(anonymousMetrics());
+
+      for (const trend of ['up', 'down', 'flat', 'no_history']) {
+        expect(screen.queryByTestId(`cost-trend-${trend}`)).not.toBeInTheDocument();
+      }
+      expect(screen.queryByTestId('metric-supplier-gaps')).not.toBeInTheDocument();
+    });
+
+    it('CONTROL: the shelf half an anonymous reorder is sized on is untouched', () => {
+      renderRow(anonymousMetrics());
+
+      expect(screen.getByTestId('metric-qoh')).toHaveTextContent('10');
+      expect(screen.getByTestId('metric-qoo')).toHaveTextContent('7');
+      expect(screen.getByTestId('metric-qa')).toHaveTextContent('6');
+      expect(screen.getByTestId('metric-qc')).toHaveTextContent('4');
+      expect(screen.getByTestId('metric-qit')).toHaveTextContent('3');
+      expect(screen.getByTestId('metric-rp')).toHaveTextContent('5');
+      expect(screen.getByTestId('metric-sku')).toHaveTextContent('SKU-123');
+    });
+
+    it('CONTROL: a signed-in caller still gets both figures', () => {
+      renderRow(buildMetrics());
+
+      expect(screen.queryByTestId('metric-lead-withheld')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('metric-cost-withheld')).not.toBeInTheDocument();
+      expect(screen.getByTestId('metric-lead')).toHaveTextContent('14d');
+      expect(screen.getByTestId('metric-cost')).toHaveTextContent('$5.00');
+    });
+  });
 });

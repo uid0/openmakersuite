@@ -118,11 +118,23 @@ api.interceptors.response.use(
     // Handle 401 errors (token expired) with automatic refresh
     // Skip refresh logic for:
     // - The refresh endpoint itself (to avoid infinite loops)
-    // - Public endpoints that don't require authentication
+    // - Endpoints that run NO authentication at all, so a stale token cannot
+    //   produce the 401 a refresh would fix.
+    //
+    // `/reorders/purchase-orders/` and `/reorders/analytics/transparency/` were
+    // on this list under the justification "public endpoints that don't require
+    // authentication", and op-anonymous-read-posture made that untrue of both.
+    // Purchase orders are IsAuthenticated on every action now. Transparency is
+    // still AllowAny, but it lost `authentication_classes=[]` — which it had to,
+    // because that setting made request.user AnonymousUser for a SIGNED-IN
+    // caller and no vendor gate could tell the two apart. It therefore runs
+    // CSRFExemptJWTAuthentication, an expired Bearer raises InvalidToken, and
+    // DRF answers 401 before AllowAny is ever consulted. Skipping the refresh
+    // left a member who had left the tab open staring at "Unable to load
+    // transparency data" on a page that is public. `logistics_dashboard` keeps
+    // `authentication_classes=[]` and so genuinely cannot 401 on a stale token.
     const isRefreshEndpoint = originalRequest?.url?.includes('/auth/refresh/');
-    const isPublicEndpoint = originalRequest?.url?.includes('/reorders/purchase-orders/') ||
-                            originalRequest?.url?.includes('/reorders/analytics/transparency/') ||
-                            originalRequest?.url?.includes('/reorders/analytics/logistics_dashboard/');
+    const isPublicEndpoint = originalRequest?.url?.includes('/reorders/analytics/logistics_dashboard/');
 
     // Only attempt refresh if we have a valid error response with 401 status
     // and we haven't already retried this request
@@ -171,6 +183,14 @@ api.interceptors.response.use(
           headers: {
             'Content-Type': 'application/json',
           },
+          // Bypassing the `api` instance also bypasses its `withCredentials`,
+          // and this is the one request that must not lose it: the backend
+          // slides the Django session cookie /media/ runs on ONLY when the
+          // refresh presents it (auth_views._renew_session_from_token). A
+          // cross-origin XHR without credentials sends no cookie, so on
+          // localhost and in any split deployment the slide silently became a
+          // no-op and every gated download 403'd from day 15.
+          withCredentials: true,
         });
         const { access } = refreshResponse.data;
         localStorage.setItem('token', access);
@@ -5535,6 +5555,17 @@ export interface ScanDispatchResult {
   target_name?: string;
   target_url?: string;
   message?: string;
+  /**
+   * The two keys `ResolvedScan.VENDOR_ONLY_KEYS` withholds from a caller with
+   * no session (op-anonymous-read-posture). `dispatch_scan` stays `AllowAny` —
+   * it is what a barcode gun hits — but a UPC is printed on the outside of the
+   * box, so anyone holding one could otherwise turn it into the name of the
+   * vendor we buy that item from.
+   *
+   * `vendor_data_withheld` is what tells the two absences apart: withheld from
+   * you, versus this scan resolved no supplier link at all.
+   */
+  vendor_data_withheld?: boolean;
   item_supplier_id?: number;
   supplier_name?: string;
   item_id?: string;

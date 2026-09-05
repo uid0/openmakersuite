@@ -15,6 +15,16 @@ exclusions" mean that AGENTS.md section.
 
 ## The change list
 
+**EVERY FIGURE BELOW IS THE SIGNED-IN ONE NOW.** `oms-anonymous-read-posture`
+put vendor identity and vendor money behind a login, so a caller with no session
+gets the vendor keys OMITTED (with `vendor_data_withheld: true`) rather than
+formatted — on the public transparency feed and page, the anonymous scan screen,
+the item and kit payloads and the inventory CSV alike. The wording rules this
+file records still govern what a reader who may see the figure sees; who that
+reader is belongs to
+[`API_PERMISSION_MATRIX.md`](API_PERMISSION_MATRIX.md), which is the current
+contract wherever a bullet below says "public" or "no auth".
+
 **MONEY FIGURES AND PAYLOAD CLAIMS MOVED BY THE REVIEW ROUNDS**, each with the
 screen or payload that shows it. The branch invariant requires this list to be
 complete, and it was twice not:

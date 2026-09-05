@@ -51,6 +51,30 @@ CONTRACT_FIELDS = {
     "supplier_scored_without_history",
 }
 
+#: The half of the contract that describes the SHELF, and so is served to a
+#: caller with no session — the item-detail row an anonymous QR scanner reads
+#: (op-anonymous-read-posture).
+#:
+#: ``case_size`` is here on purpose: a pack size is a shelf fact, not a vendor
+#: one — the same call the pack-size derivation (op-c1ke) makes for
+#: ``current_cases`` — and it re-derives nothing once both costs are gone.
+PUBLIC_CONTRACT_FIELDS = {
+    "current_stock",
+    "quantity_on_order",
+    "quantity_available",
+    "quantity_committed",
+    "committed_breakdown",
+    "quantity_in_transit",
+    "reorder_point",
+    "is_case_based",
+    "case_size",
+    "vendor_data_withheld",
+}
+
+#: The half withheld from that caller: the vendor's wait, the vendor's price,
+#: how it moved, and why the scoring could not see one.
+VENDOR_CONTRACT_FIELDS = CONTRACT_FIELDS - (PUBLIC_CONTRACT_FIELDS - {"vendor_data_withheld"})
+
 BREAKDOWN_FIELDS = {
     "work_order_id",
     "work_order_short_id",
@@ -196,25 +220,67 @@ def _corrective_work_order(asset, *, status=WorkOrder.Status.OPEN):
     return WorkOrder.objects.create(asset=asset, status=status)
 
 
+@pytest.fixture
+def metrics_reader(authenticated_client):
+    """A signed-in client.
+
+    ``metrics`` stays ``AllowAny`` — it powers the row an anonymous scanner
+    reads — but its vendor half is withheld from a caller with no session
+    (op-anonymous-read-posture). The tests below assert what the vendor half
+    CONTAINS, which is a signed-in reader's payload; the anonymous shape is
+    pinned by ``TestMetricsEndpointContract`` instead.
+    """
+    client, _user = authenticated_client
+    return client
+
+
 class TestMetricsEndpointContract:
-    def test_endpoint_is_public_and_returns_exact_contract(self, api_client):
+    def test_endpoint_is_still_public_and_serves_the_shelf_half(self, api_client):
+        """The endpoint did NOT move behind a login. An anonymous scanner still
+        gets every stock figure; what they lose is the vendor's price and wait."""
         item = InventoryItemFactory(image=None, current_stock=10, reorder_quantity=4)
 
         response = api_client.get(_metrics_url(item))
 
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        # Exactly the pinned contract — no more, no less (ScanTTY depends on it).
-        assert set(data.keys()) == CONTRACT_FIELDS
+        assert set(data.keys()) == PUBLIC_CONTRACT_FIELDS
+        assert data["vendor_data_withheld"] is True
         assert data["current_stock"] == 10
         assert data["reorder_point"] == 4
 
-    def test_reorder_point_and_lead_time_echo_the_item(self, api_client):
+    def test_a_signed_in_caller_returns_the_exact_pinned_contract(self, metrics_reader):
+        """CONTROL, and the ScanTTY contract: no key is renamed or removed, so a
+        client that sends a Bearer token sees exactly what it always saw."""
+        item = InventoryItemFactory(image=None, current_stock=10, reorder_quantity=4)
+
+        response = metrics_reader.get(_metrics_url(item))
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        # Exactly the pinned contract — no more, no less (ScanTTY depends on it).
+        assert set(data.keys()) == CONTRACT_FIELDS
+        assert "vendor_data_withheld" not in data
+        assert data["current_stock"] == 10
+        assert data["reorder_point"] == 4
+
+    def test_the_withheld_half_is_exactly_the_vendor_keys(self, api_client, metrics_reader):
+        """Names the boundary in one place, so a key added to the row lands on
+        one side of it deliberately rather than by omission."""
+        item = InventoryItemFactory(image=None)
+
+        anonymous = set(api_client.get(_metrics_url(item)).json())
+        signed_in = set(metrics_reader.get(_metrics_url(item)).json())
+
+        assert signed_in - anonymous == VENDOR_CONTRACT_FIELDS
+        assert anonymous - signed_in == {"vendor_data_withheld"}
+
+    def test_reorder_point_and_lead_time_echo_the_item(self, metrics_reader):
         item = InventoryItemFactory(
             image=None, current_stock=5, reorder_quantity=9, average_lead_time=14
         )
 
-        data = api_client.get(_metrics_url(item)).json()
+        data = metrics_reader.get(_metrics_url(item)).json()
 
         assert data["reorder_point"] == 9  # RP == reorder_quantity
         assert data["lead_time_days"] == 14  # Lead == average_lead_time
@@ -255,33 +321,33 @@ class TestSupplierChoiceGaps:
         )
         return item, winner
 
-    def test_an_unpriced_winner_is_named_as_one(self, api_client):
+    def test_an_unpriced_winner_is_named_as_one(self, metrics_reader):
         item, winner = self._two_supplier_item(cheap_cost=Decimal("6.00"), quick_cost=None)
 
-        data = api_client.get(_metrics_url(item)).json()
+        data = metrics_reader.get(_metrics_url(item)).json()
 
         assert item.primary_item_supplier.pk == winner.pk
         assert data["unit_cost"] is None
         assert data["supplier_scored_without_price"] is True
         assert data["supplier_scored_without_history"] is True
 
-    def test_a_priced_winner_with_a_delivery_record_is_named_as_neither(self, api_client):
+    def test_a_priced_winner_with_a_delivery_record_is_named_as_neither(self, metrics_reader):
         item, winner = self._two_supplier_item(
             cheap_cost=Decimal("6.00"), quick_cost=Decimal("6.00")
         )
         _record_delivery(winner, variance_days=0)
 
-        data = api_client.get(_metrics_url(item)).json()
+        data = metrics_reader.get(_metrics_url(item)).json()
 
         assert data["unit_cost"] == "6.00"
         assert data["supplier_scored_without_price"] is False
         assert data["supplier_scored_without_history"] is False
 
-    def test_a_flagged_primary_reports_neither(self, api_client):
+    def test_a_flagged_primary_reports_neither(self, metrics_reader):
         """The gate weighed nothing, so no gap decided anything (see the module)."""
         item = InventoryItemFactory(image=None, current_stock=1, reorder_quantity=1, unit_cost=None)
 
-        data = api_client.get(_metrics_url(item)).json()
+        data = metrics_reader.get(_metrics_url(item)).json()
 
         assert item.primary_item_supplier.is_primary is True
         assert data["unit_cost"] is None
@@ -736,10 +802,10 @@ class TestCommittedBreakdown:
 
 
 class TestCostAndTrend:
-    def test_no_history_when_item_has_no_purchase_orders(self, api_client):
+    def test_no_history_when_item_has_no_purchase_orders(self, metrics_reader):
         item = InventoryItemFactory(image=None, reorder_quantity=1, unit_cost=Decimal("4.00"))
 
-        data = api_client.get(_metrics_url(item)).json()
+        data = metrics_reader.get(_metrics_url(item)).json()
 
         assert data["cost_trend"] == "no_history"
         assert data["last_po_unit_cost"] is None
@@ -752,7 +818,9 @@ class TestCostAndTrend:
             (Decimal("4.00"), Decimal("4.0000"), "flat"),
         ],
     )
-    def test_trend_compares_current_cost_to_last_po(self, api_client, current, last_po, expected):
+    def test_trend_compares_current_cost_to_last_po(
+        self, metrics_reader, current, last_po, expected
+    ):
         item = InventoryItemFactory(image=None, reorder_quantity=1, unit_cost=current)
         _po_line(
             item,
@@ -762,13 +830,13 @@ class TestCostAndTrend:
             unit_cost_ordered=last_po,
         )
 
-        data = api_client.get(_metrics_url(item)).json()
+        data = metrics_reader.get(_metrics_url(item)).json()
 
         assert data["cost_trend"] == expected
         assert Decimal(data["last_po_unit_cost"]) == last_po
         assert Decimal(data["unit_cost"]) == current
 
-    def test_trend_uses_the_most_recent_po_line(self, api_client):
+    def test_trend_uses_the_most_recent_po_line(self, metrics_reader):
         item = InventoryItemFactory(image=None, reorder_quantity=1, unit_cost=Decimal("5.00"))
         older = _po_line(
             item,
@@ -789,14 +857,14 @@ class TestCostAndTrend:
         PurchaseOrderItem.objects.filter(pk=older.pk).update(created_at=now - timedelta(days=2))
         PurchaseOrderItem.objects.filter(pk=newer.pk).update(created_at=now - timedelta(days=1))
 
-        data = api_client.get(_metrics_url(item)).json()
+        data = metrics_reader.get(_metrics_url(item)).json()
 
         assert Decimal(data["last_po_unit_cost"]) == Decimal("4.0000")
         assert data["cost_trend"] == "up"  # current 5.00 > most-recent 4.00
 
 
 class TestCaseBasedCost:
-    def test_case_based_reports_case_cost_and_size(self, api_client):
+    def test_case_based_reports_case_cost_and_size(self, metrics_reader):
         # package_cost is derived as unit_cost * quantity_per_package = 2.00 * 12.
         item = InventoryItemFactory(
             image=None,
@@ -807,13 +875,13 @@ class TestCaseBasedCost:
             quantity_per_package=12,
         )
 
-        data = api_client.get(_metrics_url(item)).json()
+        data = metrics_reader.get(_metrics_url(item)).json()
 
         assert data["is_case_based"] is True
         assert data["case_size"] == 12
         assert Decimal(data["unit_cost"]) == Decimal("24.00")  # per-case cost
 
-    def test_per_item_cost_when_not_case_based(self, api_client):
+    def test_per_item_cost_when_not_case_based(self, metrics_reader):
         item = InventoryItemFactory(
             image=None,
             reorder_quantity=1,
@@ -822,7 +890,7 @@ class TestCaseBasedCost:
             quantity_per_package=1,
         )
 
-        data = api_client.get(_metrics_url(item)).json()
+        data = metrics_reader.get(_metrics_url(item)).json()
 
         assert data["is_case_based"] is False
         assert Decimal(data["unit_cost"]) == Decimal("2.50")  # per-unit cost

@@ -72,15 +72,30 @@ class IndexCardRenderer:
 
     CALL_TO_ACTION = "Scan to notify Logistics\nit's time to reorder me!"
 
-    def __init__(self, base_url: str | None = None, blank_cards: bool = False) -> None:
+    def __init__(
+        self,
+        base_url: str | None = None,
+        blank_cards: bool = False,
+        include_vendor_data: bool = False,
+    ) -> None:
         """Initialize the renderer with base URL and card type.
 
         Args:
             base_url: Base URL for QR codes (defaults to FRONTEND_URL setting)
             blank_cards: If True, render blank cards with only QR codes
+            include_vendor_data: Whether this render may print vendor facts.
+                Only the lead-time lines are affected today — see
+                :meth:`_stock_info_lines`. DEFAULTS TO FALSE, because a PDF is
+                the one surface where withholding cannot be undone after the
+                fact: the card is printed and stuck on a shelf. A caller that
+                has not proven its reader is signed in gets the public card.
+                ``InventoryItemViewSet.download_card`` is ``AllowAny``, so it
+                passes ``may_see_vendor_data(request)``
+                (op-anonymous-read-posture).
         """
         self.base_url = base_url or getattr(settings, "FRONTEND_URL", "http://localhost:3000")
         self.blank_cards = blank_cards
+        self.include_vendor_data = include_vendor_data
         self._title_style = ParagraphStyle(
             name="CardTitle",
             fontName="Helvetica-Bold",
@@ -821,10 +836,19 @@ class IndexCardRenderer:
         (:mod:`inventory.services.supplier_selection`); ``Max Lead`` spans the
         orderable links. Neither can quote a vendor nobody can buy from — the
         card outlives the screen it was printed from (op-2rsp).
+
+        BOTH LEAD LINES ARE VENDOR FACTS and are omitted unless
+        ``include_vendor_data``. A lead time is named in the captain's decision
+        alongside vendor names and prices, and ``download_card`` serves this PDF
+        to a caller with no session. The reorder-point line stays: it is a shelf
+        threshold this makerspace set, not a wait a vendor quoted.
         """
         info_lines = [
             self._reorder_at_line(item),
         ]
+
+        if not self.include_vendor_data:
+            return info_lines
 
         if item.average_lead_time:
             info_lines.append(f"Avg Lead: {self._pluralize(item.average_lead_time, 'day')}")
@@ -934,7 +958,9 @@ def build_preview_payload(
 
     Args:
         item: Item to render
-        renderer: Optional custom renderer
+        renderer: Optional custom renderer. A caller that may print vendor facts
+            passes one built with ``include_vendor_data=True``; the fallback
+            below deliberately does not, matching the renderer's own default.
         blank_card: If True, render blank card with only QR code
     """
     renderer = renderer or IndexCardRenderer(blank_cards=blank_card)
@@ -1142,12 +1168,19 @@ class FixtureCardRenderer:
 
         self.base_url = base_url or getattr(settings, "FRONTEND_URL", "http://localhost:3000")
 
-    def render_preview(self, fixture) -> bytes:
-        """Render a preview PDF for a fixture card."""
+    def render_preview(self, fixture, include_vendor_data: bool = False) -> bytes:
+        """Render a preview PDF for a fixture card.
+
+        ``include_vendor_data`` rides through to ``IndexCardRenderer`` because
+        this borrows that renderer wholesale, and so inherits its lead-time
+        lines — ``FixtureViewSet.download_card`` is a GET on an
+        ``IsAuthenticatedOrReadOnly`` viewset and therefore anonymously
+        reachable (op-anonymous-read-posture).
+        """
         # For now, use the existing IndexCardRenderer with the fixture's refill_item
         # This is a temporary implementation until a dedicated fixture card renderer is created
         if not fixture.refill_item:
             raise ValueError("Fixture must have a refill_item to generate a card")
 
-        renderer = IndexCardRenderer(blank_cards=False)
+        renderer = IndexCardRenderer(blank_cards=False, include_vendor_data=include_vendor_data)
         return renderer.render_preview(fixture.refill_item, blank_card=False)

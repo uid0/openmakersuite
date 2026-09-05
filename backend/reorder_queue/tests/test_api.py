@@ -362,11 +362,72 @@ class TestReorderRequestAPI:
         assert ledger_entry["quantity"] == request_obj.quantity
         assert ledger_entry["ordered_at"] is not None
         assert ledger_entry["delivered_at"] == delivery_date.isoformat()
-        assert ledger_entry["actual_cost"] == float(request_obj.actual_cost)
+        # ``actual_cost`` is what we paid a vendor for this order, so it goes
+        # with the vendor block; the AGGREGATE above it stays, because a total
+        # across every vendor names none of them and is what the page is for.
+        assert "actual_cost" not in ledger_entry
+        assert ledger_entry["vendor_data_withheld"] is True
 
         order_entry = data["orders"][0]
+        # Vendor identity and the paperwork numbers are withheld from a caller
+        # with no session (op-anonymous-read-posture); the accountability the
+        # page exists for — totals, item, quantity, dates, status — is not.
+        assert "supplier_name" not in order_entry
+        assert "invoice_number" not in order_entry
+        assert order_entry["vendor_data_withheld"] is True
+        assert request_obj.item.supplier.name.encode() not in response.content
+        assert b"INV-LEDGER-1" not in response.content
+
+    def test_the_summary_says_the_gate_ran_even_when_the_feed_is_empty(self, api_client):
+        """REGRESSION (op-anonymous-read-posture).
+
+        ``orders`` and ``ledger`` are built in one loop, so they empty together
+        and a consumer reading the marker off row 0 gets ``False`` for a feed
+        with nothing in it — and then tells an anonymous reader that ALL
+        financial information is published, which is the claim this action
+        stopped honouring. The summary is the one object the payload always
+        carries, so the marker is on it.
+        """
+        response = api_client.get(reverse("analytics-transparency"))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["ledger"] == []
+        assert response.data["orders"] == []
+        assert response.data["summary"]["vendor_data_withheld"] is True
+
+    def test_a_signed_in_caller_gets_no_withheld_marker_on_the_summary(self, authenticated_client):
+        """CONTROL: the marker reports a gate that ran, not a permanent label."""
+        client, _user = authenticated_client
+
+        response = client.get(reverse("analytics-transparency"))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert "vendor_data_withheld" not in response.data["summary"]
+
+    def test_transparency_gives_a_signed_in_caller_the_whole_ledger(self, authenticated_client):
+        """CONTROL: the feed is gated on the reader, not trimmed.
+
+        Also pins the removal of ``authentication_classes=[]`` from the action:
+        while that was set, ``request.user`` was ``AnonymousUser`` for every
+        caller, so no gate here could have told these two apart.
+        """
+        client, _user = authenticated_client
+        request_obj = ReorderRequestFactory(
+            status=ReorderRequest.Status.RECEIVED,
+            ordered_at=timezone.now(),
+            actual_cost="150.25",
+            order_number="ORD-LEDGER-2",
+            invoice_number="INV-LEDGER-2",
+        )
+
+        response = client.get(reverse("analytics-transparency"))
+
+        assert response.status_code == status.HTTP_200_OK
+        order_entry = response.data["orders"][0]
         assert order_entry["supplier_name"] == request_obj.item.supplier.name
-        assert order_entry["invoice_number"] == "INV-LEDGER-1"
+        assert order_entry["invoice_number"] == "INV-LEDGER-2"
+        assert order_entry["actual_cost"] == float(request_obj.actual_cost)
+        assert "vendor_data_withheld" not in order_entry
 
     def test_logistics_dashboard_public_endpoint(self, api_client):
         """The logistics dashboard data should be accessible without authentication."""
@@ -1939,9 +2000,14 @@ class TestPurchaseOrderMetadataAndAttachments:
         assert purchase_order.sales_order_number == "SO-99"
         assert str(purchase_order.expected_delivery_date) == "2026-05-15"
 
-    def test_po_detail_includes_metadata_fields(self, api_client, authenticated_client):
-        """AC-1/AC-4: PO detail response surfaces the new metadata fields."""
-        _, user = authenticated_client
+    def test_po_detail_includes_metadata_fields(self, authenticated_client):
+        """AC-1/AC-4: PO detail response surfaces the new metadata fields.
+
+        Read through the authenticated client since op-anonymous-read-posture:
+        a purchase order is vendor identity and vendor money in one document, so
+        `PurchaseOrderViewSet` requires a session for reads too.
+        """
+        api_client, user = authenticated_client
         purchase_order = self._make_po(user)
         purchase_order.supplier_order_number = "SUP-7"
         purchase_order.sales_order_number = "SO-7"
@@ -2205,16 +2271,24 @@ class TestPurchaseOrderListDraftFilter:
         assert response.status_code == status.HTTP_200_OK
         assert draft_po.id in {row["id"] for row in response.data["results"]}
 
-    def test_status_draft_hides_drafts_from_anonymous_users(self, api_client):
-        """Drafts stay private: the public list is active+settled only."""
+    def test_the_whole_list_is_hidden_from_anonymous_users(self, api_client):
+        """This used to assert that DRAFTS stayed private while the rest of the
+        list was public. The list itself is private now
+        (op-anonymous-read-posture) — a purchase order names the vendor and
+        prices every line — so the narrower question has no caller left to ask
+        it. The draft filter's own behaviour is covered for a signed-in caller
+        by ``TestPurchaseOrderListDraftFilter``'s other cases.
+        """
         user = User.objects.create_user(username="po-draft-owner", password="pw12345678")
-        self._make_po(user, po_status=PurchaseOrder.Status.DRAFT)
+        purchase_order = self._make_po(user, po_status=PurchaseOrder.Status.DRAFT)
 
-        url = reverse("purchaseorder-list")
-        response = api_client.get(url, {"status": "draft"})
+        response = api_client.get(reverse("purchaseorder-list"), {"status": "draft"})
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data["results"] == []
+        assert response.status_code in (
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+        )
+        assert purchase_order.supplier.name.encode() not in response.content
 
 
 @pytest.mark.integration

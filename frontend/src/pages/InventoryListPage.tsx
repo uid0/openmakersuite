@@ -24,11 +24,11 @@ import { IconDownload, IconQrcode, IconSearch, IconSortAscending, IconSortDescen
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
-import { isAuthenticated } from '../components/RequireAuth';
 import { indexCardsAPI, inventoryAPI } from '../services/api';
 import { Category, InventoryItem, Location } from '../types';
 import { exportInventoryItemsToCSV } from '../utils/csvExport';
 import { showError, showInfo, showSuccess } from '../utils/dialogs';
+import { vendorDataWithheld } from '../utils/vendorVisibility';
 
 type SortField = 'name' | 'sku' | 'current_stock' | 'category_name' | 'location';
 type SortDirection = 'asc' | 'desc';
@@ -270,13 +270,16 @@ const InventoryListPage: React.FC = () => {
     try {
       const selected = items.filter((item) => selectedItems.has(item.id));
       const itemsToExport = selected.length > 0 ? selected : await fetchAllMatchingItems();
-      // This route is not behind RequireAuth and its list endpoint is AllowAny,
-      // so whoever pressed Export may be logged out. The export is a pure
-      // function that cannot look, so the audience is decided HERE, off the
-      // same `isAuthenticated` signal the other gated supplier surfaces use,
-      // and read at press time rather than at mount so a sign-in mid-visit is
-      // not exported against (op-3xsp).
-      exportInventoryItemsToCSV(itemsToExport, isAuthenticated() ? 'operator' : 'anonymous');
+      // The audience comes off THE ROWS BEING EXPORTED, not off auth state, so
+      // the file and the table it was exported from cannot disagree — the table
+      // reads the same marker. `isAuthenticated()` is only "is there a token in
+      // localStorage", and the response interceptor clears that token when a
+      // refresh fails on any background call; an operator still looking at real
+      // prices would then have exported a file with those columns missing.
+      exportInventoryItemsToCSV(
+        itemsToExport,
+        itemsToExport.some(vendorDataWithheld) ? 'anonymous' : 'operator'
+      );
     } catch (err) {
       console.error('Error exporting items:', err);
       showError('Failed to export items. Please try again.');
@@ -317,6 +320,11 @@ const InventoryListPage: React.FC = () => {
     if (sortField !== field) return null;
     return sortDirection === 'asc' ? <IconSortAscending size={16} /> : <IconSortDescending size={16} />;
   };
+
+  // `some` rather than reading row 0: every row of one response is gated the
+  // same way, so this agrees with row 0 whenever there is one, and stays false
+  // for an empty list — where a dropped column would say nothing to nobody.
+  const vendorWithheld = items.some(vendorDataWithheld);
 
   if (loading && items.length === 0) {
     return (
@@ -424,6 +432,18 @@ const InventoryListPage: React.FC = () => {
         </Stack>
       </Paper>
 
+      {/* The Unit Cost column is DROPPED, not blanked, for a caller the server
+          withheld the vendor block from (op-anonymous-read-posture). This route
+          is not behind RequireAuth and its list endpoint is AllowAny, so a
+          logged-out visitor gets rows with no `unit_cost` key at all — and '-'
+          in this column already means "no price recorded", a claim about the
+          ITEM where the truth is a fact about the READER. `csvExport` drops the
+          same column for the same reason ("an absent COLUMN cannot be misread
+          as an empty VALUE"), and the screen and its own export have to agree.
+
+          Read off the payload's marker rather than off auth state: the server
+          has already decided, and a second client-side derivation of the same
+          answer is how the two come to disagree. */}
       {/* Table */}
       <Paper withBorder>
         <Table.ScrollContainer minWidth={800}>
@@ -467,7 +487,7 @@ const InventoryListPage: React.FC = () => {
                     <SortIcon field="current_stock" />
                   </Group>
                 </Table.Th>
-                <Table.Th>Unit Cost</Table.Th>
+                {!vendorWithheld && <Table.Th>Unit Cost</Table.Th>}
                 <Table.Th>Status</Table.Th>
                 <Table.Th>Actions</Table.Th>
               </Table.Tr>
@@ -540,9 +560,11 @@ const InventoryListPage: React.FC = () => {
                       </Tooltip>
                     )}
                   </Table.Td>
-                  <Table.Td>
-                    {item.unit_cost != null ? `$${item.unit_cost.toFixed(2)}` : '-'}
-                  </Table.Td>
+                  {!vendorWithheld && (
+                    <Table.Td>
+                      {item.unit_cost != null ? `$${item.unit_cost.toFixed(2)}` : '-'}
+                    </Table.Td>
+                  )}
                   <Table.Td>
                     <Group gap="xs">
                       {item.needs_reorder && <Badge color="red" size="sm">Low Stock</Badge>}

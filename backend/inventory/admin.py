@@ -839,7 +839,8 @@ class InventoryItemAdmin(admin.ModelAdmin):
             return
 
         items = list(queryset.order_by("name"))
-        renderer = IndexCardRenderer(blank_cards=False)
+        # Django admin is staff-only, so this print carries the vendor lines.
+        renderer = IndexCardRenderer(blank_cards=False, include_vendor_data=True)
         pdf_bytes = renderer.render_to_bytes(items, blank_cards=False)
 
         # Generate filename with timestamp

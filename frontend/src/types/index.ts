@@ -310,9 +310,28 @@ export interface InventoryItem {
   // loose units and a low item stopped being flagged. Render it as unknown.
   current_cases: number | null;
   supplier: number | null;
-  supplier_name: string | null;
-  supplier_sku: string | null;
-  supplier_url: string | null;
+  /**
+   * THE VENDOR BLOCK: ABSENT, not null, for a caller with no session
+   * (op-anonymous-read-posture).
+   *
+   * `supplier_name` / `supplier_sku` / `supplier_url` / `unit_cost` /
+   * `package_cost` / `average_lead_time` / `suppliers` / `supplier_choice` /
+   * `total_value` are OMITTED from this payload when the server withholds them,
+   * and `vendor_data_withheld` is `true` in their place. Optional here so the
+   * compiler forces a reader to say which of the three states it is handling —
+   * `null` still means "nothing on file", which is a claim about the ITEM, and
+   * conflating it with "not shown to you" is what these declarations exist to
+   * prevent.
+   *
+   * A guard spelled `=== null` does NOT catch the withheld case: it is exactly
+   * how `item.unit_cost.toFixed(2)` came to run on `undefined` and take the
+   * item detail page down for a logged-out visitor. Ask
+   * `utils/vendorVisibility.vendorDataWithheld` first.
+   */
+  vendor_data_withheld?: boolean;
+  supplier_name?: string | null;
+  supplier_sku?: string | null;
+  supplier_url?: string | null;
   /**
    * A NUMBER, not a decimal string (op-9m2v).
    *
@@ -327,8 +346,8 @@ export interface InventoryItem {
    * sends `0`, which is falsy AND which React renders as a stray "0".
    * Same attribute name, two wire types, decided by the serializer field.
    */
-  unit_cost: number | null;
-  average_lead_time: number | null;
+  unit_cost?: number | null;
+  average_lead_time?: number | null;
   qr_code: string | null;
   is_active: boolean;
   // Retirement (op-jv7r). A retired item is never flagged for reorder and is
@@ -346,7 +365,7 @@ export interface InventoryItem {
   // `null` when no supplier records a price, so the stock cannot be valued
   // (op-9m2v). The server used to send "0.00", which claims the shelf is worth
   // nothing. Render the absence, never a $0.00.
-  total_value: string | null;
+  total_value?: string | null;
   created_at: string;
   updated_at: string;
   // Ownership fields
@@ -479,19 +498,33 @@ export interface InventoryItemMetrics {
   committed_breakdown: CommittedBreakdownEntry[]; // which WOs/assets hold QC
   quantity_in_transit: number; // QIT — partially-received (⊆ QOO)
   reorder_point: number; // RP
-  lead_time_days: number | null; // Lead
-  unit_cost: string | null; // Cost — per-item, or per-case when case-based
-  cost_trend: InventoryCostTrend;
-  last_po_unit_cost: string | null;
   is_case_based: boolean;
-  case_size: number | null; // units per case
+  case_size: number | null; // units per case — a shelf fact, NOT withheld
+  /**
+   * THE SIX KEYS BELOW ARE OPTIONAL BECAUSE THE SERVER OMITS THEM
+   * (op-anonymous-read-posture). `metrics` stays `AllowAny` — it powers the
+   * strip an anonymous scanner reads — and withholds the vendor half instead,
+   * per `InventoryMetricsSerializer.VENDOR_ONLY_FIELDS`.
+   *
+   * Optional rather than `| null` on purpose, and that is the whole point of
+   * declaring them this way: `null` already means "nothing on file" here, so
+   * the compiler is what now stops a reader treating "we are not telling you"
+   * as the same fact. Ask `utils/vendorVisibility` before rendering any of
+   * them; `cost_trend` in particular must never index a label table before
+   * that question is answered.
+   */
+  vendor_data_withheld?: boolean;
+  lead_time_days?: number | null; // Lead
+  unit_cost?: string | null; // Cost — per-item, or per-case when case-based
+  cost_trend?: InventoryCostTrend;
+  last_po_unit_cost?: string | null;
   // Why Cost / Lead above may be blank or unbacked (op-2rsp). The supplier
   // scoring neither rewards nor punishes a missing price or an empty delivery
   // record, so a supplier can win WITH one — these say when it did, so a blank
   // Cost cell is not read as "no supplier". Both are false when an operator's
   // own flagged primary took the gate.
-  supplier_scored_without_price: boolean;
-  supplier_scored_without_history: boolean;
+  supplier_scored_without_price?: boolean;
+  supplier_scored_without_history?: boolean;
 }
 
 // Per-item purchase/receipt provenance (op-96uo) — payload of
@@ -535,6 +568,16 @@ export interface UsageLog {
   quantity_used: number;
   usage_date: string;
   notes: string;
+  /**
+   * The cost snapshot `log_usage` takes, WITHHELD from a caller with no session
+   * (op-anonymous-read-posture). `UsageLogSerializer` is `fields = "__all__"`,
+   * so both keys have always been on the wire and this type simply did not
+   * declare them — which would have gone on hiding the gated pair from every
+   * reader. `recent_usage` on the item payload nests this same shape.
+   */
+  vendor_data_withheld?: boolean;
+  unit_cost?: string | null;
+  total_cost?: string | null;
 }
 
 // Stock-history DTO (op-2dqu) — payload of GET /inventory/items/{id}/stock_history/.
@@ -2647,8 +2690,16 @@ export interface KitSummary {
   sku: string;
   is_active: boolean;
   quantity_in_kit: number | null;
-  supplier_name: string | null;
-  supplier_sku: string | null;
+  /**
+   * The vendor block on this row: ABSENT for a caller with no session
+   * (op-anonymous-read-posture). `items/<id>/kits/` stays `AllowAny` — "which
+   * kits supply this cartridge?" is reorder triage — so what a logged-out
+   * reader loses is these three keys, not the card. See `InventoryItem` above
+   * for why absent rather than null.
+   */
+  vendor_data_withheld?: boolean;
+  supplier_name?: string | null;
+  supplier_sku?: string | null;
   /**
    * A NUMBER, unlike every other price in this file (op-9m2v).
    *
@@ -2658,7 +2709,7 @@ export interface KitSummary {
    * `string | null` is what made `{kit.unit_cost && ...}` read as safe here
    * while being genuinely safe on the string-valued twins.
    */
-  unit_cost: number | null;
+  unit_cost?: number | null;
   component_count: number;
 }
 

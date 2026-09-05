@@ -142,26 +142,53 @@ vendor exposure, discloses nothing, and every one has a suffix-less twin the
 crawl does fetch and search. It is pinned as an exact allowed set, not ignored,
 so a NEW exception class still fails.
 
-## Nine vacuous checks, in three shapes
+## Vacuous checks, in three shapes
 
-The branch produced nine checks that could not have failed, and three of its
-real disclosures were found only after one of them was repaired. The tally, kept
-here because it is this branch's count and not a standing figure:
+A check that cannot fail reads as evidence. This section lists the branch's
+instances instead of counting them: the count that used to stand here was
+written mid-branch and the branch went on finding more, which is the same
+failure it is about — a figure in prose that its own evidence does not support.
+The three SHAPES are the durable part, and what a future reader can recognise;
+the instances under each are examples, not a closed set.
 
-* **Asserted nothing** — the nginx refusal remedy enforced nowhere; a
-  write-surface list whose docstring called it derived while the body returned
-  eleven literals; an undecodable-PDF branch whose comment said it reported.
-* **Guarded on something always true** — `sys.modules` holds
-  `rest_framework.serializers` no matter what; a first-party path filter that
-  skips every app on a `/tmp` vs `/private/tmp` mismatch and passes having
-  inspected nothing.
-* **Read nothing** — the crawl 404ing on an untyped router pk; a nested
-  serializer over an empty relation; a fixture feeding a signed-in payload to a
-  logged-out render.
+**Asserted nothing**
 
-The two habits that catch all three shapes are in AGENTS.md, because they
-generalise: mutation-prove each guard, and give each derived set an
-anti-vacuity floor.
+* The nginx media remedy: `error_page` present in the template, asserted by no
+  test, so deleting it broke nothing.
+* `anonymous_write_surfaces`: the docstring said "derived from the permission
+  snapshot"; the body returned a hard-coded list.
+* `searchable_bytes`: the comment said an undecodable PDF "is reported, not
+  silently passed"; nothing read the marker it wrote.
+* The derived write set: matched the exact tuple `("AllowAny",)` and silently
+  dropped routes that are MORE open — a view with an empty permission list runs
+  no check at all — with no entry in `unclassified`.
+
+**Guarded on something always true**
+
+* The walk-widening guard, twice: first satisfied by
+  `rest_framework.serializers`, which every DRF import puts in `sys.modules`;
+  then, after that was fixed, still calling the helper directly instead of the
+  code path the gate runs, so the reversion it names still passed.
+* The registry upload reading: a `.resolve()`d constant compared against an
+  unresolved app path, so a symlinked root or macOS `/tmp` vs `/private/tmp`
+  skipped every app and it passed having inspected nothing.
+
+**Read nothing**
+
+* The anonymous crawl resolving an untyped router `pk` to a row from the wrong
+  table, so item detail 404'd and reported clean — and again later for the two
+  `LocationViewSet` writes.
+* The crawl never building DRF's `.json` format-suffix routes at all.
+* `recent_usage` nested over an empty relation, serialising to `[]` and testing
+  green because nothing had been consumed.
+* `KitSupplierAttribution` and `InventoryItemDetailPage.suppliers` fixtures
+  feeding a signed-in payload to a logged-out render, so the anonymous cases
+  could not fail for the real reason.
+
+Three of this branch's real disclosures were found only after one of these was
+repaired. The two habits that catch all three shapes are in AGENTS.md, because
+they generalise: mutation-prove each guard against the exact reversion it names,
+and give each derived set an anti-vacuity floor.
 
 ## ScanTTY is unaffected — no contract change
 

@@ -864,16 +864,16 @@ the AST and fails on any `upload_to` that is neither gated nor carried in its
 you to classify it.
 
 **A CHECK THAT CANNOT FAIL IS WORSE THAN NO CHECK**, because it reads as
-evidence. Three shapes recur: checks that ASSERT NOTHING, checks GUARDED ON
-SOMETHING ALWAYS TRUE, and checks that READ NOTHING — a crawl 404ing on an
-untyped router pk, a nested serializer over an empty relation, a fixture feeding
-a signed-in payload to a logged-out render. Two habits catch all three and both
-are cheap: MUTATION-PROVE a new guard against the exact reversion it names —
+evidence. Three shapes recur: checks that ASSERT NOTHING (a remedy present in a
+template no test reads), checks GUARDED ON SOMETHING ALWAYS TRUE (a
+`sys.modules` probe every DRF import satisfies), and checks that READ NOTHING (a
+crawl 404ing on an untyped router pk). Two habits catch all three and both are
+cheap: MUTATION-PROVE a new guard against the exact reversion it names —
 make the reversion, watch it fail, restore — and give every derived set an
 ANTI-VACUITY FLOOR, a floor on how much it reached (`statuses[200] >= 50`) or a
 known member it must contain (`inventory.SupplierAgreement.document`). This is
 not tidying: three of this branch's real disclosures were found only after a
-vacuous check was repaired, and the count and the case histories are in the
+vacuous check was repaired, and the case histories, grouped by shape, are in the
 branch record. The lesson generalises: when a check comes back clean, ask what
 it could not have seen.
 

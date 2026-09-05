@@ -613,6 +613,33 @@ class TestInvariantASaveWithNoPriceIntentFilesNoHistory:
         assert stored_pair(link) == before
         assert history_rows(link) == []
 
+    def test_a_real_price_change_still_files_its_history_row(self, item, supplier):
+        """CONTROL: the fix quiets FALSE history; it must not quiet true history.
+
+        The whole change makes ``pricing_changed`` stop firing on saves that move
+        no price. The failure mode of that is going too far and losing the record
+        of a change that did happen — and the captain reads this history. Pinned
+        at a pack size where the derivation is lossy, which is the case no
+        pre-existing history test covers.
+        """
+        link = make_link(item, supplier)
+        PriceHistory.objects.filter(item_supplier=link).delete()
+
+        link.package_cost = Decimal("12.00")
+        link.save()
+
+        assert history_rows(link) == [("updated", Decimal("4.00"), Decimal("12.00"), 3)]
+
+    def test_a_pack_size_change_alone_still_files_its_history_row(self, item, supplier):
+        """CONTROL: the pack size moves the unit price, so it is a pricing change."""
+        link = make_link(item, supplier)
+        PriceHistory.objects.filter(item_supplier=link).delete()
+
+        link.quantity_per_package = 5
+        link.save()
+
+        assert history_rows(link) == [("updated", Decimal("2.00"), Decimal("10.00"), 5)]
+
     def test_the_same_holds_for_any_flag_flipped_on_a_row_that_was_just_read(self, item, supplier):
         """BEFORE/AFTER: the shape ``reorder_queue.services.purchase_orders.void_line_item``
         uses — read the link, set ``is_discontinued`` / ``is_active``, ``save()``.

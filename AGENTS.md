@@ -1051,21 +1051,15 @@ whichever is true: "the supplier already has this line, void it instead" and
 from the two frozensets — the closed case is *outside `PRE_SUPPLIER_STATUSES`
 and outside `IN_RECEIVING_STATUSES`*, i.e. the terminal statuses, never a typed
 list of labels — with `sent_at` read only as corroboration. Do NOT key such a
-split on `sent_at` alone: `PurchaseOrderAdmin.mark_as_sent` moves a queryset to
-`SENT` with one `update()` and stamps `sent_by` but not `sent_at`, so an order
-can be live with its supplier and hold no stamp. A refusal is only legitimate
-when the operator can act on it, and a refusal that misstates why is worse than
-a bare one.
-
-One thing found here and deliberately NOT changed, routed to follow-up instead
-(the list-filter defect found alongside it — `get_queryset` dropping a draft
-off the list once its only line was gone — has since been fixed, and the next
-section owns that rule):
-
-- `PurchaseOrderAdmin.mark_as_sent` never stamps `sent_at`, which also leaves
-  `days_since_ordered` reading 0 for orders sent that way. Changing it alters
-  existing admin behaviour, so instead nothing in this change depends on that
-  stamp being written.
+split on `sent_at` alone: `status`/`sent_at`/`sent_by` are editable on the admin
+change form and writable on `PurchaseOrderSerializer`, and rows the pre-fix
+`PurchaseOrderAdmin.mark_as_sent` sent without a stamp are still in the table,
+so an order can be live with its supplier and hold no stamp. A refusal is only
+legitimate when the operator can act on it, and a refusal that misstates why is
+worse than a bare one. (The admin action itself now goes through
+`services.mark_sent` and stamps the whole set — see "A status transition owes a
+SET of facts" above, which owns that rule and the read-only report on the rows
+written before it.)
 
 ### Two kinds of empty purchase order, and when emptiness hides one
 

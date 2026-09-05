@@ -3097,7 +3097,8 @@ class AssetViewSet(viewsets.ModelViewSet):
             "resolution_notes", problem.resolution_notes or ""
         )
         # The stamp is settle_problem's rule, shared with the admin actions and
-        # AssetProblemViewSet.resolve: resolving restamps, closing preserves.
+        # AssetProblemViewSet.resolve: entering settlement stamps, a move already
+        # inside it keeps the moment the row settled.
         settle_problem(problem, new_status=new_status, actor=request.user)
 
         serializer = AssetProblemSerializer(problem, context={"request": request})

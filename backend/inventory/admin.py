@@ -1959,9 +1959,10 @@ class AssetProblemAdmin(admin.ModelAdmin):
         """Move each selected report to ``new_status``, stamping the resolution.
 
         The stamp is not defined here. It is
-        :func:`inventory.services.problem_settlement.settle_problem`, which the
-        two API resolve routes call as well — a new resolution restamps, a
-        close preserves an existing stamp. This action used to carry its own
+        :func:`inventory.services.problem_settlement.settle_problem`, which
+        every other writer calls as well — a report ENTERING settlement is
+        stamped, a move already inside it is a filing change and keeps the
+        moment the row actually settled. This action used to carry its own
         copy: ``mark_closed`` did a bare ``queryset.update(status=...)``, so a
         report closed from this changelist showed as closed with no resolution
         date and no resolver on the API and in ScanTTY, which decode both
@@ -2011,8 +2012,10 @@ class AssetProblemAdmin(admin.ModelAdmin):
         main use — and narrowing it here would take an action away from
         operators that this change has no business touching.
 
-        A filing change, not a resolution, so a stamp already on the row is
-        left alone.
+        Unfiltered means both kinds of row reach it, and the shared rule
+        tells them apart: an unsettled report is entering settlement and is
+        stamped, while one somebody already resolved is a filing change and
+        keeps the stamp it has.
         """
         count = self._settle(
             request,

@@ -726,13 +726,17 @@ def assert_deletable(purchase_order):
     ``SENT`` included, gets the supplier answer.
 
     ``sent_at`` cannot carry the split on its own: it is not reliably written.
-    ``PurchaseOrderAdmin.mark_as_sent`` moves a whole queryset to ``SENT`` with
-    one ``update()`` and stamps ``sent_by`` but not ``sent_at``, and both
-    columns are editable on the change form. An order can therefore be live
-    with its supplier and hold no stamp, and a split that read the stamp alone
-    would tell that operator their order was never sent and is closed — three
-    false clauses, and it would withhold the one remedy that does work. Reading
-    the status sets first makes the answer immune to how the stamp got written.
+    ``status``, ``sent_at`` and ``sent_by`` are all editable on the admin change
+    form and writable on ``PurchaseOrderSerializer``, so a ``PATCH`` still lands
+    a ``SENT`` order with a null stamp — and rows sent by the pre-fix
+    ``PurchaseOrderAdmin.mark_as_sent``, which moved a queryset to ``SENT`` with
+    one ``update()`` and stamped ``sent_by`` but not ``sent_at``, are still in
+    the table (``reorder_queue.management.commands.report_unstamped_transitions``
+    counts them). An order can therefore be live with its supplier and hold no
+    stamp, and a split that read the stamp alone would tell that operator their
+    order was never sent and is closed — three false clauses, and it would
+    withhold the one remedy that does work. Reading the status sets first makes
+    the answer immune to how the stamp got written.
     """
     if purchase_order.status in PurchaseOrder.PRE_SUPPLIER_STATUSES:
         return

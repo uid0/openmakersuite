@@ -50,7 +50,6 @@ import {
   reorderQuantityLabel,
   reorderThresholdLabel,
 } from '../utils/packaging';
-import { anonymousAlternativesNote, chosenSupplierName } from '../utils/supplierChoice';
 import { VENDOR_WITHHELD_TEXT, vendorDataWithheld } from '../utils/vendorVisibility';
 
 /**
@@ -971,36 +970,13 @@ const InventoryItemDetailPage: React.FC = () => {
                     </Text>
                     <Text size="sm">{item.location || 'No location specified'}</Text>
                   </div>
-                  {/* A logged-out visitor keeps ONE supplier name, as they did
-                      before the Suppliers card existed — see that card below
-                      for why it is gated, and why widening this block to the
-                      whole sourcing table is deliberately not done here.
-
-                      Two things did change (op-3xsp). The name comes from
-                      `supplier_choice`, not the flat legacy `supplier_name`;
-                      and the heading no longer says "Primary Supplier", which
-                      was a claim the derivation does not make — a primary is a
-                      GATE an operator sets, and most items have none, so the
-                      name under that heading was usually the winner of a
-                      price/lead-time/delivery score being labelled as somebody's
-                      standing decision. The count that follows says there are
-                      others without naming any of them, so nothing this block
-                      discloses is new — and it is worded by
-                      `utils/supplierChoice`, which is where the decision that
-                      THIS surface alone gets a count is recorded. */}
-                  {!isLoggedIn && chosenSupplierName(item.supplier_choice) && (
-                    <div data-testid="anonymous-supplier-block">
-                      <Text size="sm" fw={500} mb="xs">
-                        We order this from
-                      </Text>
-                      <Text size="sm">{chosenSupplierName(item.supplier_choice)}</Text>
-                      {anonymousAlternativesNote(item.supplier_choice) && (
-                        <Text size="xs" c="dimmed" data-testid="anonymous-supplier-alternatives">
-                          {anonymousAlternativesNote(item.supplier_choice)}
-                        </Text>
-                      )}
-                    </div>
-                  )}
+                  {/* There was a logged-out-only block here naming ONE supplier
+                      (op-3xsp), reading `item.supplier_choice`. The captain put
+                      vendor identity behind a login, `supplier_choice` is in
+                      `InventoryItemSerializer.VENDOR_ONLY_FIELDS`, and an
+                      anonymous payload no longer carries the key — so the block
+                      could only ever render for a caller the server had already
+                      decided must not see a vendor's name. */}
                 </Stack>
               </Card>
 

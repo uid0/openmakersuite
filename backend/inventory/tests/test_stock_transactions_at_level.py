@@ -18,6 +18,7 @@ The purchase-order and receipt halves live in
 
 import csv
 import io
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -635,6 +636,31 @@ class TestOpenClosedTransitions:
         # Opening consumes the pack, so usage history and stock agree.
         assert response.data["usage_log"]["quantity_used"] == 12
         assert UsageLog.objects.get(item=item).quantity_used == 12
+
+    def test_open_tells_a_signed_in_operator_the_cost_it_just_snapshotted(self, staff_api_client):
+        """REGRESSION (op-anonymous-read-posture).
+
+        ``UsageLogSerializer`` gates its cost keys through
+        ``VendorGatedSerializerMixin``, which FAILS CLOSED — a serializer built
+        with no ``context`` cannot prove anybody is signed in, so it withholds.
+        This reply was hand-built without one, so an authenticated operator got
+        an answer that omitted the very figures ``open_pack`` had just written
+        onto the row, and asserted ``vendor_data_withheld: true`` to a caller
+        the endpoint had already required a login from.
+        """
+        item = _pack_item(mode=InventoryItem.CountMode.OPEN_CLOSED, case_size=12, current_stock=36)
+        assert item.unit_cost is not None, "fixture must price the item for this to mean anything"
+
+        response = staff_api_client.post(
+            _pack_container_url(item), {"transition": "open"}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        usage_log = response.data["usage_log"]
+        assert "vendor_data_withheld" not in usage_log
+        written = UsageLog.objects.get(item=item)
+        assert Decimal(str(usage_log["unit_cost"])) == written.unit_cost
+        assert Decimal(str(usage_log["total_cost"])) == written.total_cost
 
     def test_finish_clears_a_container_without_touching_stock(self, staff_api_client):
         item = _pack_item(mode=InventoryItem.CountMode.OPEN_CLOSED, case_size=12, current_stock=24)

@@ -138,12 +138,14 @@ server {
 
     # VENDOR PAPERWORK IS NOT PUBLIC MEDIA (op-anonymous-read-posture).
     #
-    # These four prefixes hold supplier agreements, purchase-order invoices,
-    # out-of-pocket purchase receipts and generated index cards — a vendor's
-    # identity and what we pay them, as files. nginx answers /media/ before
-    # Django sees it, so no `permission_classes` change reaches them: verified
-    # by running this config's previous /media/ block and fetching a signed
-    # agreement with no session (HTTP 200, full body).
+    # These prefixes hold supplier agreements, purchase-order invoices,
+    # out-of-pocket purchase receipts, third-party work-order invoices and
+    # quotes, maintenance-record invoices, work-order attachments, and the raw
+    # PDFs the Postmark inbound webhook files verbatim — a vendor's identity and
+    # what we pay them, as files. nginx answers /media/ before Django sees it,
+    # so no `permission_classes` change reaches them: verified by running this
+    # config's previous /media/ block and fetching a signed agreement with no
+    # session (HTTP 200, full body).
     #
     # `auth_request` puts a session check in front of the bytes while leaving
     # the PATH unchanged, so no payload, no stored file_url and no consumer
@@ -187,7 +189,47 @@ server {
         add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.sentry-cdn.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com https:; font-src 'self' data:; connect-src 'self' wss: https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://sentry.io https://${SENTRY_HOST}; frame-src 'self' https://www.wunderground.com https://embed.waze.com https://www.youtube.com https://www.youtube-nocookie.com; worker-src 'self' blob:; media-src 'self' https:;" always;
     }
 
-    # The subrequest the four blocks above make. 204 for a signed-in caller,
+    location ^~ /media/third_party_work_orders/ {
+        auth_request /_vendor_media_auth;
+        alias /app/media/third_party_work_orders/;
+        expires -1;
+        add_header Cache-Control "private, no-store";
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.sentry-cdn.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com https:; font-src 'self' data:; connect-src 'self' wss: https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://sentry.io https://${SENTRY_HOST}; frame-src 'self' https://www.wunderground.com https://embed.waze.com https://www.youtube.com https://www.youtube-nocookie.com; worker-src 'self' blob:; media-src 'self' https:;" always;
+    }
+
+    location ^~ /media/inventory/maintenance_records/ {
+        auth_request /_vendor_media_auth;
+        alias /app/media/inventory/maintenance_records/;
+        expires -1;
+        add_header Cache-Control "private, no-store";
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.sentry-cdn.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com https:; font-src 'self' data:; connect-src 'self' wss: https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://sentry.io https://${SENTRY_HOST}; frame-src 'self' https://www.wunderground.com https://embed.waze.com https://www.youtube.com https://www.youtube-nocookie.com; worker-src 'self' blob:; media-src 'self' https:;" always;
+    }
+
+    location ^~ /media/work_orders/attachments/ {
+        auth_request /_vendor_media_auth;
+        alias /app/media/work_orders/attachments/;
+        expires -1;
+        add_header Cache-Control "private, no-store";
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.sentry-cdn.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com https:; font-src 'self' data:; connect-src 'self' wss: https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://sentry.io https://${SENTRY_HOST}; frame-src 'self' https://www.wunderground.com https://embed.waze.com https://www.youtube.com https://www.youtube-nocookie.com; worker-src 'self' blob:; media-src 'self' https:;" always;
+    }
+
+    location ^~ /media/work_orders/submissions/ {
+        auth_request /_vendor_media_auth;
+        alias /app/media/work_orders/submissions/;
+        expires -1;
+        add_header Cache-Control "private, no-store";
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.sentry-cdn.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com https:; font-src 'self' data:; connect-src 'self' wss: https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://sentry.io https://${SENTRY_HOST}; frame-src 'self' https://www.wunderground.com https://embed.waze.com https://www.youtube.com https://www.youtube-nocookie.com; worker-src 'self' blob:; media-src 'self' https:;" always;
+    }
+
+    location ^~ /media/work_orders/scans/ {
+        auth_request /_vendor_media_auth;
+        alias /app/media/work_orders/scans/;
+        expires -1;
+        add_header Cache-Control "private, no-store";
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.sentry-cdn.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com https:; font-src 'self' data:; connect-src 'self' wss: https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://sentry.io https://${SENTRY_HOST}; frame-src 'self' https://www.wunderground.com https://embed.waze.com https://www.youtube.com https://www.youtube-nocookie.com; worker-src 'self' blob:; media-src 'self' https:;" always;
+    }
+
+    # The subrequest the blocks above make. 204 for a signed-in caller,
     # 403 otherwise; never reachable directly (`internal`), and never cached —
     # a cached 204 here would be an open door for every caller behind the proxy.
     location = /_vendor_media_auth {

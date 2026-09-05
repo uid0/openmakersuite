@@ -609,4 +609,53 @@ describe('InventoryListPage', () => {
       expect(costCell()).toHaveTextContent('$15.99');
     });
   });
+
+  describe('a caller the server withheld the vendor block from', () => {
+    /**
+     * REGRESSION (op-anonymous-read-posture). `/inventory/items` is not behind
+     * RequireAuth and its list endpoint is AllowAny, so a logged-out visitor
+     * reaches this table — and their rows carry no `unit_cost` key at all.
+     * `item.unit_cost != null ? ... : '-'` therefore printed '-' in every row,
+     * which in THIS table means "no price recorded": a claim about the ITEM
+     * where the truth is a fact about the READER. The three CONTROL cases just
+     * above are what make that dash unusable for anything else.
+     *
+     * `csvExport` already drops the same column for the same audience ("an
+     * absent COLUMN cannot be misread as an empty VALUE"), so the screen and
+     * the file exported from it have to agree.
+     */
+    const anonymousRows = () =>
+      mockItems.map((item) => {
+        const row: Record<string, unknown> = { ...item, vendor_data_withheld: true };
+        for (const key of ['unit_cost', 'supplier_name', 'supplier_sku', 'supplier_url', 'total_value']) {
+          delete row[key];
+        }
+        return row;
+      });
+
+    it('drops the Unit Cost column rather than dashing every row', async () => {
+      (api.inventoryAPI.listItems as jest.Mock).mockResolvedValue(
+        fullPage(anonymousRows() as unknown as typeof mockItems)
+      );
+      renderPage();
+
+      await screen.findByText('Test Item 1');
+
+      expect(screen.queryByRole('columnheader', { name: 'Unit Cost' })).not.toBeInTheDocument();
+      // ...and the row loses the cell with it, so the remaining columns do not
+      // slide one place left under their own headers.
+      const headers = screen.getAllByRole('columnheader').length;
+      const cells = screen.getByText('Test Item 1').closest('tr')!.querySelectorAll('td').length;
+      expect(cells).toBe(headers);
+    });
+
+    it('CONTROL: a signed-in caller still gets the column', async () => {
+      renderPage();
+
+      await screen.findByText('Test Item 1');
+
+      expect(screen.getByRole('columnheader', { name: 'Unit Cost' })).toBeInTheDocument();
+      expect(screen.getByText('$15.99')).toBeInTheDocument();
+    });
+  });
 });

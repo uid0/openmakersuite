@@ -14,16 +14,28 @@ permission change"). So this module does two different things:
    rather than restating it, so a prefix added in Python and forgotten in nginx
    fails here.
 
+THE NGINX HALF PARSES, IT DOES NOT GREP. It used to search the template's raw
+text for ``location ^~ /media/<prefix>``, ``auth_request`` and the absence of
+``expires 7d`` — this repo's own named test anti-pattern, and defeated by any
+of: a ``${VAR}`` in the prefix, a differently indented closing brace, or an
+``expires 7d`` inherited from a wider block. ``config/tests/nginx_config.py``
+renders the ``${VAR}`` substitution and parses the result into location blocks
+and directives, and the assertions below ask that model which block nginx WOULD
+SELECT for a real URI and what caching is EFFECTIVE there. Where an nginx binary
+is on PATH the rendered config is additionally handed to ``nginx -t``.
+
 The deployment itself was additionally verified out of band by running nginx
-with that template in front of a real Django process: anonymous requests to all
-four prefixes answered 403 and a signed-in session answered 200 with the file's
-bytes, while ``/media/inventory/qrcodes/`` stayed 200 for everyone. That
+with that template in front of a real Django process: anonymous requests to the
+protected prefixes answered 403 and a signed-in session answered 200 with the
+file's bytes, while ``/media/inventory/qrcodes/`` stayed 200 for everyone. That
 transcript is in the PR body; what CI can re-run on its own is below.
 """
 
 from __future__ import annotations
 
-import re
+import shutil
+import subprocess  # nosec B404 — `nginx -t` on a test-owned rendered config
+import tempfile
 from pathlib import Path
 
 from django.core.files.base import ContentFile
@@ -32,10 +44,33 @@ import pytest
 from rest_framework.test import APIClient
 
 from config.protected_media import VENDOR_MEDIA_PREFIXES, is_vendor_media
+from config.tests.nginx_config import parse, render, servers
 
 NGINX_TEMPLATE = (
     Path(__file__).resolve().parents[3] / "nginx" / "templates" / "default.conf.template"
 )
+
+#: What the container's entrypoint substitutes. Values are stand-ins; only their
+#: presence matters, so a prefix that ever became ``${VAR}``-templated resolves
+#: to a concrete path here rather than silently failing to match.
+TEMPLATE_VARIABLES = {
+    "LETSENCRYPT_DOMAINS": "oms.test",
+    "SENTRY_HOST": "sentry.test",
+}
+
+#: nginx treats these as "do not cache"; anything else is a positive lifetime.
+NON_CACHING_EXPIRES = {"-1", "off", "epoch"}
+
+
+def _tls_server():
+    """The ``server`` block that serves the app (the plain-80 one only redirects)."""
+    root = parse(render(NGINX_TEMPLATE.read_text(), TEMPLATE_VARIABLES))
+    for server in servers(root):
+        if server.locations and any(
+            loc.args and loc.args[-1] == "/media/" for loc in server.locations
+        ):
+            return server
+    raise AssertionError("no server block in the nginx template serves /media/")
 
 
 @pytest.fixture
@@ -105,6 +140,15 @@ def test_public_media_is_untouched(db, tmp_path, settings):
         ("purchase_orders/attachments/2026/09/i.pdf", True),
         ("work_orders/receipts/2026/09/r.jpg", True),
         ("index_cards/batch.pdf", True),
+        ("third_party_work_orders/42/invoice.pdf", True),
+        ("inventory/maintenance_records/invoice.pdf", True),
+        ("work_orders/attachments/2026/09/receipt.jpg", True),
+        ("work_orders/submissions/2026/09/inbound.pdf", True),
+        ("work_orders/scans/2026/09/completed.pdf", True),
+        # The gated roots are siblings of open ones under the same first
+        # segment, so the prefix test has to be doing more than a first-segment
+        # comparison for either answer to be right.
+        ("work_order_photos/2026/09/photo.jpg", False),
         ("inventory/qrcodes/item.png", False),
         ("inventory/images/item.jpg", False),
         ("inventory/msds/sheet.pdf", False),
@@ -123,31 +167,127 @@ def test_the_prefix_test_normalises_before_deciding(path, protected):
 def test_the_nginx_template_gates_every_protected_prefix():
     """The half of the rule Python cannot enforce.
 
+    Asks the parsed model which location block nginx SELECTS for a real file
+    under each prefix, and what ``auth_request`` is effective there. Selection
+    rather than presence is the point: a block that exists but loses the match
+    (a longer sibling prefix, a regex location declared earlier) gates nothing,
+    and a text search cannot tell the two apart.
+
     Reads the prefix list from the Python module rather than restating it, so
     adding a prefix in one place and not the other fails here rather than in
     production.
     """
-    template = NGINX_TEMPLATE.read_text()
+    server = _tls_server()
 
     for prefix in VENDOR_MEDIA_PREFIXES:
-        location = re.search(
-            r"location\s+\^~\s+/media/" + re.escape(prefix) + r"\s*\{(.*?)\n    \}",
-            template,
-            re.S,
-        )
-        assert location, f"nginx serves /media/{prefix} with no dedicated location block"
-        assert "auth_request /_vendor_media_auth;" in location.group(
-            1
-        ), f"/media/{prefix} has a location block but no auth_request"
-        assert "expires 7d" not in location.group(
-            1
-        ), f"/media/{prefix} would be cached publicly by an intermediary"
+        uri = f"/media/{prefix}zzqq-probe.pdf"
+        location = server.match_location(uri)
+        assert location is not None, f"nginx matches no location at all for {uri}"
 
-    subrequest = re.search(r"location\s+=\s+/_vendor_media_auth\s*\{(.*?)\n    \}", template, re.S)
-    assert subrequest, "the auth_request target is not defined"
-    body = subrequest.group(1)
-    assert "internal;" in body, "the auth_request target is directly reachable"
-    assert "/api/auth/media-access/" in body, "the auth_request target does not reach Django"
+        auth = location.effective("auth_request")
+        assert auth, (
+            f"nginx serves {uri} from `location {' '.join(location.args)}`, which "
+            "has no effective auth_request — the file is public."
+        )
+        assert [d.value for d in auth] != ["off"], f"{uri} switches auth_request off"
+
+        target = auth[0].value
+        subrequest = server.match_location(target)
+        assert (
+            subrequest is not None
+        ), f"{uri} points auth_request at {target}, which is not defined"
+        assert subrequest.declared("internal"), f"{target} is reachable directly by a client"
+        proxies = subrequest.effective("proxy_pass")
+        assert proxies and proxies[0].value.endswith(
+            "/api/auth/media-access/"
+        ), f"{target} does not reach the Django gate"
+
+
+@pytest.mark.unit
+def test_no_protected_prefix_is_left_publicly_cacheable():
+    """An intermediary holding a copy is the gate failing a second time.
+
+    ``expires`` and ``add_header`` are asked through :meth:`Block.effective`,
+    which applies nginx's inheritance rule, so an ``expires 7d`` sitting in an
+    enclosing block and no caching directive in the location itself fails here —
+    the case a search for the literal string inside one block cannot see.
+    """
+    server = _tls_server()
+
+    for prefix in VENDOR_MEDIA_PREFIXES:
+        uri = f"/media/{prefix}zzqq-probe.pdf"
+        location = server.match_location(uri)
+        assert location is not None
+
+        expires = location.effective("expires")
+        assert expires, f"{uri} inherits no expires policy at all"
+        assert (
+            expires[0].value in NON_CACHING_EXPIRES
+        ), f"{uri} is served with `expires {expires[0].value}` — a cacheable lifetime"
+
+        cache_control = location.header("Cache-Control")
+        assert cache_control is not None, f"{uri} sets no Cache-Control"
+        assert (
+            "public" not in cache_control.lower()
+        ), f"{uri} is served Cache-Control: {cache_control}"
+
+
+@pytest.mark.unit
+def test_public_media_still_wins_its_own_match():
+    """CONTROL: the parse proves a gate, not that every /media/ URI is gated.
+
+    Without this, a model that matched everything to a protected block would
+    pass the two tests above while describing a server that had closed the
+    anonymous scan path.
+    """
+    server = _tls_server()
+    qr = server.match_location("/media/inventory/qrcodes/item.png")
+    assert qr is not None
+    assert not qr.effective("auth_request"), "item QR codes are behind a login in nginx"
+
+
+@pytest.mark.unit
+def test_the_rendered_config_is_valid_nginx():
+    """Hand the real consumer the real file, where the real consumer exists.
+
+    Skipped rather than faked when nginx is not installed: the parse above is
+    what CI always runs, and this is the stronger check when it can be had.
+    ``nginx -t`` is a syntax and directive-context check — it proves the gate
+    above is expressed in directives nginx accepts, not that the policy is
+    right, which is what the parsed assertions are for.
+    """
+    binary = shutil.which("nginx")
+    if binary is None:
+        pytest.skip("nginx is not installed on this machine")
+
+    rendered = render(NGINX_TEMPLATE.read_text(), TEMPLATE_VARIABLES)
+    # `upstream` members are compose service names and nginx RESOLVES them at
+    # config-test time, so outside the compose network it aborts on the first
+    # one and validates nothing after it. The addresses are a deployment
+    # detail, not what this template is being checked for; the location blocks
+    # and their directives — which are — are untouched by this substitution.
+    rendered = rendered.replace("server backend:8000;", "server 127.0.0.1:8000;")
+    rendered = rendered.replace("server emqx:18083;", "server 127.0.0.1:18083;")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "conf.d").mkdir()
+        (root / "conf.d" / "default.conf").write_text(rendered)
+        (root / "nginx.conf").write_text(
+            "events {}\n" f"http {{\n    include {root}/conf.d/*.conf;\n}}\n"
+        )
+        result = subprocess.run(  # nosec B603 — fixed binary, test-owned config
+            [binary, "-t", "-c", str(root / "nginx.conf"), "-p", str(root)],
+            capture_output=True,
+            text=True,
+        )
+
+    # The TLS material is issued by certbot into the deployed container; a
+    # developer box has no copy, and nginx opens it during `-t`. That is an
+    # absent file rather than a rejected directive, so it is a skip, not a pass.
+    if "cannot load certificate" in result.stderr or "BIO_new_file" in result.stderr:
+        pytest.skip("nginx reached the TLS certificate paths, which this box has no copy of")
+    assert result.returncode == 0, f"`nginx -t` rejected the rendered template:\n{result.stderr}"
 
 
 @pytest.mark.integration

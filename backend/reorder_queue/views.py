@@ -3755,6 +3755,14 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     )
                 ),
             }
+            # The marker belongs on the SUMMARY, not only on the rows. A
+            # consumer reading it off row 0 gets `false` for an EMPTY feed —
+            # both arrays are built in one loop, so they empty together — and
+            # then tells an anonymous reader that all financial information is
+            # published, which is the claim this action stopped honouring. The
+            # summary is the one object this payload always has.
+            if not may_see_vendors:
+                summary[VENDOR_WITHHELD_KEY] = True
 
             return Response(
                 {

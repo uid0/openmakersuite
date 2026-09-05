@@ -46,6 +46,14 @@ interface TransparencySummary {
   total_amount_spent: number;
   last_updated: string;
   transparency_note: string;
+  /**
+   * The gate's marker, carried HERE as well as on each row — see
+   * `TransparencyOrder`. The summary is the one object this payload always has:
+   * `orders` and `ledger` are built in the same loop and empty together, so a
+   * reader that takes the answer off row 0 gets `false` for an empty ledger and
+   * shows an anonymous visitor the claim the server stopped making.
+   */
+  vendor_data_withheld?: boolean;
 }
 
 interface LedgerEntry {
@@ -185,9 +193,12 @@ const TransparencyPage: React.FC = () => {
 
   // Read off the payload, not off auth state: the server has already decided,
   // and a second client-side derivation of the same answer is how the two come
-  // to disagree. Either array carrying the marker means the same gate ran.
-  const vendorWithheld =
-    vendorDataWithheld(data.orders[0]) || vendorDataWithheld(data.ledger[0]);
+  // to disagree. Off the SUMMARY rather than off row 0, because the two arrays
+  // are built in one loop and so are empty together — an empty ledger left this
+  // false and printed the "all financial information is made available" footer
+  // to the very reader it is no longer true of. The rows keep the marker too;
+  // they are still read when a row is what a surface has.
+  const vendorWithheld = vendorDataWithheld(data.summary);
 
   return (
     <WorkspacePage

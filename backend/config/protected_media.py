@@ -13,7 +13,7 @@ that block: HTTP 200, full body.
 THE SHAPE OF THE FIX, and why it is this shape:
 
 * nginx keeps serving the bytes — sendfile is why the files are there — but the
-  four vendor prefixes below carry ``auth_request`` pointing at
+  vendor prefixes below carry ``auth_request`` pointing at
   :func:`media_access_check`. The path a client uses does not change, so no
   payload, no stored ``file_url``, and no consumer moves.
 * The check is a session check, and that works because ``auth_views.login_user``
@@ -32,6 +32,14 @@ location-problem snapshots and asset manuals are on the anonymous scan path or
 are safety information, and closing them would break the flow the printed QR
 codes exist for. The list below is derived from the captain's sentence, entry by
 entry, and each entry says which model writes there.
+
+THE UNIT OF THAT DERIVATION IS AN UPLOAD FIELD, NOT A URL PREFIX, and the first
+pass got that backwards: it enumerated the prefixes it had already found rather
+than asking where a vendor document can be STORED, and so missed five roots that
+hold invoices — two of them fed by unfiltered inbound mail. Every ``upload_to``
+under ``backend/`` is now classified, and
+``config/tests/test_upload_field_classification.py`` fails the build on a new
+one until somebody says which side of this list it belongs on.
 """
 
 from __future__ import annotations
@@ -61,11 +69,35 @@ from django.views.static import serve as django_static_serve
 #:   therefore prints the lead-time lines, so the resulting file carries them
 #:   even though the endpoint that made it is closed. A generated artefact
 #:   inherits the audience of its contents, not of its generator.
+#: * ``third_party_work_orders/`` — ``maintenance_orders
+#:   .ThirdPartyWorkOrderAttachment.file``, whose ``KIND_CHOICES`` are Invoice,
+#:   Field Service Report, Photo, Quote, Paper Form, Other. Its ``upload_to`` is
+#:   the callable ``_attachment_upload_path``, which is why a walk over string
+#:   literals alone would not have found it.
+#: * ``inventory/maintenance_records/`` — ``inventory.MaintenanceRecord
+#:   .attachment``, "Invoice PDF, receipt photo, etc.", on a model that also
+#:   carries a ``vendor`` FK, a ``cost`` and an ``invoice_number``.
+#: * ``work_orders/attachments/`` — ``inventory.WorkOrderAttachment.file``,
+#:   which exists (its own docstring) because "a supplier receipt, a datasheet
+#:   page, a torque spec, a photo of the nameplate" had nowhere to live.
+#: * ``work_orders/submissions/`` — ``inventory.WorkOrderSubmission
+#:   .attachment``, "the raw PDF attachment as received from the email". This is
+#:   UNFILTERED INBOUND MAIL through the Postmark webhook: whatever a vendor
+#:   emails to that address is stored here verbatim, so the contents cannot be
+#:   narrowed by argument.
+#: * ``work_orders/scans/`` — ``inventory.WorkOrder.completed_scan``, a
+#:   completed paper work order arriving down that same inbound path, carrying
+#:   the job's material costs.
 VENDOR_MEDIA_PREFIXES = (
     "supplier_agreements/",
     "purchase_orders/attachments/",
     "work_orders/receipts/",
     "index_cards/",
+    "third_party_work_orders/",
+    "inventory/maintenance_records/",
+    "work_orders/attachments/",
+    "work_orders/submissions/",
+    "work_orders/scans/",
 )
 
 

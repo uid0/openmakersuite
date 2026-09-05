@@ -1415,7 +1415,11 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                 "current_stock": item.current_stock,
                 "open_container_count": item.open_container_count,
                 "on_hand_display": on_hand_display(item),
-                "usage_log": UsageLogSerializer(usage_log).data if usage_log else None,
+                "usage_log": (
+                    UsageLogSerializer(usage_log, context=self.get_serializer_context()).data
+                    if usage_log
+                    else None
+                ),
             }
         )
 

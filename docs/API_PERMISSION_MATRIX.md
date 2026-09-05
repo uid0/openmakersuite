@@ -564,7 +564,13 @@ question is entitled to a different answer, and this records why.
 | `quantity_per_package` / `case_size` | A pack size is a shelf fact. op-c1ke already answered this for the same column when it excluded `InventoryItem.current_cases` from the supplier derivation, and the public `current_cases` / `on_hand_display` / `reorder_display` keys — which size an anonymous reorder — depend on it. It re-derives nothing once both costs are withheld. |
 | `scanner/dispatch/`'s `raw_payload` | The caller's own scan, echoed back. They supplied it. |
 | ForgeKey's `AllowAny` device endpoints | Checked rather than assumed, as the brief required: the anonymous crawl exercises every one of them and finds no vendor sentinel, and `grep` over `forgekey/views.py` finds no supplier, cost or lead-time read. They are not a vendor surface. |
-| Item photos, QR codes, MSDS sheets, location-problem snapshots, asset manuals under `/media/` | On the anonymous scan path, or safety information. Closing them would break the flow the printed QR codes exist for. |
+| `assets/documents/` (`AssetDocument.file`) | Its Category choices are Manual / CAD Source / Wiring Diagram / Cut Sheet-Spec / Photo / **Other**: technical documentation a member needs to work on a machine. **Residual risk, stated rather than argued away:** the `Other` category means a purchase document COULD be filed here. Closing the prefix was rejected because it would take manuals and wiring diagrams away from the people the space serves. |
+| `assets/manuals/` (`Asset.manual_pdf`) | A manufacturer's manual. A manufacturer is not a vendor relationship, and a manual is not a name, a price, an invoice or an agreement. |
+| `inventory/msds/` (`InventorySafetyProfile.msds_file`) | Safety data sheets, on the anonymous scan path and protected by the brief outright. |
+| `donations/tax_receipts/` (`TaxReceipt.pdf_file`) | A receipt this makerspace **issues to a donor**. A donor is not a vendor and the document is outbound. |
+| `location_problems/paper/` (`LocationProblem.paper_form_attachment`) | A scanned member problem-report form. |
+| `signatures/` (`membership`) | Member PII rather than vendor data, and out of this branch's scope by the captain's decision. Listed rather than silently omitted: an unclassified prefix and a prefix somebody decided about look identical from outside. |
+| Every remaining upload field | Item / asset / location / donation / project-storage QR codes and images, site logo and favicon, checklist and maintenance and work-order evidence photos, electrical outlet/drop/disconnect photos, ForgeKey device and enrollment photos and firmware, storage-vision captures and crops. None can hold a vendor's identity or a vendor's price. Each is named individually with its reason in `config/tests/test_upload_field_classification.py`'s `OPEN_PREFIXES`, which is the copy CI enforces. |
 
 ## Protected media (`/media/`) — op-anonymous-read-posture
 
@@ -576,8 +582,18 @@ assumed: nginx rendered from that template, with a real Django process behind
 it, answered an anonymous GET for a seeded supplier agreement with HTTP 200 and
 the file's bytes.
 
-Four prefixes hold vendor identity or vendor money as files. Each now has its
-own `location ^~` block carrying `auth_request /_vendor_media_auth`, a
+**The unit of this derivation is an upload field, not a URL prefix.** The first
+pass enumerated the prefixes it had already found and stopped, which left five
+roots open — two of them fed by unfiltered inbound mail. `config/tests/test_upload_field_classification.py`
+now parses every `upload_to` under `backend/` (string literals *and* callables:
+`ThirdPartyWorkOrderAttachment`'s is a callable, and a string-only walk is
+exactly what missed it) and fails the build on a prefix that is neither gated
+below nor carried in that module's `OPEN_PREFIXES` with a written reason. Its
+two limits are named there: `backend/` only, and a callable's prefix has to be
+resolvable statically.
+
+These prefixes hold vendor identity or vendor money as files. Each has its own
+`location ^~` block carrying `auth_request /_vendor_media_auth`, a
 `private, no-store` cache policy, and no `expires 7d`:
 
 | Prefix | Written by | Why it is vendor data |
@@ -586,6 +602,11 @@ own `location ^~` block carrying `auth_request /_vendor_media_auth`, a
 | `purchase_orders/attachments/` | `reorder_queue.PurchaseOrderAttachment.file` | Where supplier invoices are filed. |
 | `work_orders/receipts/` | `inventory.WorkOrderMaterialUsage.receipt_image` | "Photo of the receipt backing an out-of-pocket purchase" — a vendor's name and their prices, in an image. |
 | `index_cards/` | `IndexCardRenderer.render_batch_to_storage` | Batch card PDFs, which carry the lead-time lines because the authenticated view that generates them prints those. A generated artefact inherits the audience of its contents, not of its generator. |
+| `third_party_work_orders/` | `maintenance_orders.ThirdPartyWorkOrderAttachment.file` | Its `KIND_CHOICES` are Invoice, Field Service Report, Photo, Quote, Paper Form, Other. |
+| `inventory/maintenance_records/` | `inventory.MaintenanceRecord.attachment` | "Invoice PDF, receipt photo, etc.", on a model that also carries a `vendor` FK, a `cost` and an `invoice_number`. |
+| `work_orders/attachments/` | `inventory.WorkOrderAttachment.file` | Its own docstring says it exists because "a supplier receipt, a datasheet page, a torque spec, a photo of the nameplate" had nowhere to live. |
+| `work_orders/submissions/` | `inventory.WorkOrderSubmission.attachment` | "The raw PDF attachment as received from the email" — unfiltered inbound mail through the Postmark webhook. Whatever a vendor emails in is stored verbatim, so the contents cannot be narrowed by argument. |
+| `work_orders/scans/` | `inventory.WorkOrder.completed_scan` | A completed paper work order arriving down that same inbound path, carrying the job's material costs. |
 
 `GET /api/auth/media-access/` (`config.protected_media.media_access_check`) is
 the `auth_request` target: 204 for a signed-in caller, 403 otherwise, and
@@ -604,7 +625,17 @@ and it is what left CI unable to exercise any of this.
 Everything else under `/media/` is untouched and stays public: item photos, QR
 codes, MSDS sheets, location-problem snapshots, asset manuals. Those are on the
 anonymous scan path or are safety information, and closing them would break the
-flow the printed QR codes exist for.
+flow the printed QR codes exist for. Each is classified by name, with its
+reason, in the exclusions table above and in `OPEN_PREFIXES`.
+
+`config/tests/test_protected_media.py` checks the nginx half by **parsing**, not
+by grepping: `config/tests/nginx_config.py` applies the `${VAR}` substitution the
+container entrypoint does, builds a location/directive model, and the assertions
+ask that model which block nginx would *select* for a real URI under each prefix
+and whether the `expires` and `Cache-Control` **effective** there (nginx's
+inheritance rule, not a line in the block) leave the response publicly cacheable.
+Where an nginx binary is on PATH the rendered config is additionally run through
+`nginx -t`.
 
 Pinned by `config/tests/test_protected_media.py`, which exercises the Python
 half with real requests and asserts the nginx template gates the same prefixes,

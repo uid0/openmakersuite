@@ -378,6 +378,32 @@ class TestReorderRequestAPI:
         assert request_obj.item.supplier.name.encode() not in response.content
         assert b"INV-LEDGER-1" not in response.content
 
+    def test_the_summary_says_the_gate_ran_even_when_the_feed_is_empty(self, api_client):
+        """REGRESSION (op-anonymous-read-posture).
+
+        ``orders`` and ``ledger`` are built in one loop, so they empty together
+        and a consumer reading the marker off row 0 gets ``False`` for a feed
+        with nothing in it — and then tells an anonymous reader that ALL
+        financial information is published, which is the claim this action
+        stopped honouring. The summary is the one object the payload always
+        carries, so the marker is on it.
+        """
+        response = api_client.get(reverse("analytics-transparency"))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["ledger"] == []
+        assert response.data["orders"] == []
+        assert response.data["summary"]["vendor_data_withheld"] is True
+
+    def test_a_signed_in_caller_gets_no_withheld_marker_on_the_summary(self, authenticated_client):
+        """CONTROL: the marker reports a gate that ran, not a permanent label."""
+        client, _user = authenticated_client
+
+        response = client.get(reverse("analytics-transparency"))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert "vendor_data_withheld" not in response.data["summary"]
+
     def test_transparency_gives_a_signed_in_caller_the_whole_ledger(self, authenticated_client):
         """CONTROL: the feed is gated on the reader, not trimmed.
 

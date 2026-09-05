@@ -36,6 +36,10 @@ const withheldPayload = {
     transparency_note:
       'Dallas Makerspace publishes what it spends. Totals, items, quantities and ' +
       'dates are public; supplier names and per-order costs are shown to signed-in members.',
+    // The gate's marker rides on the SUMMARY as well as on each row. The page
+    // reads it here, because the two arrays are built in one server-side loop
+    // and so are empty together — see the empty-feed case below.
+    vendor_data_withheld: true,
   },
   orders: [
     {
@@ -64,6 +68,26 @@ const withheldPayload = {
       status: 'received',
       vendor_data_withheld: true,
     },
+  ],
+  purchase_orders: [],
+};
+
+/** The same feed as a caller WITH a session gets it: no marker, vendor block intact. */
+const SIGNED_IN_NOTE =
+  'Dallas Makerspace operates with full financial transparency. All purchase ' +
+  'information is publicly available.';
+
+const signedInPayload = {
+  summary: {
+    ...withheldPayload.summary,
+    transparency_note: SIGNED_IN_NOTE,
+    vendor_data_withheld: undefined,
+  },
+  orders: [
+    { ...withheldPayload.orders[0], supplier_name: 'Belt Vendor Co.', actual_cost: 200.0 },
+  ],
+  ledger: [
+    { ...withheldPayload.ledger[0], supplier_name: 'Belt Vendor Co.', actual_cost: 200.0 },
   ],
   purchase_orders: [],
 };
@@ -113,5 +137,80 @@ describe('TransparencyPage — vendor data withheld', () => {
     expect(screen.queryByRole('columnheader', { name: 'Cost' })).not.toBeInTheDocument();
     // ...and says so once, above the table, rather than down a column.
     expect(screen.getByTestId('ledger-vendor-withheld')).toBeInTheDocument();
+  });
+
+  it('CONTROL: gives a signed-in reader the Supplier and Cost columns back', async () => {
+    (analyticsAPI.getTransparencyLedger as jest.Mock).mockResolvedValue({
+      data: signedInPayload,
+    });
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Laser Cutter Belt').length).toBeGreaterThan(0);
+    });
+    expect(screen.getByRole('columnheader', { name: 'Supplier' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Cost' })).toBeInTheDocument();
+    expect(screen.queryByTestId('ledger-vendor-withheld')).not.toBeInTheDocument();
+  });
+
+  describe('an EMPTY ledger', () => {
+    /**
+     * REGRESSION. `vendorWithheld` was derived from `orders[0] || ledger[0]`,
+     * and the server builds both arrays in one loop — so they empty together
+     * and the marker read `false` for a feed with nothing in it. The page then
+     * told an anonymous reader that "All financial information is made
+     * available", which is the exact claim this branch reworded because the
+     * payload stopped honouring it.
+     */
+    const emptyWithheldPayload = {
+      summary: {
+        total_orders_with_financial_data: 0,
+        total_amount_spent: 0,
+        last_updated: '2026-01-15T12:00:00Z',
+        transparency_note: withheldPayload.summary.transparency_note,
+        vendor_data_withheld: true,
+      },
+      orders: [],
+      ledger: [],
+      purchase_orders: [],
+    };
+
+    it('does not claim ALL financial information is published', async () => {
+      (analyticsAPI.getTransparencyLedger as jest.Mock).mockResolvedValue({
+        data: emptyWithheldPayload,
+      });
+      const { container } = renderPage();
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/No logistics purchases with transparency data/i),
+        ).toBeInTheDocument();
+      });
+      expect(container.textContent).not.toContain('All financial information is made available');
+      expect(container.textContent).toContain(
+        'supplier names and per-order costs are shown to signed-in members',
+      );
+    });
+
+    it('CONTROL: a signed-in reader of the same empty feed keeps the original claim', async () => {
+      (analyticsAPI.getTransparencyLedger as jest.Mock).mockResolvedValue({
+        data: {
+          ...emptyWithheldPayload,
+          summary: {
+            ...emptyWithheldPayload.summary,
+            transparency_note: SIGNED_IN_NOTE,
+            vendor_data_withheld: undefined,
+          },
+        },
+      });
+      const { container } = renderPage();
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/No logistics purchases with transparency data/i),
+        ).toBeInTheDocument();
+      });
+      expect(container.textContent).toContain('All financial information is made available');
+    });
   });
 });

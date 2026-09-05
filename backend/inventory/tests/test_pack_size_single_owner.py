@@ -71,19 +71,26 @@ ALLOWED: dict[str, tuple[int, str]] = {
         "code that decides between KNOWN, NOT_RECORDED and RECORDED_ZERO.",
     ),
     "inventory/models/core.py": (
-        6,
-        "ItemSupplier's own arithmetic on its OWN row: unit_weight, and the "
-        "unit_cost/package_cost derivation in save(). All six guard on '> 0' "
-        "explicitly rather than for truthiness, so a RECORDED_ZERO takes its own "
-        "branch and is never read as one-unit-per-package. No item-level answer "
-        "is produced here — nothing crosses from a row to 'how many units are in "
-        "this item's box', which is the question pack_size owns.",
+        3,
+        "``ItemSupplier``'s own arithmetic on its OWN row: ``unit_weight``'s two "
+        "reads, plus the one that hands the pack size to "
+        "``services.suppliers.derive_costs``. Both guard on '> 0' explicitly "
+        "rather than for truthiness, so a RECORDED_ZERO takes its own branch and "
+        "is never read as one-unit-per-package. Down from 6 because the "
+        "cost derivation that used to read it inline now lives in the service. "
+        "No item-level answer is produced here — nothing crosses from a row to "
+        "'how many units are in this item's box', which is the question "
+        "pack_size owns.",
     ),
     "inventory/services/suppliers.py": (
         3,
-        "Copies the recorded value verbatim into PriceHistory and compares it to "
-        "the previous row. A snapshot of what was recorded, not a reading of it: "
-        "a NOT_RECORDED or RECORDED_ZERO row is snapshotted as what it says.",
+        "``stored_pricing``'s ``.values(..., 'quantity_per_package')`` (1), and "
+        "``pricing_changed`` / ``record_price_history`` reading it off the "
+        "instance (2) — a comparison and a snapshot, neither of them an answer. "
+        "``derive_costs`` divides and multiplies by the pack size, and guards "
+        "'< 1' explicitly before dividing so a bypassed validator cannot reach a "
+        "division by zero, but it takes the value as a parameter and so counts "
+        "none of these three.",
     ),
     "reorder_queue/services/line_entry.py": (
         1,

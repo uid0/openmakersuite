@@ -1575,10 +1575,10 @@ class ItemSupplier(models.Model):
             # the save would make "the operator did not touch this price" a
             # statement about a row that no longer exists.
             stored = stored_pricing(self)
-            before = (self.unit_cost, self.package_cost)
+            supplied_unit, supplied_package = self.unit_cost, self.package_cost
             self.unit_cost, self.package_cost = derive_costs(
-                unit_cost=self.unit_cost,
-                package_cost=self.package_cost,
+                unit_cost=supplied_unit,
+                package_cost=supplied_package,
                 quantity_per_package=self.quantity_per_package,
                 stored=stored,
             )
@@ -1588,8 +1588,8 @@ class ItemSupplier(models.Model):
                 derived = {
                     name
                     for name, was, now in (
-                        ("unit_cost", before[0], self.unit_cost),
-                        ("package_cost", before[1], self.package_cost),
+                        ("unit_cost", supplied_unit, self.unit_cost),
+                        ("package_cost", supplied_package, self.package_cost),
                     )
                     if was != now
                 }

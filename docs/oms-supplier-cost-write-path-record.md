@@ -182,3 +182,103 @@ unit-moved / package-unchanged and is honoured.
   figure is editable; the OMS surfaces now carry it, ScanTTY's does not.
   Mitigating: after a save ScanTTY switches to `ItemSuppliersScreen`, which
   re-fetches, so the stored figures are visible immediately.
+
+## How five symptoms passed a green suite
+
+**Every pre-existing test of this behaviour used `quantity_per_package=1`,** the
+one pack size at which the derivation is exact and no defect on this path is
+reachable. `test_services_suppliers.py`'s whole `TestPriceHistoryViaSave` class —
+including `test_non_pricing_save_writes_no_new_history`, which asserts exactly the
+guarantee that was broken — is written at pack 1. The fixtures here deliberately
+use a pack size that does not divide the case price evenly.
+
+**And four tests in `test_costing.py` asserted a value the database never held.**
+`test_trash_bag_example` asserted `unit_cost == Decimal("0.8098")`,
+`test_cost_calculation_precision` `0.1299`, `test_updating_package_cost_recalculates_unit_cost`
+`2.999` and then `2.499`, `test_edge_case_quantity_per_package_change` `0.075`.
+The column is `DecimalField(decimal_places=2)`. Measured on the pre-fix code, with
+a `refresh_from_db()` added:
+
+| fixture | test asserted | in memory | on disk |
+|---|---|---|---|
+| `40.49 / 50` | `0.8098` | `0.8098` | **`0.81`** |
+| `12.99 / 100` | `0.1299` | `0.1299` | **`0.13`** |
+| `29.99 / 10` | `2.999` | `2.999` | **`3.00`** |
+| `15.00 / 200` | `0.075` | `0.075` | **`0.08`** |
+
+Those tests passed only because they read the in-memory object without
+refreshing. That divergence is not cosmetic — it is the root of the false
+price-history rows, because `pricing_changed()` compared the stored `3.33` with a
+re-derived `3.3333…` and concluded the price had moved. `save()` now rounds at the
+point of derivation, so the object agrees with the row, and the four tests assert
+the stored figure with a `refresh_from_db()` beside it.
+
+These were not a deliberate money fix being undone: they date from
+`Test(CI Cleanup.)` / `Fix(CI): More CI Fixes`, and the schema has always
+contradicted them.
+
+## The two AST gates
+
+`test_price_single_owner.py` and `test_pack_size_single_owner.py` count direct
+column reads per file against an allowlist. Moving the arithmetic out of
+`save()` moved reads, so both allowlists were updated — **downwards**:
+
+| gate | file | before | after |
+|---|---|---|---|
+| price | `inventory/models/core.py` | 7 | **6** |
+| pack size | `inventory/models/core.py` | 6 | **3** |
+
+Neither gate was weakened; both still fail on any unlisted reader, and the counts
+they permit went down rather than up. `derive_costs` contributes **zero** counted
+reads in either gate — it takes the pair and the pack size as parameters and
+never touches a model attribute, which is what makes it a definition of the
+columns rather than a reading of them. Every reason string was rewritten against
+the actual node list, not from memory.
+
+## Findings ledger
+
+| round | ORIGINAL | ARTEFACT | note |
+|---|---|---|---|
+| 1 — investigation, no code changed | **11** | 0 | the 5 named symptoms, all reproduced on base first, plus 6 nobody had named |
+| 2 — implement and verify | **1** | 7 | trend: originals collapsed, artefacts are of round 2's own changes |
+
+**Round 1, the six that were not in the brief's five:**
+
+1. Every save of a link whose case price is not evenly divisible filed a false
+   `PriceHistory` `updated` row — including `mark_discontinued` and
+   `void_line_item` flipping a boolean.
+2. `save()` left an unquantized cost in memory, diverging from the stored row.
+   The cause of (1).
+3. `_create_supplier_relationship` sent `None` for an ABSENT cost, conflating
+   "absent" with "cleared".
+4. Symptom 1 (`'0'` for a blank kit cost box) is **live on main**. The earlier
+   postmortem states "that fix stays"; it does not — `6c2adc10` put `'0'` back.
+5. The `views.py` site named in the brief is CREATE-ONLY; its update branch is
+   unreachable. The live edit path is `ItemSupplierViewSet`.
+6. The whole pre-existing test set for this behaviour sits at pack size 1.
+
+**Round 2's one ORIGINAL:** the four `test_costing.py` assertions above.
+**Round 2's artefacts, all mine:** seven test labels claiming BEFORE/AFTER for
+behaviour that passes on base (corrected to CONTROL); a kit test driving a
+hand-rolled copy of the write site instead of the endpoint; a stale kit payload;
+a test-database collision from running two pytest sessions at once; two gate
+counts; formatting.
+
+Round 2's findings are predominantly artefacts of round 2's own changes, which is
+the stop condition.
+
+## Still open, filed not fixed
+
+Carried from the earlier record, verified still true, and deliberately NOT taken:
+
+- A non-numeric `supplier` id inside `supplier_terms` reaches the ORM and returns
+  500 rather than 400, because that field is a pass-through `DictField`. The same
+  holds for a malformed `average_lead_time` and for a cost overflowing the
+  column's `max_digits`. Out of scope here: it is an input-validation defect on
+  the same endpoint, not a price-derivation one, and this branch neither
+  introduces nor worsens it — `quantize_cost` returns an unquantizable value
+  untouched so Django's own field validation still raises.
+- `KitSerializer._apply_supplier_terms` accepts neither `package_cost` nor
+  `quantity_per_package`, so an API caller sending either has it silently
+  dropped. Not fixed: the kit form offers no box for either, so there is no
+  operator who can supply one, and adding the keys would be scope with no driver.

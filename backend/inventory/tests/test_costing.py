@@ -36,12 +36,20 @@ class TestNewCostingLogic:
             package_cost=Decimal("40.49"),
         )
 
-        # Unit cost should be calculated: $40.49 / 50 = $0.8098
-        expected_unit_cost = Decimal("40.49") / Decimal("50")
-        assert item_supplier.unit_cost == expected_unit_cost
+        # $40.49 / 50 = $0.8098, and the column stores two decimal places, so the
+        # unit cost the system HAS is $0.81. This used to assert the unrounded
+        # 0.8098, which the database never held: measured on the pre-fix code, the
+        # in-memory row carried 0.8098 while the row on disk carried 0.81. save()
+        # now rounds at the point of derivation so the two agree — the divergence
+        # is what made pricing_changed() report a price change on a save that moved
+        # no price, and file a PriceHistory row saying so.
+        assert item_supplier.unit_cost == Decimal("0.81")
 
-        # Verify the calculation is approximately $0.81
-        assert abs(item_supplier.unit_cost - Decimal("0.8098")) < Decimal("0.0001")
+        item_supplier.refresh_from_db()
+        assert item_supplier.unit_cost == Decimal("0.81")
+
+        # The case price is what the shop actually pays, and it is untouched.
+        assert item_supplier.package_cost == Decimal("40.49")
 
     def test_cost_calculation_precision(self):
         """Test that cost calculations maintain proper decimal precision."""
@@ -67,7 +75,10 @@ class TestNewCostingLogic:
         )
 
         # Unit cost should be $12.99 / 100 = $0.1299
-        assert item_supplier.unit_cost == Decimal("0.1299")
+        # Two decimal places is what the column stores; see test_trash_bag_example.
+        assert item_supplier.unit_cost == Decimal("0.13")
+        item_supplier.refresh_from_db()
+        assert item_supplier.unit_cost == Decimal("0.13")
 
     def test_inventory_item_total_value_with_new_costing(self):
         """Test that inventory value calculations work correctly with new costing."""
@@ -119,14 +130,20 @@ class TestNewCostingLogic:
         )
 
         # Initial unit cost: $29.99 / 10 = $2.999
-        assert item_supplier.unit_cost == Decimal("2.999")
+        assert item_supplier.unit_cost == Decimal("3.00")
+        item_supplier.refresh_from_db()
+        assert item_supplier.unit_cost == Decimal("3.00")
 
         # Update package cost
         item_supplier.package_cost = Decimal("24.99")
         item_supplier.save()
 
-        # Unit cost should be recalculated: $24.99 / 10 = $2.499
-        assert item_supplier.unit_cost == Decimal("2.499")
+        # Recalculated: $24.99 / 10 = $2.499, stored at two places as $2.50.
+        assert item_supplier.unit_cost == Decimal("2.50")
+        item_supplier.refresh_from_db()
+        assert item_supplier.unit_cost == Decimal("2.50")
+        # The case price the operator actually edited is stored exactly.
+        assert item_supplier.package_cost == Decimal("24.99")
 
     def test_edge_case_quantity_per_package_change(self):
         """Test that changing quantity per package recalculates unit cost."""
@@ -158,4 +175,6 @@ class TestNewCostingLogic:
         item_supplier.save()
 
         # New unit cost: $15.00 / 200 = $0.075 per unit
-        assert item_supplier.unit_cost == Decimal("0.075")
+        assert item_supplier.unit_cost == Decimal("0.08")
+        item_supplier.refresh_from_db()
+        assert item_supplier.unit_cost == Decimal("0.08")

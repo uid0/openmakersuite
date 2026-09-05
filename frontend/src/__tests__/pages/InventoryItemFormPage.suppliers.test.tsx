@@ -826,6 +826,20 @@ describe('InventoryItemFormPage — derived costs after a partial save', { timeo
       /\/inventory\/item-suppliers\/91\/$/.test(request.url ?? '')
     );
 
+  /**
+   * PATCHes to the row that fails — the anchor the retry assertions wait on.
+   *
+   * Strictly DOWNSTREAM of where row 91 would be written: `relationshipWriteOrder`
+   * puts the primary row first, so by the time a second write reaches row 92 the
+   * write loop has already passed row 91. Waiting on row 91's own count instead
+   * would be satisfied by the FIRST save's write and resolve before the retry had
+   * issued anything.
+   */
+  const writesToFailingRow = () =>
+    mock.history.patch.filter((request) =>
+      /\/inventory\/item-suppliers\/92\/$/.test(request.url ?? '')
+    );
+
   it('adopts the derived unit cost so a retry does not re-price the package', async () => {
     // The server's answer to "package cost moved to 12.00 at pack 3": the case
     // price stands and the unit cost is re-derived from it.
@@ -866,7 +880,12 @@ describe('InventoryItemFormPage — derived costs after a partial save', { timeo
     // The operator fixed nothing on row 91, so the retry has nothing to say
     // about it. Before the fix the box still held 3.33, the row looked dirty,
     // and this second PATCH re-priced the case price to 9.99.
-    await waitFor(() => expect(writesToStaleRow().length).toBeGreaterThanOrEqual(1));
+    await waitFor(() => expect(writesToFailingRow()).toHaveLength(2));
     expect(writesToStaleRow()).toHaveLength(1);
+    expect(
+      writesToStaleRow()
+        .slice(1)
+        .map((request) => JSON.parse(request.data as string).unit_cost)
+    ).not.toContain('3.33');
   });
 });

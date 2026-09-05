@@ -128,6 +128,61 @@ def test_a_refresh_with_no_session_support_still_returns_its_token(operator):
 
 
 @pytest.mark.integration
+def test_a_renewal_that_raises_does_not_fail_the_refresh(operator, monkeypatch):
+    """REGRESSION. The renewal is a bonus; it must never cost the caller a token.
+
+    ``django_login`` is not an in-memory call — ``cycle_key``/``flush`` write
+    the session store and ``user_logged_in`` fires ``update_last_login``, which
+    saves the user. Any of those can raise on ordinary transient trouble. It
+    used to run inside ``refresh_token``'s ``except Exception`` with only
+    ``get_user`` guarded, so the reply became 401 "Invalid refresh token" — and
+    ``services/api.ts`` reads that as a failed refresh, clears localStorage and
+    signs the operator out. A DB hiccup logged people out.
+    """
+    client = APIClient()
+    refresh = _sign_in(client, operator)
+
+    # The session has to be GONE for the renewal to reach `django_login` — with
+    # one already naming this user the helper only touches its expiry. That is
+    # also the state the whole fix exists for: day 15, session lapsed.
+    client.session.flush()
+    client.cookies.pop("sessionid", None)
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("session store unavailable")
+
+    monkeypatch.setattr("auth_views.django_login", explode)
+
+    response = client.post("/api/auth/refresh/", {"refresh": refresh}, format="json")
+
+    assert response.status_code == 200, response.data
+    assert response.data["access"]
+
+
+@pytest.mark.integration
+def test_a_renewal_that_raises_in_the_user_lookup_does_not_fail_it_either(operator, monkeypatch):
+    """The same guarantee for the step the old guard DID cover.
+
+    Kept as a pair with the case above so the two halves of the helper cannot
+    drift apart: whichever line raises, the caller still gets its token.
+    """
+    client = APIClient()
+    refresh = _sign_in(client, operator)
+
+    def explode(self, token):
+        raise RuntimeError("user lookup unavailable")
+
+    monkeypatch.setattr(
+        "rest_framework_simplejwt.authentication.JWTAuthentication.get_user", explode
+    )
+
+    response = client.post("/api/auth/refresh/", {"refresh": refresh}, format="json")
+
+    assert response.status_code == 200, response.data
+    assert response.data["access"]
+
+
+@pytest.mark.integration
 def test_a_refresh_grants_no_media_access_to_a_caller_with_no_token(agreement):
     """CONTROL: the fix renews a session, it does not create one from nothing."""
     client = APIClient()

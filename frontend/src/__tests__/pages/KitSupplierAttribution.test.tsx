@@ -17,13 +17,13 @@
  * nor the vendor. The describes below sign in, because the columns they exist
  * to test are the signed-in ones.
  *
- * WHERE THE UNIT COST GOES DIFFERS BY SCREEN, and the difference is the server
- * (op-anonymous-read-posture). `unit_cost` is in
- * `InventoryItemSerializer.VENDOR_ONLY_FIELDS`, which `KitSerializer` inherits,
- * so the LIST — which renders a whole column of it — drops that column for a
- * withheld payload, exactly as its sibling `InventoryListPage` does. The kit
- * FORM still reads `kit.unit_cost` on its read-only line; that surface is not
- * rebuilt here, so its anonymous cases still run against a signed-in fixture.
+ * THE UNIT COST IS WITHHELD ON BOTH SCREENS (op-anonymous-read-posture).
+ * `unit_cost` is in `InventoryItemSerializer.VENDOR_ONLY_FIELDS`, which
+ * `KitSerializer` inherits, so it is absent for this reader. The LIST renders a
+ * whole column of it and DROPS the column; the FORM renders one detail row and
+ * LABELS it, which is the choice `utils/vendorVisibility` documents. Both
+ * anonymous helpers below feed `WITHHELD_KIT`, the shape the server actually
+ * sends — a fixture carrying vendor keys could not fail for the real reason.
  */
 import { MantineProvider } from '@mantine/core';
 import { render, screen, waitFor, within } from '@testing-library/react';
@@ -259,7 +259,7 @@ describe('what a logged-out visitor sees on the kit surfaces', () => {
       data: { results: [{ id: 50, name: 'Acme Supplies' }] },
     });
     (kitAPI.getKit as ReturnType<typeof vi.fn>).mockResolvedValue({
-      data: KIT_WITH_ALTERNATIVES,
+      data: WITHHELD_KIT,
     });
     render(
       <MantineProvider>
@@ -347,22 +347,44 @@ describe('what a logged-out visitor sees on the kit surfaces', () => {
     expect(screen.queryByText(/Beta Parts/)).not.toBeInTheDocument();
   });
 
-  // The boundary is NAMING a supplier, not showing a number that came from one.
-  // The kit list has always shown this same visitor the same $42.00 one click
-  // earlier; withholding it here would make the two screens disagree about one
-  // kit, and it is not disclosure the acceptance record asks to narrow.
-  //
-  // The assertion MOVED from the editable Unit cost box to the read-only line
-  // beside it, because the box no longer seeds from the kit: it held the CHOSEN
-  // supplier's figure while the Supplier box named whoever was typed, so a save
-  // wrote one vendor's price onto another's link. The intent is unchanged — an
-  // anonymous visitor still sees what the kit costs, and this still fails if the
-  // price stops being displayed. Only the element carrying it moved.
-  it('CONTROL: the kit form still shows a logged-out visitor the unit cost', async () => {
+  /**
+   * REGRESSION. `unit_cost` is withheld from this reader, so the card resolved
+   * its text to "No price on file" — a claim about the KIT where the truth is
+   * about the READER, and the seventh surface of that class. LABEL rather than
+   * DROP because this is one detail row under a heading: removing it leaves a
+   * gap a reader cannot interpret.
+   */
+  it('says the price was withheld rather than that none is on file', async () => {
     await renderFormAnonymously();
 
-    expect(screen.getByTestId('kit-unit-cost-current')).toHaveTextContent('$42.00 per unit');
+    const line = screen.getByTestId('kit-unit-cost-current');
+    expect(line).toHaveTextContent('Sign in to see supplier and pricing information');
+    expect(line).not.toHaveTextContent('No price on file');
+    expect(line).not.toHaveTextContent('$');
+    // The card itself stays — the gate withholds a figure, not the section.
     expect(screen.getByText('Purchase terms')).toBeInTheDocument();
+  });
+
+  it('CONTROL: a signed-in operator still gets the figure', async () => {
+    localStorage.setItem('token', 'test-token');
+    (inventoryAPI.listSuppliers as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { results: [{ id: 50, name: 'Acme Supplies' }] },
+    });
+    (kitAPI.getKit as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: KIT_WITH_ALTERNATIVES,
+    });
+    render(
+      <MantineProvider>
+        <MemoryRouter initialEntries={['/inventory/kits/k1']}>
+          <Routes>
+            <Route path="/inventory/kits/:kitId" element={<KitDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('kit-name')).toHaveValue('Ink Kit'));
+
+    expect(screen.getByTestId('kit-unit-cost-current')).toHaveTextContent('$42.00 per unit');
   });
 
   it('CONTROL: a signed-in operator still sees both on both screens', async () => {

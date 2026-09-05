@@ -61,6 +61,10 @@ TEMPLATE_VARIABLES = {
 #: nginx treats these as "do not cache"; anything else is a positive lifetime.
 NON_CACHING_EXPIRES = {"-1", "off", "epoch"}
 
+#: The named location every gated prefix routes its 401/403 to, so a refused
+#: browser navigation gets a remedy rather than nginx's stock body.
+REMEDY_LOCATION = "@vendor_media_denied"
+
 
 def _tls_server():
     """The ``server`` block that serves the app (the plain-80 one only redirects)."""
@@ -201,6 +205,61 @@ def test_the_nginx_template_gates_every_protected_prefix():
         assert proxies and proxies[0].value.endswith(
             "/api/auth/media-access/"
         ), f"{target} does not reach the Django gate"
+
+
+@pytest.mark.unit
+def test_every_protected_prefix_refuses_with_a_remedy():
+    """The nginx half of "a refusal carries a remedy".
+
+    These URLs are followed by a browser from an ``<a href>``, so nginx's stock
+    403 body is the whole of what the person sees — there is no SPA error
+    handler downstream. Without this, copying a block for a tenth prefix and
+    dropping its ``error_page`` line passes every other check here while giving
+    that prefix a blank wall.
+
+    ``config.protected_media.serve_media`` is the same rule on the other
+    server, and ``test_media_session_lifetime.py`` covers it; this is the half
+    that was asserted nowhere.
+    """
+    server = _tls_server()
+
+    for prefix in VENDOR_MEDIA_PREFIXES:
+        uri = f"/media/{prefix}zzqq-probe.pdf"
+        location = server.match_location(uri)
+        assert location is not None
+
+        handlers = location.effective("error_page")
+        assert handlers, f"a refused {uri} gets nginx's stock 403 body — no remedy, no link"
+        named = [d.args[-1] for d in handlers]
+        assert REMEDY_LOCATION in named, (
+            f"{uri} handles an error_page but not with {REMEDY_LOCATION}: {named}. "
+            "A refused vendor download has to name a way in."
+        )
+        for handler in handlers:
+            if handler.args[-1] == REMEDY_LOCATION:
+                assert "403" in handler.args, f"{uri} does not route its 403 to {REMEDY_LOCATION}"
+
+    # Looked up by NAME, not by `match_location`: nginx never routes a URI into
+    # a named location, so asking the matcher for one would prove nothing.
+    remedy = next(
+        (loc for loc in server.locations if loc.args == (REMEDY_LOCATION,)),
+        None,
+    )
+    assert remedy is not None, f"{REMEDY_LOCATION} is not defined"
+    assert remedy.declared("internal"), f"{REMEDY_LOCATION} is reachable directly by a client"
+
+    returns = remedy.effective("return")
+    assert returns, f"{REMEDY_LOCATION} returns nothing"
+    body = " ".join(returns[0].args)
+    assert "403" in returns[0].args, f"{REMEDY_LOCATION} does not answer 403"
+    assert "Sign in" in body, f"{REMEDY_LOCATION} names no remedy"
+    assert 'href="/"' in body, f"{REMEDY_LOCATION} links nowhere"
+
+    # A refusal that echoes the request is a refusal that leaks. The reader
+    # already knows what they clicked; anyone else must learn nothing.
+    assert "$request_uri" not in body and "$uri" not in body
+    for prefix in VENDOR_MEDIA_PREFIXES:
+        assert prefix not in body, f"{REMEDY_LOCATION} echoes the {prefix} prefix"
 
 
 @pytest.mark.unit

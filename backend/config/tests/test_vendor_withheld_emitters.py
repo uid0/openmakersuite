@@ -18,6 +18,14 @@ Same shape as ``inventory/tests/test_pack_size_single_owner.py`` and
 found by walking the class hierarchy, not listed), and only what cannot be
 derived is registered by hand.
 
+EVERY APP'S SERIALIZERS ARE IMPORTED FIRST, and that is load-bearing rather
+than tidy. ``__subclasses__()`` reports only what Python has already imported,
+and ``django.setup()`` imports app configs and models — not serializer modules.
+Deriving the set after importing one app would have made this gate answer
+"nothing new" for a mixin subclass landing in any OTHER app, and made the same
+code pass or fail depending on what an earlier test in the run happened to
+import.
+
 THE HONEST LIMIT, named the way those two modules name theirs: this runs in
 Python, so it can prove the BACKEND list is complete and it cannot prove the
 TypeScript side was updated. What it can do is refuse to let a new emitter land
@@ -26,6 +34,10 @@ declarations are checked by ``tsc`` and by each surface's own tests.
 """
 
 from __future__ import annotations
+
+import importlib
+
+from django.apps import apps
 
 import pytest
 
@@ -67,15 +79,31 @@ HAND_ROLLED_EMITTERS: dict[str, str] = {
 }
 
 
-def _mixin_subclasses() -> set[str]:
-    """Every ``VendorGatedSerializerMixin`` subclass, at any depth."""
-    import inventory.serializers  # noqa: F401 — import registers the classes
+def _import_every_serializer_module() -> None:
+    """Import ``<app>.serializers`` for every installed app.
 
-    found: set[str] = set()
+    ``__subclasses__()`` below can only see classes Python has imported, so the
+    walk is exactly as wide as this is. An app with no such module is normal and
+    ignored; an app whose module raises on import is NOT ignored, because a
+    gated serializer could be hiding behind that error.
+    """
+    for config in apps.get_app_configs():
+        try:
+            importlib.import_module(f"{config.name}.serializers")
+        except ModuleNotFoundError as exc:
+            if exc.name != f"{config.name}.serializers":
+                raise
+
+
+def _mixin_subclasses() -> dict[str, str]:
+    """Every ``VendorGatedSerializerMixin`` subclass, mapped to its module."""
+    _import_every_serializer_module()
+
+    found: dict[str, str] = {}
 
     def walk(cls) -> None:
         for sub in cls.__subclasses__():
-            found.add(sub.__name__)
+            found[sub.__name__] = sub.__module__
             walk(sub)
 
     walk(VendorGatedSerializerMixin)
@@ -86,13 +114,18 @@ def _mixin_subclasses() -> set[str]:
 def test_every_gated_serializer_names_the_typescript_type_it_feeds():
     declared = _mixin_subclasses()
 
-    assert declared, (
-        "No VendorGatedSerializerMixin subclass was found. The walk is broken "
-        "(a moved module, or inventory.serializers no longer imported), so this "
-        "gate is passing vacuously rather than guarding anything."
+    # A DISAPPEARANCE has to fail too, so the guard names what it expects rather
+    # than counting. "Non-empty" would have been satisfied by the inventory
+    # classes no matter how much of the walk had broken.
+    missing = sorted(set(MIXIN_TS_TYPES) - set(declared))
+    assert not missing, (
+        f"{missing} no longer reach(es) the walk. Either the serializer stopped "
+        "gating its vendor keys — in which case say so and drop the entry — or "
+        "the walk is broken (a moved module, an app's serializers no longer "
+        "importable), and this gate is passing vacuously."
     )
 
-    unclassified = sorted(declared - set(MIXIN_TS_TYPES))
+    unclassified = sorted(set(declared) - set(MIXIN_TS_TYPES))
     assert not unclassified, (
         f"{unclassified} withhold(s) vendor keys and nothing says which "
         "TypeScript type reads the payload. A reader that does not know the "
@@ -104,11 +137,29 @@ def test_every_gated_serializer_names_the_typescript_type_it_feeds():
         "`utils/vendorVisibility` before rendering them."
     )
 
-    stale = sorted(set(MIXIN_TS_TYPES) - declared)
-    assert not stale, (
-        f"{stale} is registered in MIXIN_TS_TYPES but is no longer a "
-        "VendorGatedSerializerMixin subclass. Drop the entry rather than "
-        "leaving a classification of something that is gone."
+
+@pytest.mark.unit
+def test_the_walk_reaches_serializers_outside_inventory():
+    """The gate is only as wide as its imports, so prove the imports are wide.
+
+    Every mixin subclass lives in ``inventory.serializers`` today, so a walk
+    that had silently narrowed to that one module would look identical from the
+    outside. This exercises the import step against an app that is NOT inventory
+    and has a serializers module, which is what makes the widening real rather
+    than asserted.
+    """
+    _import_every_serializer_module()
+
+    import sys
+
+    reached = {
+        name
+        for name in sys.modules
+        if name.endswith(".serializers") and not name.startswith("inventory.")
+    }
+    assert reached, (
+        "No non-inventory serializers module was imported, so a gated "
+        "serializer landing in any other app would be invisible to this gate."
     )
 
 

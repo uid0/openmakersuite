@@ -21,19 +21,38 @@ static directory prefix it writes under, and each prefix must be either
 A new upload field anywhere under ``backend/`` matches neither and fails here
 until somebody answers the question "can a vendor document be stored there?".
 
-TWO HONEST LIMITS, named the way those two modules name theirs:
+TWO READINGS, AND THE AUTHORITATIVE ONE IS DJANGO'S OWN. The AST walk is a
+source reading and so has blind spots; ``test_django_itself_declares_no_
+unclassified_upload_root`` asks the app registry instead — every
+``FileField``/``ImageField`` Django has actually built, with the ``upload_to``
+it will actually use. That is the real consumer, it sees a callable the source
+walk cannot resolve, and it sees the POSITIONAL spelling
+(``FileField("Invoice", "vendor_invoices/")``) that the keyword-only walk was
+blind to. The AST walk is kept because it reaches modules the registry does not
+— anything that is not a model field.
+
+THREE HONEST LIMITS, named the way those two modules name theirs:
 
 * **``backend/`` only.** A file written outside a model field — the batch PDFs
   ``IndexCardRenderer.render_batch_to_storage`` persists under ``index_cards/``
-  are the live example — has no ``upload_to`` and is not seen by this walk.
+  are the live example — has no ``upload_to``, so NEITHER reading sees it.
   ``index_cards/`` is on the protected list because that renderer was read by
   hand, not because this test found it.
-* **A callable's prefix has to be resolvable statically.** ``upload_to`` may be
-  a function, and this resolves one by reading the leading literal of its
-  returned f-string (which is how ``maintenance_orders._attachment_upload_path``
-  is classified). A callable whose prefix is computed rather than written down
-  is reported as UNRESOLVED and fails, rather than being skipped — a path this
-  test cannot read is a path it cannot vouch for.
+* **A callable's prefix has to be resolvable statically, in the AST reading.**
+  ``upload_to`` may be a function, and the walk resolves one by reading the
+  leading literal of its returned f-string (which is how
+  ``maintenance_orders._attachment_upload_path`` is classified). A callable
+  whose prefix is computed rather than written down is reported as UNRESOLVED
+  and fails, rather than being skipped — a path this test cannot read is a path
+  it cannot vouch for. The registry reading calls the callable instead, so the
+  two do not share this limit.
+* **The registry reading sees FIRST-PARTY MODEL FIELDS ONLY.** A ``FileField``
+  on a form or a serializer writes through its own storage call and is
+  invisible to ``apps.get_models()``, which is why the AST walk stays rather
+  than being replaced; and a field declared by an installed third-party package
+  (django-hordak's CSV import) is skipped, because this repo cannot classify
+  somebody else's decision. Both readings therefore share the ``backend/``
+  boundary.
 """
 
 from __future__ import annotations
@@ -41,6 +60,8 @@ from __future__ import annotations
 import ast
 import pathlib
 from typing import Optional
+
+import pytest
 
 from config.protected_media import VENDOR_MEDIA_PREFIXES, is_vendor_media
 
@@ -194,6 +215,13 @@ def _prefix_from_callable(tree: ast.AST, name: str) -> Optional[str]:
     return None
 
 
+def _is_file_field(node: ast.Call) -> bool:
+    """Whether ``node`` constructs a Django file field, by either spelling."""
+    func = node.func
+    name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+    return name.endswith("FileField") or name.endswith("ImageField")
+
+
 def _upload_prefixes_in(source: str, filename: str = "<snippet>") -> set[str]:
     """Every prefix an ``upload_to`` in ``source`` writes under.
 
@@ -203,16 +231,26 @@ def _upload_prefixes_in(source: str, filename: str = "<snippet>") -> set[str]:
     tree = ast.parse(source, filename=filename)
     found: set[str] = set()
 
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.keyword) or node.arg != "upload_to":
-            continue
-        value = node.value
+    def record(value) -> None:
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
             found.add(_static_prefix(value.value) or UNRESOLVED)
         elif isinstance(value, ast.Name):
             found.add(_prefix_from_callable(tree, value.id) or UNRESOLVED)
         else:
             found.add(UNRESOLVED)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword) and node.arg == "upload_to":
+            record(node.value)
+            continue
+        # `upload_to` is the THIRD positional parameter of FileField/ImageField
+        # (verbose_name, name, upload_to, ...), so the keyword branch above is
+        # blind to `FileField("Invoice", None, "vendor_invoices/")`. Every other
+        # unreadable shape in this module fails CLOSED; this one used to fail
+        # open, which is the wrong direction for a gate that exists because a
+        # hand-enumerated list goes stale.
+        if isinstance(node, ast.Call) and _is_file_field(node) and len(node.args) >= 3:
+            record(node.args[2])
 
     return found
 
@@ -378,3 +416,76 @@ def test_a_bare_filename_upload_to_is_unresolved_rather_than_root():
 
 def test_a_field_with_no_upload_to_contributes_nothing():
     assert _upload_prefixes_in('name = CharField(max_length=10, help_text="upload_to")') == set()
+
+
+def test_a_positional_upload_to_is_caught_too():
+    """The spelling the keyword-only walk was blind to.
+
+    ``upload_to`` is the third positional parameter of ``FileField``, so this
+    declared a whole upload root that produced no prefix, no ``UNRESOLVED`` and
+    no failure — the one shape in this module that failed OPEN.
+    """
+    assert _upload_prefixes_in('f = models.FileField("Invoice", None, "vendor_invoices/")') == {
+        "vendor_invoices/"
+    }
+    assert _upload_prefixes_in('f = ImageField("Photo", None, "assets/images/")') == {
+        "assets/images/"
+    }
+
+
+def test_a_positional_argument_on_something_that_is_not_a_file_field_is_ignored():
+    """CONTROL: the positional branch must not invent prefixes elsewhere."""
+    assert _upload_prefixes_in('f = CharField("Label", None, "not/a/path/")') == set()
+
+
+@pytest.mark.django_db
+def test_django_itself_declares_no_unclassified_upload_root():
+    """THE AUTHORITATIVE READING: ask the app registry, not the source.
+
+    ``apps.get_models()`` gives every ``FileField``/``ImageField`` Django
+    actually built, with the ``upload_to`` it will actually use — so a callable
+    the AST cannot resolve is resolved here by CALLING it, and a positional
+    spelling is invisible to neither. Whatever the source walk's blind spots,
+    a model field that writes somewhere unclassified fails here.
+    """
+    from django.apps import apps
+    from django.db.models import FileField
+
+    unclassified: dict[str, list[str]] = {}
+    for model in apps.get_models():
+        # FIRST-PARTY MODELS ONLY, the same scope the AST walk states. A
+        # third-party package's upload field (django-hordak's CSV import writes
+        # straight to MEDIA_ROOT) is not something this repo can classify or
+        # gate, and failing here on one would report somebody else's decision
+        # under a message about our vendor prefixes.
+        app_path = pathlib.Path(apps.get_app_config(model._meta.app_label).path)
+        if BACKEND not in app_path.parents and app_path != BACKEND:
+            continue
+        for field in model._meta.get_fields():
+            if not isinstance(field, FileField):
+                continue
+            upload_to = field.upload_to
+            if callable(upload_to):
+                # Resolved the way storage resolves it, with a filename that
+                # cannot itself introduce a directory.
+                try:
+                    raw = upload_to(model(), "zzqq-probe.bin")
+                except Exception:
+                    raw = None
+                prefix = _static_prefix(raw) if isinstance(raw, str) else None
+            else:
+                prefix = _static_prefix(str(upload_to))
+
+            where = f"{model._meta.label}.{field.name}"
+            if prefix is None:
+                unclassified.setdefault(UNRESOLVED, []).append(where)
+            elif not _is_gated(prefix) and prefix not in OPEN_PREFIXES:
+                unclassified.setdefault(prefix, []).append(where)
+
+    assert not unclassified, (
+        f"Model upload root(s) nobody has classified: {unclassified}. Ask the "
+        "question this gate exists for — CAN A VENDOR DOCUMENT BE STORED THERE? "
+        "Gate it in config.protected_media.VENDOR_MEDIA_PREFIXES with a "
+        "mirrored nginx `location ^~` block, or add it to OPEN_PREFIXES here "
+        "WITH THE REASON it stays anonymously readable."
+    )

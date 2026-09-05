@@ -35,23 +35,44 @@ def _renew_session_from_token(request, access):
     """Re-establish the Django session for the user a fresh access token names.
 
     Called by :func:`refresh_token`; see its docstring for why the session has
-    to track the JWT's life rather than its own. Best effort by design — the
-    caller has already proven possession of a valid refresh token, so nothing
-    here can widen access, and a caller with no session support (ScanTTY, a
-    script) simply gets no cookie, as before.
+    to track the JWT's life rather than its own.
+
+    BEST EFFORT, AND THE WHOLE BODY IS INSIDE THE GUARD. ``django_login`` is not
+    an in-memory call: ``cycle_key``/``flush`` write the session store (a row
+    INSERT on the DB backend) and ``user_logged_in`` fires Django's
+    ``update_last_login``, which saves the user. Any of those can raise on
+    ordinary transient trouble, and the caller has already proven possession of
+    a valid refresh token — so a cookie that could not be renewed must never
+    become a 401, which the SPA reads as "refresh failed" and answers by
+    clearing localStorage and signing the operator out.
+    ``config/tests/test_media_session_lifetime.py::test_a_renewal_that_raises_does_not_fail_the_refresh``
+    holds that line.
+
+    RENEWED FOR EVERY CALLER, and gating it on "does this request present a
+    session cookie?" was tried and REJECTED: the cookie's own max-age is set
+    from ``SESSION_COOKIE_AGE`` at login, so on day 15 — the exact day this
+    exists for — the browser has already dropped it and sends nothing, which is
+    indistinguishable from ScanTTY or curl. Such a guard would skip precisely
+    the case it was meant to preserve.
+    ``test_a_refresh_restores_the_session_a_media_download_needs`` fails when it
+    is applied.
+
+    The cost is that a token-only client leaves a session row per refresh, which
+    ``clearsessions`` reaps; the alternative was the media gate not working.
     """
     try:
         user = JWTAuthentication().get_user(access)
+        if request.session.get("_auth_user_id") == str(user.pk):
+            # Already this user's session: cycling the key would invalidate the
+            # cookie the browser is holding. Re-save so the expiry moves forward.
+            request.session.modified = True
+            return
+        django_login(request, user)
     except Exception:
-        # Resolved by the SAME code that resolves a Bearer token on any other
-        # request, so the session can never name a user the API would refuse.
+        # The user, when resolved at all, is resolved by the SAME code that
+        # resolves a Bearer token on any other request, so the session can never
+        # name a user the API would refuse.
         return
-    if request.session.get("_auth_user_id") == str(user.pk):
-        # Already this user's session: cycling the key would invalidate the
-        # cookie the browser is holding. Re-save so the expiry moves forward.
-        request.session.modified = True
-        return
-    django_login(request, user)
 
 
 def _issue_session_and_tokens(request, user):
@@ -229,10 +250,13 @@ def refresh_token(request):
     Both are security-posture decisions and belong to the captain, not to a
     regression fix.
 
-    A failed renewal does NOT fail the refresh: the access token is what the
-    caller asked for, and a session is a bonus that a caller without a cookie
-    (ScanTTY, curl) never had. ``config/tests/test_media_session_lifetime.py``
-    exercises the sequence this exists for.
+    A FAILED RENEWAL DOES NOT FAIL THE REFRESH, and the renewal is called
+    OUTSIDE the try/except above so that cannot quietly stop being true: the
+    access token is what the caller asked for, a session is a bonus a caller
+    without a cookie (ScanTTY, curl) never had, and a 401 here would make the
+    SPA clear its storage and sign the operator out over a transient session
+    write. ``config/tests/test_media_session_lifetime.py`` exercises both the
+    sequence this exists for and that refusal to fail.
     """
     refresh_token = request.data.get("refresh")
 
@@ -242,21 +266,20 @@ def refresh_token(request):
     try:
         refresh = CustomRefreshToken(refresh_token)
         access = refresh.access_token
-
-        _renew_session_from_token(request, access)
-
-        return Response(
-            {
-                "access": str(access),
-            }
-        )
-
     except Exception:
         return error_response(
             ErrorCode.AUTHENTICATION_FAILED,
             "Invalid refresh token",
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
+
+    _renew_session_from_token(request, access)
+
+    return Response(
+        {
+            "access": str(access),
+        }
+    )
 
 
 @api_view(["POST"])

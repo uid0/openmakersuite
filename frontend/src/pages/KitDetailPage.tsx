@@ -21,6 +21,7 @@ import { isAuthenticated } from '../components/RequireAuth';
 import { kitAPI, inventoryAPI } from '../services/api';
 import { Kit, Supplier } from '../types';
 import { alternativeSupplierNamesText, chosenSupplierName } from '../utils/supplierChoice';
+import { labelIfWithheld, vendorDataWithheld } from '../utils/vendorVisibility';
 
 /** Pull a field-addressed message out of the API error envelope. */
 const readError = (err: unknown, fallback: string): string => {
@@ -52,15 +53,15 @@ const KitDetailPage: React.FC = () => {
   const [supplierSku, setSupplierSku] = useState('');
   const [unitCost, setUnitCost] = useState<number | string>('');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  // This route carries no `RequireAuth` and `KitViewSet` serves reads to
-  // anyone, so a logged-out visitor lands here. What they are not shown is the
-  // VENDOR and that vendor's part number: a SKU shown without the vendor it
-  // belongs to gets pasted into the wrong order form, and naming the vendor is
-  // the disclosure this branch is not authorised to widen (op-3xsp). The
-  // kit's own unit cost is not in that set — a price is a number that came
-  // from a supplier, not the naming of one, and the kit list shows it to the
-  // same visitor one click earlier.
-  const [showSupplierAttribution] = useState<boolean>(isAuthenticated);
+  // FETCH DECISION ONLY. `inventory/suppliers/` is `IsAuthenticated`, and there
+  // is no payload to read before the request is made, so this is the one thing
+  // on the page auth state legitimately decides. Everything RENDERED asks
+  // `vendorDataWithheld(kit)` instead — see `utils/vendorVisibility`, which
+  // rejects a second client-side derivation of an answer the payload carries:
+  // the response interceptor clears the token when a refresh fails on any
+  // background call, so a later refetch returns a withheld payload while a
+  // flag frozen at mount still says operator.
+  const [signedInAtMount] = useState<boolean>(isAuthenticated);
 
   // Scoped mutation state — never a page-level spinner.
   const [saving, setSaving] = useState(false);
@@ -91,9 +92,9 @@ const KitDetailPage: React.FC = () => {
   // `IsAuthenticated`, so firing this unconditionally answered 401 and the
   // response interceptor, finding no refresh token, cleared storage and raised
   // the session-expired banner at a visitor who never signed in. The picker
-  // this list feeds is behind `showSupplierAttribution` anyway.
+  // this list feeds is behind the withheld check anyway.
   useEffect(() => {
-    if (!showSupplierAttribution) return undefined;
+    if (!signedInAtMount) return undefined;
     let cancelled = false;
     inventoryAPI
       .listSuppliers()
@@ -108,7 +109,7 @@ const KitDetailPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [showSupplierAttribution]);
+  }, [signedInAtMount]);
 
   useEffect(() => {
     if (isNew) return undefined;
@@ -180,13 +181,17 @@ const KitDetailPage: React.FC = () => {
   // order and the emptiness test are the server's answer, not this page's
   // (op-3xsp).
   //
-  // These are the OPERATOR readings — they name vendors — and `showSupplierAttribution`
-  // is the only thing keeping them off an anonymous screen. That gate does NOT
-  // cover the card: the Purchase terms heading and the Unit cost render for
-  // everyone. It covers exactly three things, and both values below are inside
-  // it at every use — the attribution note, the Supplier input and the Supplier
-  // SKU input. Rendering either one anywhere else in this card publishes the
-  // vendor names to a logged-out visitor.
+  // These are the OPERATOR readings — they name vendors — and `vendorWithheld`
+  // is what keeps them off an anonymous screen. Both values below are inside
+  // that guard at every use: the attribution note, the Supplier input and the
+  // Supplier SKU input. Rendering either one anywhere else in this card
+  // publishes the vendor names to a logged-out visitor.
+  //
+  // The Unit cost beneath them is inside it too, which is a CHANGE: `unit_cost`
+  // is in `InventoryItemSerializer.VENDOR_ONLY_FIELDS`, which `KitSerializer`
+  // inherits, so the key is absent for this reader and the card said "No price
+  // on file" — a claim about the KIT where the truth is about the READER.
+  const vendorWithheld = vendorDataWithheld(kit);
   const kitSupplierName = chosenSupplierName(kit?.supplier_choice);
   const kitAlternativeText = alternativeSupplierNamesText(kit?.supplier_choice);
 
@@ -199,10 +204,11 @@ const KitDetailPage: React.FC = () => {
   // the card's other comment draws.
   const storedUnitCost =
     kit?.unit_cost === null || kit?.unit_cost === undefined ? null : Number(kit.unit_cost);
-  const storedUnitCostText =
+  const storedUnitCostText = labelIfWithheld(kit, () =>
     storedUnitCost === null || Number.isNaN(storedUnitCost)
       ? 'No price on file'
-      : `$${storedUnitCost.toFixed(2)} per unit`;
+      : `$${storedUnitCost.toFixed(2)} per unit`
+  );
 
   // Whether the Supplier box names someone other than the link these terms came
   // from. The SKU box still seeds from the chosen link, so retargeting silently
@@ -307,7 +313,7 @@ const KitDetailPage: React.FC = () => {
                 Supplier here is not a supported way to retarget these terms —
                 the save writes this vendor's SKU and price onto whichever
                 vendor the field names. */}
-            {showSupplierAttribution && kitSupplierName && (
+            {!vendorWithheld && kitSupplierName && (
               <Text size="sm" c="dimmed" data-testid="kit-supplier-attribution">
                 Showing {kitSupplierName}&rsquo;s terms
                 {kitAlternativeText !== null &&
@@ -316,17 +322,16 @@ const KitDetailPage: React.FC = () => {
               </Text>
             )}
             <Grid>
-              {/* SIGNED-IN ONLY, and only these two. Neither route here is
-                  behind RequireAuth and KitViewSet serves reads publicly, so a
-                  logged-out visitor reaches this card — and the boundary this
-                  change draws is NAMING a supplier, with the kit SKU as the one
-                  explicit exception because it is traceable to a vendor. The
-                  Supplier box names one (its datalist lists every vendor by
-                  name); the SKU is that vendor's part number. Unit cost is
-                  neither: it is a number that came from a supplier, which the
-                  kit LIST has always shown anonymously, so withholding it here
-                  would make the two kit screens disagree about the same kit. */}
-              {showSupplierAttribution && (
+              {/* WITHHELD-PAYLOAD ONLY, asked off the rows rather than off a
+                  token. Neither kit route is behind RequireAuth and KitViewSet
+                  serves reads publicly, so a logged-out visitor reaches this
+                  card: the Supplier box names a vendor (its datalist lists
+                  every one by name) and the SKU is that vendor's part number.
+                  The Unit cost above is gated by the same answer — `unit_cost`
+                  is withheld from this reader, and `KitListPage` DROPS its
+                  column for the same payload, so labelling it here is what
+                  keeps the two kit screens agreeing about the same kit. */}
+              {!vendorWithheld && (
                 <>
                   <Grid.Col span={{ base: 12, sm: 4 }}>
                     <TextInput

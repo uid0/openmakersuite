@@ -436,6 +436,56 @@ Carried from the earlier record, verified still true, and deliberately NOT taken
   dropped. Not fixed: the kit form offers no box for either, so there is no
   operator who can supply one, and adding the keys would be scope with no driver.
 
+### The kit form writes one vendor's terms onto another — AMPLIFIED BY THIS BRANCH
+
+Not merely pre-existing: this branch made it move money.
+
+`KitDetailPage.applyKit` seeds the Unit cost and Supplier SKU boxes from the
+ITEM-LEVEL payload — `next.unit_cost` and `next.supplier_sku`, which are the
+CHOSEN supplier's figures (`unit_cost` is `order_unit_price(self).amount`).
+`supplierId` is a separate free-text box the operator types, and nothing ties
+the two together. So the boxes can hold supplier A's cost and part number while
+the box names supplier B, and the save writes A's figures onto B's link.
+
+The trace. Kit K links A (unit 3.33, package 10.00, pack 3) and B (unit 5.00,
+package 20.00, pack 4); A is chosen, so the boxes load 3.33 / A's SKU. The
+operator types B's id to record B's terms and touches neither box. The payload
+is `supplier_terms {supplier: B, supplier_sku: <A's>, unit_cost: "3.33"}`.
+`_apply_supplier_terms` puts `unit_cost` into `defaults`, `update_or_create`
+finds B's row, and `derive_costs` sees `package_moved` False (20.00 echoed) with
+`unit_moved` True (3.33 != 5.00) — so A's rounded 3.33 GOVERNS and B's case
+price is rewritten 20.00 -> 13.32, with a `PriceHistory` row asserting B
+re-quoted.
+
+**On base the cost half was harmless.** An echoed `unit_cost` was discarded
+whenever the link had a `package_cost` — symptom 3. Fixing symptom 3 is what
+gives the stale figure authority, so this branch converted a display defect into
+a money-moving one. The SKU half is the worse of the two regardless, per
+op-3xsp: a part number gets pasted into an order form, so an unattributed — or
+misattributed — one is actionable-wrong in a way a price is not.
+
+**A fix was attempted on this branch and WITHDRAWN, because it did not
+converge.** Three successive rounds each generated the next round's findings in
+the same file. The decisive one: closing the "stale box" case by seeding
+`supplierId` from the chosen link on load turned every kit save into a
+supplier-primary write. `ItemSupplier.supplier_sku` is a non-blank CharField, so
+seeding made both halves of `handleSave`'s `supplierId && supplierSku` gate
+truthy for every existing kit, `_apply_supplier_terms` forces
+`defaults["is_primary"] = True`, and `enforce_single_primary` then demotes every
+sibling — so renaming a kit would pin its supplier selection and unflag another
+vendor. That escaped the suite only because the fixture behind
+`CONTROL: a save that never touches the purchase terms sends none at all`
+carries no `supplier_choice` key, which real payloads always do.
+
+**So the next attempt must not start by seeding the id.** The likelier shapes are
+a dirty check on the terms themselves (has the operator touched them since load)
+or dropping `is_primary` from `_apply_supplier_terms`' defaults on an update —
+and whichever is taken, that CONTROL has to be re-run against a fixture that
+carries `supplier_choice`, or it proves nothing.
+
+Until then the standing warning is the comment above the attribution line on
+that page: changing Supplier there is not a supported way to retarget the terms.
+
 ### Lost-update window on the stored-row read
 
 `stored_pricing` issues a plain `SELECT` with no `select_for_update()`. Being

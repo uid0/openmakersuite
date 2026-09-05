@@ -1570,10 +1570,17 @@ class ItemSupplier(models.Model):
 
         is_new = self.pk is None
         with transaction.atomic():
-            # Read the pre-save row INSIDE the transaction: the derivation is a
-            # delta against it, so a concurrent write landing between the read and
-            # the save would make "the operator did not touch this price" a
-            # statement about a row that no longer exists.
+            # Read the pre-save row INSIDE the transaction so the derivation,
+            # the single-primary enforcement, the save and the PriceHistory row
+            # commit or roll back together, and so the derivation and
+            # pricing_changed share ONE read of the stored row and cannot
+            # disagree about what was on disk.
+            #
+            # This does NOT isolate the read from a concurrent writer: the SELECT
+            # takes no row lock, so under PostgreSQL's default READ COMMITTED
+            # another transaction can still commit between it and the UPDATE. The
+            # resulting lost-update window is pre-existing and filed as an open
+            # defect in docs/oms-supplier-cost-write-path-record.md.
             stored = stored_pricing(self)
             supplied_unit, supplied_package = self.unit_cost, self.package_cost
             self.unit_cost, self.package_cost = derive_costs(

@@ -809,6 +809,11 @@ The rule, decided by the operator and pinned in
 - `package_cost` moved — it governs. It is what the shop actually pays, and it is
   the only safe direction: `package -> unit` is the lossy half.
 - `package_cost` cleared — both clear. "No price on file" has to stay sayable.
+- `package_cost` cleared AND a `unit_cost` value supplied in the same request —
+  the supplied value wins and the case price re-derives from it. A supplied VALUE
+  beats a clear, whichever box it came from: taking the clears first discarded a
+  typed unit price without a word, and it is a regression this branch caught in
+  its own first cut.
 - only `unit_cost` moved — it governs; the case price re-derives. This is the
   ordinary case: every form sends both boxes and the operator edits one.
 - only `unit_cost` cleared — it re-derives, because it is a derived figure. The

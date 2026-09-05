@@ -2628,9 +2628,13 @@ export interface Kit extends InventoryItem {
 export interface KitSupplierTerms {
   supplier: number;
   supplier_sku: string;
-  /** `null` when the cost box is blank: that is no price on file, and it stores
-   * NULL. Sending `'0'` recorded a real price of zero — a free item — which the
-   * order pad and the stock-value reports then present and sum as money. */
+  /** `null` when the cost box is blank. On a CREATE that is no price on file and
+   * it stores NULL. On an UPDATE — the common case here, since a kit link made
+   * through this form always ends up with a derived package cost — blanking the
+   * box re-derives the unit cost from the stored package cost rather than
+   * clearing it. Sending `'0'` recorded a real price of zero — a free item —
+   * which the order pad and the stock-value reports then present and sum as
+   * money. */
   unit_cost: string | number | null;
   supplier_url?: string;
   average_lead_time?: number;

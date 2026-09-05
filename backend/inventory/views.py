@@ -1742,6 +1742,13 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         so nothing is clearable here; omitting the key keeps the site honest if
         that ever stops being true, and keeps it on the same rule as every other
         writer.
+
+        ``quantity_per_package`` is omitted on the same terms. ``_process_quantity_value``
+        returns the field default ``1`` for an absent pack size, which a create
+        would take from the column anyway; sending it unconditionally would, on a
+        reachable update, reset a recorded pack size of 3 back to 1 and re-derive
+        the unit price at the wrong pack size. That is the same fabrication
+        removed from ``KitSerializer._apply_supplier_terms``.
         """
         package_cost_value, unit_cost_value = cost_data
 
@@ -1749,11 +1756,12 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             "supplier_sku": data.get("supplier_sku") or item.sku or str(item.id),
             "supplier_url": data.get("supplier_url", ""),
             "average_lead_time": lead_time,
-            "quantity_per_package": quantity,
             "package_upc": data.get("package_upc", ""),
             "unit_upc": data.get("unit_upc", ""),
             "is_primary": True,
         }
+        if data.get("quantity_per_package") not in (None, "", "null"):
+            defaults["quantity_per_package"] = quantity
         if package_cost_value is not None:
             defaults["package_cost"] = package_cost_value
         if unit_cost_value is not None:

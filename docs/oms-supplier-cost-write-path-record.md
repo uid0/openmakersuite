@@ -354,3 +354,29 @@ Carried from the earlier record, verified still true, and deliberately NOT taken
   `quantity_per_package`, so an API caller sending either has it silently
   dropped. Not fixed: the kit form offers no box for either, so there is no
   operator who can supply one, and adding the keys would be scope with no driver.
+
+### Lost-update window on the stored-row read
+
+`stored_pricing` issues a plain `SELECT` with no `select_for_update()`. Being
+inside `ItemSupplier.save()`'s `transaction.atomic` block makes the write set
+commit or roll back together and gives the derivation and `pricing_changed` a
+single consistent read, but under PostgreSQL's default READ COMMITTED isolation
+it does NOT stop another transaction committing between that `SELECT` and the
+`UPDATE`. The trace:
+
+1. Session A reads the stored row: `package_cost` 10.00, `unit_cost` 3.33.
+2. Session B commits a price change: 12.00 / 4.00.
+3. Session A — a SKU edit that merely echoes 10.00 / 3.33 — computes "nothing
+   moved" against its stale read and writes 10.00 / 3.33 back, silently
+   reverting B's price change. `pricing_changed` compares against that same
+   stale read, so no `PriceHistory` row records the reversal either.
+
+**PRE-EXISTING, not a regression.** Base's `pricing_changed` read was equally
+stale, so base loses the same update; this branch neither introduces nor widens
+the window.
+
+The fix is `select_for_update()` on the read in `stored_pricing`. The operator
+deferred it to its own branch and its own review rather than taking it here: row
+locking on every `ItemSupplier.save()` is a blast radius of its own, and an
+adjacent pre-existing improvement of exactly this shape, authorised alongside a
+different change, produced a regression that nearly shipped.

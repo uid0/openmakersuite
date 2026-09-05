@@ -258,6 +258,19 @@ the actual node list, not from memory.
 6. The whole pre-existing test set for this behaviour sits at pack size 1.
 
 **Round 2's one ORIGINAL:** the four `test_costing.py` assertions above.
+
+**One ARTEFACT worth naming, because it was self-inflicted and nearly shipped.**
+The first cut of `quantize_cost` rounded `ROUND_HALF_UP`. The COLUMN does not:
+`DecimalField.get_db_prep_save` quantizes through
+`django.db.backends.utils.format_number`, which uses the decimal context default
+of `ROUND_HALF_EVEN`. Measured against Django's own helper, the two disagree on
+every exact-half case — `package_cost 0.25` at pack 2 would have begun storing
+`0.13` where it has always stored `0.12`, and `0.05` at pack 2 `0.03` where it
+stores `0.02`. That is a silent change to stored money, which is the exact defect
+class this branch exists to end, arriving through the fix for it. Caught before
+commit by checking the rounding against `format_number` rather than assuming, and
+pinned by `test_a_derived_unit_cost_equals_what_the_column_stores`, which
+parametrises both rules' disagreement cases and asserts memory and disk agree.
 **Round 2's artefacts, all mine:** seven test labels claiming BEFORE/AFTER for
 behaviour that passes on base (corrected to CONTROL); a kit test driving a
 hand-rolled copy of the write site instead of the endpoint; a stale kit payload;

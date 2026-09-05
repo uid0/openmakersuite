@@ -19,7 +19,7 @@ it is the one place the rule can be stated once.
 
 from __future__ import annotations
 
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
@@ -48,6 +48,15 @@ def quantize_cost(value):
     reported a price change on a save that moved no price, and
     :func:`record_price_history`, which filed one.
 
+    The rounding is ``ROUND_HALF_EVEN`` because that is what the COLUMN does:
+    ``DecimalField.get_db_prep_save`` quantizes through
+    ``django.db.backends.utils.format_number``, which uses the decimal context
+    default. Rounding half away from zero here instead would have silently moved
+    stored money — ``package_cost 0.25`` at pack 2 would begin storing ``0.13``
+    where it has always stored ``0.12`` — which is the same class of quiet
+    corruption this function exists to end. The point is to hold exactly what the
+    column will hold, not to pick a nicer rule.
+
     A value that cannot be quantized (an overflow of the column's ``max_digits``,
     say) is returned unchanged so Django's own field validation raises on it
     rather than this helper turning it into something else.
@@ -55,7 +64,7 @@ def quantize_cost(value):
     if value is None:
         return None
     try:
-        return Decimal(value).quantize(COST_SCALE, rounding=ROUND_HALF_UP)
+        return Decimal(value).quantize(COST_SCALE, rounding=ROUND_HALF_EVEN)
     except (InvalidOperation, TypeError, ValueError):
         return value
 

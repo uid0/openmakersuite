@@ -130,6 +130,45 @@ class TestInvariantTheDerivationIsLossy:
         assert in_memory.as_tuple().exponent == -2
 
 
+class TestTheRoundingIsTheColumnsOwn:
+    """Holding what the column holds is the point; picking a nicer rule is not.
+
+    ``save()`` now rounds at the point of derivation so the in-memory row agrees
+    with the stored one. That rounding has to be the COLUMN's — Django quantizes
+    through ``format_number``, which uses the decimal context default of
+    ``ROUND_HALF_EVEN``. Rounding half away from zero instead would have moved
+    stored money on every exact-half case, silently, which is the same class of
+    defect this whole path is being fixed for.
+    """
+
+    @pytest.mark.parametrize(
+        "package_cost,pack,expected",
+        [
+            ("0.25", 2, "0.12"),  # half-even rounds to the EVEN digit, not up
+            ("1.25", 2, "0.62"),
+            ("0.05", 2, "0.02"),
+            ("0.15", 2, "0.08"),  # and where the two rules agree, they agree
+            ("10.00", 3, "3.33"),
+        ],
+    )
+    def test_a_derived_unit_cost_equals_what_the_column_stores(
+        self, item, supplier, package_cost, pack, expected
+    ):
+        """CONTROL: the value in memory and the value on disk, for both rules' cases."""
+        link = ItemSupplier.objects.create(
+            item=item,
+            supplier=supplier,
+            supplier_sku="SKU-ROUND",
+            package_cost=Decimal(package_cost),
+            quantity_per_package=pack,
+        )
+
+        in_memory = link.unit_cost
+        link.refresh_from_db()
+        assert in_memory == link.unit_cost
+        assert link.unit_cost == Decimal(expected)
+
+
 class TestInvariantASaveThatChangesNoPriceMovesNoPrice:
     """Invariant 1. Editing a SKU, or a flag, is not a price edit."""
 

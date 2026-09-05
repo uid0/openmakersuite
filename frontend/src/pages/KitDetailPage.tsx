@@ -353,8 +353,8 @@ const KitDetailPage: React.FC = () => {
                   {namingAnotherSupplier && (
                     <Grid.Col span={12}>
                       <Text size="sm" c="dimmed" data-testid="kit-supplier-differs">
-                        These terms will be recorded against a different supplier than the
-                        one above — enter that supplier&rsquo;s own SKU and price.
+                        The price shown above is a different supplier&rsquo;s. Enter this
+                        supplier&rsquo;s own SKU and price.
                       </Text>
                     </Grid.Col>
                   )}

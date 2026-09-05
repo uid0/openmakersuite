@@ -309,3 +309,82 @@ describe('the kit form never invents a price the operator did not give', () => {
     expect(payload).not.toHaveProperty('supplier_terms');
   });
 });
+
+/**
+ * The purchase-terms card shows the CHOSEN supplier link's figures — the
+ * read-only price line, and a SKU box that still seeds from that link — while
+ * the Supplier box is free text the operator types. When those two name
+ * different vendors, the card says so.
+ *
+ * That sentence is a claim made to an operator, so it is held to the same
+ * standard as a claim in prose: it has to state something a run can contradict.
+ * Both halves are asserted here, because a test that only checks the warning
+ * appears cannot tell a working condition from one that is always true.
+ *
+ * It only warns. Saving still writes the typed figures onto the named link —
+ * the remaining cross-supplier routes are filed in
+ * docs/oms-supplier-cost-write-path-record.md.
+ */
+describe('the kit form says when the terms on screen belong to another supplier', () => {
+  beforeEach(() => localStorage.setItem('token', 'test-token'));
+  afterEach(() => localStorage.removeItem('token'));
+
+  const KIT_WITH_LINKS = {
+    ...KIT,
+    supplier_choice: {
+      item_supplier_id: 11,
+      supplier_name: 'Acme Supplies',
+      basis: 'best_scored',
+      reason: null,
+      flagged_primary_unorderable: false,
+      scored_without_price: false,
+      scored_without_history: false,
+      alternatives: [],
+    },
+    suppliers: [
+      {
+        id: 11,
+        supplier: 50,
+        supplier_name: 'Acme Supplies',
+        supplier_sku: 'T3200',
+        unit_cost: '89.99',
+        package_cost: '89.99',
+        quantity_per_package: 1,
+      },
+      {
+        id: 12,
+        supplier: 51,
+        supplier_name: 'Beta Parts',
+        supplier_sku: 'BETA-9',
+        unit_cost: '5.00',
+        package_cost: '20.00',
+        quantity_per_package: 4,
+      },
+    ],
+  };
+
+  const nameSupplier = async (id: string) => {
+    const user = userEvent.setup();
+    (kitAPI.getKit as ReturnType<typeof vi.fn>).mockResolvedValue({ data: KIT_WITH_LINKS });
+
+    renderDetail();
+    await waitFor(() => expect(screen.getByTestId('kit-supplier-sku')).toHaveValue('T3200'));
+
+    await user.type(screen.getByTestId('kit-supplier'), id);
+    await waitFor(() => expect(screen.getByTestId('kit-supplier')).toHaveValue(id));
+  };
+
+  it('says nothing while the Supplier box names the kit\u2019s own supplier link', async () => {
+    await nameSupplier('50');
+
+    expect(screen.queryByTestId('kit-supplier-differs')).not.toBeInTheDocument();
+  });
+
+  it('BEFORE/AFTER: warns when the Supplier box names a different supplier', async () => {
+    await nameSupplier('51');
+
+    expect(screen.getByTestId('kit-supplier-differs')).toHaveTextContent(
+      'The price shown above is a different supplier\u2019s. Enter this supplier\u2019s own SKU and price.',
+    );
+  });
+});

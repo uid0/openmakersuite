@@ -440,29 +440,51 @@ Carried from the earlier record, verified still true, and deliberately NOT taken
 
 Not merely pre-existing: this branch made it move money.
 
-`KitDetailPage.applyKit` seeds the Unit cost and Supplier SKU boxes from the
-ITEM-LEVEL payload — `next.unit_cost` and `next.supplier_sku`, which are the
-CHOSEN supplier's figures (`unit_cost` is `order_unit_price(self).amount`).
-`supplierId` is a separate free-text box the operator types, and nothing ties
-the two together. So the boxes can hold supplier A's cost and part number while
-the box names supplier B, and the save writes A's figures onto B's link.
+`KitDetailPage` has three ways a figure can reach a supplier link, and only one
+of them is now closed. `supplierId` is a free-text box the operator types, and
+nothing ties it to what the term boxes hold.
 
-The trace. Kit K links A (unit 3.33, package 10.00, pack 3) and B (unit 5.00,
-package 20.00, pack 4); A is chosen, so the boxes load 3.33 / A's SKU. The
-operator types B's id to record B's terms and touches neither box. The payload
-is `supplier_terms {supplier: B, supplier_sku: <A's>, unit_cost: "3.33"}`.
-`_apply_supplier_terms` puts `unit_cost` into `defaults`, `update_or_create`
-finds B's row, and `derive_costs` sees `package_moved` False (20.00 echoed) with
-`unit_moved` True (3.33 != 5.00) — so A's rounded 3.33 GOVERNS and B's case
-price is rewritten 20.00 -> 13.32, with a `PriceHistory` row asserting B
-re-quoted.
+**CLOSED — the cost route through item-level seeding.** `applyKit` no longer
+does `setUnitCost(next.unit_cost ?? '')`, so the Unit cost box starts BLANK
+rather than pre-filled from `next.unit_cost` — the CHOSEN supplier's figure, via
+`order_unit_price(self).amount`. An operator who names a different supplier and
+TOUCHES NEITHER BOX now sends `unit_cost: null`; `derive_costs` reaches the
+`unit_moved` / `unit_cost is None` clause and re-derives from the named link's
+own surviving `package_cost`, so that link stores exactly what it already held
+and `pricing_changed` files nothing. Measured on a link for B at (unit 10.00,
+package 30.00, pack 3) with the box holding A's 3.33: that save used to store
+(3.33, 9.99, 3); with the box blank it stores (10.00, 30.00, 3), untouched.
+**The blank box is what closes this route. It is not cosmetic — re-seeding it
+reopens the write.**
+
+**STILL OPEN — the cost route through PERSISTENCE.** Nothing ever resets
+`unitCost`: not `applyKit`, which runs on every save response, and not the
+Supplier box's `onChange`. So a figure typed for one supplier survives into a
+save naming another. The trace: the box starts blank; the operator types
+supplier A's id and a cost of 5.00 and saves; `applyKit(res.data)` folds the
+response in but leaves the box holding 5.00; the operator then names supplier B
+and saves again; the payload carries `unit_cost: "5.00"` to B. If B has an
+existing link with a case price, `derive_costs` sees `unit_moved` True and
+`package_moved` False, so A's figure GOVERNS and B's case price is rewritten
+from it, with a `PriceHistory` row asserting B re-quoted. The advisory on that
+card fires in exactly this situation — the Supplier box names someone other than
+the link the terms on screen came from — but it only says so; it does not
+prevent the save.
+
+**STILL OPEN AND UNCHANGED — the SKU route.** `applyKit` still does
+`setSupplierSku(next.supplier_sku ?? '')` from the ITEM-LEVEL payload, which is
+the chosen supplier's part number, and nothing re-seeds it when the Supplier box
+changes. So supplier A's SKU is still written onto whichever supplier is named.
+The blanking did not touch this half, and per op-3xsp it is the WORSE half: a
+part number gets pasted into an order form, so a misattributed one is
+actionable-wrong in a way a price is not.
 
 **On base the cost half was harmless.** An echoed `unit_cost` was discarded
 whenever the link had a `package_cost` — symptom 3. Fixing symptom 3 is what
-gives the stale figure authority, so this branch converted a display defect into
-a money-moving one. The SKU half is the worse of the two regardless, per
-op-3xsp: a part number gets pasted into an order form, so an unattributed — or
-misattributed — one is actionable-wrong in a way a price is not.
+gives a stale figure authority, so this branch converted a display defect into a
+money-moving one wherever the named link ALREADY EXISTS and carries a case
+price. The new-link case is identical to base: with no stored row there is
+nothing to move.
 
 **A fix was attempted on this branch and WITHDRAWN, because it did not
 converge.** Three successive rounds each generated the next round's findings in

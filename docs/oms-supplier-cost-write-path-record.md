@@ -240,7 +240,7 @@ the actual node list, not from memory.
 | round | ORIGINAL | ARTEFACT | note |
 |---|---|---|---|
 | 1 — investigation, no code changed | **11** | 0 | the 5 named symptoms, all reproduced on base first, plus 6 nobody had named |
-| 2 — implement and verify | **1** | 7 | trend: originals collapsed, artefacts are of round 2's own changes |
+| 2 — implement and verify | **1** | 9 | trend: originals collapsed, artefacts are of round 2's own changes |
 
 **Round 1, the six that were not in the brief's five:**
 
@@ -277,8 +277,21 @@ hand-rolled copy of the write site instead of the endpoint; a stale kit payload;
 a test-database collision from running two pytest sessions at once; two gate
 counts; formatting.
 
+**A second self-inflicted one, also caught before it shipped.** The first cut of
+the delta rule tested the two "cleared" cases before the two "supplied a value"
+cases. That ordering means an operator who empties the case-price box AND types a
+unit price gets `NULL`/`NULL` — the figure they just typed discarded without a
+word. Every surface that edits these puts both boxes on screen together, so doing
+that is ordinary. Base handled it correctly, so the guard ships as a CONTROL:
+`test_emptying_the_case_price_while_typing_a_unit_price_keeps_what_was_typed`
+passes on base and on the fix, and fails on the ordering it replaces. A supplied
+value now beats a clear, whichever box it came from.
+
 Round 2's findings are predominantly artefacts of round 2's own changes, which is
-the stop condition.
+the stop condition. Both artefacts that mattered were regressions this branch
+would otherwise have shipped, in the same defect class it exists to close — which
+is the argument for the invariants being written first and measured against base,
+rather than for trusting the fix because it is "at the root".
 
 ## Still open, filed not fixed
 

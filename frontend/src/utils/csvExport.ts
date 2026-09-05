@@ -119,11 +119,23 @@ export function exportToCSV<T extends Record<string, any>>(
  * That unrecoverability cuts both ways, which is why `audience` is a required
  * argument rather than an option with a default. `/inventory/items` is not
  * behind RequireAuth and its list endpoint is AllowAny, so a logged-out visitor
- * can tick rows and press Export; the three columns above would hand them a
- * FILE naming every vendor that stocks each item, plus caveats addressed to
- * whoever maintains the links. An anonymous export therefore carries the
- * pre-`supplier_choice` column set and nothing more — `Supplier`, one name,
- * exactly what they could already export.
+ * can tick rows and press Export.
+ *
+ * AN ANONYMOUS EXPORT NOW OMITS THE VENDOR COLUMNS ENTIRELY, rather than
+ * carrying a `Supplier` and a `Unit Cost` column that happen to be blank
+ * (op-anonymous-read-posture). This paragraph used to record the opposite — an
+ * anonymous export "carries the pre-`supplier_choice` column set and nothing
+ * more, `Supplier`, one name, exactly what they could already export" — and the
+ * captain closed that: the server no longer sends either key to a caller with
+ * no session, so those cells would be empty for every row.
+ *
+ * Empty is the wrong answer, and this is the file where it is worst. A blank
+ * `Unit Cost` already means "nobody recorded a price" here (op-9m2v) and a
+ * blank `Supplier` means "nobody has said where this comes from"; keeping the
+ * columns would state both of those about every item in the makerspace, in a
+ * file that leaves the system and gets ordered from. An absent COLUMN cannot be
+ * misread as an empty VALUE — the same reason the server omits the keys instead
+ * of nulling them.
  *
  * The audience is the CALLER's to decide: this function stays pure and never
  * reads auth state. Making the argument required is the point — a new call
@@ -140,9 +152,9 @@ export function exportInventoryItemsToCSV(items: any[], audience: SupplierAudien
     'Current Stock',
     'Minimum Stock',
     'Reorder Quantity',
-    'Unit Cost',
-    'Supplier',
-    ...(forOperator ? ['Other Suppliers', 'Supplier Chosen By', 'Supplier Caveats'] : []),
+    ...(forOperator
+      ? ['Unit Cost', 'Supplier', 'Other Suppliers', 'Supplier Chosen By', 'Supplier Caveats']
+      : []),
     'Needs Reorder',
     'Is Active',
   ];
@@ -155,12 +167,13 @@ export function exportInventoryItemsToCSV(items: any[], audience: SupplierAudien
     'Current Stock': item.current_stock || 0,
     'Minimum Stock': item.minimum_stock || 0,
     'Reorder Quantity': item.reorder_quantity || 0,
-    // A donated item records a real 0, not an absent price; `|| ''` exported it
-    // as a blank cell — the spelling this file uses for "unknown" (op-9m2v).
-    'Unit Cost': item.unit_cost ?? '',
-    Supplier: chosenSupplierName(item.supplier_choice) ?? '',
     ...(forOperator
       ? {
+          // A donated item records a real 0, not an absent price; `|| ''`
+          // exported it as a blank cell — the spelling this file uses for
+          // "unknown" (op-9m2v).
+          'Unit Cost': item.unit_cost ?? '',
+          Supplier: chosenSupplierName(item.supplier_choice) ?? '',
           'Other Suppliers': alternativeSupplierNames(item.supplier_choice).join('; '),
           'Supplier Chosen By': SUPPLIER_BASIS_LABELS[item.supplier_choice?.basis] ?? '',
           // Covers the no-supplier reasons too, so a blank `Supplier` cell says

@@ -749,15 +749,18 @@ authenticated caller's payload is unchanged. Absent rather than `null`, because
 rationale live in `docs/API_PERMISSION_MATRIX.md`'s
 `dashboard/inventory-summary/` row and the view's own docstring.
 
-**STILL OPEN, and deliberately untouched — the rest of the anonymous money
-surface.** In production `REST_FRAMEWORK.DEFAULT_PERMISSION_CLASSES` is
-`IsAuthenticatedOrReadOnly` (`config/settings.py`), so every viewset that does
-not override it serves anonymous GETs. Purchase orders, item and supplier
-costs, price history, asset purchase prices and maintenance estimates all reach
-a caller with no session; `reorders/analytics/transparency/` does so by design.
-The full derivation is in the `fm/oms-public-inventory-valuation` PR body.
-Queued as `oms-anonymous-read-posture` — a captain decision, not an
-implementation one. Do not narrow any of it without that decision.
+**DECIDED AND DONE — the rest of the anonymous vendor surface
+(`oms-anonymous-read-posture`).** This entry used to say the question was still
+open. The captain decided it: *"Vendor names should not be public, same with
+Vendor Pricing. They should always be behind user auth."* That covers vendor
+names, supplier SKUs, supplier UPCs, lead times, and every form of vendor money,
+on every surface. See "Vendor identity and vendor pricing are behind a login"
+below for what that means in code.
+
+In production `REST_FRAMEWORK.DEFAULT_PERMISSION_CLASSES` is still
+`IsAuthenticatedOrReadOnly` (`config/settings.py`), so a viewset that overrides
+neither it nor `get_permissions` STILL serves anonymous GETs. That default is
+unchanged and remains the thing to check first when adding a viewset.
 
 **FILED, APPROVED, NOT DONE — `log_usage`'s "no unit cost" warning. Recorded so
 the branch's "the derived set AND its deliberate exclusions both reported with
@@ -780,6 +783,82 @@ string and must move with it: the `log_usage` docstring (~:1199),
 `backend/inventory/tests/test_log_usage_charge.py`, which asserts it.
 APPROVED BY THE OPERATOR and deferred only because the phase that found it
 could not make functional changes — NOT declined.
+
+### Vendor identity and vendor pricing are behind a login (op-anonymous-read-posture)
+
+`inventory.services.vendor_visibility` is the ONE answer to "may this caller see
+vendor data". It is the sibling of `supplier_selection` and `pack_size` and the
+same discipline: it decides WHO is asking; each serializer decides WHICH of its
+own keys are vendor facts, in its `VENDOR_ONLY_FIELDS`. It FAILS CLOSED, so a
+serializer built without `context` restricts rather than discloses — which means
+a view that hand-builds one MUST pass `self.get_serializer_context()`. That trap
+is live: `_annotate_metrics` was a `@staticmethod` and had to stop being one.
+
+Two shapes, and which a route gets is not a style choice:
+
+* an endpoint whose every row IS vendor data is closed outright —
+  `inventory/{suppliers,supplier-agreements,item-suppliers,price-history}/` and
+  `reorders/purchase-orders/`, all now `IsAuthenticated` for reads too;
+* an endpoint the anonymous QR-scan flow runs on keeps `AllowAny` and withholds
+  the FIELDS — the item payload, `metrics`, `kits`, `download_card`, and
+  `reorders/analytics/transparency/`.
+
+**Keys are OMITTED, not nulled**, and the payload carries
+`vendor_data_withheld: true`. `null` already means "nothing on file" here
+(op-9m2v), so nulling would say something false about the item instead of
+something true about the reader. The cost lands on consumers: a guard spelled
+`=== null` does NOT catch the withheld case, and that is exactly how
+`item.unit_cost.toFixed(2)` came to run on `undefined` and blank the item page
+for a logged-out visitor. The web asks `utils/vendorVisibility` before rendering
+a vendor row. A CSV drops the vendor COLUMNS rather than emptying them, for the
+same reason the server drops the keys.
+
+**Where the line was drawn, so it is not redrawn by accident.** `total_value` is
+withheld because `current_stock` is public beside it. `quantity_per_package` /
+`case_size` are NOT: a pack size is a shelf fact, which is the call op-c1ke
+already made for `current_cases`, and anonymous reorder sizing depends on it.
+The transparency feed keeps its aggregate totals and `po_number` — a total names
+no vendor and `po_number` is ours, unlike `supplier_order_number` — and withholds
+`ReorderRequest.order_number`, operator-typed free text that holds the vendor's
+reference as often as not.
+
+**What must not break, and is pinned:** anonymous scan-to-reorder and issue
+reporting, end to end, in
+`config/tests/test_anonymous_vendor_exposure.py`. If you find yourself requiring
+a login on the scan path, you have the wrong end of it.
+
+**The gate is a crawl, not a list.** That module walks the live URL conf, issues
+real unauthenticated requests, and fails on any response carrying a seeded vendor
+sentinel — so a viewset added later, or one whose `get_permissions` quietly
+widens, fails there. It does NOT read `permission_classes`, and that is the
+point: see below.
+
+**`docs/API_PERMISSION_MATRIX.md` NOW RECORDS WHAT IS ENFORCED.** It used to
+snapshot declared `permission_classes` only, so all 103 `(view, action)` entries
+behind a `get_permissions` override were wrong — several with the opposite
+meaning — and it was cited as evidence that a screen was anonymously readable
+when it was not. `_perm_names` resolves the real answer now, applying any
+`@action(permission_classes=[...])` first the way DRF applies route
+`initkwargs`; skipping that step reports the class default for every decorated
+action. Treat the matrix as evidence again, but confirm anything load-bearing
+with a request.
+
+**A `FileField` URL is answered by nginx, not Django.** No `permission_classes`
+change reaches `/media/`. Four prefixes hold vendor paperwork —
+`supplier_agreements/`, `purchase_orders/attachments/`, `work_orders/receipts/`
+(a receipt photo is a vendor's name and their prices, in an image) and
+`index_cards/` (a generated artefact inherits the audience of its CONTENTS, not
+of its generator). `config.protected_media` owns the list; nginx gates them with
+`auth_request`, and the same list is enforced in Python for every deployment
+without nginx in front. That Python view is registered unconditionally, not
+under `if settings.DEBUG` — a rule that exists only in development is how the
+dev server and production came to disagree about who may read an invoice.
+
+**ScanTTY is unaffected.** Verified against `uid0/scantty` `main` at
+`ca71ba2a` (SHA confirmed through the GitHub API): its root shows the login
+screen unless a token is cached (`internal/tui/app.go:139`), every request from
+a screen under it carries `Authorization: Bearer`, and it never fetches
+`/media/`. No key was renamed or removed, so no contract moved.
 
 ### oms-supplier-terms-write-path — the DERIVATION is closed; some surfaces are not
 

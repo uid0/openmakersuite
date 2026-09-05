@@ -378,9 +378,7 @@ class TestReorderRequestAPI:
         assert request_obj.item.supplier.name.encode() not in response.content
         assert b"INV-LEDGER-1" not in response.content
 
-    def test_transparency_gives_a_signed_in_caller_the_whole_ledger(
-        self, authenticated_client
-    ):
+    def test_transparency_gives_a_signed_in_caller_the_whole_ledger(self, authenticated_client):
         """CONTROL: the feed is gated on the reader, not trimmed.
 
         Also pins the removal of ``authentication_classes=[]`` from the action:

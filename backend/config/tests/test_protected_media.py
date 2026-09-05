@@ -26,8 +26,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
 from django.core.files.base import ContentFile
+
+import pytest
 from rest_framework.test import APIClient
 
 from config.protected_media import VENDOR_MEDIA_PREFIXES, is_vendor_media
@@ -135,12 +136,12 @@ def test_the_nginx_template_gates_every_protected_prefix():
             re.S,
         )
         assert location, f"nginx serves /media/{prefix} with no dedicated location block"
-        assert "auth_request /_vendor_media_auth;" in location.group(1), (
-            f"/media/{prefix} has a location block but no auth_request"
-        )
-        assert "expires 7d" not in location.group(1), (
-            f"/media/{prefix} would be cached publicly by an intermediary"
-        )
+        assert "auth_request /_vendor_media_auth;" in location.group(
+            1
+        ), f"/media/{prefix} has a location block but no auth_request"
+        assert "expires 7d" not in location.group(
+            1
+        ), f"/media/{prefix} would be cached publicly by an intermediary"
 
     subrequest = re.search(r"location\s+=\s+/_vendor_media_auth\s*\{(.*?)\n    \}", template, re.S)
     assert subrequest, "the auth_request target is not defined"

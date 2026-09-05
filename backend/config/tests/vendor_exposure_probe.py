@@ -233,6 +233,12 @@ _REGEX_GROUP = re.compile(r"\(\?P<([^>]+)>[^()]*(?:\([^()]*\)[^()]*)*\)")
 def _value_for(name: str, conv: str | None, fill: dict) -> str:
     if name in fill:
         return str(fill[name])
+    # DRF's format-suffix routes ('items.json'). They reach the same view and
+    # action as the bare path, so their permissions are the same by
+    # construction — but "by construction" is the kind of reasoning this probe
+    # exists to replace, and filling them costs one line.
+    if name == "format":
+        return "json"
     if conv and f"__{conv}__" in fill:
         return str(fill[f"__{conv}__"])
     if name in ("pk", "id") or name.endswith("_id"):
@@ -255,6 +261,11 @@ def concrete_path(route: str, fill: dict) -> str | None:
     for match in list(_ROUTE_ARG.finditer(out)):
         out = out.replace(match.group(0), _value_for(match.group(2), match.group(1), fill))
     out = out.replace("^", "").replace("$", "")
+    # A format-suffix route ends '\.json/?' once its group is filled: unescape
+    # the dot and drop the optional trailing slash so it becomes requestable.
+    out = out.replace("\\.", ".")
+    if out.endswith("/?"):
+        out = out[:-2]
     if any(char in out for char in "()[]?*+\\|"):
         return None
     return "/" + out.lstrip("/")

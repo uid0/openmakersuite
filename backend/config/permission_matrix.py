@@ -16,9 +16,8 @@ from typing import Iterable
 
 from django.urls import URLPattern, URLResolver, get_resolver
 
-from rest_framework import views
-
 import yaml
+from rest_framework import views
 
 MATRIX_PATH = Path(__file__).resolve().parent / "api_permission_matrix.yaml"
 
@@ -130,9 +129,9 @@ def _perm_names(view_cls, action_name: str | None) -> tuple[str, ...]:
 
     # A function-based view has no ``get_permissions`` at all, and a class that
     # inherits DRF's unchanged means what it declares.
-    if getattr(view_cls, "get_permissions", None) is views.APIView.get_permissions or not isinstance(
-        view_cls, type
-    ):
+    if getattr(
+        view_cls, "get_permissions", None
+    ) is views.APIView.get_permissions or not isinstance(view_cls, type):
         return _declared_perm_names(view_cls, action_name)
 
     try:

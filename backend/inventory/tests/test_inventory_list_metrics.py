@@ -56,7 +56,6 @@ METRICS_FIELDS = {
 }
 
 
-
 @pytest.fixture
 def metrics_reader(authenticated_client):
     """A signed-in client for ``?with_metrics=1``.

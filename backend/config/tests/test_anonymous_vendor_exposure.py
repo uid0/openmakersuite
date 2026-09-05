@@ -126,9 +126,10 @@ def test_vendor_only_endpoints_require_authentication(vendor_fixture, anonymous,
         "purchase-orders-detail": f"/api/reorders/purchase-orders/{objs['po'].id}/",
     }
     response = anonymous.get(paths[path_key])
-    assert response.status_code in (401, 403), (
-        f"{paths[path_key]} answered {response.status_code} to a caller with no session"
-    )
+    assert response.status_code in (
+        401,
+        403,
+    ), f"{paths[path_key]} answered {response.status_code} to a caller with no session"
     assert sentinels_in(response) == []
 
 
@@ -195,7 +196,9 @@ def test_an_authenticated_caller_still_sees_vendor_data(vendor_fixture, django_u
         response = client.get(path)
         assert response.status_code == 200, f"{path} broke for a signed-in caller"
         if expected is not None:
-            assert expected in sentinels_in(response), f"a signed-in caller lost {expected} on {path}"
+            assert expected in sentinels_in(
+                response
+            ), f"a signed-in caller lost {expected} on {path}"
 
 
 @pytest.mark.integration

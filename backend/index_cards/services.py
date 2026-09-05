@@ -1182,7 +1182,5 @@ class FixtureCardRenderer:
         if not fixture.refill_item:
             raise ValueError("Fixture must have a refill_item to generate a card")
 
-        renderer = IndexCardRenderer(
-            blank_cards=False, include_vendor_data=include_vendor_data
-        )
+        renderer = IndexCardRenderer(blank_cards=False, include_vendor_data=include_vendor_data)
         return renderer.render_preview(fixture.refill_item, blank_card=False)

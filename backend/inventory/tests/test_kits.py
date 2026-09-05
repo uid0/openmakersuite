@@ -424,9 +424,7 @@ class TestKitApiSurface:
             )
         )
 
-        response = api_client.get(
-            reverse("inventoryitem-kits", args=[ink_components[0].pk])
-        )
+        response = api_client.get(reverse("inventoryitem-kits", args=[ink_components[0].pk]))
 
         assert response.status_code == status.HTTP_200_OK
         row = response.data[0]

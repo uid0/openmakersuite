@@ -818,7 +818,9 @@ class TestCostAndTrend:
             (Decimal("4.00"), Decimal("4.0000"), "flat"),
         ],
     )
-    def test_trend_compares_current_cost_to_last_po(self, metrics_reader, current, last_po, expected):
+    def test_trend_compares_current_cost_to_last_po(
+        self, metrics_reader, current, last_po, expected
+    ):
         item = InventoryItemFactory(image=None, reorder_quantity=1, unit_cost=current)
         _po_line(
             item,

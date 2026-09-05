@@ -833,8 +833,13 @@ The rule, decided by the operator and pinned in
 - only `unit_cost` moved — it governs; the case price re-derives. This is the
   ordinary case: every form sends both boxes and the operator edits one.
 - only `unit_cost` cleared — it re-derives, because it is a derived figure. The
-  surfaces that offer the box say so, and the write response carries the value it
-  came back as.
+  write response carries the value it came back as, and the item form's
+  relationship editor labels both of its boxes with the rule. The KIT form's box
+  does NOT yet, so ruling (C)'s presentation condition is met on one surface and
+  not the other; the gap is filed in
+  [`docs/oms-supplier-cost-write-path-record.md`](docs/oms-supplier-cost-write-path-record.md)
+  under "Still open, filed not fixed". Read that list before assuming the
+  condition holds everywhere.
 - only the pack size moved — hold `package_cost`. "The case holds 6, not 3" is
   about packing, not about price.
 

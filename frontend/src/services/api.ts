@@ -183,6 +183,14 @@ api.interceptors.response.use(
           headers: {
             'Content-Type': 'application/json',
           },
+          // Bypassing the `api` instance also bypasses its `withCredentials`,
+          // and this is the one request that must not lose it: the backend
+          // slides the Django session cookie /media/ runs on ONLY when the
+          // refresh presents it (auth_views._renew_session_from_token). A
+          // cross-origin XHR without credentials sends no cookie, so on
+          // localhost and in any split deployment the slide silently became a
+          // no-op and every gated download 403'd from day 15.
+          withCredentials: true,
         });
         const { access } = refreshResponse.data;
         localStorage.setItem('token', access);

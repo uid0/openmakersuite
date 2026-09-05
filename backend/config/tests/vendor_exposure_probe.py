@@ -255,7 +255,18 @@ _ROUTE_ARG = re.compile(r"<(?:([^:>]+):)?([^>]+)>")
 _REGEX_GROUP = re.compile(r"\(\?P<([^>]+)>[^()]*(?:\([^()]*\)[^()]*)*\)")
 
 
-def _value_for(name: str, conv: str | None, fill: dict, route: str = "") -> str:
+class UnmappedRouteArg(Exception):
+    """A route needs a pk that ``__pk_by_prefix__`` does not map to a real row.
+
+    Raised only in STRICT mode. The GET crawl tolerates the fallback because it
+    reports what it reached and what it could not; a WRITE this probe issues
+    cannot, because a 404 leaks nothing and therefore reads as clean.
+    """
+
+
+def _value_for(
+    name: str, conv: str | None, fill: dict, route: str = "", strict: bool = False
+) -> str:
     if name in fill:
         return str(fill[name])
     # DRF's format-suffix routes ('items.json'). They reach the same view and
@@ -272,29 +283,43 @@ def _value_for(name: str, conv: str | None, fill: dict, route: str = "") -> str:
         # Getting this wrong is SILENT: the request 404s and the crawl records
         # the surface as clean. ``/api/inventory/items/<a supplier's id>/`` did
         # exactly that, so the item detail payload — the largest vendor surface
-        # there is — was never actually fetched by the crawl. The route prefix
-        # picks a row that exists.
+        # there is — was never actually fetched by the crawl; later
+        # ``/api/inventory/locations/<a supplier's id>/report_problem/`` did it
+        # again, to two anonymous WRITE surfaces. The route prefix picks a row
+        # that exists, and a STRICT caller refuses the fallback outright.
         for prefix, value in (fill.get("__pk_by_prefix__") or {}).items():
             if prefix in route:
                 return str(value)
+        if strict:
+            raise UnmappedRouteArg(
+                f"route {route} needs <{name}> and no `__pk_by_prefix__` entry matches it. "
+                "Filling it from `__default_pk__` would point the request at a row in "
+                "another table, which 404s and reads as clean."
+            )
         return str(fill.get("__default_pk__", "1"))
     return "zzqq"
 
 
-def concrete_path(route: str, fill: dict) -> str | None:
+def concrete_path(route: str, fill: dict, *, strict: bool = False) -> str | None:
     """Turn a routed pattern into a requestable path, or ``None``.
 
     ``None`` means "this probe could not construct a request for it" — which
     the caller must report as *could not tell*, never as *found nothing*.
+
+    ``strict`` refuses the ``__default_pk__`` fallback and raises
+    :class:`UnmappedRouteArg` instead. :func:`anonymous_write_surfaces` is the
+    caller that cannot afford a request against the wrong table.
     """
     out = route
     # Regex groups FIRST: '(?P<pk>...)' contains a '<pk>' that the path()-style
     # pattern below would otherwise match and destroy, silently turning every
     # DRF router route into an unfillable one.
     for match in list(_REGEX_GROUP.finditer(out)):
-        out = out.replace(match.group(0), _value_for(match.group(1), None, fill, route))
+        out = out.replace(match.group(0), _value_for(match.group(1), None, fill, route, strict))
     for match in list(_ROUTE_ARG.finditer(out)):
-        out = out.replace(match.group(0), _value_for(match.group(2), match.group(1), fill, route))
+        out = out.replace(
+            match.group(0), _value_for(match.group(2), match.group(1), fill, route, strict)
+        )
     out = out.replace("^", "").replace("$", "")
     # A format-suffix route ends '\.json/?' once its group is filled: unescape
     # the dot and drop the optional trailing slash so it becomes requestable.
@@ -459,6 +484,11 @@ MEMBER_REPORT = (
     "and the serializer names no supplier field; the row it writes carries no "
     "vendor foreign key."
 )
+NOT_OUR_VIEW = (
+    "A Django, DRF, drf-spectacular or passkeys view. This repo declares no "
+    "permissions for it, which is why the permission snapshot skips it, and it "
+    "reads none of our tables — it cannot name a supplier or quote a price."
+)
 
 #: Every derived anonymous write this probe does NOT issue, with its reason.
 ANONYMOUS_WRITES_NOT_ISSUED: dict[EndpointKey, str] = {
@@ -504,6 +534,26 @@ ANONYMOUS_WRITES_NOT_ISSUED: dict[EndpointKey, str] = {
     EndpointKey("location_checkins.views.LocationFeedbackViewSet", "submit"): MEMBER_REPORT,
     EndpointKey("location_checkins.views.SecurityReportViewSet", "create"): MEMBER_REPORT,
     EndpointKey("location_checkins.views.SecurityReportViewSet", "report"): MEMBER_REPORT,
+    EndpointKey("membership.views.register_user_with_token", None): CREDENTIAL_CHANNEL,
+    EndpointKey("membership.views.validate_registration_token", None): CREDENTIAL_CHANNEL,
+    EndpointKey("storage_vision.views.VisionCameraViewSet", "heartbeat"): DEVICE_CHANNEL,
+}
+
+#: Routes whose permissions this probe could not READ, with the reason each is
+#: left alone anyway. Kept apart from :data:`ANONYMOUS_WRITES_NOT_ISSUED`
+#: because the two say different things: that one says "anyone can reach it and
+#: here is why we do not issue it", this one says "we could not tell who can
+#: reach it". Anything not listed here comes back unclassified.
+WRITES_WITH_UNREADABLE_PERMISSIONS: dict[EndpointKey, str] = {
+    EndpointKey("django.contrib.auth.views.LoginView", None): NOT_OUR_VIEW,
+    EndpointKey("django.contrib.auth.views.LogoutView", None): NOT_OUR_VIEW,
+    EndpointKey("django.views.generic.base.RedirectView", None): NOT_OUR_VIEW,
+    EndpointKey("drf_spectacular.views.SpectacularAPIView", None): NOT_OUR_VIEW,
+    EndpointKey("drf_spectacular.views.SpectacularSwaggerView", None): NOT_OUR_VIEW,
+    EndpointKey("passkeys.views.PasskeyInfo", None): NOT_OUR_VIEW,
+    EndpointKey("passkeys.views.PasskeyLogin", None): NOT_OUR_VIEW,
+    EndpointKey("passkeys.views.PasskeyRegister", None): NOT_OUR_VIEW,
+    EndpointKey("rest_framework.routers.APIRootView", None): NOT_OUR_VIEW,
 }
 
 
@@ -549,8 +599,34 @@ def _write_bodies(objs) -> dict[EndpointKey, list[tuple[dict, str]]]:
 _READ_METHODS = ("get", "head", "options")
 
 
-def routed_anonymous_writes() -> dict[EndpointKey, str]:
-    """Every routed non-GET surface that resolves to ``AllowAny``, as key -> route.
+def _lets_anyone_in(permission_classes: tuple[str, ...]) -> bool:
+    """Whether this resolved permission set admits a caller with no credentials.
+
+    NOT ``== ("AllowAny",)``. An EMPTY set runs no permission check at all, so
+    it is MORE open than ``AllowAny`` and was being dropped by an equality test
+    for being spelled differently —
+    ``membership.views.register_user_with_token`` and two others sat outside
+    the derived set for exactly that reason.
+
+    ``(unresolved)`` is deliberately NOT handled here: it means
+    ``_perm_names`` could not run ``get_permissions`` and fell back to the
+    declared classes, so the real answer is unknown.
+    :func:`routed_anonymous_writes` reports those separately rather than
+    guessing in either direction.
+    """
+    return set(permission_classes) in (set(), {"AllowAny"})
+
+
+def routed_anonymous_writes() -> tuple[dict[EndpointKey, str], dict[EndpointKey, str]]:
+    """Every routed non-GET surface an anonymous caller can reach.
+
+    Returns ``(anonymous, unreadable)``: the routes whose resolved permissions
+    let anyone in, and the routes whose permissions this probe could not read —
+    either because ``get_permissions`` did not resolve, or because the endpoint
+    sits outside the permission snapshot's own scope
+    (``config.permission_matrix`` audits ``api/`` and skips framework views).
+    The second dict is returned rather than dropped, because "I could not read
+    its permissions" must never be recorded as "it is closed".
 
     DERIVED, not listed. The routes are walked here rather than taken from
     :func:`~config.permission_matrix.introspect_endpoints` alone because that
@@ -563,6 +639,7 @@ def routed_anonymous_writes() -> dict[EndpointKey, str]:
     """
     snapshots = introspect_endpoints()
     found: dict[EndpointKey, str] = {}
+    unreadable: dict[EndpointKey, str] = {}
 
     def walk(patterns, prefix=""):
         for pattern in patterns:
@@ -599,12 +676,18 @@ def routed_anonymous_writes() -> dict[EndpointKey, str]:
             for name in names:
                 key = EndpointKey(view_path, name)
                 snapshot = snapshots.get(key)
-                if snapshot is None or snapshot.permission_classes != ("AllowAny",):
-                    continue
-                found.setdefault(key, route)
+                if snapshot is None:
+                    unreadable.setdefault(key, f"{route} (outside the permission snapshot)")
+                elif "(unresolved)" in snapshot.permission_classes:
+                    unreadable.setdefault(
+                        key,
+                        f"{route} (get_permissions did not resolve: {snapshot.permission_classes})",
+                    )
+                elif _lets_anyone_in(snapshot.permission_classes):
+                    found.setdefault(key, route)
 
     walk(get_resolver().url_patterns)
-    return found
+    return found, unreadable
 
 
 def anonymous_write_surfaces(objs, fill) -> tuple[list[tuple[str, dict, str]], list[str]]:
@@ -615,24 +698,47 @@ def anonymous_write_surfaces(objs, fill) -> tuple[list[tuple[str, dict, str]], l
     is ``AllowAny`` by design (a barcode gun's entry point) and answered a UPC
     scan with the vendor's name. A UPC is printed on the outside of the box.
 
-    THE SET IS DERIVED, THE PAYLOADS ARE NOT, and the two halves are held
-    together here: :func:`routed_anonymous_writes` finds every AllowAny non-GET
-    route, :func:`_write_bodies` says what to send to the ones this probe
-    issues, and :data:`ANONYMOUS_WRITES_NOT_ISSUED` says why each of the rest is
-    left alone. Anything in neither comes back in ``unclassified`` — a new
+    THE SET IS DERIVED, THE PAYLOADS ARE NOT, and the halves are held together
+    here: :func:`routed_anonymous_writes` finds every non-GET route an
+    anonymous caller can reach AND every one whose permissions it could not
+    read, :func:`_write_bodies` says what to send to the ones this probe
+    issues, and :data:`ANONYMOUS_WRITES_NOT_ISSUED` /
+    :data:`WRITES_WITH_UNREADABLE_PERMISSIONS` say why each of the rest is left
+    alone. Anything in none of them comes back in ``unclassified`` — a new
     anonymous write cannot be skipped silently, which is what a hand-written
     list of paths allowed.
 
-    A 4xx is a fine outcome for an issued write: the point is that whatever
-    comes back names no vendor.
+    A path is built in STRICT mode, so a route whose pk this fixture has not
+    mapped is reported rather than filled from another table: that fallback
+    404s, and a 404 leaks nothing and so reads as clean. It had silently
+    dropped both ``LocationViewSet`` writes.
+
+    A 4xx that reaches the view is a fine outcome for an issued write — the
+    point is that whatever comes back names no vendor — but the caller is
+    expected to refuse a 404; see
+    ``test_anonymous_vendor_exposure.py::test_no_anonymous_write_names_a_vendor_in_its_reply``.
     """
     bodies = _write_bodies(objs)
     requests: list[tuple[str, dict, str]] = []
     unclassified: list[str] = []
 
-    for key, route in sorted(routed_anonymous_writes().items(), key=lambda kv: str(kv[0])):
+    anonymous, unreadable = routed_anonymous_writes()
+
+    for key, why in sorted(unreadable.items(), key=lambda kv: str(kv[0])):
+        if key not in WRITES_WITH_UNREADABLE_PERMISSIONS:
+            unclassified.append(
+                f"{key} ({why}): a non-GET route whose permissions this probe cannot read, "
+                "so it cannot be called closed. Say why it is left alone in "
+                "WRITES_WITH_UNREADABLE_PERMISSIONS."
+            )
+
+    for key, route in sorted(anonymous.items(), key=lambda kv: str(kv[0])):
         if key in bodies:
-            path = concrete_path(route, fill)
+            try:
+                path = concrete_path(route, fill, strict=True)
+            except UnmappedRouteArg as exc:
+                unclassified.append(f"{key}: {exc}")
+                continue
             if path is None:
                 unclassified.append(f"{key}: route {route} could not be turned into a request")
                 continue

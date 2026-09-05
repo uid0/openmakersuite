@@ -59,6 +59,7 @@ def _fill(objs):
         "__pk_by_prefix__": {
             "inventory/^items/": str(objs["item"].id),
             "inventory/^kits/": str(objs["item"].id),
+            "inventory/^locations/": str(objs["location"].id),
             "inventory/^fixtures/": str(objs["fixture"].id),
             "inventory/^price-history/": str(objs["price_history"].id),
             "inventory/^item-suppliers/": str(objs["link"].id),
@@ -287,6 +288,21 @@ def test_no_anonymous_write_names_a_vendor_in_its_reply(vendor_fixture, anonymou
     A write's REPLY is a read, and this is where the crawl's blind spot cost
     something real: ``dispatch_scan`` answered an anonymous UPC scan with the
     vendor's name. Every anonymous write is issued here and its reply checked.
+
+    A REFUSED REQUEST IS A FAILURE HERE, not an outcome. A reply that never
+    reached the view leaks nothing, so it passes the sentinel check while
+    proving nothing about the surface it was aimed at. Every write below is
+    accepted today; one that must be refused has to say so here rather than
+    being absorbed by a permissive allowance.
+
+    This is only half the guard, and the weaker half. When the pk lands on
+    another TABLE the request 404s and this catches it; when it lands on a
+    real-but-wrong ROW of the right table it succeeds and this cannot. That is
+    what happened to both ``LocationViewSet`` writes once paths started coming
+    from the route: the fallback pk named a Location that exists, so they
+    answered 201 while exercising a row the fixture knows nothing about.
+    ``concrete_path(..., strict=True)`` is what refuses that, and
+    ``unclassified`` above is where it lands.
     """
     from config.tests.vendor_exposure_probe import anonymous_write_surfaces
 
@@ -298,8 +314,11 @@ def test_no_anonymous_write_names_a_vendor_in_its_reply(vendor_fixture, anonymou
     assert len(writes) >= 11, f"the derivation found almost nothing: {writes}"
 
     disclosures = []
+    unreached = []
     for path, body, fmt in writes:
         response = anonymous.post(path, body, format=fmt)
+        if response.status_code >= 400:
+            unreached.append(f"  {response.status_code} POST {path}")
         leaked = [
             name
             for name in sentinels_in(response)
@@ -315,6 +334,10 @@ def test_no_anonymous_write_names_a_vendor_in_its_reply(vendor_fixture, anonymou
         if leaked:
             disclosures.append(f"  {response.status_code} POST {path} -> {', '.join(leaked)}")
 
+    assert not unreached, (
+        "these anonymous writes were refused, so their replies prove nothing about "
+        "the surface they were aimed at:\n" + "\n".join(unreached)
+    )
     assert not disclosures, "anonymous writes disclosed vendor data:\n" + "\n".join(disclosures)
 
 

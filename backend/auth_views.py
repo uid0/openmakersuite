@@ -38,12 +38,20 @@ def _renew_session_from_token(request, access):
     Called by :func:`refresh_token`; see its docstring for why the cookie
     ``/media/`` runs on has to track the JWT's life rather than its own.
 
-    HOW THIS REPAIRS THE 403, which is the non-obvious part.
-    ``SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"]`` is 7 days, so a signed-in browser
-    posts here at least weekly; each of those slides the 14-day
-    ``SESSION_COOKIE_AGE`` forward, so the cookie never reaches the day-15
-    expiry that made every gated download a bare 403. No session is ever
-    created from a bearer credential to achieve that.
+    HOW THIS REPAIRS THE 403, AND FOR WHOM — the non-obvious part, and the
+    limit is half of it. ``SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"]`` is 7 days and
+    the SPA posts here from its 401 interceptor, so A BROWSER THAT KEEPS USING
+    THE APP AT LEAST EVERY 14 DAYS slides the ``SESSION_COOKIE_AGE`` cookie
+    forward before it can reach the day-15 expiry that made every gated
+    download a bare 403. No session is ever created from a bearer credential to
+    achieve that.
+
+    A BROWSER THAT GOES QUIET FOR LONGER POSTS NOTHING, so its cookie does
+    lapse while the 30-day refresh token stays good — the app still considers
+    that reader signed in. They are not left at a blank wall: the refusal hands
+    them ``config.protected_media.REAUTH_PATH``, which drops the stale local
+    auth state and puts the sign-in form in front of them.
+    ``frontend/src/__tests__/pages/ReauthPage.test.tsx`` walks that sequence.
 
     RENEWED ONLY FOR THE SAME USER. A request with no session gets nothing —
     ScanTTY and curl hold a refresh token, no cookie jar, and never fetch

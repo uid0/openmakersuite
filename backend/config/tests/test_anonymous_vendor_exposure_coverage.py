@@ -34,8 +34,10 @@ import collections
 import pytest
 from rest_framework.test import APIClient
 
+from config.permission_matrix import EndpointKey
 from config.tests.vendor_exposure_probe import (
     crawl_anonymously,
+    routed_anonymous_writes,
     routed_get_urls,
     seed_vendor_fixture,
 )
@@ -51,6 +53,7 @@ def test_the_crawl_reaches_most_of_the_get_surface_and_names_what_it_cannot():
         "__pk_by_prefix__": {
             "inventory/^items/": str(objs["item"].id),
             "inventory/^kits/": str(objs["item"].id),
+            "inventory/^locations/": str(objs["location"].id),
             "inventory/^fixtures/": str(objs["fixture"].id),
             "inventory/^price-history/": str(objs["price_history"].id),
             "inventory/^item-suppliers/": str(objs["link"].id),
@@ -112,6 +115,7 @@ def test_the_crawl_actually_gets_answers_rather_than_errors():
         "__pk_by_prefix__": {
             "inventory/^items/": str(objs["item"].id),
             "inventory/^kits/": str(objs["item"].id),
+            "inventory/^locations/": str(objs["location"].id),
             "inventory/^fixtures/": str(objs["fixture"].id),
             "inventory/^price-history/": str(objs["price_history"].id),
             "inventory/^item-suppliers/": str(objs["link"].id),
@@ -174,6 +178,7 @@ def test_the_crawl_could_read_every_pdf_it_was_served():
         "__default_pk__": str(objs["supplier"].id),
         "__pk_by_prefix__": {
             "inventory/^items/": str(objs["item"].id),
+            "inventory/^locations/": str(objs["location"].id),
             "inventory/^fixtures/": str(objs["fixture"].id),
         },
         "item_id": str(objs["item"].id),
@@ -188,4 +193,46 @@ def test_the_crawl_could_read_every_pdf_it_was_served():
     assert not unreadable, (
         "the crawl was served a PDF it could not decode, so those responses "
         f"were searched as raw bytes and prove nothing: {unreadable}"
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.django_db
+def test_the_write_derivation_sees_the_routes_it_claims_to():
+    """AN ANTI-VACUITY FLOOR for the half that found the real disclosures.
+
+    ``anonymous_write_surfaces`` reports anything it cannot classify, but a
+    route DROPPED before classification is reported by nobody — so the
+    derivation has to be pinned by what it must contain, not only by what it
+    complains about. Each name below is a reversion this has already suffered:
+
+    * ``dispatch_scan`` is the surface that answered an anonymous UPC scan with
+      the vendor's name, and the reason the write half exists at all.
+    * both ``LocationViewSet`` writes are the pair that fell out when paths
+      started being built from the route: their pk was filled from another
+      table, so the requests 404'd and the replies proved nothing.
+    * ``register_user_with_token`` resolves to an EMPTY permission set — no
+      permission check runs at all, which is MORE open than ``AllowAny`` — and
+      an equality test against ``("AllowAny",)`` dropped it for being spelled
+      differently.
+    * ``PasskeyLogin`` is mounted outside the permission snapshot's ``api/``
+      scope, so its permissions cannot be read here; "could not read" was being
+      recorded as "closed".
+    """
+    anonymous, unreadable = routed_anonymous_writes()
+
+    for key in (
+        EndpointKey("scanner.views.dispatch_scan", None),
+        EndpointKey("inventory.views.LocationViewSet", "generate_qr"),
+        EndpointKey("inventory.views.LocationViewSet", "report_problem"),
+        EndpointKey("membership.views.register_user_with_token", None),
+    ):
+        assert key in anonymous, (
+            f"{key} is reachable by an anonymous caller and the derivation no longer "
+            f"sees it, so nothing classifies or exercises it. Derived: {len(anonymous)}."
+        )
+
+    assert EndpointKey("passkeys.views.PasskeyLogin", None) in unreadable, (
+        "a non-GET route outside the permission snapshot is being dropped rather "
+        "than reported, which records `could not tell` as `closed`."
     )

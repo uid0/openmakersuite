@@ -545,6 +545,27 @@ expectation; the implementation may use any of:
 When a public write endpoint does not yet have an abuse control, file a
 follow-up bead under AC-6.
 
+### Deliberate exclusions from the vendor gate, with reasons
+
+Named here because a derivation that reports only what it closed is not a
+derivation. Each of these IS money, or IS near a supplier, and each stays
+anonymously readable on purpose. **The question this branch answers is "what can
+someone with no login learn about a VENDOR'S IDENTITY, or about WHAT WE PAY
+THEM?" — not "what money is public?"** The earlier `fm/oms-public-inventory-valuation`
+derivation asked the second question and so listed some of these; a different
+question is entitled to a different answer, and this records why.
+
+| Left open | Why |
+| --- | --- |
+| `Asset.amount_paid` on `inventory/assets/` | What the space paid for a machine. The `Asset` model has **no supplier relation at all** — nothing attributes this to a vendor — and it is on none of the lists the captain's decision enumerates. `donor_name` beside it is a donor, not a vendor. Verified that assets nest no vendor data either: `AssetSerializer.parts` → `AssetPartSerializer.part_details` carries the inventory item's own name, SKU and stock, and `part_sku` is **our** SKU, not the supplier's. |
+| `MaintenanceItem.estimated_cost` | A maintenance budget the space sets for a task, not a price a vendor quoted. AGENTS.md already separates these two under op-9m2v, and this follows that line rather than drawing a new one. |
+| `summary.total_amount_spent` / `total_po_amount_spent` on the transparency feed | Aggregates across every vendor. They name none and quote no vendor's price, and they are the accountability the page exists to provide. |
+| `PurchaseOrder.po_number` on the transparency feed | This makerspace's own reference. The vendor's number for the same order is `supplier_order_number`, a separate field this payload has never carried — that separation is what makes this one unambiguously ours. Contrast `ReorderRequest.order_number`, which IS withheld. |
+| `quantity_per_package` / `case_size` | A pack size is a shelf fact. op-c1ke already answered this for the same column when it excluded `InventoryItem.current_cases` from the supplier derivation, and the public `current_cases` / `on_hand_display` / `reorder_display` keys — which size an anonymous reorder — depend on it. It re-derives nothing once both costs are withheld. |
+| `scanner/dispatch/`'s `raw_payload` | The caller's own scan, echoed back. They supplied it. |
+| ForgeKey's `AllowAny` device endpoints | Checked rather than assumed, as the brief required: the anonymous crawl exercises every one of them and finds no vendor sentinel, and `grep` over `forgekey/views.py` finds no supplier, cost or lead-time read. They are not a vendor surface. |
+| Item photos, QR codes, MSDS sheets, location-problem snapshots, asset manuals under `/media/` | On the anonymous scan path, or safety information. Closing them would break the flow the printed QR codes exist for. |
+
 ## Protected media (`/media/`) — op-anonymous-read-posture
 
 A `FileField` URL is answered by **nginx, not Django**, so no

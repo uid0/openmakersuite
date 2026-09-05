@@ -330,7 +330,10 @@ const KitDetailPage: React.FC = () => {
                   The Unit cost above is gated by the same answer — `unit_cost`
                   is withheld from this reader, and `KitListPage` DROPS its
                   column for the same payload, so labelling it here is what
-                  keeps the two kit screens agreeing about the same kit. */}
+                  keeps the two kit screens agreeing about the same kit. The
+                  editable price box belongs with them: `handleSave` emits
+                  `supplier_terms` only when both boxes above are filled, so
+                  for this reader it is one whose contents are discarded. */}
               {!vendorWithheld && (
                 <>
                   <Grid.Col span={{ base: 12, sm: 4 }}>
@@ -371,20 +374,20 @@ const KitDetailPage: React.FC = () => {
                       </Text>
                     </Grid.Col>
                   )}
+                  <Grid.Col span={{ base: 12, sm: 4 }}>
+                    <NumberInput
+                      label="Unit cost"
+                      description="Per unit. The case price is derived from it."
+                      prefix="$"
+                      decimalScale={2}
+                      value={unitCost}
+                      onChange={setUnitCost}
+                      disabled={saving}
+                      data-testid="kit-unit-cost"
+                    />
+                  </Grid.Col>
                 </>
               )}
-              <Grid.Col span={{ base: 12, sm: 4 }}>
-                <NumberInput
-                  label="Unit cost"
-                  description="Per unit. The case price is derived from it."
-                  prefix="$"
-                  decimalScale={2}
-                  value={unitCost}
-                  onChange={setUnitCost}
-                  disabled={saving}
-                  data-testid="kit-unit-cost"
-                />
-              </Grid.Col>
             </Grid>
           </Stack>
         </Card>

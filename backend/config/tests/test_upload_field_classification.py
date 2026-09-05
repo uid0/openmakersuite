@@ -27,9 +27,9 @@ unclassified_upload_root`` asks the app registry instead — every
 ``FileField``/``ImageField`` Django has actually built, with the ``upload_to``
 it will actually use. That is the real consumer, it sees a callable the source
 walk cannot resolve, and it sees the POSITIONAL spelling
-(``FileField("Invoice", "vendor_invoices/")``) that the keyword-only walk was
-blind to. The AST walk is kept because it reaches modules the registry does not
-— anything that is not a model field.
+(``FileField("Invoice", None, "vendor_invoices/")``) that the keyword-only walk
+was blind to. The AST walk is kept because it reaches modules the registry does
+not — anything that is not a model field.
 
 THREE HONEST LIMITS, named the way those two modules name theirs:
 
@@ -216,10 +216,19 @@ def _prefix_from_callable(tree: ast.AST, name: str) -> Optional[str]:
 
 
 def _is_file_field(node: ast.Call) -> bool:
-    """Whether ``node`` constructs a Django file field, by either spelling."""
+    """Whether ``node`` constructs a ``FileField``, positionally readable.
+
+    ``ImageField`` is deliberately NOT included, and the difference is Django's,
+    not a simplification: ``FileField(verbose_name, name, upload_to, storage,
+    ...)`` takes ``upload_to`` third, while ``ImageField(verbose_name, name,
+    width_field, height_field, ...)`` takes ``width_field`` there and has no
+    positional slot for ``upload_to`` at all — an ``ImageField`` can only spell
+    it as a keyword, which the branch above already reads. Reading its third
+    argument as a path would invent a prefix that does not exist.
+    """
     func = node.func
     name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
-    return name.endswith("FileField") or name.endswith("ImageField")
+    return name.endswith("FileField")
 
 
 def _upload_prefixes_in(source: str, filename: str = "<snippet>") -> set[str]:
@@ -243,7 +252,7 @@ def _upload_prefixes_in(source: str, filename: str = "<snippet>") -> set[str]:
         if isinstance(node, ast.keyword) and node.arg == "upload_to":
             record(node.value)
             continue
-        # `upload_to` is the THIRD positional parameter of FileField/ImageField
+        # `upload_to` is the THIRD positional parameter of FileField
         # (verbose_name, name, upload_to, ...), so the keyword branch above is
         # blind to `FileField("Invoice", None, "vendor_invoices/")`. Every other
         # unreadable shape in this module fails CLOSED; this one used to fail
@@ -428,9 +437,16 @@ def test_a_positional_upload_to_is_caught_too():
     assert _upload_prefixes_in('f = models.FileField("Invoice", None, "vendor_invoices/")') == {
         "vendor_invoices/"
     }
-    assert _upload_prefixes_in('f = ImageField("Photo", None, "assets/images/")') == {
-        "assets/images/"
-    }
+
+
+def test_an_imagefields_third_positional_is_not_read_as_a_path():
+    """CONTROL: it is ``width_field`` there, so reading it invents a prefix.
+
+    ``ImageField(verbose_name, name, width_field, height_field, ...)`` has no
+    positional slot for ``upload_to`` at all — verified against the installed
+    Django in ``django/db/models/fields/files.py``.
+    """
+    assert _upload_prefixes_in('f = ImageField("Photo", None, "width_px")') == set()
 
 
 def test_a_positional_argument_on_something_that_is_not_a_file_field_is_ignored():
@@ -452,13 +468,17 @@ def test_django_itself_declares_no_unclassified_upload_root():
     from django.db.models import FileField
 
     unclassified: dict[str, list[str]] = {}
+    inspected: set[str] = set()
     for model in apps.get_models():
         # FIRST-PARTY MODELS ONLY, the same scope the AST walk states. A
         # third-party package's upload field (django-hordak's CSV import writes
         # straight to MEDIA_ROOT) is not something this repo can classify or
         # gate, and failing here on one would report somebody else's decision
         # under a message about our vendor prefixes.
-        app_path = pathlib.Path(apps.get_app_config(model._meta.app_label).path)
+        # Resolved on both sides: a symlinked checkout root, macOS's /tmp vs
+        # /private/tmp, or a container bind mount otherwise spells the same
+        # directory two ways and this filter quietly skips every app.
+        app_path = pathlib.Path(apps.get_app_config(model._meta.app_label).path).resolve()
         if BACKEND not in app_path.parents and app_path != BACKEND:
             continue
         for field in model._meta.get_fields():
@@ -477,10 +497,22 @@ def test_django_itself_declares_no_unclassified_upload_root():
                 prefix = _static_prefix(str(upload_to))
 
             where = f"{model._meta.label}.{field.name}"
+            inspected.add(where)
             if prefix is None:
                 unclassified.setdefault(UNRESOLVED, []).append(where)
             elif not _is_gated(prefix) and prefix not in OPEN_PREFIXES:
                 unclassified.setdefault(prefix, []).append(where)
+
+    # ANTI-VACUITY, and not a formality: everything above is a filter, and a
+    # filter that stops matching leaves `unclassified` empty and passes this
+    # test having read nothing at all. Naming a field that must be reached is
+    # what turns "found no problem" back into "looked, and found no problem".
+    assert "inventory.SupplierAgreement.document" in inspected, (
+        "The registry reading inspected no field it was supposed to "
+        f"({len(inspected)} found in total), so it is passing vacuously. Either "
+        "the first-party filter above no longer matches this checkout's layout "
+        "or the model moved."
+    )
 
     assert not unclassified, (
         f"Model upload root(s) nobody has classified: {unclassified}. Ask the "

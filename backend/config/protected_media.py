@@ -26,9 +26,11 @@ THE SHAPE OF THE FIX, and why it is this shape:
   (``SESSION_SAVE_EVERY_REQUEST`` is left at ``False``), while
   ``SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"]`` is 30 days — so an operator whose
   API calls kept working would have hit a bare 403 on every invoice from day
-  15. ``refresh_token`` now renews the session when it mints an access token;
-  its docstring records which two alternative fixes were rejected and why.
-  ``config/tests/test_media_session_lifetime.py`` exercises that sequence.
+  15. ``refresh_token`` SLIDES an existing session's expiry when it mints an
+  access token, and never creates one: a refresh token is not ``HttpOnly`` and
+  must not buy the cookie Django admin runs on.
+  ``auth_views._renew_session_from_token`` records the rejected alternatives,
+  and ``config/tests/test_media_session_lifetime.py`` exercises the sequence.
 * A REFUSAL CARRIES A REMEDY. Both servers answer 403 with a small page that
   says how to get in, because these are ordinary browser navigations and a
   stock 403 body is the end of the road for whoever clicked. What it must

@@ -348,6 +348,41 @@ describe('what a logged-out visitor sees on the kit surfaces', () => {
   });
 
   /**
+   * The editable price box belongs with the two inputs above it: `handleSave`
+   * emits `supplier_terms` only when the supplier and SKU boxes are both
+   * filled, and both are hidden from this reader — so anything typed there is
+   * discarded before the request is built. Left rendered, it sat directly
+   * under "Sign in to see supplier and pricing information".
+   */
+  it('offers a logged-out visitor no price box under the withheld notice', async () => {
+    await renderFormAnonymously();
+
+    expect(screen.queryByTestId('kit-unit-cost')).not.toBeInTheDocument();
+  });
+
+  it('CONTROL: a signed-in operator still gets the price box', async () => {
+    localStorage.setItem('token', 'test-token');
+    (inventoryAPI.listSuppliers as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { results: [{ id: 50, name: 'Acme Supplies' }] },
+    });
+    (kitAPI.getKit as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: KIT_WITH_ALTERNATIVES,
+    });
+    render(
+      <MantineProvider>
+        <MemoryRouter initialEntries={['/inventory/kits/k1']}>
+          <Routes>
+            <Route path="/inventory/kits/:kitId" element={<KitDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('kit-name')).toHaveValue('Ink Kit'));
+
+    expect(screen.getByTestId('kit-unit-cost')).toBeInTheDocument();
+  });
+
+  /**
    * REGRESSION. `unit_cost` is withheld from this reader, so the card resolved
    * its text to "No price on file" — a claim about the KIT where the truth is
    * about the READER, and the seventh surface of that class. LABEL rather than

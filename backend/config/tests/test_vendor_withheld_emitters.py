@@ -36,12 +36,18 @@ declarations are checked by ``tsc`` and by each surface's own tests.
 from __future__ import annotations
 
 import importlib
+import pathlib
 
 from django.apps import apps
 
 import pytest
 
 from inventory.services.vendor_visibility import VENDOR_WITHHELD_KEY, VendorGatedSerializerMixin
+
+#: The repository's ``backend/`` root, which is what makes an app FIRST-PARTY.
+#: Resolved on both sides of every comparison below, because a symlinked
+#: checkout or a bind mount spells the same directory two ways.
+BACKEND = pathlib.Path(__file__).resolve().parents[2]
 
 #: Every serializer that withholds through the mixin, mapped to the TypeScript
 #: type the web reads that payload through. The KEY set is derived below; this
@@ -144,22 +150,28 @@ def test_the_walk_reaches_serializers_outside_inventory():
 
     Every mixin subclass lives in ``inventory.serializers`` today, so a walk
     that had silently narrowed to that one module would look identical from the
-    outside. This exercises the import step against an app that is NOT inventory
-    and has a serializers module, which is what makes the widening real rather
-    than asserted.
+    outside. What has to be shown is that a FIRST-PARTY app other than
+    inventory was reached: ``rest_framework.serializers`` is in ``sys.modules``
+    the moment any serializer module is imported at all, so counting
+    "non-inventory" modules would pass for a walk that had narrowed all the way
+    back down.
     """
     _import_every_serializer_module()
 
     import sys
 
+    first_party = {
+        f"{config.name}.serializers"
+        for config in apps.get_app_configs()
+        if BACKEND in pathlib.Path(config.path).resolve().parents
+    }
     reached = {
-        name
-        for name in sys.modules
-        if name.endswith(".serializers") and not name.startswith("inventory.")
+        name for name in first_party if name in sys.modules and not name.startswith("inventory.")
     }
     assert reached, (
-        "No non-inventory serializers module was imported, so a gated "
-        "serializer landing in any other app would be invisible to this gate."
+        "No first-party serializers module outside inventory was imported, so "
+        "a gated serializer landing in any other app would be invisible to "
+        "this gate."
     )
 
 

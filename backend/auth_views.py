@@ -8,6 +8,7 @@ the DRF browsable API, and the Django admin.
 
 import re
 
+from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth import login as django_login
 from django.contrib.auth import logout as django_logout
@@ -32,46 +33,56 @@ def _tokens_for(user):
 
 
 def _renew_session_from_token(request, access):
-    """Re-establish the Django session for the user a fresh access token names.
+    """Slide the expiry of a session the request ALREADY has. Never create one.
 
-    Called by :func:`refresh_token`; see its docstring for why the session has
-    to track the JWT's life rather than its own.
+    Called by :func:`refresh_token`; see its docstring for why the cookie
+    ``/media/`` runs on has to track the JWT's life rather than its own.
 
-    BEST EFFORT, AND THE WHOLE BODY IS INSIDE THE GUARD. ``django_login`` is not
-    an in-memory call: ``cycle_key``/``flush`` write the session store (a row
-    INSERT on the DB backend) and ``user_logged_in`` fires Django's
-    ``update_last_login``, which saves the user. Any of those can raise on
-    ordinary transient trouble, and the caller has already proven possession of
-    a valid refresh token — so a cookie that could not be renewed must never
-    become a 401, which the SPA reads as "refresh failed" and answers by
-    clearing localStorage and signing the operator out.
-    ``config/tests/test_media_session_lifetime.py::test_a_renewal_that_raises_does_not_fail_the_refresh``
-    holds that line.
+    HOW THIS REPAIRS THE 403, which is the non-obvious part.
+    ``SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"]`` is 7 days, so a signed-in browser
+    posts here at least weekly; each of those slides the 14-day
+    ``SESSION_COOKIE_AGE`` forward, so the cookie never reaches the day-15
+    expiry that made every gated download a bare 403. No session is ever
+    created from a bearer credential to achieve that.
 
-    RENEWED FOR EVERY CALLER, and gating it on "does this request present a
-    session cookie?" was tried and REJECTED: the cookie's own max-age is set
-    from ``SESSION_COOKIE_AGE`` at login, so on day 15 — the exact day this
-    exists for — the browser has already dropped it and sends nothing, which is
-    indistinguishable from ScanTTY or curl. Such a guard would skip precisely
-    the case it was meant to preserve.
-    ``test_a_refresh_restores_the_session_a_media_download_needs`` fails when it
-    is applied.
+    RENEWED ONLY FOR THE SAME USER. A request with no session gets nothing —
+    ScanTTY and curl hold a refresh token, no cookie jar, and never fetch
+    ``/media/``. A session naming somebody ELSE is left exactly as it is:
+    neither slid nor replaced, because the token's holder is not that session's
+    owner.
 
-    The cost is that a token-only client leaves a session row per refresh, which
-    ``clearsessions`` reaps; the alternative was the media gate not working.
+    FOUR CANDIDATE FIXES, THREE OF THEM REJECTED, recorded because a future
+    reader holding the same 403 report will otherwise re-propose the one that
+    was tried:
+
+    * Lengthening ``SESSION_COOKIE_AGE`` (or setting
+      ``SESSION_SAVE_EVERY_REQUEST``) extends a credential's lifetime, and
+      teaching the media gate to accept a JWT changes what the gate accepts.
+      Both are security-posture decisions and belong to the captain, not to a
+      regression fix.
+    * MINTING a session here with ``django_login`` WAS WRITTEN ON THIS BRANCH
+      AND REVERTED. It made the refresh token — not ``HttpOnly``, 30 days old,
+      held in ``localStorage`` and cached on disk by ScanTTY — redeemable for
+      the session cookie ``config/urls.py`` serves Django admin off, for any
+      ``is_staff`` user. Sign-in and token refresh were two different
+      credential classes and that collapsed them into one. It also fired
+      ``user_logged_in`` on every refresh, so ``update_last_login`` moved
+      ``User.last_login`` weekly and the admin's "Important dates" column
+      stopped meaning last sign-in.
+
+    BEST EFFORT, AND THE WHOLE BODY IS INSIDE THE GUARD: a session write can
+    raise on ordinary transient trouble, and the caller has already proven
+    possession of a valid refresh token — so a cookie that could not be slid
+    must never become a 401, which the SPA reads as "refresh failed" and
+    answers by clearing localStorage and signing the operator out.
+    ``config/tests/test_media_session_lifetime.py`` holds every line of this.
     """
     try:
         user = JWTAuthentication().get_user(access)
-        if request.session.get("_auth_user_id") == str(user.pk):
-            # Already this user's session: cycling the key would invalidate the
-            # cookie the browser is holding. Re-save so the expiry moves forward.
-            request.session.modified = True
+        if request.session.get("_auth_user_id") != str(user.pk):
             return
-        django_login(request, user)
+        request.session.set_expiry(settings.SESSION_COOKIE_AGE)
     except Exception:
-        # The user, when resolved at all, is resolved by the SAME code that
-        # resolves a Bearer token on any other request, so the session can never
-        # name a user the API would refuse.
         return
 
 
@@ -225,7 +236,7 @@ def logout_user(request):
 @permission_classes([AllowAny])
 def refresh_token(request):
     """
-    Refresh JWT access token, and re-establish the Django session with it.
+    Refresh JWT access token, and slide the Django session the caller has.
 
     THE SESSION IS RENEWED HERE BECAUSE /media/ RUNS ON IT
     (op-anonymous-read-posture). ``config.protected_media`` gates the vendor
@@ -239,16 +250,12 @@ def refresh_token(request):
     through the API for 30 days and, from day 15, got a bare 403 on every
     supplier agreement, invoice and receipt.
 
-    Renewing here ties the cookie's life to the credential the app actually
-    runs on: the SPA refreshes to stay signed in, and the session it needs for
-    a file download is renewed by the same call.
-
-    TWO OTHER FIXES WERE REJECTED, and this note exists so neither is
-    "simplified" back in later: lengthening ``SESSION_COOKIE_AGE`` (or setting
-    ``SESSION_SAVE_EVERY_REQUEST``) extends a credential's lifetime, and
-    teaching the media gate to accept a JWT changes what the gate accepts.
-    Both are security-posture decisions and belong to the captain, not to a
-    regression fix.
+    Sliding here ties the cookie's life to the credential the app actually runs
+    on, WITHOUT making the token redeemable for a session:
+    :func:`_renew_session_from_token` only ever moves the expiry of a session
+    the request already presents for that same user, and its docstring records
+    the three fixes that were rejected — including the one written on this
+    branch and reverted.
 
     A FAILED RENEWAL DOES NOT FAIL THE REFRESH, and the renewal is called
     OUTSIDE the try/except above so that cannot quietly stop being true: the

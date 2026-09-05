@@ -450,12 +450,13 @@ class TestInvariantTheDisagreementRuleIsStated:
     """Invariant 4. The forms permit an inconsistent pair, so which one governs is stated.
 
     Decided by the operator: ``package_cost`` governs. It is what the shop
-    actually pays for a case, ``unit_cost`` is documented on the model as
-    "auto-calculated from package cost", the Django admin already renders
-    ``unit_cost`` read-only, ``views._process_cost_data`` already prefers the case
-    price, and ScanTTY's API client documents the same precedence. It is also the
-    only safe direction: ``package -> unit`` is the lossy half, so letting a
-    rounded unit price reconstruct a case price is symptom 5 by another name.
+    actually pays for a case, the model documents ``unit_cost`` to the operator as
+    "Derived from the package cost; changing it re-prices the package", the Django
+    admin already renders ``unit_cost`` read-only, ``views._process_cost_data``
+    already prefers the case price, and ScanTTY's API client documents the same
+    precedence. It is also the only safe direction: ``package -> unit`` is the
+    lossy half, so letting a rounded unit price reconstruct a case price is
+    symptom 5 by another name.
 
     Measured against base: this ruling CONFIRMS the behaviour the model already
     had on all three branches below rather than changing any of them. Nothing

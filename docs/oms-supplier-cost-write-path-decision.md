@@ -27,6 +27,13 @@ against what is stored, and a delta is well defined regardless of whether a form
 withdrawn attempt could not make at the callers, and it is why the three caller
 rules each reopened the other's defect.
 
+**Historical, not the current owner.** The table and the (A)/(B)/(C) sections
+below record the rule AS IT WAS PUT to the operator, together with the
+after-the-fact corrections marking where it differs from what shipped. The
+shipped rule is stated in one live place — the `derive_costs` docstring in
+`backend/inventory/services/suppliers.py` — and that is what to read for current
+behaviour.
+
 Under a delta rule:
 
 | unit moved | package moved | pack moved | outcome |

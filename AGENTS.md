@@ -812,48 +812,15 @@ stored, so it is the one place the rule can be stated. **Do not re-open this at
 the write sites.** A partial `defaults` dict is now safe by construction, so a
 new writer needs no rule of its own.
 
-The rule, decided by the operator and pinned in
-`backend/inventory/tests/test_supplier_cost_derivation.py`:
-
-- nothing moved — derive nothing; both stored prices stay byte-identical. A SKU
-  or flag edit is not a price edit.
-- `package_cost` moved — it governs. It is what the shop actually pays, and it is
-  the only safe direction: `package -> unit` is the lossy half.
-- `package_cost` cleared — both clear, at every pack size and on every link
-  shape. "No price on file" has to stay sayable, and a derived unit price left
-  standing beside an emptied case price advertises a figure the operator has just
-  withdrawn.
-- `package_cost` cleared AND a `unit_cost` that MOVED against the stored row in
-  the same request — the changed value wins and the case price re-derives from
-  it. A value that MOVED beats a clear, whichever box it came from: taking the
-  clears first discarded a freshly typed unit price without a word, and that is a
-  regression this branch caught in its own first cut. An ECHOED unit cost does
-  not qualify, and must not be read as one — stored (`package_cost` 10.00,
-  `unit_cost` 3.33, pack 3), the operator empties the Package Cost box, and the
-  form sends every offered field, so the request carries an unchanged `unit_cost`
-  of 3.33. Nothing moved in that box, so the bullet above governs and both
-  columns clear.
-- only `unit_cost` moved — it governs; the case price re-derives. This is the
-  ordinary case: every form sends both boxes and the operator edits one.
-- only `unit_cost` cleared — it is a derived figure, so it is NEVER stored as
-  NULL: re-derived from the case price where one survives and the pack size can
-  divide, and otherwise held exactly as stored. No pack size and no link shape is
-  an exception. `derive_costs` decides BOTH cleared-cost cases — this one and the
-  cleared `package_cost` above it — together in one place, because they are one
-  question and answering half of it there is what left the other half falling
-  through the divide-by-zero guard. The cost of that is one unreachable state,
-  deliberately: a unit-only
-  link's price cannot be cleared through this path — set a case price and clear
-  that instead, which clears both. The
-  write response carries the value it came back as, and the item form's
-  relationship editor labels both of its boxes with the rule. The KIT form's box
-  does NOT yet, so ruling (C)'s presentation condition is met on one surface and
-  not the other; the gap is filed in
-  [`docs/oms-supplier-cost-write-path-record.md`](docs/oms-supplier-cost-write-path-record.md)
-  under "Still open, filed not fixed". Read that list before assuming the
-  condition holds everywhere.
-- only the pack size moved — hold `package_cost`. "The case holds 6, not 3" is
-  about packing, not about price.
+**The rule itself is stated in ONE live place: the `derive_costs` docstring in
+`backend/inventory/services/suppliers.py`**, on the code it governs, and pinned
+by `backend/inventory/tests/test_supplier_cost_derivation.py`. Read it there
+rather than restating it here — this same rule was written out in several places
+and drifted on three separate passes, each of which missed a copy. The open
+surface gaps, including the kit form's cost box not labelled derived and the
+lost-update window on `stored_pricing`, are in
+[`docs/oms-supplier-cost-write-path-record.md`](docs/oms-supplier-cost-write-path-record.md)
+under "Still open, filed not fixed".
 
 Two consequences worth keeping in mind when touching this path:
 

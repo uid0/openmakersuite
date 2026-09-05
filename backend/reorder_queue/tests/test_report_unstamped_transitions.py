@@ -19,6 +19,8 @@ import pytest
 
 from inventory.tests.factories import InventoryItemFactory, ItemSupplierFactory, SupplierFactory
 from reorder_queue.management.commands.report_unstamped_transitions import (
+    ORDER_SIGNATURE,
+    REQUEST_SIGNATURE,
     lines_owed_a_lead_time_log,
     orders_sent_without_a_moment,
     requests_reviewed_without_a_moment,
@@ -207,3 +209,70 @@ def test_the_command_offers_no_way_to_write_the_moments_back():
     flags = {option for action in parser._actions for option in action.option_strings}
 
     assert not {flag for flag in flags if "fix" in flag or "backfill" in flag or "repair" in flag}
+
+
+def test_a_damaged_request_is_still_found_after_it_has_moved_on():
+    """The signature is the reviewer with no moment, not the status.
+
+    A request bulk-approved before the fix does not stay at ``approved``: the
+    next purchase order for its item carries it to ``ordered``
+    (``update_reorder_requests_from_po``) and receiving carries it to
+    ``received`` (``close_linked_reorder_request``), neither of which touches
+    the review columns. Keying the report on status therefore dropped the most
+    likely trajectory of a damaged row and reported a number smaller than the
+    truth — worse than no report, because a small number reads as reassurance.
+    """
+    ordered = ReorderRequestFactory(
+        status=ReorderRequest.Status.ORDERED, reviewed_by=UserFactory(), reviewed_at=None
+    )
+    received = ReorderRequestFactory(
+        status=ReorderRequest.Status.RECEIVED, reviewed_by=UserFactory(), reviewed_at=None
+    )
+    approved = ReorderRequestFactory(
+        status=ReorderRequest.Status.APPROVED, reviewed_by=UserFactory(), reviewed_at=None
+    )
+    # Still excluded: a row that never named a reviewer never claimed a moment.
+    no_reviewer_pending = ReorderRequestFactory(
+        status=ReorderRequest.Status.PENDING, reviewed_by=None, reviewed_at=None
+    )
+    no_reviewer_cancelled = ReorderRequestFactory(
+        status=ReorderRequest.Status.CANCELLED, reviewed_by=None, reviewed_at=None
+    )
+
+    found = list(requests_reviewed_without_a_moment())
+
+    assert found == [ordered, received, approved]
+    assert no_reviewer_pending not in found
+    assert no_reviewer_cancelled not in found
+
+
+def test_the_report_states_the_signature_each_count_covers():
+    """A count is only readable next to the population it covers.
+
+    The report's stdout is its interface — a human reads the text form and a
+    caller parses the JSON — so both name the rule that selected the rows,
+    and neither number can be mistaken for a count of something narrower.
+    """
+    ReorderRequestFactory(
+        status=ReorderRequest.Status.ORDERED, reviewed_by=UserFactory(), reviewed_at=None
+    )
+    order_with_line(status=PurchaseOrder.Status.SENT, sent_at=None)
+
+    out = StringIO()
+    call_command("report_unstamped_transitions", "--format", "json", stdout=out)
+    payload = json.loads(out.getvalue())
+
+    assert payload["signatures"] == {
+        "orders_sent_without_sent_at": ORDER_SIGNATURE,
+        "requests_reviewed_without_reviewed_at": REQUEST_SIGNATURE,
+    }
+    assert payload["signatures"]["requests_reviewed_without_reviewed_at"] == (
+        "reviewed_by set, reviewed_at NULL"
+    )
+    assert "sent_at NULL" in payload["signatures"]["orders_sent_without_sent_at"]
+
+    text = StringIO()
+    call_command("report_unstamped_transitions", stdout=text)
+    printed = text.getvalue()
+    assert "reviewed_by set, reviewed_at NULL" in printed
+    assert "sent_at NULL" in printed

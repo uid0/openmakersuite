@@ -541,19 +541,27 @@ def mark_sent(purchase_order, user):
     stays complete only if there is one place to add the next one.
     ``test_every_send_path_stamps_the_whole_transition`` is the check, run over
     each path that performs it.
+
+    The three writes are one unit of work. A fact-set that is only complete
+    when every part of it lands cannot be allowed to commit half of itself:
+    without the transaction, a failure in the request sweep or the audit insert
+    leaves an order SENT with no linked request closed and no ``po_send`` row —
+    the same shape this function exists to prevent. Callers that transition
+    several orders (the admin changelist) get one unit of work per order.
     """
-    purchase_order.status = PurchaseOrder.Status.SENT
-    purchase_order.sent_by = user
-    purchase_order.sent_at = timezone.now()
-    purchase_order.save()
-    # Keep linked reorder requests in step with the PO going out.
-    update_reorder_requests_from_po(purchase_order)
-    record_event(
-        action=PurchaseOrderAuditEvent.Action.PO_SEND,
-        actor=user,
-        purchase_order=purchase_order,
-        metadata={"po_number": purchase_order.po_number},
-    )
+    with transaction.atomic():
+        purchase_order.status = PurchaseOrder.Status.SENT
+        purchase_order.sent_by = user
+        purchase_order.sent_at = timezone.now()
+        purchase_order.save()
+        # Keep linked reorder requests in step with the PO going out.
+        update_reorder_requests_from_po(purchase_order)
+        record_event(
+            action=PurchaseOrderAuditEvent.Action.PO_SEND,
+            actor=user,
+            purchase_order=purchase_order,
+            metadata={"po_number": purchase_order.po_number},
+        )
 
 
 #: Sentinel for "the caller supplied no value", distinct from an explicitly

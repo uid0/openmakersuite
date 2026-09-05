@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from decimal import Decimal
+from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.test import Client
@@ -43,6 +44,7 @@ from reorder_queue.models import (
     PurchaseOrderItem,
     ReorderRequest,
 )
+from reorder_queue.services import purchase_orders as po_services
 from reorder_queue.services.receiving import receive_delivery
 from reorder_queue.tests.factories import ReorderRequestFactory, UserFactory
 
@@ -352,3 +354,42 @@ def test_admin_approve_leaves_a_non_pending_request_alone(admin_client, staff):
     request_row.refresh_from_db()
     assert request_row.status == ReorderRequest.Status.ORDERED
     assert request_row.reviewed_at is None
+
+
+def test_a_send_that_fails_part_way_leaves_no_half_written_transition(staff):
+    """The fact-set commits whole or not at all.
+
+    ``mark_sent`` writes three things — the order, the linked reorder requests,
+    the ``po_send`` audit row — and the whole point of gathering them here is
+    that they are ONE fact. Without a transaction around them a failure in the
+    third write leaves an order recorded as SENT that no audit row and no
+    closed request accounts for: the same incomplete transition this file
+    exists to remove, arrived at from the other direction. Driven through the
+    real service, which every send path (including the admin loop) goes
+    through.
+    """
+    order = draft_order(staff)
+    item = order.items.first().item_supplier.item
+    request_row = ReorderRequestFactory(
+        item=item,
+        status=ReorderRequest.Status.APPROVED,
+        reviewed_by=staff,
+        reviewed_at=timezone.now(),
+    )
+
+    with mock.patch(
+        "reorder_queue.services.purchase_orders.record_event",
+        side_effect=RuntimeError("audit insert failed"),
+    ):
+        with pytest.raises(RuntimeError):
+            po_services.mark_sent(order, staff)
+
+    order.refresh_from_db()
+    request_row.refresh_from_db()
+    assert order.status == PurchaseOrder.Status.DRAFT
+    assert order.sent_at is None
+    assert order.sent_by is None
+    assert request_row.status == ReorderRequest.Status.APPROVED
+    assert not PurchaseOrderAuditEvent.objects.filter(
+        purchase_order=order, action=PurchaseOrderAuditEvent.Action.PO_SEND
+    ).exists()

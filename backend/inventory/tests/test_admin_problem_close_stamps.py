@@ -130,3 +130,29 @@ def test_mark_resolved_still_leaves_a_closed_report_alone(admin_client, staff):
 
     problem.refresh_from_db()
     assert problem.status == AssetProblem.Status.CLOSED
+
+
+def test_resolving_a_reopened_report_stamps_the_new_resolution_not_the_old_one(admin_client, staff):
+    """Resolving is a NEW resolution, so it never inherits an earlier stamp.
+
+    Nothing clears ``resolved_at`` when a recurrence is put back to
+    ``reported`` from the change form, so a resolve that skipped an
+    already-stamped row would show today's work with a months-old date and
+    somebody else's name — a false record of the exact kind this change exists
+    to remove. Closing keeps the opposite rule, checked above: filing away a
+    report somebody else resolved must not steal their credit.
+    """
+    stale_moment = timezone.now() - timedelta(days=238)
+    problem = AssetProblemFactory(status=AssetProblem.Status.RESOLVED)
+    problem.resolved_by = "dana"
+    problem.resolved_at = stale_moment
+    problem.save()
+    # The only reopen there is: a staff member edits status back on the form.
+    AssetProblem.objects.filter(pk=problem.pk).update(status=AssetProblem.Status.REPORTED)
+
+    run_admin_action(admin_client, "mark_resolved", problem)
+
+    problem.refresh_from_db()
+    assert problem.status == AssetProblem.Status.RESOLVED
+    assert problem.resolved_by == staff.username
+    assert problem.resolved_at > stale_moment

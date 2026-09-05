@@ -962,9 +962,26 @@ The rules that follow:
 - **Preserve each action's population when you convert it.** `mark_closed` is
   deliberately unfiltered — narrowing it removes an operator's ability to file
   away a resolved report.
+- **The set is one unit of work.** `services.mark_sent` writes the order, the
+  linked requests and the audit row inside a single `transaction.atomic()`: a
+  fact-set that is only true whole must not be able to commit half of itself,
+  or a failed send leaves exactly the incomplete transition the set exists to
+  prevent. A caller that transitions several rows gets one unit per row.
+- **Stamping is not the same obligation as filing.** `_settle` takes
+  `is_new_resolution`: `mark_resolved` asserts the work just happened and
+  stamps unconditionally, because a recurrence still carries the previous
+  occurrence's `resolved_at`; `mark_closed` keeps the `if not resolved_at`
+  guard, because filing away somebody else's resolution must not steal their
+  credit. Do not collapse the two.
 
 `reorder_queue/management/commands/report_unstamped_transitions.py` names the
-rows written before the fix. It is permanently read-only, and the reason is the
+rows written before the fix. **Key such a report on the DAMAGE SIGNATURE, not
+on the status the row sits at today** — a damaged row keeps moving (an approved
+request bulk-written without `reviewed_at` is carried on to `ordered` and
+`received` by paths that never touch the review columns), and a report that
+under-counts the population it exists to size is worse than none, because a
+small number reads as reassurance. The output names each signature it used, so
+a count can never be read as covering something narrower. It is permanently read-only, and the reason is the
 general one: **a moment nobody recorded cannot be recovered from a moment nobody
 recorded.** `order_date` is a different, editable fact and `updated_at` has been
 overwritten; back-filling either into `LeadTimeLog` would put invented numbers

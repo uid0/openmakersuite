@@ -42,6 +42,16 @@ of evidence", while a fabricated row actively mis-scores.
 survive. And the affected population is exactly countable — which is what this
 command prints, so the incompleteness can be weighed rather than guessed at.
 
+How the population is identified
+--------------------------------
+By the DAMAGE SIGNATURE the bulk write left on the row, not by the status the
+row happens to sit at today — a damaged row keeps moving. Both signatures are
+named in the output, in the text report and in the JSON payload, so a count can
+never be read as covering something narrower or broader than it does:
+
+  * orders — ``status`` past ``draft`` with ``sent_at`` NULL
+  * requests — ``reviewed_by`` set with ``reviewed_at`` NULL
+
 This command is deliberately, permanently READ-ONLY. There is no ``--fix`` and
 no ``--backfill``: there is nothing truthful to write. Do not add one.
 
@@ -56,7 +66,6 @@ from __future__ import annotations
 import json
 
 from django.core.management.base import BaseCommand
-from django.db.models import Q
 
 from reorder_queue.models import LeadTimeLog, PurchaseOrder, ReorderRequest
 
@@ -71,13 +80,12 @@ SENT_ONWARD_STATUSES = (
     PurchaseOrder.Status.RECEIVED,
 )
 
-#: A request in one of these states was reviewed by somebody, so it owes a
-#: ``reviewed_at``. ``ordered``/``received`` are excluded: those are reachable
-#: from ``pending`` through paths that never claimed to review the request.
-REVIEWED_STATUSES = (
-    ReorderRequest.Status.APPROVED,
-    ReorderRequest.Status.CANCELLED,
+#: The two damage signatures, stated in the output so the number a reader takes
+#: away is inseparable from the population it covers.
+ORDER_SIGNATURE = "status past draft ({}) with sent_at NULL".format(
+    ", ".join(status.value for status in SENT_ONWARD_STATUSES)
 )
+REQUEST_SIGNATURE = "reviewed_by set, reviewed_at NULL"
 
 
 def orders_sent_without_a_moment():
@@ -120,12 +128,28 @@ def lines_owed_a_lead_time_log(order):
 def requests_reviewed_without_a_moment():
     """Reorder requests carrying a reviewer but no ``reviewed_at``.
 
-    ``reviewed_by`` must be present: a request that reached ``cancelled``
-    without any reviewer never claimed a review moment in the first place.
+    Keyed on the damage signature, NOT on status. ``reviewed_by`` present with
+    ``reviewed_at`` null IS the damage: a row that names who reviewed it but
+    not when. ``reviewed_by`` must be present for the same reason — a request
+    that reached ``cancelled`` without any reviewer never claimed a review
+    moment in the first place, so its null is the truth.
+
+    Status is deliberately not filtered on, because a damaged row does not stay
+    where it was damaged. ``services.purchase_orders.update_reorder_requests_from_po``
+    carries an approved request on to ``ordered`` and
+    ``services.receiving.close_linked_reorder_request`` carries it on to
+    ``received``; neither touches ``reviewed_by``/``reviewed_at``, so a row
+    bulk-approved before the fix and since fulfilled is still damaged and still
+    owes its moment. An earlier draft restricted this to
+    ``approved``/``cancelled`` and therefore under-counted the very population
+    the command exists to size exactly — the most likely trajectory of a
+    damaged row was the one it dropped. Nor can this widening produce a false
+    positive: the only route that sets ``reviewed_by`` on the way to
+    ``ordered``, ``ReorderRequestViewSet.mark_ordered``, sets both columns
+    together.
     """
     return (
         ReorderRequest.objects.filter(
-            Q(status__in=REVIEWED_STATUSES),
             reviewed_by__isnull=False,
             reviewed_at__isnull=True,
         )
@@ -148,6 +172,10 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         orders = list(orders_sent_without_a_moment())
         payload = {
+            "signatures": {
+                "orders_sent_without_sent_at": ORDER_SIGNATURE,
+                "requests_reviewed_without_reviewed_at": REQUEST_SIGNATURE,
+            },
             "orders_sent_without_sent_at": [],
             "requests_reviewed_without_reviewed_at": [],
         }
@@ -206,6 +234,7 @@ class Command(BaseCommand):
 
     def _write_text(self, payload):
         totals = payload["totals"]
+        signatures = payload["signatures"]
         self.stdout.write("Status transitions recorded without their moment")
         self.stdout.write("=" * 64)
 
@@ -213,6 +242,10 @@ class Command(BaseCommand):
         self.stdout.write(
             f"POSITIVE FINDING: {totals['orders_sent_without_sent_at']} purchase order(s) "
             "reached the supplier with no sent_at."
+        )
+        self.stdout.write(
+            f"  signature: {signatures['orders_sent_without_sent_at']} "
+            "(every such row, whatever it has since become)"
         )
         for row in payload["orders_sent_without_sent_at"]:
             name = row["po_number"] or "#{}".format(row["id"])
@@ -241,6 +274,11 @@ class Command(BaseCommand):
         self.stdout.write(
             f"POSITIVE FINDING: {totals['requests_reviewed_without_reviewed_at']} reorder "
             "request(s) name a reviewer but no review moment."
+        )
+        self.stdout.write(
+            f"  signature: {signatures['requests_reviewed_without_reviewed_at']} "
+            "(status is not part of it — a damaged request carries the gap on "
+            "into ordered and received)"
         )
         for row in payload["requests_reviewed_without_reviewed_at"]:
             self.stdout.write(

@@ -1955,7 +1955,7 @@ class AssetProblemAdmin(admin.ModelAdmin):
 
     actions = ["mark_resolved", "mark_closed"]
 
-    def _settle(self, request, queryset, *, new_status, settleable=None):
+    def _settle(self, request, queryset, *, new_status, settleable=None, is_new_resolution):
         """Move each selected report to ``new_status``, stamping the resolution.
 
         The stamp every other route to ``resolved``/``closed`` writes:
@@ -1968,15 +1968,28 @@ class AssetProblemAdmin(admin.ModelAdmin):
         the API and in ScanTTY, which decode both fields; ``mark_resolved``
         stamped the date and left the resolver blank.
 
-        ``if not problem.resolved_at`` matches the guard on both API routes and
-        the "already-resolved reports are left alone" rule in
-        ``problem_auto_resolve``: closing a report somebody else resolved is a
-        filing change, not a new resolution, so it must not overwrite who did
-        the work. Returns how many rows moved.
+        ``is_new_resolution`` is why the two actions differ, and it is not a
+        style choice:
+
+          * ``mark_resolved`` (``True``) asserts that the work has just been
+            done, so it stamps ``resolved_at``/``resolved_by`` UNCONDITIONALLY.
+            A report whose status was edited back to ``reported`` still carries
+            the previous occurrence's ``resolved_at``; inheriting it would put
+            a months-old resolution date and somebody else's name on a
+            resolution that happened today — a false record of exactly the kind
+            this change exists to remove.
+          * ``mark_closed`` (``False``) is a FILING change, not a resolution:
+            it keeps the ``if not problem.resolved_at`` guard both API routes
+            and ``problem_auto_resolve``'s "already-resolved reports are left
+            alone" rule carry, because filing away a report somebody else
+            resolved must not steal their credit. A report that carries no
+            stamp at all is still stamped, since closing it is then the only
+            settlement it ever got.
 
         ``settleable`` is the status precondition, or ``None`` for "no
         precondition" — each action keeps exactly the population it had before,
-        so this change is the stamp and nothing else.
+        so this change is the stamp and nothing else. Returns how many rows
+        moved.
         """
         from django.utils import timezone
 
@@ -1986,7 +1999,7 @@ class AssetProblemAdmin(admin.ModelAdmin):
         count = 0
         for problem in rows:
             problem.status = new_status
-            if not problem.resolved_at:
+            if is_new_resolution or not problem.resolved_at:
                 problem.resolved_at = timezone.now()
                 problem.resolved_by = actor_display(request.user)
             problem.save()
@@ -1995,12 +2008,18 @@ class AssetProblemAdmin(admin.ModelAdmin):
 
     @admin.action(description="Mark selected as resolved")
     def mark_resolved(self, request, queryset):
-        """Mark selected problems as resolved."""
+        """Mark selected problems as resolved.
+
+        A NEW resolution: the operator is asserting the work was just done, so
+        the stamp is this moment and this actor, never one a previous
+        occurrence of the problem left behind.
+        """
         count = self._settle(
             request,
             queryset,
             new_status=AssetProblem.Status.RESOLVED,
             settleable=(AssetProblem.Status.REPORTED,),
+            is_new_resolution=True,
         )
         self.message_user(
             request,
@@ -2016,8 +2035,16 @@ class AssetProblemAdmin(admin.ModelAdmin):
         than resolving — filing away a report somebody already resolved is the
         main use — and narrowing it here would take an action away from
         operators that this change has no business touching.
+
+        A filing change, not a resolution, so a stamp already on the row is
+        left alone.
         """
-        count = self._settle(request, queryset, new_status=AssetProblem.Status.CLOSED)
+        count = self._settle(
+            request,
+            queryset,
+            new_status=AssetProblem.Status.CLOSED,
+            is_new_resolution=False,
+        )
         self.message_user(
             request,
             f"{count} problem(s) marked as closed.",

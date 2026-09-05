@@ -19,7 +19,7 @@ it is the one place the rule can be stated once.
 
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:

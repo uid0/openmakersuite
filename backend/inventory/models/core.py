@@ -1555,8 +1555,10 @@ class ItemSupplier(models.Model):
         grouped into one ``transaction.atomic`` block and delegated to
         :mod:`inventory.services.suppliers` (gh #887, AC-2) so a failure can't
         leave a demoted sibling without the save, or a saved row without its
-        history entry. Order is preserved exactly: demote siblings, snapshot the
-        pre-save pricing, save, then record.
+        history entry. The order inside the block is: read the stored row and
+        derive from it, demote siblings, snapshot the pre-save pricing (from that
+        same read, so the derivation and the history cannot disagree about what
+        was on disk), save, then record.
         """
         from ..services.suppliers import (
             derive_costs,
@@ -1566,30 +1568,34 @@ class ItemSupplier(models.Model):
             stored_pricing,
         )
 
-        stored = stored_pricing(self)
-        before = (self.unit_cost, self.package_cost)
-        self.unit_cost, self.package_cost = derive_costs(
-            unit_cost=self.unit_cost,
-            package_cost=self.package_cost,
-            quantity_per_package=self.quantity_per_package,
-            stored=stored,
-        )
-
-        update_fields = kwargs.get("update_fields")
-        if update_fields is not None:
-            derived = {
-                name
-                for name, was, now in (
-                    ("unit_cost", before[0], self.unit_cost),
-                    ("package_cost", before[1], self.package_cost),
-                )
-                if was != now
-            }
-            if derived:
-                kwargs["update_fields"] = frozenset(update_fields) | derived
-
         is_new = self.pk is None
         with transaction.atomic():
+            # Read the pre-save row INSIDE the transaction: the derivation is a
+            # delta against it, so a concurrent write landing between the read and
+            # the save would make "the operator did not touch this price" a
+            # statement about a row that no longer exists.
+            stored = stored_pricing(self)
+            before = (self.unit_cost, self.package_cost)
+            self.unit_cost, self.package_cost = derive_costs(
+                unit_cost=self.unit_cost,
+                package_cost=self.package_cost,
+                quantity_per_package=self.quantity_per_package,
+                stored=stored,
+            )
+
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None:
+                derived = {
+                    name
+                    for name, was, now in (
+                        ("unit_cost", before[0], self.unit_cost),
+                        ("package_cost", before[1], self.package_cost),
+                    )
+                    if was != now
+                }
+                if derived:
+                    kwargs["update_fields"] = frozenset(update_fields) | derived
+
             enforce_single_primary(self)
             price_changed = pricing_changed(self, stored)
             super().save(*args, **kwargs)

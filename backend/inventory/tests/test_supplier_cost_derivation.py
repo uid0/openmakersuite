@@ -27,7 +27,6 @@ from decimal import Decimal
 from django.urls import reverse
 
 import pytest
-
 from rest_framework.test import APIClient
 
 from inventory.models.core import ItemSupplier, PriceHistory
@@ -238,9 +237,7 @@ class TestInvariantAnAbsentValueIsNeverFabricated:
         copy of its ``defaults`` dict.
         """
         component = InventoryItemFactory(image=None, is_kit=False, is_serialized=False)
-        kit = InventoryItemFactory(
-            image=None, is_kit=True, current_stock=0, minimum_stock=0
-        )
+        kit = InventoryItemFactory(image=None, is_kit=True, current_stock=0, minimum_stock=0)
         link = make_link(kit, supplier)
         before = stored_pair(link)
 
@@ -290,8 +287,9 @@ class TestInvariantOperatorInputIsNotDiscarded:
         """BEFORE/AFTER: symptom 4. ``update_or_create`` restricts ``update_fields``
         to its own ``defaults`` keys, so a case price save() derived was computed
         and then dropped on the floor."""
-        link = make_link(item, supplier, unit_cost=None, package_cost=None,
-                         quantity_per_package=LOSSY_PACK_SIZE)
+        link = make_link(
+            item, supplier, unit_cost=None, package_cost=None, quantity_per_package=LOSSY_PACK_SIZE
+        )
 
         ItemSupplier.objects.update_or_create(
             item=link.item,
@@ -307,9 +305,7 @@ class TestInvariantOperatorInputIsNotDiscarded:
 class TestInvariantEveryWriteSiteObeysTheSameRule:
     """Invariant 5. One rule, so a fix at one site is a fix at all of them."""
 
-    def test_the_item_form_write_site_omits_a_cost_the_request_did_not_carry(
-        self, item, supplier
-    ):
+    def test_the_item_form_write_site_omits_a_cost_the_request_did_not_carry(self, item, supplier):
         """BEFORE/AFTER: views.py ``_create_supplier_relationship``.
 
         It used to put ``"package_cost": None`` in ``defaults`` whenever the
@@ -518,3 +514,94 @@ class TestInvariantClearingAPriceIsObservable:
         assert response.status_code == 200
         assert Decimal(response.data["unit_cost"]) == Decimal("4.00")
         assert Decimal(response.data["package_cost"]) == Decimal("12.00")
+
+
+class TestInvariantASaveWithNoPriceIntentFilesNoHistory:
+    """The set is wider than the two hand-rolled write sites.
+
+    "Where does this system write a supplier price?" includes every call that
+    reaches ``ItemSupplier.save()``, because the derivation runs there. Two such
+    calls carry no price intent at all — they flip a boolean on a row they just
+    read — and both used to file a price-history row saying the price changed.
+    The captain reads that history, and a corrupted record of what a supplier
+    charged is worse than a wrong current price.
+    """
+
+    def test_marking_a_supplier_discontinued_files_no_price_change(
+        self, item, supplier, authenticated_client
+    ):
+        """BEFORE/AFTER: ``ItemSupplierViewSet.mark_discontinued`` — a real operator action."""
+        client, _ = authenticated_client
+        link = make_link(item, supplier)
+        before = stored_pair(link)
+        PriceHistory.objects.filter(item_supplier=link).delete()
+
+        response = client.post(
+            reverse("itemsupplier-mark-discontinued", args=[link.pk]), {}, format="json"
+        )
+
+        assert response.status_code == 200
+        link.refresh_from_db()
+        assert link.is_discontinued is True
+        assert stored_pair(link) == before
+        assert history_rows(link) == []
+
+    def test_the_same_holds_for_any_flag_flipped_on_a_row_that_was_just_read(self, item, supplier):
+        """BEFORE/AFTER: the shape ``reorder_queue.services.purchase_orders.void_line_item``
+        uses — read the link, set ``is_discontinued`` / ``is_active``, ``save()``.
+
+        Pinned at the model rather than through a purchase order, because the
+        defect is in the derivation and not in either caller: this is the one
+        rule, and it is what makes the two callers safe.
+        """
+        link = make_link(item, supplier)
+        before = stored_pair(link)
+        PriceHistory.objects.filter(item_supplier=link).delete()
+
+        fresh = ItemSupplier.objects.get(pk=link.pk)
+        fresh.is_discontinued = True
+        fresh.is_active = False
+        fresh.save()
+
+        assert stored_pair(link) == before
+        assert history_rows(link) == []
+
+
+class TestTheKitResponseCarriesWhatWasStored:
+    """The operator's condition, on the other surface that edits these costs.
+
+    ``KitSerializer`` inherits ``suppliers`` from ``InventoryItemSerializer``, so
+    a kit save echoes the link rows back. That is what the kit form re-seeds its
+    cost box from, which is what makes a re-derived figure explicable rather than
+    a number that silently reappeared.
+    """
+
+    def test_a_kit_save_echoes_the_derived_case_price(self, supplier, staff_client):
+        """AFTER: the kit form offers a unit cost only; the case price it implies
+        must come back in the response rather than being invisible."""
+        component = InventoryItemFactory(image=None, is_kit=False, is_serialized=False)
+        kit = InventoryItemFactory(image=None, is_kit=True, current_stock=0, minimum_stock=0)
+        link = make_link(kit, supplier)
+
+        response = staff_client.patch(
+            reverse("kit-detail", args=[kit.pk]),
+            {
+                "name": kit.name,
+                "components": [{"component": component.pk, "quantity": 1}],
+                "supplier_terms": {
+                    "supplier": supplier.pk,
+                    "supplier_sku": "KIT-SKU",
+                    "unit_cost": "4.00",
+                },
+            },
+            format="json",
+        )
+
+        assert response.status_code == 200, response.data
+        link.refresh_from_db()
+        assert link.unit_cost == Decimal("4.00")
+        assert link.package_cost == Decimal("12.00")
+
+        row = next(r for r in response.data["suppliers"] if r["id"] == link.pk)
+        assert Decimal(row["unit_cost"]) == Decimal("4.00")
+        assert Decimal(row["package_cost"]) == Decimal("12.00")

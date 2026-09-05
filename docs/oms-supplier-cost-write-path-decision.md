@@ -1,7 +1,17 @@
 # Supplier cost write path — the one product decision
 
-Status: **routed to firstmate, awaiting answer.** Everything not depending on
-the answer is being built in parallel.
+Status: **ANSWERED — all three as recommended**, with one added condition on (C):
+the re-derivation must be OBSERVABLE, so `unit_cost` is presented as derived
+wherever it is editable and the write response carries the derived value.
+
+This file is the reasoning that was put to the operator. What was then built, the
+full write-price set, the history findings and the ScanTTY check are in
+[`oms-supplier-cost-write-path-record.md`](oms-supplier-cost-write-path-record.md).
+
+Measured afterwards and worth knowing before re-reading the reasoning below:
+rulings (A) and (B) turned out to CONFIRM behaviour the model already had rather
+than change it. Nothing asserted either one, which is precisely how a later round
+came to undo one of them.
 
 ## What the investigation changed about the question
 

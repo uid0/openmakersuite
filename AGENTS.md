@@ -781,25 +781,51 @@ string and must move with it: the `log_usage` docstring (~:1199),
 APPROVED BY THE OPERATOR and deferred only because the phase that found it
 could not make functional changes — NOT declined.
 
-### oms-supplier-terms-write-path — filed, and the lesson from a withdrawn attempt
+### oms-supplier-terms-write-path — CLOSED at the derivation, not at the callers
 
-A single owner for the supplier-terms WRITE path was built, gated and then
-REVERTED IN FULL on this branch: `KitSerializer._apply_supplier_terms`,
-`ItemSupplierSerializer` / `ItemSupplierViewSet` and
-`inventory/services/suppliers.py` are byte-identical to base `7c078de`. The path
-is filed as `oms-supplier-terms-write-path`, carrying six base defects that were
-verified against base and left unfixed. **The full record — root cause, the
-three caller rules tried and what each reopened, the kept/dropped boundary and
-those six defects — is in
-[`docs/oms-falsy-zero-money-guards-record.md`](docs/oms-falsy-zero-money-guards-record.md);
-read it before reopening the bead.**
+**One rule, in one place: `inventory.services.suppliers.derive_costs`, called
+from `ItemSupplier.save()`.** `unit_cost` and `package_cost` are derived from
+each other and `package -> unit` is LOSSY at two decimal places — `10.00 / 3`
+stores as `3.33`, and `3.33 * 3` is `9.99` — so any write that handed the model a
+partial picture made it re-derive the twin from a value nobody edited, and a cent
+escaped on a save that touched no price.
 
-The durable lesson: `ItemSupplier.save()` derives `unit_cost` and `package_cost`
-FROM EACH OTHER, so any partial write to that path fights the derivation, and
-which cost the operator meant cannot be recovered from the submitted values
-alone. Three different rules at the callers each fixed one case by reopening
-another. **The next attempt should address the derivation in `save()` itself
-rather than the callers, and must not be retried one narrow rule at a time.**
+**Intent is a DELTA against the stored row, never a rule about which keys a
+caller sent.** That distinction is the whole bead. A form that echoes an
+unchanged cost box and a form that omits it are indistinguishable by key, which
+is why three successive caller-side rules each fixed one case by reopening
+another and the attempt was withdrawn in full — the history is in
+[`docs/oms-falsy-zero-money-guards-record.md`](docs/oms-falsy-zero-money-guards-record.md).
+`save()` is the one place that sees BOTH what the caller supplied and what is
+stored, so it is the one place the rule can be stated. **Do not re-open this at
+the write sites.** A partial `defaults` dict is now safe by construction, so a
+new writer needs no rule of its own.
+
+The rule, decided by the operator and pinned in
+`backend/inventory/tests/test_supplier_cost_derivation.py`:
+
+- nothing moved — derive nothing; both stored prices stay byte-identical. A SKU
+  or flag edit is not a price edit.
+- `package_cost` moved — it governs. It is what the shop actually pays, and it is
+  the only safe direction: `package -> unit` is the lossy half.
+- `package_cost` cleared — both clear. "No price on file" has to stay sayable.
+- only `unit_cost` moved — it governs; the case price re-derives. This is the
+  ordinary case: every form sends both boxes and the operator edits one.
+- only `unit_cost` cleared — it re-derives, because it is a derived figure. The
+  surfaces that offer the box say so, and the write response carries the value it
+  came back as.
+- only the pack size moved — hold `package_cost`. "The case holds 6, not 3" is
+  about packing, not about price.
+
+Two consequences worth keeping in mind when touching this path:
+
+- **A derived column is added to `update_fields`.** `QuerySet.update_or_create`
+  restricts `update_fields` to its own `defaults` keys, so without that a
+  `package_cost` the model derives is computed and then dropped on the floor.
+- **Test it at a pack size that does not divide the case price evenly.** Every
+  pre-existing test of this behaviour used `quantity_per_package=1`, where the
+  derivation is exact and NO defect on this path is reachable. That is how five
+  symptoms reached main under a green suite.
 
 ### The pre-send boundary: when a PO is still the shop's own document
 

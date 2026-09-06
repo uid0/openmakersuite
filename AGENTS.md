@@ -1183,6 +1183,57 @@ does. Enforced across every model in the repo — the check derives the withheld
 set from `QuerySet` and `Manager` rather than naming `delete`, so a second
 queryset class in any app is already covered.
 
+### Which stock-changing actions owe an audit row (op-scan-audit)
+
+`PurchaseOrderAuditEvent` is the purchase-order trail. The question it answers
+is "who received what against this order, and what did that receipt leave" —
+so **every path that credits stock against a PO line owes a row**, and the ones
+that do not owe one are excluded for a structural reason, not a stylistic one.
+The derived set, and why each member is where it is:
+
+- `POST .../receive/`, `.../mark-delivered/`, `.../close-short/`,
+  `.../mark-received/`, `.../reopen-short/` — all write from the view, per the
+  #883 split. Kit component credits ride inside `receive_delivery`, so
+  `explode_kit_receipt` needs no row of its own.
+- `POST /api/reorders/receipts/scan_barcode/` — writes one row per scan.
+- `POST /api/reorders/reorder-requests/{id}/mark_received/` — **deliberately
+  none.** It credits stock against a `ReorderRequest`, which is not a purchase
+  order and has no line or attachment either, and `record_event` requires one
+  of those three to make the row queryable by entity. There is no
+  `ReorderRequestAuditEvent`; adding one is a new table, not a missing call.
+- Everything under `inventory/` that moves `current_stock` — `log_usage`,
+  reconciliation, pack open/close, work-order material usage — is **outside
+  this trail by construction** (no PO) and each already writes its own record:
+  `UsageLog` or `StockReconciliation`.
+
+**A trail that covers one path and silently omits another says nothing, not
+"not audited".** `scan_barcode` used to write no row while crediting stock and
+advancing the order, so a reader concluded no receipt had happened. Two
+successive changes had recorded that gap as deliberate without either one
+deciding it should be: #883/#898 was a behaviour-preserving refactor, so its
+"records NO audit event" DESCRIBED the path rather than endorsing it, and #1040
+deferred the fix on the stated ground that it "covers ALL scanned receipts and
+not just over-receipts, so it is its own change". Read a recorded divergence for
+what it actually decided before treating it as settled.
+
+**Where two paths write the same action, the row says which one wrote it.**
+The desk row always carries a `serials` list and `scan_barcode` never can, so
+the scan row is marked `source: "scan_barcode"`. Without it, a
+`po_receive_items` row with no serials is ambiguous between "the operator
+captured none" and "this path captures none" — the same conflation of *found
+nothing* with *could not tell* that the missing row itself was. Anything else
+this path cannot report the way the desk does belongs behind that marker too.
+
+**Read the figures AFTER settlement, and write the row inside the receipt's
+transaction.** `quantity_variance` / `receipt_state` describe what THIS receipt
+left, so they are read after the line is credited and
+`refresh_receipt_status` has run; the row goes inside the same
+`transaction.atomic()` as the stock write, so a failed receipt cannot leave an
+audit row claiming goods arrived. `scan_barcode` upserts one `OrderDelivery`
+per day, so several scans share a delivery — each is still its own row, and
+`delivery_date` names the delivery joined while the row's own `created_at`
+names the moment.
+
 ### Django upgrade history
 
 The backend now runs **Django 6.0.7**. The notes below cover the earlier 4.2 -> 5.1

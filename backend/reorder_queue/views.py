@@ -3126,10 +3126,21 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
         ways that do not parameterize cleanly: it upserts one delivery per day
         (``get_or_create`` on ``delivery_date``) instead of always creating a new
         delivery, it records scan-specific ``DeliveryItem`` fields
-        (``scanned_upc``/``scanned_at``/``scanned_by``/damage/expiry), it never
-        sets ``delivery.is_complete``, and it records NO audit event. Those four
-        divergences are still the case; the rest is flagged as a future
-        de-duplication.
+        (``scanned_upc``/``scanned_at``/``scanned_by``/damage/expiry), and it
+        never sets ``delivery.is_complete``. Those THREE divergences are still
+        the case; the rest is flagged as a future de-duplication.
+
+        A fourth divergence used to be listed here and is gone: this path wrote
+        no audit event. That was never a decision that a scanned receipt should
+        go unrecorded — #883 was a behaviour-preserving refactor, so it
+        described what the path did rather than endorsing it, and #1040 left it
+        alone only because closing it covers ALL scanned receipts and so is its
+        own change. This is that change: every committed scan now writes a
+        ``PO_RECEIVE_ITEMS`` row carrying the same ``quantity_variance`` and
+        ``receipt_state`` per line the desk path records, one row per scan.
+        A trail covering one receive path and silently omitting the other does
+        not say "this receipt was not audited"; it says nothing, and a reader
+        concludes no receipt happened.
 
         What it does NOT decide for itself is settlement. Which lines may still
         take a receipt (:func:`services.receipt_refusal`), what the order's
@@ -3273,6 +3284,45 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
                 # above) because this path is inline rather than routed through
                 # ``services.receive_delivery`` — see the note on this action.
                 services.close_linked_reorder_request(po_item, delivery.delivery_date)
+
+            # INSIDE the transaction, and last, for the two reasons the desk
+            # path gives: a receipt that fails must write nothing at all rather
+            # than credit stock with no audit event to show for it, and the
+            # variance this row reports is the one this receipt LEFT, so it is
+            # read after the line and the order have both been settled above.
+            record_audit_event(
+                action=PurchaseOrderAuditEvent.Action.PO_RECEIVE_ITEMS,
+                actor=request.user,
+                purchase_order=purchase_order,
+                notes=data.get("condition_notes", ""),
+                metadata={
+                    # Which path took the receipt. The desk row always carries a
+                    # ``serials`` list and this one never can, so without this a
+                    # row with no serials would be ambiguous between "the
+                    # operator captured none" and "this path captures none" —
+                    # the same conflation of *found nothing* with *could not
+                    # tell* that the missing row itself was.
+                    "source": "scan_barcode",
+                    "scanned_upc": scanned_upc,
+                    # The delivery this receipt was filed against, which is not
+                    # necessarily today's scan: this path upserts ONE delivery
+                    # per day, so an afternoon box joins the morning's. When the
+                    # receipt happened is this row's own ``created_at``.
+                    "delivery_date": delivery.delivery_date.isoformat(),
+                    "fully_received": (purchase_order.status == PurchaseOrder.Status.RECEIVED),
+                    # One line per scan, in the shape the desk path records so
+                    # one reader can read both. The mismatch the captain chases
+                    # a vendor with, on the audit trail as well as on the line.
+                    "received_items": [
+                        {
+                            "purchase_order_item": po_item.id,
+                            "quantity_received": quantity_received,
+                            "quantity_variance": po_item.quantity_variance,
+                            "receipt_state": po_item.receipt_state,
+                        }
+                    ],
+                },
+            )
 
         return Response(
             {

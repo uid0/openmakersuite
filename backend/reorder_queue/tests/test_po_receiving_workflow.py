@@ -2422,9 +2422,7 @@ class TestAScannedReceiptIsOnTheAuditTrail:
         assert received["quantity_variance"] == line.quantity_variance
         assert received["receipt_state"] == line.receipt_state
 
-    def test_a_scanned_part_receipt_records_the_shortfall_it_left(
-        self, client, supplier, operator
-    ):
+    def test_a_scanned_part_receipt_records_the_shortfall_it_left(self, client, supplier, operator):
         """Three of five arrive: ``-2`` / ``partially_received``, not a rounded zero."""
         purchase_order, _item, line = self.scannable_po(supplier, operator)
 
@@ -2457,9 +2455,12 @@ class TestAScannedReceiptIsOnTheAuditTrail:
         assert scan_barcode(client, scanned_po, "0123456789012", 7).status_code == (
             status.HTTP_200_OK
         )
-        assert receive(
-            client, keyed_po, [{"purchase_order_item": keyed_line.pk, "quantity_received": 7}]
-        ).status_code == status.HTTP_200_OK
+        assert (
+            receive(
+                client, keyed_po, [{"purchase_order_item": keyed_line.pk, "quantity_received": 7}]
+            ).status_code
+            == status.HTTP_200_OK
+        )
 
         scanned = self.receipt_rows(scanned_po).get().metadata["received_items"][0]
         keyed = self.receipt_rows(keyed_po).get().metadata["received_items"][0]
@@ -2575,6 +2576,39 @@ class TestAScannedReceiptIsOnTheAuditTrail:
         assert line.quantity_received == 0
         assert purchase_order.deliveries.count() == 0
         assert self.receipt_rows(purchase_order).count() == 0
+
+    def test_the_captains_audit_feed_shows_the_scanned_receipt(self, client, supplier, operator):
+        """The row reaches the surface the captain actually reads.
+
+        ``GET /api/dashboard/audit-feed/`` is the staff review surface that
+        joins the per-domain audit tables. Asserting on the model row alone
+        would not prove a scanned receipt is visible there, which is the whole
+        point of putting it on the trail.
+        """
+        purchase_order, _item, line = self.scannable_po(supplier, operator)
+
+        assert scan_barcode(client, purchase_order, "0123456789012", 7).status_code == (
+            status.HTTP_200_OK
+        )
+
+        response = client.get(reverse("get_audit_feed"), {"domain": "purchase_orders"})
+
+        assert response.status_code == status.HTTP_200_OK
+        receipts = [
+            event
+            for event in response.data["events"]
+            if event["action"] == PurchaseOrderAuditEvent.Action.PO_RECEIVE_ITEMS
+            and event["entity_id"] == str(purchase_order.pk)
+        ]
+        assert len(receipts) == 1, response.data["events"]
+        event = receipts[0]
+        assert event["actor_username"] == operator.username
+        assert event["metadata"]["source"] == "scan_barcode"
+        received = event["metadata"]["received_items"][0]
+        assert received["purchase_order_item"] == line.pk
+        assert received["quantity_variance"] == 2
+        assert received["receipt_state"] == PurchaseOrderItem.ReceiptState.OVER_RECEIVED
+
 
 @pytest.mark.django_db
 class TestLeadTimeIsLoggedOncePerLine:

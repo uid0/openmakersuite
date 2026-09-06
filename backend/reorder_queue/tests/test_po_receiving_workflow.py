@@ -2349,6 +2349,234 @@ class TestScannedOverReceiptMatchesTheDesk:
 
 
 @pytest.mark.django_db
+class TestAScannedReceiptIsOnTheAuditTrail:
+    """A receipt taken with the scanner is on the record, same as a keyed one.
+
+    ``receive`` and ``receipts/scan_barcode/`` are two receive paths onto the
+    same lines, and the audit trail used to cover only one of them. That is not
+    a trail that says "this receipt was not audited" — it says nothing at all,
+    and a reader concludes no receipt happened.
+
+    What made it cost something is that a scanned receipt can now be short or
+    over (``TestScannedOverReceiptMatchesTheDesk``): the mismatch the captain
+    chases a vendor with was on the line and in the worksheet, and on the trail
+    only when the receipt was keyed at the desk.
+    """
+
+    def scannable_po(self, supplier, operator, *, ordered=5, upc="0123456789012"):
+        """A sent order whose scanned line is still outstanding.
+
+        The second line holds the order inside ``RECEIVABLE_STATUSES`` while the
+        first settles, exactly as ``TestScannedOverReceiptMatchesTheDesk`` needs
+        it to: an order every line of which has settled is refused at the ORDER,
+        which is a different question from the one under test.
+        """
+        purchase_order = make_po(supplier, operator)
+        item = make_item("Widget", stock=0, supplier=supplier, sku_barcodes={"package_upc": upc})
+        line = add_line(purchase_order, item, ordered)
+        add_line(purchase_order, make_item("Gasket", supplier=supplier), 3)
+        return purchase_order, item, line
+
+    def receipt_rows(self, purchase_order):
+        return PurchaseOrderAuditEvent.objects.filter(
+            purchase_order=purchase_order,
+            action=PurchaseOrderAuditEvent.Action.PO_RECEIVE_ITEMS,
+        )
+
+    def test_a_scanned_receipt_writes_one_audit_row_naming_what_it_received(
+        self, client, supplier, operator
+    ):
+        purchase_order, _item, line = self.scannable_po(supplier, operator)
+
+        response = scan_barcode(client, purchase_order, "0123456789012", 5)
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        rows = self.receipt_rows(purchase_order)
+        assert rows.count() == 1
+        row = rows.get()
+        assert row.actor == operator
+        received = row.metadata["received_items"][0]
+        assert received["purchase_order_item"] == line.pk
+        assert received["quantity_received"] == 5
+        # Which path took the receipt, because the desk row carries a
+        # ``serials`` list and this one cannot. Without it, a row with no
+        # serials is ambiguous between "the operator captured none" and "this
+        # path never captures any".
+        assert row.metadata["source"] == "scan_barcode"
+        assert row.metadata["scanned_upc"] == "0123456789012"
+
+    def test_a_scanned_over_receipt_records_the_variance_the_captain_chases(
+        self, client, supplier, operator
+    ):
+        """Seven arrive against five ordered: ``+2`` / ``over_received`` on the trail."""
+        purchase_order, _item, line = self.scannable_po(supplier, operator)
+
+        response = scan_barcode(client, purchase_order, "0123456789012", 7)
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        received = self.receipt_rows(purchase_order).get().metadata["received_items"][0]
+        assert received["quantity_variance"] == 2
+        assert received["receipt_state"] == PurchaseOrderItem.ReceiptState.OVER_RECEIVED
+        # The trail quotes the line, rather than a second opinion about it.
+        line.refresh_from_db()
+        assert received["quantity_variance"] == line.quantity_variance
+        assert received["receipt_state"] == line.receipt_state
+
+    def test_a_scanned_part_receipt_records_the_shortfall_it_left(
+        self, client, supplier, operator
+    ):
+        """Three of five arrive: ``-2`` / ``partially_received``, not a rounded zero."""
+        purchase_order, _item, line = self.scannable_po(supplier, operator)
+
+        response = scan_barcode(client, purchase_order, "0123456789012", 3)
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        received = self.receipt_rows(purchase_order).get().metadata["received_items"][0]
+        assert received["quantity_variance"] == -2
+        assert received["receipt_state"] == PurchaseOrderItem.ReceiptState.PARTIALLY_RECEIVED
+        line.refresh_from_db()
+        assert received["quantity_variance"] == line.quantity_variance
+
+    def test_the_scanner_and_the_desk_describe_one_delivery_the_same_way(
+        self, client, supplier, operator
+    ):
+        """The same over-receipt, taken both ways, reads identically on the trail.
+
+        Both sides are read off real audit rows rather than compared against a
+        written-down expectation, so the two paths agreeing is what is proven —
+        and the figures are asserted outright as well, so two empty rows cannot
+        pass it.
+        """
+        scanned_po, _scanned_item, scanned_line = self.scannable_po(
+            supplier, operator, upc="0123456789012"
+        )
+        keyed_po, _keyed_item, keyed_line = self.scannable_po(
+            supplier, operator, upc="9999999999999"
+        )
+
+        assert scan_barcode(client, scanned_po, "0123456789012", 7).status_code == (
+            status.HTTP_200_OK
+        )
+        assert receive(
+            client, keyed_po, [{"purchase_order_item": keyed_line.pk, "quantity_received": 7}]
+        ).status_code == status.HTTP_200_OK
+
+        scanned = self.receipt_rows(scanned_po).get().metadata["received_items"][0]
+        keyed = self.receipt_rows(keyed_po).get().metadata["received_items"][0]
+
+        for field in ("quantity_received", "quantity_variance", "receipt_state"):
+            assert scanned[field] == keyed[field], field
+        assert scanned["quantity_received"] == 7
+        assert scanned["quantity_variance"] == 2
+        assert scanned["receipt_state"] == PurchaseOrderItem.ReceiptState.OVER_RECEIVED
+        assert scanned["purchase_order_item"] == scanned_line.pk
+        assert keyed["purchase_order_item"] == keyed_line.pk
+
+    def test_two_scans_that_share_a_delivery_are_still_two_records(
+        self, client, supplier, operator
+    ):
+        """One delivery a day is this path's shape; one row per receipt is the trail's.
+
+        ``scan_barcode`` upserts a single ``OrderDelivery`` per day, so a second
+        box scanned the same afternoon joins the first delivery. Each scan is
+        still its own operator action against its own goods, and each is its own
+        row — the second one describing the line as that receipt left it.
+        """
+        purchase_order, _item, line = self.scannable_po(supplier, operator)
+
+        assert scan_barcode(client, purchase_order, "0123456789012", 3).status_code == (
+            status.HTTP_200_OK
+        )
+        assert scan_barcode(client, purchase_order, "0123456789012", 4).status_code == (
+            status.HTTP_200_OK
+        )
+
+        assert purchase_order.deliveries.count() == 1
+        rows = list(self.receipt_rows(purchase_order).order_by("created_at"))
+        assert len(rows) == 2
+        first, second = (row.metadata["received_items"][0] for row in rows)
+        assert (first["quantity_received"], first["quantity_variance"]) == (3, -2)
+        assert first["receipt_state"] == PurchaseOrderItem.ReceiptState.PARTIALLY_RECEIVED
+        assert (second["quantity_received"], second["quantity_variance"]) == (4, 2)
+        assert second["receipt_state"] == PurchaseOrderItem.ReceiptState.OVER_RECEIVED
+        line.refresh_from_db()
+        assert line.quantity_received == 7
+
+    def test_a_scan_the_line_refuses_writes_no_row(self, client, supplier, operator):
+        """A refusal is not a receipt, so it leaves no receipt on the trail.
+
+        Counted as a DELTA across the scan, because the close-short that set
+        this line up writes a ``po_receive_items`` row of its own.
+        """
+        purchase_order, item, line = self.scannable_po(supplier, operator, ordered=10)
+        receive(client, purchase_order, [{"purchase_order_item": line.pk, "quantity_received": 8}])
+        client.post(
+            reverse("purchaseorder-close-short", args=[purchase_order.pk]),
+            {"items": [{"purchase_order_item": line.pk, "reason": "backorder cancelled"}]},
+            format="json",
+        )
+        before = self.receipt_rows(purchase_order).count()
+
+        response = scan_barcode(client, purchase_order, "0123456789012", 5)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "reopen-short" in response.data["error"]
+        assert self.receipt_rows(purchase_order).count() == before
+        item.refresh_from_db()
+        assert item.current_stock == 8
+
+    def test_a_scanned_kit_line_is_refused_and_writes_no_row(self, client, supplier, operator):
+        """The kit refusal is unchanged, and it does not leave a receipt behind."""
+        purchase_order = make_po(supplier, operator)
+        kit = InventoryItemFactory(
+            name="Repair Kit", is_kit=True, current_stock=0, minimum_stock=0, image=None
+        )
+        KitComponent.objects.create(kit=kit, component=make_item("Cartridge"), quantity=5)
+        ItemSupplier.objects.create(
+            item=kit,
+            supplier=supplier,
+            supplier_sku="KIT-AUDIT",
+            unit_cost=Decimal("50.00"),
+            quantity_per_package=1,
+            is_primary=True,
+            package_upc="5550001",
+        )
+        add_line(purchase_order, kit, 2)
+
+        response = scan_barcode(client, purchase_order, "5550001", 2)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.data["is_kit_line"] is True
+        assert self.receipt_rows(purchase_order).count() == 0
+
+    def test_the_audit_row_is_rolled_back_with_the_receipt_it_describes(
+        self, client, supplier, operator, monkeypatch
+    ):
+        """The row is written inside the receipt's transaction, not after it.
+
+        The desk path states the rule outright: a receipt that fails writes
+        nothing at all, rather than crediting stock and leaving no audit event
+        to show for it. Proven by failing the last step inside the block, which
+        an audit write placed after the ``with`` would survive.
+        """
+        purchase_order, item, line = self.scannable_po(supplier, operator)
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("reorder close failed")
+
+        monkeypatch.setattr(services, "close_linked_reorder_request", boom)
+
+        with pytest.raises(RuntimeError):
+            scan_barcode(client, purchase_order, "0123456789012", 5)
+
+        item.refresh_from_db()
+        line.refresh_from_db()
+        assert item.current_stock == 0
+        assert line.quantity_received == 0
+        assert purchase_order.deliveries.count() == 0
+        assert self.receipt_rows(purchase_order).count() == 0
+
+@pytest.mark.django_db
 class TestLeadTimeIsLoggedOncePerLine:
     """A line becomes fully received once, so it is logged once.
 

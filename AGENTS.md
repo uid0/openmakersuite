@@ -1300,9 +1300,9 @@ Updated packages:
   so the component silently renders its off state. `npx tsc --noEmit` already
   names every one of them; grep its output for `does not exist on type` before
   assuming a dead toggle is a state bug. To prove you added none, capture `tsc`
-  on your branch and on base and diff — see the pre-commit notes above, and
-  never wrap the command in `timeout` (macOS has no `timeout`; it exits 127 and
-  prints nothing, which reads exactly like success).
+  on your branch and on base and diff the two counts; never wrap the command in
+  `timeout` (macOS has no `timeout`; it exits 127 and prints nothing, which
+  reads exactly like success).
 - **Assert VISIBILITY, not presence, on anything collapsible.** Mantine's
   `Collapse` defaults to `keepMounted`, so children stay in the DOM while shut
   and `toBeInTheDocument()` passes on a panel that can never open — that is what

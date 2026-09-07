@@ -7,7 +7,8 @@
  *   3. Actor filter narrows the displayed rows client-side (no second
  *      network call) without dropping unmatched rows from state.
  *   4. Clicking a row toggles the metadata expansion — asserted on
- *      VISIBILITY, not presence; see the test for why.
+ *      VISIBILITY, not presence; see the test for why. Expansion follows
+ *      the event, not its index in the actor-filtered list.
  *   5. A scanned receipt flagged damaged/expired is badged on the row
  *      without opening it, and desk rows carry no badge.
  *   6. Non-staff visitors are redirected to home.
@@ -135,6 +136,76 @@ describe('AuditFeedPage', () => {
     await waitFor(() => {
       expect(metadata).not.toBeVisible();
     });
+  });
+
+  it('keeps expansion attached to the event, not to its position in the filtered list', async () => {
+    // Three events; the actor filter below keeps the first and the third, so
+    // the row that survives at index 1 is NOT the row that was opened at
+    // index 1. Expansion keyed on the visible index therefore opens a row
+    // nobody clicked; expansion keyed on the event's own identity does not.
+    mockDashboard.getAuditFeed.mockResolvedValue({
+      data: {
+        count: 3,
+        events: [
+          buildEvent({ actor_username: 'uid0', entity_id: 'a', metadata: { marker: 'alpha' } }),
+          buildEvent({ actor_username: 'sysop', entity_id: 'b', metadata: { marker: 'bravo' } }),
+          buildEvent({ actor_username: 'uid0', entity_id: 'c', metadata: { marker: 'charlie' } }),
+        ],
+      },
+    } as any);
+
+    renderPage();
+
+    const bravoRow = await screen.findByTestId('audit-row-1');
+    const charlie = screen.getByText(/charlie/);
+    expect(charlie).not.toBeVisible();
+
+    fireEvent.click(bravoRow);
+    await waitFor(() => {
+      expect(screen.getByText(/bravo/)).toBeVisible();
+    });
+
+    // Filter out the opened row entirely. Charlie slides into index 1.
+    fireEvent.change(screen.getByLabelText(/Actor/i), { target: { value: 'uid0' } });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/bravo/)).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('audit-row-1')).toBeInTheDocument();
+    expect(screen.getByText(/charlie/)).not.toBeVisible();
+    expect(screen.getByText(/alpha/)).not.toBeVisible();
+  });
+
+  it('keeps an opened row open when a filter shifts it to a different index', async () => {
+    // The converse of the test above, and the reason the fix is identity
+    // keying rather than clearing the set on every filter change: a row the
+    // operator opened must survive a filter that merely moves it up.
+    mockDashboard.getAuditFeed.mockResolvedValue({
+      data: {
+        count: 3,
+        events: [
+          buildEvent({ actor_username: 'uid0', entity_id: 'a', metadata: { marker: 'alpha' } }),
+          buildEvent({ actor_username: 'sysop', entity_id: 'b', metadata: { marker: 'bravo' } }),
+          buildEvent({ actor_username: 'uid0', entity_id: 'c', metadata: { marker: 'charlie' } }),
+        ],
+      },
+    } as any);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('audit-row-2'));
+    await waitFor(() => {
+      expect(screen.getByText(/charlie/)).toBeVisible();
+    });
+
+    // Charlie moves from index 2 to index 1 and must stay open.
+    fireEvent.change(screen.getByLabelText(/Actor/i), { target: { value: 'uid0' } });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/bravo/)).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/charlie/)).toBeVisible();
+    expect(screen.getByText(/alpha/)).not.toBeVisible();
   });
 
   it('badges a scanned receipt flagged damaged or expired on the row itself', async () => {

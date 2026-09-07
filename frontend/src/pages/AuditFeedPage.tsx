@@ -72,6 +72,29 @@ const DOMAIN_COLORS: Record<string, string> = {
   third_party_work_orders: 'cyan',
 };
 
+/**
+ * Stable identity for one audit event, derived from the event's own fields.
+ *
+ * `AuditFeedEvent` carries no `id`, and the feed is a union of eight
+ * per-domain tables whose primary keys do not share a namespace, so identity
+ * has to be composed. It deliberately contains NO positional component: the
+ * actor filter re-indexes the visible list on every keystroke, so an
+ * index-keyed expansion set both opens rows nobody clicked and closes rows
+ * that merely shifted up. `JSON.stringify` over the tuple keeps `null` and
+ * `''` distinct and escapes the separator, which a template string cannot.
+ *
+ * Used for BOTH the React key and the expansion lookup so the two cannot
+ * drift apart.
+ */
+const eventKey = (event: AuditFeedEvent): string =>
+  JSON.stringify([
+    event.domain,
+    event.created_at,
+    event.action,
+    event.entity_type,
+    event.entity_id,
+  ]);
+
 const formatTimestamp = (iso: string): string => {
   try {
     return new Date(iso).toLocaleString();
@@ -121,7 +144,7 @@ const AuditFeedPage: React.FC = () => {
   const [until, setUntil] = useState<string>('');
   const [limit, setLimit] = useState<string>('200');
   const [actorFilter, setActorFilter] = useState<string>('');
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -159,13 +182,13 @@ const AuditFeedPage: React.FC = () => {
     );
   }, [events, actorFilter]);
 
-  const toggleRow = useCallback((index: number) => {
+  const toggleRow = useCallback((key: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(index)) {
-        next.delete(index);
+      if (next.has(key)) {
+        next.delete(key);
       } else {
-        next.add(index);
+        next.add(key);
       }
       return next;
     });
@@ -263,13 +286,14 @@ const AuditFeedPage: React.FC = () => {
                 </Table.Thead>
                 <Table.Tbody>
                   {visibleEvents.map((event, index) => {
-                    const open = expanded.has(index);
+                    const key = eventKey(event);
+                    const open = expanded.has(key);
                     const conditions = conditionFlags(event.metadata);
                     return (
-                      <React.Fragment key={`${event.domain}-${event.created_at}-${index}`}>
+                      <React.Fragment key={key}>
                         <Table.Tr
                           style={{ cursor: 'pointer' }}
-                          onClick={() => toggleRow(index)}
+                          onClick={() => toggleRow(key)}
                           data-testid={`audit-row-${index}`}
                         >
                           <Table.Td>{formatTimestamp(event.created_at)}</Table.Td>

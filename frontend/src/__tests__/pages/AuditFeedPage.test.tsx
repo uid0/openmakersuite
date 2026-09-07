@@ -6,8 +6,11 @@
  *   2. Domain select fires a new GET with the chosen domain.
  *   3. Actor filter narrows the displayed rows client-side (no second
  *      network call) without dropping unmatched rows from state.
- *   4. Clicking a row toggles the metadata expansion.
- *   5. Non-staff visitors are redirected to home.
+ *   4. Clicking a row toggles the metadata expansion — asserted on
+ *      VISIBILITY, not presence; see the test for why.
+ *   5. A scanned receipt flagged damaged/expired is badged on the row
+ *      without opening it, and desk rows carry no badge.
+ *   6. Non-staff visitors are redirected to home.
  */
 import { MantineProvider } from '@mantine/core';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -104,7 +107,7 @@ describe('AuditFeedPage', () => {
     expect(mockDashboard.getAuditFeed.mock.calls.length).toBe(before);
   });
 
-  it('expands metadata on row click', async () => {
+  it('expands and re-collapses metadata on row click', async () => {
     mockDashboard.getAuditFeed.mockResolvedValue({
       data: { count: 1, events: [buildEvent()] },
     } as any);
@@ -112,9 +115,87 @@ describe('AuditFeedPage', () => {
     renderPage();
 
     const row = await screen.findByTestId('audit-row-0');
-    fireEvent.click(row);
 
-    expect(await screen.findByText(/device_mac/)).toBeInTheDocument();
+    // VISIBILITY, not presence. Mantine's Collapse defaults to
+    // keepMounted, so the metadata node is in the document from first
+    // paint whether the row is open or shut — an assertion that only
+    // asked `toBeInTheDocument()` passed for as long as the row never
+    // opened at all (#1052). Every assertion below is `toBeVisible`,
+    // which is the thing the reviewer is actually promised.
+    const metadata = screen.getByText(/device_mac/);
+    expect(metadata).not.toBeVisible();
+
+    fireEvent.click(row);
+    await waitFor(() => {
+      expect(metadata).toBeVisible();
+    });
+
+    // And shuts again — a row stuck open is the same unreadable feed.
+    fireEvent.click(row);
+    await waitFor(() => {
+      expect(metadata).not.toBeVisible();
+    });
+  });
+
+  it('badges a scanned receipt flagged damaged or expired on the row itself', async () => {
+    mockDashboard.getAuditFeed.mockResolvedValue({
+      data: {
+        count: 1,
+        events: [
+          buildEvent({
+            domain: 'purchase_orders',
+            action: 'po_receive_items',
+            notes: 'crushed corner, tape torn',
+            metadata: {
+              source: 'scan_barcode',
+              scanned_upc: '0123456789012',
+              is_damaged: true,
+              is_expired: true,
+            },
+          }),
+        ],
+      },
+    } as any);
+
+    renderPage();
+
+    // Visible WITHOUT opening the row: the condition is the thing the captain
+    // scrolls this feed looking for, so it must not be buried in the collapsed
+    // metadata blob.
+    expect(await screen.findByTestId('audit-condition-damaged-0')).toBeVisible();
+    expect(screen.getByTestId('audit-condition-expired-0')).toBeVisible();
+    // The operator's own words survive alongside the badges.
+    expect(screen.getByText('crushed corner, tape torn')).toBeVisible();
+  });
+
+  it('badges only the flag actually raised, and leaves desk rows unbadged', async () => {
+    mockDashboard.getAuditFeed.mockResolvedValue({
+      data: {
+        count: 2,
+        events: [
+          // Scanned, and the operator said it was sound. `false` is an answer,
+          // but it is not a problem — no badge.
+          buildEvent({
+            action: 'po_receive_items',
+            metadata: { source: 'scan_barcode', is_damaged: false, is_expired: true },
+          }),
+          // Desk receipt: never asked, so the keys are absent entirely. This is
+          // the case a truthiness check would get right by accident and an
+          // `undefined`-blind one would render as "Damaged".
+          buildEvent({
+            action: 'po_receive_items',
+            metadata: { delivery_date: '2026-05-29T10:00:00+00:00', carrier: 'UPS' },
+          }),
+        ],
+      },
+    } as any);
+
+    renderPage();
+
+    expect(await screen.findByTestId('audit-condition-expired-0')).toBeVisible();
+    expect(screen.queryByTestId('audit-condition-damaged-0')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('audit-condition-damaged-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('audit-condition-expired-1')).not.toBeInTheDocument();
   });
 
   it('redirects non-staff visitors home', async () => {

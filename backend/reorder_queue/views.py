@@ -3142,6 +3142,15 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
         not say "this receipt was not audited"; it says nothing, and a reader
         concludes no receipt happened.
 
+        That row also carries ``is_damaged`` / ``is_expired``, the condition the
+        operator flagged at the scanner. They were already accepted here,
+        persisted on the ``DeliveryItem`` and served by
+        ``DeliveryItemSerializer`` — the audit trail was the one reader that
+        could not see them, so a delivery that arrived smashed read as a clean
+        receipt on the surface the captain uses to chase the vendor for it.
+        Both keys are written on EVERY scan row (``false`` is the operator
+        answering "sound") and on NO desk row, which is never asked.
+
         What it does NOT decide for itself is settlement. Which lines may still
         take a receipt (:func:`services.receipt_refusal`), what the order's
         status should be afterwards (:func:`services.refresh_receipt_status`),
@@ -3165,6 +3174,11 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
         purchase_order_id = data["purchase_order_id"]
         scanned_upc = data["scanned_upc"]
         quantity_received = data["quantity_received"]
+        # Read ONCE and shared by the DeliveryItem below and the audit row at
+        # the end of the transaction. Two independent reads of the same flag is
+        # exactly how a trail drifts from the record it is supposed to describe.
+        is_damaged = data.get("is_damaged", False)
+        is_expired = data.get("is_expired", False)
 
         try:
             purchase_order = PurchaseOrder.objects.get(id=purchase_order_id)
@@ -3253,8 +3267,8 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
                 delivery=delivery,
                 purchase_order_item=po_item,
                 quantity_received=quantity_received,
-                is_damaged=data.get("is_damaged", False),
-                is_expired=data.get("is_expired", False),
+                is_damaged=is_damaged,
+                is_expired=is_expired,
                 condition_notes=data.get("condition_notes", ""),
                 scanned_upc=scanned_upc,
                 scanned_at=timezone.now(),
@@ -3304,6 +3318,22 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
                     # tell* that the missing row itself was.
                     "source": "scan_barcode",
                     "scanned_upc": scanned_upc,
+                    # The condition the operator flagged at the scanner. Both
+                    # are already accepted by ``BarcodeReceiptSerializer``,
+                    # persisted on the ``DeliveryItem`` and served by
+                    # ``DeliveryItemSerializer`` — the trail was the one reader
+                    # that could not see them, so a delivery that arrived
+                    # broken read as a clean receipt to the person whose job is
+                    # chasing the vendor for it.
+                    #
+                    # Scan rows only, and unconditionally on a scan row. The
+                    # desk path has no equivalent field: nobody at the desk is
+                    # ever asked, so writing ``is_damaged: false`` there would
+                    # claim an answer that was never given. Here the operator
+                    # WAS asked, which makes ``false`` a real answer worth
+                    # recording and distinguishable from a desk row's silence.
+                    "is_damaged": is_damaged,
+                    "is_expired": is_expired,
                     # The delivery this receipt was filed against, which is not
                     # necessarily today's scan: this path upserts ONE delivery
                     # per day, so an afternoon box joins the morning's. When the

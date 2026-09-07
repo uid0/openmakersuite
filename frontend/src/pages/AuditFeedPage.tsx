@@ -13,6 +13,12 @@
  * client-side: actor username substring (cheap, avoids a user
  * lookup round-trip). Click a row to expand the JSON metadata
  * blob — kept collapsed by default to keep the page scannable.
+ *
+ * One thing does NOT wait for the row to be opened: a receipt a
+ * scanner operator flagged damaged or expired is badged on the row
+ * itself (see `conditionFlags`), because the captain scrolling this
+ * feed for vendors to chase should not have to open every row to
+ * find the deliveries that arrived broken.
  */
 import {
   Alert,
@@ -72,6 +78,33 @@ const formatTimestamp = (iso: string): string => {
   } catch {
     return iso;
   }
+};
+
+/**
+ * Condition an operator flagged at the scanner, lifted out of the metadata
+ * blob onto the row itself.
+ *
+ * The captain reads this feed to chase vendors, and "the box arrived smashed"
+ * is the single most chase-worthy thing on it — burying it inside a collapsed
+ * JSON blob means scrolling the feed does not show it at all.
+ *
+ * Scan-path rows only. The desk receive path never asks about condition and
+ * so writes neither key, which is why this tests for `=== true` rather than
+ * truthiness: `undefined` there means *nobody was asked*, and `false` means
+ * *the operator was asked and said it was sound*. Neither earns a badge —
+ * only a flag actually raised does.
+ */
+const conditionFlags = (
+  metadata: Record<string, unknown> | null | undefined,
+): { key: string; label: string; color: string }[] => {
+  const flags = [];
+  if (metadata?.is_damaged === true) {
+    flags.push({ key: 'damaged', label: 'Damaged', color: 'red' });
+  }
+  if (metadata?.is_expired === true) {
+    flags.push({ key: 'expired', label: 'Expired', color: 'orange' });
+  }
+  return flags;
 };
 
 const AuditFeedPage: React.FC = () => {
@@ -231,6 +264,7 @@ const AuditFeedPage: React.FC = () => {
                 <Table.Tbody>
                   {visibleEvents.map((event, index) => {
                     const open = expanded.has(index);
+                    const conditions = conditionFlags(event.metadata);
                     return (
                       <React.Fragment key={`${event.domain}-${event.created_at}-${index}`}>
                         <Table.Tr
@@ -258,11 +292,32 @@ const AuditFeedPage: React.FC = () => {
                               <Text c="dimmed">—</Text>
                             )}
                           </Table.Td>
-                          <Table.Td>{event.notes || <Text c="dimmed">—</Text>}</Table.Td>
+                          <Table.Td>
+                            <Group gap={6} wrap="wrap">
+                              {conditions.map((flag) => (
+                                <Badge
+                                  key={flag.key}
+                                  color={flag.color}
+                                  variant="filled"
+                                  size="sm"
+                                  data-testid={`audit-condition-${flag.key}-${index}`}
+                                >
+                                  {flag.label}
+                                </Badge>
+                              ))}
+                              {event.notes ? (
+                                <Text size="sm">{event.notes}</Text>
+                              ) : (
+                                conditions.length === 0 && (
+                                  <Text c="dimmed">—</Text>
+                                )
+                              )}
+                            </Group>
+                          </Table.Td>
                         </Table.Tr>
                         <Table.Tr>
                           <Table.Td colSpan={6} style={{ padding: 0, border: 0 }}>
-                            <Collapse in={open}>
+                            <Collapse expanded={open}>
                               <Paper p="sm" m="sm" withBorder bg="var(--mantine-color-gray-0)">
                                 <Stack gap="xs">
                                   <Text size="xs" c="dimmed">

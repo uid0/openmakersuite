@@ -725,7 +725,7 @@ const AssetFormPage: React.FC = () => {
             >
               {advancedOpen ? 'Hide advanced options' : 'Show advanced options'}
             </Button>
-            <Collapse in={advancedOpen}>
+            <Collapse expanded={advancedOpen}>
               <Paper p="md" withBorder mt="sm" radius="md">
                 <Stack gap="md">
                   <Text size="sm" c="dimmed">

@@ -1224,6 +1224,15 @@ captured none" and "this path captures none" — the same conflation of *found
 nothing* with *could not tell* that the missing row itself was. Anything else
 this path cannot report the way the desk does belongs behind that marker too.
 
+`is_damaged` / `is_expired` are the second members of that set. The scanner asks
+the operator about condition; the desk never does. So a scan row carries both
+keys ALWAYS (`false` is the operator answering "sound") and a desk row carries
+NEITHER — defaulting `false` onto a desk row would claim an answer nobody was
+asked for, which is the same *found nothing* / *could not tell* conflation
+again. Read the flag ONCE into a local shared by the `DeliveryItem` and the
+audit row: two independent reads of the same request field is how a trail
+drifts from the record it describes.
+
 **Read the figures AFTER settlement, and write the row inside the receipt's
 transaction.** `quantity_variance` / `receipt_state` describe what THIS receipt
 left, so they are read after the line is credited and
@@ -1283,6 +1292,25 @@ Updated packages:
   validation." message, and `src/utils/extractErrorMessage.ts` returns only that message.
   A form that has to name the rejected field reads `details` itself —
   `src/utils/supplierRelationships.ts` is the pattern.
+- **The repo tolerates ~70 pre-existing `tsc` errors, so a renamed Mantine prop
+  ships silently.** `@mantine/core` 9.x renamed props without a migration pass:
+  `Collapse` `in` -> `expanded` (fixed, 5 sites) and `Grid` `gutter` -> `gap`
+  (`src/components/forms/FormLayout.tsx`, still open — harmless only because
+  every caller uses the default). An unmigrated prop is DROPPED, not defaulted,
+  so the component silently renders its off state. `npx tsc --noEmit` already
+  names every one of them; grep its output for `does not exist on type` before
+  assuming a dead toggle is a state bug. To prove you added none, capture `tsc`
+  on your branch and on base and diff — see the pre-commit notes above, and
+  never wrap the command in `timeout` (macOS has no `timeout`; it exits 127 and
+  prints nothing, which reads exactly like success).
+- **Assert VISIBILITY, not presence, on anything collapsible.** Mantine's
+  `Collapse` defaults to `keepMounted`, so children stay in the DOM while shut
+  and `toBeInTheDocument()` passes on a panel that can never open — that is what
+  hid the `in`/`expanded` break. Use `toBeVisible()`, and prefer a Playwright
+  spec for the layout layer: a shut `Collapse` is hidden by `height: 0`, which
+  jsdom cannot see because it computes no layout.
+  `frontend/e2e/audit-feed-row-expand.spec.ts` is the pattern — it stubs the API
+  with `page.route()` so it needs no seeded backend.
 
 ## Maintaining this file
 

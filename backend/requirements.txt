@@ -1,4 +1,4 @@
-Django==6.0.7
+Django==6.1.1
 djangorestframework==3.18.0
 django-cors-headers==4.9.0
 psycopg2-binary==2.9.12
@@ -26,7 +26,7 @@ Pillow==12.3.0
 # Forced to the headless Agg backend in code so this does not pull GUI deps.
 matplotlib==3.11.1
 pyzbar==0.1.9  # Optional: for QR code validation (requires system zbar library)
-pypdf==6.16.2   # PDF text/form extraction for inbound work-order ingestion
+pypdf==6.17.0   # PDF text/form extraction for inbound work-order ingestion
 opencv-python-headless==5.0.0.93  # cv2.QRCodeDetector for image-based PDF ingestion
 
 # Authentication
@@ -52,7 +52,7 @@ PyJWT==2.13.0
 cryptography==50.0.1
 
 # Email (Postmark via Anymail)
-django-anymail[postmark]==15.1
+django-anymail[postmark]==15.2
 
 # Error reporting / observability (Sentry). Replaces Highlight (oms-fjs)
 # after that integration was ripped out; backend init is in
@@ -77,5 +77,5 @@ pytest-django==4.14.0
 pytest-cov==7.1.0
 pytest-mock==3.15.1
 factory-boy==3.3.3
-faker==40.37.0
+faker==40.38.0
 freezegun==1.5.5

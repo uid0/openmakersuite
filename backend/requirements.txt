@@ -45,7 +45,7 @@ drf-spectacular==0.30.0
 PyYAML==6.0.3
 
 # Utilities
-python-slugify==8.0.4
+python-slugify==9.0.0
 requests==2.34.2
 paho-mqtt==2.1.0
 PyJWT==2.13.0

@@ -68,15 +68,9 @@ from freezegun import freeze_time
 from rest_framework.test import APIClient
 
 from inventory.tests.factories import InventoryItemFactory, ItemSupplierFactory, SupplierFactory
-from reorder_queue.models import (
-    LeadTimeLog,
-    PurchaseOrder,
-    PurchaseOrderAuditEvent,
-    PurchaseOrderItem,
-    ReorderRequest,
-)
+from reorder_queue.models import LeadTimeLog, PurchaseOrder, PurchaseOrderItem
 from reorder_queue.services.receiving import receive_delivery
-from reorder_queue.tests.factories import ReorderRequestFactory, UserFactory
+from reorder_queue.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -282,7 +276,7 @@ def test_the_admin_change_form_refuses_an_order_with_no_lines(admin_client, staf
 
 
 def test_an_order_whose_every_line_was_voided_cannot_be_sent(api, staff):
-    """"Has lines" means lines that are still on the order.
+    """ "Has lines" means lines that are still on the order.
 
     ``void_item`` carries no status gate, so striking off the only line of a
     draft is a live second route to an order with nothing to order — and the
@@ -367,9 +361,9 @@ def test_the_sales_order_number_refusal_reaches_the_operator_as_the_reason(api, 
     """
     order = empty_draft(staff)
 
-    envelope = api.patch(
-        detail_url(order), {"sales_order_number": "SO-77"}, format="json"
-    ).data["error"]
+    envelope = api.patch(detail_url(order), {"sales_order_number": "SO-77"}, format="json").data[
+        "error"
+    ]
 
     assert "line item" in envelope["message"].lower()
 
@@ -457,6 +451,56 @@ def test_a_patch_sent_order_records_its_supplier_s_lead_time_when_it_arrives(api
     log = LeadTimeLog.objects.get(purchase_order=order)
     assert log.order_date == order.sent_at
     assert log.estimated_lead_time_days == 5
+
+
+def test_the_change_form_can_add_the_first_line_and_send_in_one_save(admin_client, staff):
+    """The reason the change form's send is DEFERRED past the inline formset.
+
+    Whether an order may be sent depends on its lines, and the inline that adds
+    the first one is saved AFTER ``save_model``. Refusing in ``save_model``
+    would tell an operator who did both in one save that the order has no line
+    items — a false statement in the one place they most need a true one — so
+    the transition happens in ``save_related``, once the lines are final.
+
+    Without the deferral this order is refused; without the guard running at
+    all, the empty-order checks above pass but this one is what says the guard
+    is not simply refusing everything on the change form.
+    """
+    order = empty_draft(staff)
+    item_supplier = ItemSupplierFactory(
+        supplier=order.supplier,
+        quantity_per_package=1,
+        item=InventoryItemFactory(current_stock=0),
+    )
+
+    response = post_change_form(
+        admin_client,
+        order,
+        status=PurchaseOrder.Status.SENT,
+        **{
+            "items-TOTAL_FORMS": "1",
+            "items-0-item_supplier": str(item_supplier.pk),
+            "items-0-quantity_ordered": "6",
+            "items-0-quantity_received": "0",
+            "items-0-order_in_packages": "6",
+            "items-0-unit_cost_ordered": "1.50",
+            "items-0-unit_cost_actual": "",
+            "items-0-expected_shipment_date": "",
+            "items-0-actual_shipment_date": "",
+            "items-0-notes": "",
+            "items-0-void_reason": "",
+            "items-0-closed_short_reason": "",
+            "items-0-id": "",
+            "items-0-purchase_order": str(order.pk),
+        },
+    )
+    assert response.redirect_chain, messages_from(response)
+
+    order.refresh_from_db()
+    assert order.items.count() == 1
+    assert order.status == PurchaseOrder.Status.SENT
+    assert order.sent_at is not None
+    assert order.sent_by == staff
 
 
 def test_the_admin_change_form_keeps_a_sent_at_the_operator_typed(admin_client, staff):

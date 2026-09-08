@@ -1008,16 +1008,68 @@ into the column that chooses suppliers, which is worse than the honest gap
 (`DeliveryRecord.factor` already returns 1 for "no history" on purpose).
 
 **A report keyed on a signature is not a report on a closed historical set**,
-and must not read as one. `status`/`sent_at`/`sent_by` are still writable on
-`PurchaseOrderSerializer` (`read_only_fields` is `po_number`/`updated_at`
-only), so `PATCH {"status": "sent"}` still lands a SENT order with a null
-`sent_at` — no `po_send` row, no request sweep, no `LeadTimeLog` on delivery.
-REPORTED, NOT FIXED: `ReorderRequestSerializer` closed the identical door with
-`read_only_fields` (op-xj1i), so the fix is known, but narrowing a writable
-field on the purchase-order API is an operator-visible contract change and a
-product decision. The command's docstring and its printed output both say so,
-because a count a reader believes is historical is worse than one they know is
-a live signature.
+and must not read as one — a direct database edit still lands the shape, and no
+application code can close that. What HAS closed since is every application
+route; see "Sending a purchase order" below.
+
+### Sending a purchase order: the rule, and where it is enforced
+
+**A purchase order must carry at least one line before it may be marked sent,
+and the send records the moment.** Both halves at every path, because a rule
+enforced on one route is a rule the other routes disagree with.
+
+`services.purchase_orders.send_refusal` is THE rule — one function, three
+readers: the guard inside `mark_sent`, the refusal in
+`PurchaseOrderViewSet.perform_update`, and `send_blocked_reason` on the order
+serializer. It answers the CONTENT question only (`has_active_items`) and says
+nothing about `status`: the DRAFT precondition differs per path and stays with
+each caller, and folding it in would make `send_blocked_reason` answer "it is
+already sent" to a screen that is not asking.
+
+FIVE paths reach `services.mark_sent`, and a sixth joins the list in
+`test_every_send_path_stamps_the_whole_transition`, which is parametrised over
+all of them: the API send action, `PATCH {"status": "sent"}`, the
+sales-order-number auto-send (oms-qdxss), the admin changelist action, and the
+admin CHANGE FORM. The last two were the ones nobody expects.
+
+- **`PATCH {"status": "sent"}` was the open one.** `status` is still WRITABLE —
+  the endpoint was NOT narrowed, unlike the sibling `ReorderRequestSerializer`
+  (op-xj1i), because there the PATCH went round a *permission* gate and here it
+  goes round a *transition*. `perform_update` pops `status` out of the fields
+  `save()` writes and calls the service, so the endpoint keeps its contract and
+  the transition keeps its fact set. A PATCH to any other status is untouched.
+- **The admin change form** edits `status`/`sent_at`/`sent_by` directly. Its
+  send is DEFERRED from `save_model` to `save_related`, because whether the
+  order may be sent depends on lines the inline formset has not saved yet —
+  refusing in `save_model` would tell an operator adding a line and sending in
+  one save that the order has none, which would be false. `mark_sent(at=...)`
+  honours a `sent_at` the operator typed; backdating is why that field is
+  editable.
+- **Only an ENTRY into "the supplier has it" is a send.**
+  `PurchaseOrder.SENT_ONWARD_STATUSES` is the ONE definition, read by the API
+  routing and by `report_unstamped_transitions`. Re-asserting a status a row
+  already holds is a filing change and must never re-stamp the moment — the
+  same source-state predicate `problem_settlement.settle_problem` uses.
+- **The refusal is a sentence, and it reaches the operator.** `send_to_supplier`
+  answers through `config.api_errors.error_response`, and the update path raises
+  an `APIException` rather than a serializer `ValidationError`: a field map
+  lands in `error.details` while `error.message` — the string the web toast and
+  ScanTTY's `APIError.Error()` display — falls back to the generic "One or more
+  fields failed validation.". A hand-built `{"error": "<prose>"}` is worse
+  still: ScanTTY's `parseError` cannot decode it and shows the raw body.
+- **The screen that offers the send explains the refusal before the click.**
+  `send_blocked_reason` is served like `can_receive` / `can_delete_items` so no
+  client keeps its own copy; `PurchaseOrderPage` disables the button and prints
+  the server's sentence, rather than counting lines itself.
+
+`report_unstamped_transitions` reports the rows written before all this, under
+two signatures: sent with no `sent_at`, and sent with **no line-item rows at
+all**. An order whose lines are all VOIDED is deliberately in neither — striking
+every line off an order that already went out is the oms-a8o workflow, not
+damage. Nothing is recoverable in either population, and the reasons differ: a
+moment nobody recorded cannot be reconstructed, and a pre-send line delete
+leaves no reason, no ghost and no audit row, so what a line-less order was for
+is gone too.
 
 ### The pre-send boundary: when a PO is still the shop's own document
 
@@ -1051,10 +1103,12 @@ whichever is true: "the supplier already has this line, void it instead" and
 from the two frozensets — the closed case is *outside `PRE_SUPPLIER_STATUSES`
 and outside `IN_RECEIVING_STATUSES`*, i.e. the terminal statuses, never a typed
 list of labels — with `sent_at` read only as corroboration. Do NOT key such a
-split on `sent_at` alone: `status`/`sent_at`/`sent_by` are editable on the admin
-change form and writable on `PurchaseOrderSerializer`, and rows the pre-fix
-`PurchaseOrderAdmin.mark_as_sent` sent without a stamp are still in the table,
-so an order can be live with its supplier and hold no stamp. A refusal is only
+split on `sent_at` alone: rows the pre-fix `PurchaseOrderAdmin.mark_as_sent`
+sent without a stamp are still in the table, so an order can be live with its
+supplier and hold no stamp. (`status`/`sent_at`/`sent_by` remain editable on
+the admin change form and writable on `PurchaseOrderSerializer`; writing
+`status` no longer bypasses the transition — see "Sending a purchase order" —
+but that closes no historical row and no direct database edit.) A refusal is only
 legitimate when the operator can act on it, and a refusal that misstates why is
 worse than a bare one. (The admin action itself now goes through
 `services.mark_sent` and stamps the whole set — see "A status transition owes a

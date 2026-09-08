@@ -129,9 +129,7 @@ from reorder_queue.models import LeadTimeLog, PurchaseOrder, ReorderRequest
 #: Ordered here so the printed signature reads in lifecycle order rather than
 #: in whatever order a set iterates.
 SENT_ONWARD_STATUSES = tuple(
-    status
-    for status in PurchaseOrder.Status
-    if status in PurchaseOrder.SENT_ONWARD_STATUSES
+    status for status in PurchaseOrder.Status if status in PurchaseOrder.SENT_ONWARD_STATUSES
 )
 
 #: The two damage signatures, stated in the output so the number a reader takes

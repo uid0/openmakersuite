@@ -350,12 +350,22 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         the operator's next screen. Any other exception propagates and rolls the
         whole save back — a send that failed for an unknown reason is not
         something to report as a tidy refusal.
+
+        THE ORDER IS RE-READ, and that is not defensive tidiness. ``form.instance``
+        came off ``get_queryset``'s ``prefetch_related("items")``, and
+        ``has_active_items`` reads ``self.items.all()`` through the
+        ``_line_item_totals`` cached property — so it answers with the line set
+        as it stood BEFORE the formset saved. On the very case this deferral
+        exists for, adding the first line and sending in one save, that is a
+        refusal over a line the same request had just written.
+        ``test_the_change_form_can_add_the_first_line_and_send_in_one_save``
+        caught exactly that.
         """
         super().save_related(request, form, formsets, change)
         actor = getattr(form, self._DEFERRED_SEND, None)
         if actor is None:
             return
-        purchase_order = form.instance
+        purchase_order = PurchaseOrder.objects.get(pk=form.instance.pk)
         try:
             services.mark_sent(purchase_order, actor, at=purchase_order.sent_at)
         except services.SendRefused as exc:

@@ -983,9 +983,16 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         back to "One or more fields failed validation.". Raised as an
         ``APIException`` it stays the sentence the rule wrote.
 
-        The second guard, around ``_mark_sent``, is for the race where the last
-        line is struck off between that check and this write. It answers 400
-        rather than 500.
+        That pre-check is the ONLY guard on this path, and its scope is stated
+        rather than implied: a line voided by a CONCURRENT request after it runs
+        is not caught. ``has_active_items`` resolves the ``_line_item_totals``
+        cached property, ``serializer.save()`` returns the same instance without
+        invalidating it, and nothing here takes a row lock — so a second check
+        after the save would re-read the same cached answer and prove nothing.
+        (``PurchaseOrderAdmin.save_related`` re-reads the order for a different
+        reason entirely: ``form.instance`` carries ``get_queryset``'s prefetch
+        cache and would answer with the PRE-FORMSET line set. That is
+        deterministic staleness, not a race.)
         """
         send_field = send_request_field(serializer.validated_data, serializer.instance)
         if send_field is not None:
@@ -1001,10 +1008,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         had_sales_order_number = self._has_sales_order_number(serializer.instance)
         purchase_order = serializer.save()
         if sends_via_status:
-            try:
-                self._mark_sent(purchase_order, self.request.user)
-            except services.SendRefused as exc:
-                raise SendRefusedError(exc.message)
+            self._mark_sent(purchase_order, self.request.user)
         elif not had_sales_order_number and self._has_sales_order_number(purchase_order):
             self._auto_transition_to_sent(purchase_order)
 

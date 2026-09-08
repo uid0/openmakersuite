@@ -1010,10 +1010,12 @@ into the column that chooses suppliers, which is worse than the honest gap
 **A report keyed on a signature is not a report on a closed historical set**,
 and must not read as one — a direct database edit still lands the shape, and no
 application code can close that. What HAS closed since is every route that
-SENDS; see "Sending a purchase order" below. What has NOT is a `PATCH` to
-another sent-onward status (`confirmed`, `received`, `partially_received`) on an
-order that never went out: that is not a send, is not routed, and still writes
-the status with `sent_at` null. Open gap, filed as
+SENDS; see "Sending a purchase order" below. What has NOT is a `PATCH` **or an
+admin change-form save** to a sent-onward status other than `sent` (`confirmed`,
+`received`, `partially_received`) on an order that never went out: that is not a
+send, is not routed on either surface, and still writes the status with
+`sent_at` null. The admin changelist is not a third door — `mark_as_confirmed`
+filters its queryset to `sent`. Open gap, filed with both traces as
 [issue 1053](https://github.com/uid0/openmakersuite/issues/1053) — the report
 says so on the line beside the number, because a claim that a count is closed
 is exactly the kind of reassurance that stops somebody looking.
@@ -1045,12 +1047,15 @@ admin CHANGE FORM. The last two were the ones nobody expects.
   `save()` writes and calls the service, so the endpoint keeps its contract and
   the transition keeps its fact set. A PATCH to any other status is untouched —
   deliberately, and that leaves a gap the send rule does not cover: `confirmed`,
-  `received` and `partially_received` are sent-onward statuses, so a PATCH
+  `received` and `partially_received` are sent-onward statuses, so a move
   straight to one of them from DRAFT still lands `sent_at` null and still costs
-  the delivery its `LeadTimeLog`. Each has its own service function with its own
-  preconditions (`confirm_order` requires SENT; the receiving statuses are
-  DERIVED by `receiving.refresh_receipt_status`), so routing them is its own
-  product decision — filed as
+  the delivery its `LeadTimeLog`. **Two surfaces make that move**, not one — the
+  PATCH, and an admin change-form save selecting the same status, which
+  `save_model` does not defer because it defers only a move to `sent`. Each
+  status has its own service function with its own preconditions
+  (`confirm_order` requires SENT; the receiving statuses are DERIVED by
+  `receiving.refresh_receipt_status`), so routing them is its own product
+  decision — filed with both traces as
   [issue 1053](https://github.com/uid0/openmakersuite/issues/1053), not folded
   in here.
 - **The admin change form** edits `status`/`sent_at`/`sent_by` directly. Its

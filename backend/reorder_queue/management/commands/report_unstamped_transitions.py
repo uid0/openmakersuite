@@ -81,16 +81,19 @@ changed since this command was written is that every SEND route is now closed:
 not narrowed, because the rule was what needed enforcing, not the contract —
 but writing ``status`` SENT no longer bypasses the transition.
 
-The send routes are not every route into this shape. ``PATCH`` to ANOTHER
+The send routes are not every route into this shape. A move to ANOTHER
 ``SENT_ONWARD`` status — ``confirmed``, ``received``, ``partially_received`` —
-is not a send and is not routed, so it still writes the status straight through
-with ``sent_at`` left null, and the row lands squarely on the signature below.
-That gap is open and filed as
-https://github.com/uid0/openmakersuite/issues/1053; closing it is a separate
-product decision, because each of those statuses has its own service function
-with its own preconditions (``services.confirm_order`` requires SENT, and the
-receiving statuses are DERIVED by ``receiving.refresh_receipt_status`` rather
-than set by hand).
+is not a send and is not routed, and TWO application doors still make it: a
+``PATCH`` to one of those statuses, and an admin CHANGE-FORM save that selects
+one. Both write the status straight through with ``sent_at`` left null, and the
+row lands squarely on the signature below. The admin changelist is NOT one of
+them: ``PurchaseOrderAdmin.mark_as_confirmed`` filters its queryset to SENT, so
+it cannot move a never-sent order. That gap is open and filed as
+https://github.com/uid0/openmakersuite/issues/1053, which carries both traces;
+closing it is a separate product decision, because each of those statuses has
+its own service function with its own preconditions
+(``services.confirm_order`` requires SENT, and the receiving statuses are
+DERIVED by ``receiving.refresh_receipt_status`` rather than set by hand).
 
 A SECOND ORDER SIGNATURE
 ------------------------
@@ -176,8 +179,8 @@ def orders_sent_without_a_moment():
 
     THE SHAPE, NOT A CLOSED HISTORICAL SET. This finds rows carrying the damage
     signature whenever they were written, and a non-zero count next quarter is
-    NOT automatically a count of pre-fix rows. Two routes can still produce the
-    shape today:
+    NOT automatically a count of pre-fix rows. Three routes can still produce
+    the shape today:
 
       * a direct database edit, which no application code can close;
       * ``PATCH /api/reorders/purchase-orders/<id>/`` with
@@ -185,15 +188,23 @@ def orders_sent_without_a_moment():
         on an order that never went out. ``PurchaseOrderSerializer.read_only_fields``
         is ``["po_number", "updated_at"]``, so ``status`` is writable and the
         serializer checks no transition; only a write to ``sent`` is treated as
-        a send and routed. The row lands ``confirmed`` with a null ``sent_at``,
-        and its delivery writes no ``LeadTimeLog`` because
-        ``receiving.create_lead_time_log`` returns early on a falsy
-        ``sent_at``: the same chain, through a status the send rule says
-        nothing about.
+        a send and routed;
+      * an admin CHANGE-FORM save selecting one of those same statuses.
+        ``status`` is a plain editable field on the fieldset, and
+        ``PurchaseOrderAdmin.save_model`` defers only a move to ``sent``, so a
+        DRAFT order set to "Confirmed by Supplier" with ``sent_at`` left blank
+        is written straight through. The admin CHANGELIST is not a third door:
+        ``mark_as_confirmed`` filters its queryset to SENT, so it leaves a
+        never-sent order alone.
 
-    That second one is REPORTED, NOT FIXED here, and is filed as
-    https://github.com/uid0/openmakersuite/issues/1053. Each of those statuses
-    has its own service function with its own preconditions
+    Either way the row lands ``confirmed`` with a null ``sent_at``, and its
+    delivery writes no ``LeadTimeLog`` because
+    ``receiving.create_lead_time_log`` returns early on a falsy ``sent_at``:
+    the same chain, through a status the send rule says nothing about.
+
+    Those two application routes are REPORTED, NOT FIXED here, and are filed
+    together as https://github.com/uid0/openmakersuite/issues/1053. Each of
+    those statuses has its own service function with its own preconditions
     (``services.confirm_order`` requires SENT; the receiving statuses are
     DERIVED by ``receiving.refresh_receipt_status``, not set by hand), so
     routing them is a separate product decision rather than part of the send
@@ -225,8 +236,9 @@ def orders_sent_with_no_line_items():
 
     Like its sibling above this is a SHAPE, not a closed historical set, and for
     the same remaining reasons: a direct database edit, and the unrouted PATCH
-    to another SENT_ONWARD status (issue 1053). Every path that SENDS passes the
-    guard inside ``services.mark_sent`` (oms-po-send-rule).
+    or admin change-form save to another SENT_ONWARD status (issue 1053). Every
+    path that SENDS passes the guard inside ``services.mark_sent``
+    (oms-po-send-rule).
     """
     return (
         PurchaseOrder.objects.filter(status__in=SENT_ONWARD_STATUSES)
@@ -404,10 +416,12 @@ class Command(BaseCommand):
             "(oms-po-send-rule)."
         )
         self.stdout.write(
-            "  but a PATCH to ANOTHER sent-onward status (confirmed, received, "
-            "partially_received) is not a send, is not routed, and still lands "
-            "this shape with sent_at null — open gap, filed as "
-            "https://github.com/uid0/openmakersuite/issues/1053."
+            "  but a PATCH or an admin change-form save to ANOTHER sent-onward "
+            "status (confirmed, received, partially_received) is not a send, is "
+            "not routed, and still lands this shape with sent_at null — open "
+            "gap, filed as https://github.com/uid0/openmakersuite/issues/1053. "
+            "The admin changelist is not affected: mark_as_confirmed filters to "
+            "sent, so it cannot move a never-sent order."
         )
         for row in payload["orders_sent_without_sent_at"]:
             name = row["po_number"] or "#{}".format(row["id"])

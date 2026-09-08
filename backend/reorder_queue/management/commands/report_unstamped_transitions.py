@@ -72,28 +72,26 @@ never be read as covering something narrower or broader than it does:
     clean records damaged, so they are excluded and the order count is a FLOOR.
     The output says so on the line beside the number.
 
-It is a signature, so it is not a historical set — a DIRECT DATABASE EDIT
-still lands the order shape, and no application code can close that. What has
-changed since this command was written is that every SEND route is now closed:
-``PATCH {"status": "sent"}`` and the admin change form both go through
-``services.mark_sent`` (oms-po-send-rule), which stamps the whole transition.
-``status``, ``sent_at`` and ``sent_by`` are still WRITABLE — the endpoint was
-not narrowed, because the rule was what needed enforcing, not the contract —
-but writing ``status`` SENT no longer bypasses the transition.
+It is a signature, so it is not a historical set. What has changed since this
+command was written is that the SEND TRANSITIONS are closed: every path that
+moves an order to ``sent`` goes through ``services.mark_sent``
+(oms-po-send-rule), which stamps.
 
-The send routes are not every route into this shape. A move to ANOTHER
-``SENT_ONWARD`` status — ``confirmed``, ``received``, ``partially_received`` —
-is not a send and is not routed, and TWO application doors still make it: a
-``PATCH`` to one of those statuses, and an admin CHANGE-FORM save that selects
-one. Both write the status straight through with ``sent_at`` left null, and the
-row lands squarely on the signature below. The admin changelist is NOT one of
-them: ``PurchaseOrderAdmin.mark_as_confirmed`` filters its queryset to SENT, so
-it cannot move a never-sent order. That gap is open and filed as
-https://github.com/uid0/openmakersuite/issues/1053, which carries both traces;
-closing it is a separate product decision, because each of those statuses has
-its own service function with its own preconditions
-(``services.confirm_order`` requires SENT, and the receiving statuses are
-DERIVED by ``receiving.refresh_receipt_status`` rather than set by hand).
+NOTHING ELSE IS, and that boundary is the honest statement of what a non-zero
+count can mean. ``status``, ``sent_at`` and ``sent_by`` are all WRITABLE on the
+API and editable on the admin change form — the endpoint was deliberately not
+narrowed, because the rule was what needed enforcing, not the contract — so ANY
+write that leaves an order in a sent-onward status with a null ``sent_at``
+lands this signature, whether it moves the status or clears the stamp. So does
+a direct database edit, which no application code can close.
+
+Deliberately NOT enumerated as a list of doors. Earlier drafts named the routes
+one at a time and each naming turned out to be short by one, because the routes
+are the complement of a small closed set rather than a set anybody can finish
+writing down. The boundary above stays true without maintenance. The open
+product question — whether those writes should be routed or the fields
+narrowed — is filed as https://github.com/uid0/openmakersuite/issues/1053,
+which carries the traces.
 
 A SECOND ORDER SIGNATURE
 ------------------------
@@ -163,7 +161,7 @@ ORDER_SIGNATURE = (
 REQUEST_SIGNATURE = "reviewed_by set, reviewed_at NULL"
 
 #: The second order signature. Counting line ROWS, not active ones: an order
-#: emptied by voting every line off after it went out is the oms-a8o workflow,
+#: emptied by voiding every line off after it went out is the oms-a8o workflow,
 #: and its rows are the record of what was struck off.
 EMPTY_ORDER_SIGNATURE = (
     "status in ({}) with no line-item rows at all; an order whose lines are all "
@@ -179,43 +177,36 @@ def orders_sent_without_a_moment():
 
     THE SHAPE, NOT A CLOSED HISTORICAL SET. This finds rows carrying the damage
     signature whenever they were written, and a non-zero count next quarter is
-    NOT automatically a count of pre-fix rows. Three routes can still produce
-    the shape today:
+    NOT automatically a count of pre-fix rows.
 
-      * a direct database edit, which no application code can close;
-      * ``PATCH /api/reorders/purchase-orders/<id>/`` with
-        ``{"status": "confirmed"}`` — or ``received``/``partially_received`` —
-        on an order that never went out. ``PurchaseOrderSerializer.read_only_fields``
-        is ``["po_number", "updated_at"]``, so ``status`` is writable and the
-        serializer checks no transition; only a write to ``sent`` is treated as
-        a send and routed;
-      * an admin CHANGE-FORM save selecting one of those same statuses.
-        ``status`` is a plain editable field on the fieldset, and
-        ``PurchaseOrderAdmin.save_model`` defers only a move to ``sent``, so a
-        DRAFT order set to "Confirmed by Supplier" with ``sent_at`` left blank
-        is written straight through. The admin CHANGELIST is not a third door:
-        ``mark_as_confirmed`` filters its queryset to SENT, so it leaves a
-        never-sent order alone.
+    WHAT IS CLOSED: the send TRANSITIONS. Every path that moves an order to
+    ``sent`` goes through ``services.mark_sent`` (oms-po-send-rule) — all five
+    of them, the API's ``send_to_supplier`` action, ``PATCH {"status": "sent"}``,
+    the sales-order-number auto-send on create and update, the admin
+    changelist's bulk action, and the admin change form — and that service
+    stamps the whole fact set inside one unit of work.
 
-    Either way the row lands ``confirmed`` with a null ``sent_at``, and its
-    delivery writes no ``LeadTimeLog`` because
-    ``receiving.create_lead_time_log`` returns early on a falsy ``sent_at``:
-    the same chain, through a status the send rule says nothing about.
+    WHAT IS NOT: anything else. ``status``, ``sent_at`` and ``sent_by`` are all
+    writable on ``PurchaseOrderSerializer`` (``read_only_fields`` is
+    ``["po_number", "updated_at"]``) and editable on the admin change form, so
+    ANY write that leaves an order in a sent-onward status with a null
+    ``sent_at`` lands this signature — whether it moves the status somewhere
+    the send rule says nothing about, or clears the stamp on an order that had
+    already gone out. A direct database edit does the same, and no application
+    code can close that one.
 
-    Those two application routes are REPORTED, NOT FIXED here, and are filed
-    together as https://github.com/uid0/openmakersuite/issues/1053. Each of
-    those statuses has its own service function with its own preconditions
-    (``services.confirm_order`` requires SENT; the receiving statuses are
-    DERIVED by ``receiving.refresh_receipt_status``, not set by hand), so
-    routing them is a separate product decision rather than part of the send
-    rule.
+    The consequence is identical however the row got here: a delivery against
+    it writes no ``LeadTimeLog``, because ``receiving.create_lead_time_log``
+    returns early on a falsy ``sent_at``, so the supplier's performance on that
+    order never reaches the table
+    ``inventory.services.supplier_selection`` scores from.
 
-    What IS closed: every route that SENDS, all five through
-    ``services.mark_sent`` (oms-po-send-rule) — the API's ``send_to_supplier``
-    action, ``PATCH {"status": "sent"}``, the sales-order-number auto-send on
-    create and update, the admin changelist's bulk action, and the admin change
-    form. That service has always stamped ``sent_at`` and now records the whole
-    transition inside one unit of work.
+    That boundary is stated as a boundary and NOT as a list of doors, on
+    purpose: earlier drafts enumerated the routes and each enumeration proved
+    short by one, because they are the complement of a small closed set rather
+    than a set that can be finished. Whether to route those writes or narrow
+    the fields is an open product decision, filed as
+    https://github.com/uid0/openmakersuite/issues/1053 with the traces.
     """
     return (
         PurchaseOrder.objects.filter(status__in=SENT_ONWARD_STATUSES, sent_at__isnull=True)
@@ -234,11 +225,11 @@ def orders_sent_with_no_line_items():
     nothing has arrived against, so such an order stays ``sent`` until somebody
     voids or cancels it by hand.
 
-    Like its sibling above this is a SHAPE, not a closed historical set, and for
-    the same remaining reasons: a direct database edit, and the unrouted PATCH
-    or admin change-form save to another SENT_ONWARD status (issue 1053). Every
-    path that SENDS passes the guard inside ``services.mark_sent``
-    (oms-po-send-rule).
+    Like its sibling above this is a SHAPE, not a closed historical set, and the
+    boundary is the same one: every path that SENDS passes the guard inside
+    ``services.mark_sent`` (oms-po-send-rule), and nothing else is guarded — a
+    write that puts an order into a sent-onward status by any other means, or a
+    direct database edit, still lands it here (issue 1053).
     """
     return (
         PurchaseOrder.objects.filter(status__in=SENT_ONWARD_STATUSES)
@@ -410,18 +401,17 @@ class Command(BaseCommand):
             "sent_at can no longer be told apart from one that never went out."
         )
         self.stdout.write(
-            "  and it is not necessarily historical: a direct database edit still "
-            "lands this shape. Every SEND route is closed — PATCH status=sent "
-            "and the admin change form both go through services.mark_sent now "
-            "(oms-po-send-rule)."
+            "  and it is not necessarily historical. The send TRANSITIONS are "
+            "closed: every path that moves an order to sent goes through "
+            "services.mark_sent, which stamps (oms-po-send-rule)."
         )
         self.stdout.write(
-            "  but a PATCH or an admin change-form save to ANOTHER sent-onward "
-            "status (confirmed, received, partially_received) is not a send, is "
-            "not routed, and still lands this shape with sent_at null — open "
-            "gap, filed as https://github.com/uid0/openmakersuite/issues/1053. "
-            "The admin changelist is not affected: mark_as_confirmed filters to "
-            "sent, so it cannot move a never-sent order."
+            "  nothing else is. status, sent_at and sent_by are writable on the "
+            "API and editable on the admin change form, so ANY write that "
+            "leaves an order in a sent-onward status with a null sent_at lands "
+            "this signature — whether it moves the status or clears the stamp — "
+            "as does a direct database edit. Open question, filed as "
+            "https://github.com/uid0/openmakersuite/issues/1053."
         )
         for row in payload["orders_sent_without_sent_at"]:
             name = row["po_number"] or "#{}".format(row["id"])

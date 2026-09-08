@@ -673,16 +673,73 @@ def test_an_order_with_no_sales_order_number_still_sends(api, staff):
 
 
 def test_a_sales_order_number_on_an_order_with_lines_is_recorded_and_sends_it(api, staff):
-    """The auto-send still works where the order has something to send."""
+    """The auto-send still works where the order has something to send.
+
+    Naming the moment rather than asserting "not None": that weaker shape is
+    what let a supplied ``sent_at`` be overwritten on the sibling send branch.
+    """
     order = draft_with_a_line(staff)
 
-    response = api.patch(detail_url(order), {"sales_order_number": "SO-42"}, format="json")
+    with freeze_time("2026-04-07 09:30:00"):
+        response = api.patch(detail_url(order), {"sales_order_number": "SO-42"}, format="json")
 
     assert response.status_code == 200
     order.refresh_from_db()
     assert order.sales_order_number == "SO-42"
     assert order.status == PurchaseOrder.Status.SENT
-    assert order.sent_at is not None
+    assert order.sent_at == datetime(2026, 4, 7, 9, 30, tzinfo=dt_timezone.utc)
+    assert order.sent_by == staff
+
+
+def test_the_auto_send_records_the_moment_the_caller_supplied(api, staff):
+    """The sales-order-number branch SENDS, so it owes the same honouring.
+
+    Both branches of ``perform_update`` perform the transition, so the supplied
+    stamp has to reach ``services.mark_sent`` on either. Letting ``save()``
+    write it and then having the service replace it with now does not merely
+    lose the operator's backdate — ``receiving.create_lead_time_log`` computes
+    ``LeadTimeLog`` from ``sent_at``, so it records a WRONG lead time in the
+    column ``supplier_selection`` scores suppliers on.
+    """
+    order = draft_with_a_line(staff)
+    backdated = datetime(2026, 3, 1, 10, 0, tzinfo=dt_timezone.utc)
+    other = UserFactory(is_staff=True)
+
+    with freeze_time("2026-04-07 09:30:00"):
+        response = api.patch(
+            detail_url(order),
+            {
+                "sales_order_number": "SO-42",
+                "sent_at": backdated.isoformat(),
+                "sent_by": other.pk,
+            },
+            format="json",
+        )
+
+    assert response.status_code == 200, response.data
+    order.refresh_from_db()
+    assert order.status == PurchaseOrder.Status.SENT
+    assert order.sales_order_number == "SO-42"
+    assert order.sent_at == backdated
+    assert order.sent_by == other
+
+
+def test_the_auto_send_that_supplies_no_moment_is_stamped_with_now(api, staff):
+    """Forwarding a supplied stamp must not turn "none supplied" into no stamp.
+
+    A null ``sent_at`` is the exact shape ``create_lead_time_log`` returns
+    early on, so the fallback is the half of the rule that says a send records
+    its moment.
+    """
+    order = draft_with_a_line(staff)
+
+    with freeze_time("2026-04-07 09:30:00"):
+        response = api.patch(detail_url(order), {"sales_order_number": "SO-7"}, format="json")
+
+    assert response.status_code == 200, response.data
+    order.refresh_from_db()
+    assert order.sent_at == datetime(2026, 4, 7, 9, 30, tzinfo=dt_timezone.utc)
+    assert order.sent_by == staff
 
 
 def test_creating_an_order_with_a_sales_order_number_still_sends_it(api, staff):

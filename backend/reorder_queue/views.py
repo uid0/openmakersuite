@@ -973,12 +973,15 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         order's status only ever moves inside that service's transaction,
         instead of being written SENT here and stamped a moment later.
 
-        ``sent_at`` and ``sent_by`` are popped ALONGSIDE it, on that branch
-        only, and handed to the same call. They are writable fields, so a
-        caller may supply them to record a send that already happened; letting
-        ``save()`` write them and then having the service overwrite them with
-        now/``request.user`` would discard that silently. Worse than losing the
-        fact: ``receiving.create_lead_time_log`` computes ``LeadTimeLog`` from
+        ``sent_at`` and ``sent_by`` are popped ALONGSIDE it and handed to the
+        same call, on EITHER branch that sends — the status move and the
+        sales-order-number auto-send both perform the transition, so the
+        predicate is ``send_field is not None`` rather than the name of one of
+        them. They are writable fields, so a caller may supply them to record a
+        send that already happened; letting ``save()`` write them and then
+        having the service overwrite them with now/``request.user`` would
+        discard that silently. Worse than losing the fact:
+        ``receiving.create_lead_time_log`` computes ``LeadTimeLog`` from
         ``sent_at``, so a discarded backdate records a WRONG lead time in the
         column ``inventory.services.supplier_selection`` scores on. Absent,
         both fall through to now and the requesting user, which is every
@@ -1014,10 +1017,11 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         sends_via_status = send_field == "status"
         sent_at = None
         sent_by = None
-        if sends_via_status:
-            serializer.validated_data.pop("status")
+        if send_field is not None:
             sent_at = serializer.validated_data.pop("sent_at", None)
             sent_by = serializer.validated_data.pop("sent_by", None)
+        if sends_via_status:
+            serializer.validated_data.pop("status")
         # Capture the pre-update value so we only auto-send on the empty ->
         # non-empty edge. Editing other fields, or clearing the number, must
         # never change status (oms-qdxss).
@@ -1026,7 +1030,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         if sends_via_status:
             self._mark_sent(purchase_order, self.request.user, at=sent_at, sent_by=sent_by)
         elif not had_sales_order_number and self._has_sales_order_number(purchase_order):
-            self._auto_transition_to_sent(purchase_order)
+            self._auto_transition_to_sent(purchase_order, at=sent_at, sent_by=sent_by)
 
     @staticmethod
     def _has_sales_order_number(purchase_order):
@@ -1037,13 +1041,20 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         """
         return bool((purchase_order.sales_order_number or "").strip())
 
-    def _auto_transition_to_sent(self, purchase_order):
+    def _auto_transition_to_sent(self, purchase_order, at=None, sent_by=None):
         """Auto-move a DRAFT PO to SENT when a sales order number is attached.
 
         Idempotent: a no-op unless the PO is currently DRAFT, so attaching a
         number to an already-SENT/confirmed/received PO never re-stamps or
         downgrades it. Wrapped defensively so a failure in the transition never
         breaks the create/update that triggered it (oms-qdxss).
+
+        ``at``/``sent_by`` are forwarded for the same reason the status branch
+        forwards them: this IS a send, so a moment the caller supplied has to
+        reach the transition rather than be written by ``save()`` and then
+        overwritten with now. ``perform_create`` passes neither — the create
+        serializer carries no such fields — so it stamps now and the requester,
+        exactly as before.
 
         The re-read on that failure path is the other half of the guarantee.
         ``services.mark_sent`` mutates the instance BEFORE its transaction
@@ -1056,7 +1067,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         if purchase_order.status != PurchaseOrder.Status.DRAFT:
             return
         try:
-            self._mark_sent(purchase_order, self.request.user)
+            self._mark_sent(purchase_order, self.request.user, at=at, sent_by=sent_by)
         except Exception:
             purchase_order.refresh_from_db()
             import logging

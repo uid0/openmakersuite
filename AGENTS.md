@@ -1008,17 +1008,22 @@ into the column that chooses suppliers, which is worse than the honest gap
 (`DeliveryRecord.factor` already returns 1 for "no history" on purpose).
 
 **A report keyed on a signature is not a report on a closed historical set**,
-and must not read as one — a direct database edit still lands the shape, and no
-application code can close that. What HAS closed since is every route that
-SENDS; see "Sending a purchase order" below. What has NOT is a `PATCH` **or an
-admin change-form save** to a sent-onward status other than `sent` (`confirmed`,
-`received`, `partially_received`) on an order that never went out: that is not a
-send, is not routed on either surface, and still writes the status with
-`sent_at` null. The admin changelist is not a third door — `mark_as_confirmed`
-filters its queryset to `sent`. Open gap, filed with both traces as
-[issue 1053](https://github.com/uid0/openmakersuite/issues/1053) — the report
-says so on the line beside the number, because a claim that a count is closed
-is exactly the kind of reassurance that stops somebody looking.
+and must not read as one. What HAS closed is the send **transitions**: every
+path that moves an order to `sent` goes through `services.mark_sent`, which
+stamps — see "Sending a purchase order" below. **Nothing else is.** `status`,
+`sent_at` and `sent_by` are writable on the API and editable on the admin
+change form, so ANY write that leaves an order in a sent-onward status with a
+null `sent_at` lands this signature, whether it moves the status or clears the
+stamp — as does a direct database edit, which no application code can close.
+
+**State that as a boundary, never as a list of doors.** Three successive
+drafts enumerated the remaining routes and each was short by one, because they
+are the complement of a small closed set rather than a set anybody can finish
+writing down; a list that is short in the reassuring direction is exactly the
+kind of reassurance that stops somebody looking. The boundary needs no
+maintenance when a fifth door turns up. Whether to route those writes or narrow
+the fields is the open product decision, filed with the traces as
+[issue 1053](https://github.com/uid0/openmakersuite/issues/1053).
 
 ### Sending a purchase order: the rule, and where it is enforced
 
@@ -1046,16 +1051,14 @@ admin CHANGE FORM. The last two were the ones nobody expects.
   goes round a *transition*. `perform_update` pops `status` out of the fields
   `save()` writes and calls the service, so the endpoint keeps its contract and
   the transition keeps its fact set. A PATCH to any other status is untouched —
-  deliberately, and that leaves a gap the send rule does not cover: `confirmed`,
-  `received` and `partially_received` are sent-onward statuses, so a move
-  straight to one of them from DRAFT still lands `sent_at` null and still costs
-  the delivery its `LeadTimeLog`. **Two surfaces make that move**, not one — the
-  PATCH, and an admin change-form save selecting the same status, which
-  `save_model` does not defer because it defers only a move to `sent`. Each
-  status has its own service function with its own preconditions
+  deliberately, and **what the send rule covers is the transition to `sent`,
+  not the `sent_at` column**. Any write that leaves an order sent-onward with a
+  null `sent_at` still costs the delivery its `LeadTimeLog`, and neither the
+  API nor the admin change form guards that. Do not try to list the ways in:
+  each status has its own service function with its own preconditions
   (`confirm_order` requires SENT; the receiving statuses are DERIVED by
-  `receiving.refresh_receipt_status`), so routing them is its own product
-  decision — filed with both traces as
+  `receiving.refresh_receipt_status`), so routing them, or narrowing the
+  fields, is its own product decision — filed with the traces as
   [issue 1053](https://github.com/uid0/openmakersuite/issues/1053), not folded
   in here.
 - **The admin change form** edits `status`/`sent_at`/`sent_by` directly. Its

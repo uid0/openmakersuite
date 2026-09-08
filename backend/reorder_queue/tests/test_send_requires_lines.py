@@ -852,11 +852,14 @@ def test_a_change_form_resend_files_under_the_operator_who_re_sent_it(admin_clie
     assert order.status == PurchaseOrder.Status.SENT
     assert order.sent_by == replacement
 
+    # Ordered by ``created_at``, NOT by ``id``: this model's primary key is a
+    # random ``UUIDField``, so "-id" picks an arbitrary one of the two po_send
+    # rows and the check passes or fails on a coin toss.
     send_event = (
         PurchaseOrderAuditEvent.objects.filter(
             purchase_order=order, action=PurchaseOrderAuditEvent.Action.PO_SEND
         )
-        .order_by("-id")
+        .order_by("-created_at")
         .first()
     )
     assert send_event.actor == replacement

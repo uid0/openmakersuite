@@ -29,8 +29,15 @@ than from where the defect was noticed:
 
 All five now reach ``services.purchase_orders.mark_sent``, which owns the whole
 transition, and the one refusal rule ``services.purchase_orders.send_refusal``.
-:mod:`reorder_queue.tests.test_admin_status_transitions` parametrises the
-stamping half over the same paths.
+
+THE STAMPING HALF IS PINNED ELSEWHERE, over the same five paths:
+``test_every_send_path_stamps_the_whole_transition`` in
+:mod:`reorder_queue.tests.test_admin_status_transitions` is parametrised over
+each of them and asserts the whole fact set — status, ``sent_by``, ``sent_at``,
+exactly one ``po_send`` audit row and the linked request sweep. A sixth send
+path joins that list. What is pinned HERE is the refusal, the operator-facing
+reason, and the two facts that belong to one path each: the moment reaching the
+response body, and the change form keeping a ``sent_at`` the operator typed.
 
 DELIBERATELY EXCLUDED, with the reason:
 
@@ -298,27 +305,73 @@ def test_an_order_whose_every_line_was_voided_cannot_be_sent(api, staff):
 def test_the_send_action_s_refusal_names_the_missing_lines_and_what_to_do(api, staff):
     """A bare 400 leaves an operator on a screen with a button that does nothing.
 
-    Asserted on the payload the web page actually renders — ``extractErrorMessage``
-    reads ``data.error`` — and on both halves of an actionable refusal: WHY
-    (no line items) and WHAT NEXT (add one).
+    Asserted on the STANDARDIZED envelope (``config.api_errors``) rather than a
+    hand-built body, because ``error.message`` is the field both clients put in
+    front of an operator: ``extractErrorMessage`` in the web UI's toast and
+    ScanTTY's ``APIError.Error()`` at the terminal that sends orders. A
+    hand-built ``{"error": "<prose>"}`` defeats ScanTTY's ``parseError`` and
+    reaches the operator as a raw JSON dump.
+
+    Both halves of an actionable refusal are pinned: WHY (no line items) and
+    WHAT NEXT (add one).
     """
     order = empty_draft(staff)
 
     response = api.post(send_url(order))
 
-    message = response.data["error"]
-    assert "line item" in message.lower()
-    assert "add" in message.lower()
-    assert response.data["code"] == "no_line_items"
+    envelope = response.data["error"]
+    assert envelope["code"] == "no_line_items"
+    assert "line item" in envelope["message"].lower()
+    assert "add" in envelope["message"].lower()
 
 
-def test_the_patch_refusal_names_the_reason_on_the_status_field(api, staff):
-    """The PATCH refusal is a field error against ``status``, not a bare 400."""
+def test_the_send_action_s_draft_refusal_answers_in_the_same_envelope(api, staff):
+    """The sibling refusal on the same action, in the same shape.
+
+    Two refusals answering in two shapes is how the second one drifts, and this
+    one reached ScanTTY as a raw body for the same reason the one above would
+    have. It also NAMES the order and the status it is actually in, which
+    "Only draft orders can be sent to suppliers" left the operator to work out.
+    """
+    order = draft_with_a_line(staff)
+    order.status = PurchaseOrder.Status.CONFIRMED
+    order.save()
+
+    envelope = api.post(send_url(order)).data["error"]
+
+    assert envelope["code"] == "not_draft"
+    assert order.po_number in envelope["message"]
+    assert "Confirmed by Supplier" in envelope["message"]
+
+
+def test_the_patch_refusal_reaches_the_operator_as_the_reason(api, staff):
+    """Not the envelope's generic "One or more fields failed validation.".
+
+    A field-keyed error would put the reason in ``error.details`` where neither
+    client shows it; ``error.message`` is what an operator reads.
+    """
     order = empty_draft(staff)
 
-    response = api.patch(detail_url(order), {"status": "sent"}, format="json")
+    envelope = api.patch(detail_url(order), {"status": "sent"}, format="json").data["error"]
 
-    assert "line item" in str(response.data["status"]).lower()
+    assert "line item" in envelope["message"].lower()
+    assert "add" in envelope["message"].lower()
+
+
+def test_the_sales_order_number_refusal_reaches_the_operator_as_the_reason(api, staff):
+    """The auto-send refusal, which is the one a web operator can actually hit.
+
+    The PO detail page PATCHes ``sales_order_number`` (``purchaseOrderAPI.updateOrder``)
+    and never PATCHes ``status``, so this is the shape of refusal its toast has
+    to be able to render.
+    """
+    order = empty_draft(staff)
+
+    envelope = api.patch(
+        detail_url(order), {"sales_order_number": "SO-77"}, format="json"
+    ).data["error"]
+
+    assert "line item" in envelope["message"].lower()
 
 
 def test_the_admin_bulk_send_says_why_it_sent_nothing(admin_client, staff):
@@ -369,36 +422,6 @@ def test_a_draft_with_no_lines_says_on_its_own_payload_why_it_cannot_be_sent(api
 # ─────────────────────────────────────────────────────────────────────────────
 # Half two: sending stamps the moment — and what the moment is FOR
 # ─────────────────────────────────────────────────────────────────────────────
-def test_a_patch_to_sent_stamps_the_whole_transition(api, staff):
-    """``PATCH {"status": "sent"}`` owes every fact the send action owes.
-
-    It wrote ``status`` alone through the serializer: no ``sent_at``, no
-    ``sent_by``, no ``po_send`` row for the staff audit feed and no sweep of
-    the approved requests the order fulfils. The count is EXACTLY one so a
-    second audit writer coming back is caught.
-    """
-    item = InventoryItemFactory(current_stock=0)
-    order = draft_with_a_line(staff, item=item)
-    request_row = ReorderRequestFactory(item=item, status=ReorderRequest.Status.APPROVED)
-
-    response = api.patch(detail_url(order), {"status": "sent"}, format="json")
-
-    assert response.status_code == 200
-    order.refresh_from_db()
-    assert order.status == PurchaseOrder.Status.SENT
-    assert order.sent_at is not None
-    assert order.sent_by == staff
-    assert (
-        PurchaseOrderAuditEvent.objects.filter(
-            purchase_order=order, action=PurchaseOrderAuditEvent.Action.PO_SEND
-        ).count()
-        == 1
-    )
-    request_row.refresh_from_db()
-    assert request_row.status == ReorderRequest.Status.ORDERED
-    assert request_row.order_number == order.po_number
-
-
 def test_a_patch_to_sent_answers_with_the_moment_it_recorded(api, staff):
     """The response body describes the row the caller now has, stamp included."""
     order = draft_with_a_line(staff)
@@ -434,34 +457,6 @@ def test_a_patch_sent_order_records_its_supplier_s_lead_time_when_it_arrives(api
     log = LeadTimeLog.objects.get(purchase_order=order)
     assert log.order_date == order.sent_at
     assert log.estimated_lead_time_days == 5
-
-
-def test_the_admin_change_form_stamps_the_moment_it_sent_the_order(admin_client, staff):
-    """A change-form send owes the same set as every other send.
-
-    ``sent_at`` is an editable field beside ``status`` on that form, so an
-    operator who moved the status and left the stamp blank produced exactly the
-    damage signature ``report_unstamped_transitions`` looks for.
-    """
-    item = InventoryItemFactory(current_stock=0)
-    order = draft_with_a_line(staff, item=item)
-    request_row = ReorderRequestFactory(item=item, status=ReorderRequest.Status.APPROVED)
-
-    response = post_change_form(admin_client, order, status=PurchaseOrder.Status.SENT)
-    assert response.redirect_chain, messages_from(response)
-
-    order.refresh_from_db()
-    assert order.status == PurchaseOrder.Status.SENT
-    assert order.sent_at is not None
-    assert order.sent_by == staff
-    assert (
-        PurchaseOrderAuditEvent.objects.filter(
-            purchase_order=order, action=PurchaseOrderAuditEvent.Action.PO_SEND
-        ).count()
-        == 1
-    )
-    request_row.refresh_from_db()
-    assert request_row.status == ReorderRequest.Status.ORDERED
 
 
 def test_the_admin_change_form_keeps_a_sent_at_the_operator_typed(admin_client, staff):

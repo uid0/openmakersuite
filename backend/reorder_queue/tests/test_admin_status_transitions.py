@@ -244,15 +244,95 @@ def send_via_api(client_for, order, actor):
     assert response.status_code == 200
 
 
-@pytest.mark.parametrize("send", [send_via_admin, send_via_api], ids=["admin", "api"])
+def send_via_api_patch(client_for, order, actor):
+    """``PATCH {"status": "sent"}`` — the generic update path (oms-po-send-rule).
+
+    It wrote the column straight through ``PurchaseOrderSerializer`` and owed
+    everything below; ``PurchaseOrderViewSet.perform_update`` now hands the
+    transition to the service instead.
+    """
+    api = APIClient()
+    api.force_authenticate(user=actor)
+    response = api.patch(
+        reverse("purchaseorder-detail", args=[order.pk]), {"status": "sent"}, format="json"
+    )
+    assert response.status_code == 200, response.data
+
+
+def send_via_sales_order_number(client_for, order, actor):
+    """Recording a sales order number on a DRAFT, which sends it (oms-qdxss)."""
+    api = APIClient()
+    api.force_authenticate(user=actor)
+    response = api.patch(
+        reverse("purchaseorder-detail", args=[order.pk]),
+        {"sales_order_number": "SO-2026-11"},
+        format="json",
+    )
+    assert response.status_code == 200, response.data
+
+
+def send_via_admin_change_form(client_for, order, actor):
+    """Setting ``status`` to Sent on the admin change form (oms-po-send-rule).
+
+    ``status``/``sent_at``/``sent_by`` are all editable there, so it is a live
+    path to a SENT order with no stamp — the same damage the changelist action
+    used to do. The POST is the page's own field set; a wrong one re-renders
+    with a 200 instead of redirecting, which the assertion catches.
+    """
+    ordered = timezone.localtime(order.order_date)
+    response = client_for(actor).post(
+        reverse("admin:reorder_queue_purchaseorder_change", args=[order.pk]),
+        {
+            "supplier": str(order.supplier_id),
+            "status": PurchaseOrder.Status.SENT,
+            "priority": order.priority,
+            "order_date_0": ordered.date().isoformat(),
+            "order_date_1": ordered.time().strftime("%H:%M:%S"),
+            "expected_delivery_date": "",
+            "payment_terms": order.payment_terms,
+            "freight_terms": order.freight_terms,
+            "work_order": "",
+            "owning_group": "",
+            "estimated_total": str(order.estimated_total),
+            "actual_total": "",
+            "created_by": str(order.created_by_id),
+            "sent_by": "",
+            "sent_at_0": "",
+            "sent_at_1": "",
+            "notes": order.notes,
+            "items-TOTAL_FORMS": "0",
+            "items-INITIAL_FORMS": "0",
+            "items-MIN_NUM_FORMS": "0",
+            "items-MAX_NUM_FORMS": "1000",
+            "_save": "Save",
+        },
+        follow=True,
+    )
+    assert response.redirect_chain, [str(m) for m in response.context["messages"]]
+
+
+@pytest.mark.parametrize(
+    "send",
+    [
+        send_via_admin,
+        send_via_api,
+        send_via_api_patch,
+        send_via_sales_order_number,
+        send_via_admin_change_form,
+    ],
+    ids=["admin", "api", "api-patch", "sales-order-number", "admin-change-form"],
+)
 def test_every_send_path_stamps_the_whole_transition(send, staff):
     """DRAFT -> SENT owes the same set of facts however it is performed.
 
-    Parameterised over the two paths that perform it so a path that stamps only
-    part of the set fails here rather than in whichever downstream reader
-    noticed first.
+    Parameterised over EVERY path that performs it — derived from "where can a
+    purchase order become sent?", not from where a defect was noticed — so a
+    path that stamps only part of the set fails here rather than in whichever
+    downstream reader noticed first. A sixth path joins this list.
     """
-    order = draft_order(staff)
+    item = InventoryItemFactory(current_stock=0)
+    order = draft_order(staff, item=item)
+    request_row = ReorderRequestFactory(item=item, status=ReorderRequest.Status.APPROVED)
 
     def client_for(actor):
         client = Client()
@@ -275,6 +355,11 @@ def test_every_send_path_stamps_the_whole_transition(send, staff):
         ).count()
         == 1
     )
+    # The linked records are part of the set too: an approved request the order
+    # fulfils is carried to ``ordered`` and stamped with the PO number.
+    request_row.refresh_from_db()
+    assert request_row.status == ReorderRequest.Status.ORDERED
+    assert request_row.order_number == order.po_number
 
 
 # ── The same shape on the reorder-request actions ───────────────────────────

@@ -15,10 +15,13 @@ from django.utils import timezone
 
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import APIException
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
+
+from config.api_errors import error_response
 
 from inventory.models import InventoryItem, Supplier
 from inventory.services.pack_size import declares_a_case
@@ -77,6 +80,7 @@ from .serializers import (
     ReorderRequestSerializer,
     RepricePurchaseOrderLineSerializer,
     SupplierPerformanceSerializer,
+    send_request_field,
     WebHookCreateSerializer,
     WebHookSerializer,
     WebHookTestResultSerializer,
@@ -776,6 +780,25 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         return Response(cart_data)
 
 
+class SendRefusedError(APIException):
+    """A 400 carrying :func:`services.send_refusal`'s own sentence as the message.
+
+    An ``APIException`` rather than a ``ValidationError`` on purpose. DRF turns
+    a serializer ``ValidationError`` into a field map, and
+    ``config.api_errors._humanize`` reads ``error.message`` off a bare
+    ``detail`` string only — a field map falls back to the generic "One or more
+    fields failed validation.", which is the string the web toast and ScanTTY's
+    ``APIError.Error()`` would then show instead of the reason. The envelope's
+    ``code`` is the generic ``validation_failed`` on this path (``_classify``
+    knows only the codes ``config.api_errors`` registers) while
+    ``send_to_supplier`` answers ``no_line_items`` through ``error_response``;
+    the MESSAGE is the same sentence from the one rule either way, and the
+    message is what an operator acts on.
+    """
+
+    status_code = status.HTTP_400_BAD_REQUEST
+
+
 class PurchaseOrderViewSet(viewsets.ModelViewSet):
     """API endpoint for purchase order management."""
 
@@ -932,12 +955,58 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             self._auto_transition_to_sent(purchase_order)
 
     def perform_update(self, serializer):
+        """Apply the edit, and PERFORM any send it asks for rather than writing it.
+
+        ``PATCH {"status": "sent"}`` used to reach the column straight through
+        ``PurchaseOrderSerializer``: the row landed SENT with a null ``sent_at``,
+        no ``sent_by``, no ``po_send`` row in the staff audit feed, no sweep of
+        the approved requests the order fulfilled — and, because
+        ``services.receiving.create_lead_time_log`` returns early on a falsy
+        ``sent_at``, no ``LeadTimeLog`` when the order was delivered. The
+        supplier's performance on it never reached the table
+        ``inventory.services.supplier_selection`` scores from.
+
+        So the send is POPPED OUT of the fields ``save()`` writes and handed to
+        ``services.mark_sent``, which is what every other send path calls. That
+        keeps the endpoint's contract — ``status`` stays a writable field, and a
+        PATCH to any other status still lands exactly as before — while the one
+        transition that owes a fact set gets the whole set. It also means the
+        order's status only ever moves inside that service's transaction,
+        instead of being written SENT here and stamped a moment later.
+
+        The send rule is checked BEFORE ``save()`` writes anything, so a
+        refusal turns the whole request away rather than half-applying it
+        behind a 400. It is checked HERE rather than in the serializer's
+        ``validate()`` because the answer has to reach the operator: a
+        ``ValidationError`` raised inside a serializer becomes a field map, and
+        ``config.api_errors`` puts a field map in ``error.details`` while
+        ``error.message`` — the string both clients actually display — falls
+        back to "One or more fields failed validation.". Raised as an
+        ``APIException`` it stays the sentence the rule wrote.
+
+        The second guard, around ``_mark_sent``, is for the race where the last
+        line is struck off between that check and this write. It answers 400
+        rather than 500.
+        """
+        send_field = send_request_field(serializer.validated_data, serializer.instance)
+        if send_field is not None:
+            refusal = services.send_refusal(serializer.instance)
+            if refusal is not None:
+                raise SendRefusedError(refusal.message)
+        sends_via_status = send_field == "status"
+        if sends_via_status:
+            serializer.validated_data.pop("status")
         # Capture the pre-update value so we only auto-send on the empty ->
         # non-empty edge. Editing other fields, or clearing the number, must
         # never change status (oms-qdxss).
         had_sales_order_number = self._has_sales_order_number(serializer.instance)
         purchase_order = serializer.save()
-        if not had_sales_order_number and self._has_sales_order_number(purchase_order):
+        if sends_via_status:
+            try:
+                self._mark_sent(purchase_order, self.request.user)
+            except services.SendRefused as exc:
+                raise SendRefusedError(exc.message)
+        elif not had_sales_order_number and self._has_sales_order_number(purchase_order):
             self._auto_transition_to_sent(purchase_order)
 
     @staticmethod
@@ -1552,16 +1621,40 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def send_to_supplier(self, request, pk=None):
-        """Mark purchase order as sent to supplier."""
+        """Mark purchase order as sent to supplier.
+
+        Two refusals, in the order an operator meets them: the status
+        precondition this action has always owned, then the send rule
+        (``services.send_refusal``) that every send path shares.
+
+        BOTH answer in the STANDARDIZED envelope (``config.api_errors``), which
+        is what makes them actionable at the terminal that actually sends
+        orders. ScanTTY's ``parseError`` reads ``error.code``/``error.message``
+        out of that envelope; handed the hand-built ``{"error": "<prose>"}``
+        this action used to write, it falls through and puts the WHOLE RAW BODY
+        in the message — the shop-floor operator reads JSON at the step where
+        losing the reason costs them the order. (ScanTTY carries recognisers
+        that unpick that shape for the receiving and line endpoints; the send
+        action is not one of them.) ``extractErrorMessage`` in the web UI reads
+        the same envelope. One shape for both refusals, because the second one
+        is where a hand-built sibling starts to drift from its neighbour.
+        """
         purchase_order = self.get_object()
 
         if purchase_order.status != PurchaseOrder.Status.DRAFT:
-            return Response(
-                {"error": "Only draft orders can be sent to suppliers"},
-                status=status.HTTP_400_BAD_REQUEST,
+            return error_response(
+                code="not_draft",
+                message=(
+                    f"{purchase_order.po_number or 'This purchase order'} is "
+                    f"{PurchaseOrder.Status(purchase_order.status).label}. Only draft orders "
+                    f"can be sent to suppliers."
+                ),
             )
 
-        self._mark_sent(purchase_order, request.user)
+        try:
+            self._mark_sent(purchase_order, request.user)
+        except services.SendRefused as exc:
+            return error_response(code=exc.code, message=exc.message)
 
         serializer = self.get_serializer(purchase_order)
         return Response(serializer.data)

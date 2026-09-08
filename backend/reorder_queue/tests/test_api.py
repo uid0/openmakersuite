@@ -2304,12 +2304,30 @@ class TestPurchaseOrderAutoTransitionToSent:
     """
 
     def _draft_po(self, user, **kwargs):
-        return PurchaseOrder.objects.create(
-            supplier=SupplierFactory(),
+        """A DRAFT order with a line on it, which is the only kind that can be sent.
+
+        The line is not decoration. Every send path refuses an order with
+        nothing on it (``services.send_refusal``, oms-po-send-rule), so a
+        fixture without one would be testing the auto-transition against an
+        order the product would never send — and the checks below would then
+        pass or fail for the wrong reason.
+        ``reorder_queue/tests/test_send_requires_lines.py`` owns the empty case.
+        """
+        supplier = SupplierFactory()
+        purchase_order = PurchaseOrder.objects.create(
+            supplier=supplier,
             status=PurchaseOrder.Status.DRAFT,
             created_by=user,
             **kwargs,
         )
+        PurchaseOrderItem.objects.create(
+            purchase_order=purchase_order,
+            item_supplier=ItemSupplierFactory(supplier=supplier, quantity_per_package=1),
+            quantity_ordered=3,
+            unit_cost_ordered=Decimal("4.00"),
+            order_in_packages=3,
+        )
+        return purchase_order
 
     def _detail_url(self, po):
         return reverse("purchaseorder-detail", kwargs={"pk": po.pk})

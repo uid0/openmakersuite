@@ -21,7 +21,7 @@ from .models import (
     ReorderRequest,
     WebHook,
 )
-from .services import create_purchase_order
+from .services import create_purchase_order, send_refusal
 
 
 class ReorderRequestSerializer(serializers.ModelSerializer):
@@ -497,6 +497,47 @@ def validate_order_date_not_far_future(value):
     return value
 
 
+def send_request_field(attrs, instance):
+    """Which field of this write asks the order to go to the supplier, or ``None``.
+
+    TWO writes on this serializer perform a send, and both have to meet the same
+    rule:
+
+    * ``status`` set to ``sent`` on an order that has not already gone out. The
+      source state is read off
+      :attr:`~reorder_queue.models.PurchaseOrder.SENT_ONWARD_STATUSES`, not off
+      ``sent_at`` and not off the name ``draft``: re-asserting a status the row
+      already holds — a stale detail page, a client re-posting its form — is a
+      filing change and must never re-stamp the moment the order actually went
+      out, while an order that never went out is entering the supplier's hands
+      whichever un-sent state it is leaving.
+    * ``sales_order_number`` going from empty to non-empty on a DRAFT, which
+      ``PurchaseOrderViewSet`` treats as "this was already submitted"
+      (oms-qdxss). The same edge the viewset triggers on, so the refusal and
+      the trigger cannot come to disagree about which writes send.
+
+    Returned as the FIELD NAME rather than a boolean so the refusal lands on the
+    key the operator actually sent — an error against ``status`` on a request
+    that carried no ``status`` is a refusal nobody can act on.
+    """
+    if instance is None:
+        return None
+    if (
+        attrs.get("status") == PurchaseOrder.Status.SENT
+        and instance.status not in PurchaseOrder.SENT_ONWARD_STATUSES
+    ):
+        return "status"
+    incoming = attrs.get("sales_order_number")
+    if (
+        incoming is not None
+        and instance.status == PurchaseOrder.Status.DRAFT
+        and not (instance.sales_order_number or "").strip()
+        and incoming.strip()
+    ):
+        return "sales_order_number"
+    return None
+
+
 def render_payment_schedule(purchase_order):
     """JSON shape of ``PurchaseOrder.payment_schedule`` (op-bwo9).
 
@@ -580,6 +621,13 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     # Derived single payment implied by ``payment_terms`` (op-bwo9). Read-only —
     # it is recomputed from the order's own fields on every read, never stored.
     payment_schedule = serializers.SerializerMethodField()
+    # Why this order cannot go to the supplier, or null (oms-po-send-rule).
+    # Served for the same reason ``can_receive`` and ``can_delete_items`` are:
+    # a surface that OFFERS "Send to Supplier" must be able to say why the
+    # button will not work instead of failing when it is pressed, and a client
+    # that derived the answer itself would be keeping a second copy of a rule
+    # the server enforces.
+    send_blocked_reason = serializers.SerializerMethodField()
 
     class Meta:
         model = PurchaseOrder
@@ -634,6 +682,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "serials_outstanding",
             "days_since_ordered",
             "payment_schedule",
+            "send_blocked_reason",
         ]
         # ``order_date`` is deliberately absent (op-bwo9): a PO entered after the
         # fact is backdated to when it was actually placed, so PATCH must reach it.
@@ -691,6 +740,21 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     def get_payment_schedule(self, obj):
         """``{due_date, amount, basis}`` — see ``PurchaseOrder.payment_schedule``."""
         return render_payment_schedule(obj)
+
+    def get_send_blocked_reason(self, obj):
+        """The operator-facing reason this order cannot be sent, or ``None``.
+
+        Straight off :func:`reorder_queue.services.send_refusal`, so the
+        sentence a screen shows beside a disabled button is the same sentence
+        the endpoint answers with when the button is pressed anyway.
+
+        It says nothing about ``status`` — an order that is already sent is not
+        "blocked" — because the status precondition belongs to each send path,
+        not to this rule. A client decides whether to OFFER the send from the
+        status it already has, and reads this to decide whether the offer works.
+        """
+        refusal = send_refusal(obj)
+        return refusal.message if refusal is not None else None
 
     def get_supplier_agreement_details(self, obj):
         """Minimal {id, name} for the attached agreement, or None."""

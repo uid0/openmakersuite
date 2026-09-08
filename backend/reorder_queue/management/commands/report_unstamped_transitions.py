@@ -39,9 +39,18 @@ worse than the gap, because the gap is currently honest: ``DeliveryRecord.factor
 returns 1 for a link with no history, documented as "do not punish for absence
 of evidence", while a fabricated row actively mis-scores.
 
+**Cannot: what a line-less order was for.** Lines may only be DELETED while
+an order is pre-send, and deletion leaves no reason, no ghost and no audit row
+(oms-po-line-delete) — that is what makes it the right verb for a typo. So an
+order that reached a supplier with no lines cannot have its contents
+reconstructed either.
+
 **Can: who, and which.** ``sent_by`` and ``reviewed_by`` were recorded and
 survive. And the affected population is exactly countable — which is what this
 command prints, so the incompleteness can be weighed rather than guessed at.
+What to DO about a line-less sent order is an operator's judgement — void or
+cancel it, or add the lines it should have carried — and this command does not
+make it for them.
 
 How the population is identified
 --------------------------------
@@ -63,14 +72,31 @@ never be read as covering something narrower or broader than it does:
     clean records damaged, so they are excluded and the order count is a FLOOR.
     The output says so on the line beside the number.
 
-It is a signature, so it is not a historical set. Read
-:func:`orders_sent_without_a_moment` before treating a future count as pre-fix
-rows only: ``status``, ``sent_at`` and ``sent_by`` remain writable on
-``PurchaseOrderSerializer``, so a ``PATCH {"status": "sent"}`` can still land
-the order shape today. REPORTED, NOT FIXED — the sibling entity already closed
-that door via ``read_only_fields`` (op-xj1i), but narrowing a writable field on
-the purchase-order API is an operator-visible contract change and a product
-decision, not a review's.
+It is a signature, so it is not a historical set — a DIRECT DATABASE EDIT
+still lands the order shape, and no application code can close that. What has
+changed since this command was written is that every APPLICATION route is now
+closed: ``PATCH {"status": "sent"}`` and the admin change form both go through
+``services.mark_sent`` (oms-po-send-rule), which stamps the whole transition.
+``status``, ``sent_at`` and ``sent_by`` are still WRITABLE — the endpoint was
+not narrowed, because the rule was what needed enforcing, not the contract —
+but writing ``status`` no longer bypasses the transition.
+
+A SECOND ORDER SIGNATURE
+------------------------
+``orders_sent_with_no_line_items`` reports orders that went to a supplier with
+no line item at all. Distinct from the stamp gap and with a different remedy:
+nothing is missing from the ROW, the order simply never had anything on it, so
+the supplier holds a document listing nothing and the order sits in ``sent``
+for ever — ``services.receiving.refresh_receipt_status`` never moves an order
+nothing has arrived against.
+
+An order whose lines are all VOIDED is deliberately NOT in that population.
+Striking every line off an order that already went out is a documented
+workflow (oms-a8o), not damage — the rows are the record of what was struck.
+The two kinds of empty are the same pair ``PurchaseOrderViewSet.get_queryset``
+separates: lines that exist and are all struck off, versus lines that were
+never there. The send rule refuses both at SEND time, because at that moment
+neither has anything to order; only the second is damage afterwards.
 
 This command is deliberately, permanently READ-ONLY. There is no ``--fix`` and
 no ``--backfill``: there is nothing truthful to write. Do not add one.
@@ -86,6 +112,7 @@ from __future__ import annotations
 import json
 
 from django.core.management.base import BaseCommand
+from django.db.models import Count
 
 from reorder_queue.models import LeadTimeLog, PurchaseOrder, ReorderRequest
 
@@ -93,11 +120,18 @@ from reorder_queue.models import LeadTimeLog, PurchaseOrder, ReorderRequest
 #: and the two terminal states are reachable from DRAFT without a send — an
 #: order cancelled or voided before it ever went out has a null ``sent_at`` that
 #: is the truth, so including them would report clean rows as damaged.
-SENT_ONWARD_STATUSES = (
-    PurchaseOrder.Status.SENT,
-    PurchaseOrder.Status.CONFIRMED,
-    PurchaseOrder.Status.PARTIALLY_RECEIVED,
-    PurchaseOrder.Status.RECEIVED,
+#:
+#: Read off the model rather than typed out here.
+#: :attr:`PurchaseOrder.SENT_ONWARD_STATUSES` is the ONE definition of "already
+#: with the supplier", and ``send_request_field`` on the API asks the same
+#: question of the same set — a report and a guard that disagreed about which
+#: orders have gone out would be the worst possible pair to have drift.
+#: Ordered here so the printed signature reads in lifecycle order rather than
+#: in whatever order a set iterates.
+SENT_ONWARD_STATUSES = tuple(
+    status
+    for status in PurchaseOrder.Status
+    if status in PurchaseOrder.SENT_ONWARD_STATUSES
 )
 
 #: The two damage signatures, stated in the output so the number a reader takes
@@ -115,6 +149,17 @@ ORDER_SIGNATURE = (
     )
 )
 REQUEST_SIGNATURE = "reviewed_by set, reviewed_at NULL"
+
+#: The second order signature. Counting line ROWS, not active ones: an order
+#: emptied by voting every line off after it went out is the oms-a8o workflow,
+#: and its rows are the record of what was struck off.
+EMPTY_ORDER_SIGNATURE = (
+    "status in ({}) with no line-item rows at all; an order whose lines are all "
+    "VOIDED is excluded, because striking lines off an order that already went "
+    "out is a workflow and not damage".format(
+        ", ".join(status.value for status in SENT_ONWARD_STATUSES)
+    )
+)
 
 
 def orders_sent_without_a_moment():
@@ -150,6 +195,29 @@ def orders_sent_without_a_moment():
     """
     return (
         PurchaseOrder.objects.filter(status__in=SENT_ONWARD_STATUSES, sent_at__isnull=True)
+        .select_related("supplier", "sent_by")
+        .order_by("pk")
+    )
+
+
+def orders_sent_with_no_line_items():
+    """Purchase orders that reached a supplier carrying nothing.
+
+    ``Count("items")`` over ALL rows, voided included — see
+    :data:`EMPTY_ORDER_SIGNATURE`. The consequence is not a missing lead time
+    (no line, nothing owed) but an obligation that cannot close:
+    ``services.receiving.refresh_receipt_status`` returns early on an order
+    nothing has arrived against, so such an order stays ``sent`` until somebody
+    voids or cancels it by hand.
+
+    Like its sibling above this is a SHAPE, not a closed historical set, and for
+    the same remaining reason: a direct database edit. Every application route
+    now passes ``services.assert_sendable`` (oms-po-send-rule).
+    """
+    return (
+        PurchaseOrder.objects.filter(status__in=SENT_ONWARD_STATUSES)
+        .annotate(_line_rows=Count("items"))
+        .filter(_line_rows=0)
         .select_related("supplier", "sent_by")
         .order_by("pk")
     )
@@ -225,9 +293,11 @@ class Command(BaseCommand):
         payload = {
             "signatures": {
                 "orders_sent_without_sent_at": ORDER_SIGNATURE,
+                "orders_sent_with_no_line_items": EMPTY_ORDER_SIGNATURE,
                 "requests_reviewed_without_reviewed_at": REQUEST_SIGNATURE,
             },
             "orders_sent_without_sent_at": [],
+            "orders_sent_with_no_line_items": [],
             "requests_reviewed_without_reviewed_at": [],
         }
 
@@ -258,6 +328,18 @@ class Command(BaseCommand):
                 }
             )
 
+        for order in orders_sent_with_no_line_items():
+            payload["orders_sent_with_no_line_items"].append(
+                {
+                    "id": order.pk,
+                    "po_number": order.po_number,
+                    "supplier": order.supplier.name,
+                    "status": order.status,
+                    "sent_by": order.sent_by.get_username() if order.sent_by else None,
+                    "sent_at": order.sent_at.isoformat() if order.sent_at else None,
+                }
+            )
+
         for reorder_request in requests_reviewed_without_a_moment():
             payload["requests_reviewed_without_reviewed_at"].append(
                 {
@@ -272,6 +354,7 @@ class Command(BaseCommand):
             "orders_sent_without_sent_at": len(orders),
             "lead_time_rows_never_written": missing_logs,
             "supplier_links_scored_on_incomplete_evidence": len(affected_links),
+            "orders_sent_with_no_line_items": len(payload["orders_sent_with_no_line_items"]),
             "requests_reviewed_without_reviewed_at": len(
                 payload["requests_reviewed_without_reviewed_at"]
             ),
@@ -301,10 +384,10 @@ class Command(BaseCommand):
             "sent_at can no longer be told apart from one that never went out."
         )
         self.stdout.write(
-            "  and it is not necessarily historical: status/sent_at are still "
-            "writable on the purchase-order API, so a PATCH setting status=sent "
-            "can land this shape today. See the module docstring — REPORTED, "
-            "NOT FIXED."
+            "  and it is not necessarily historical: a direct database edit still "
+            "lands this shape. Every APPLICATION route is closed — PATCH "
+            "status=sent and the admin change form both go through "
+            "services.mark_sent now (oms-po-send-rule)."
         )
         for row in payload["orders_sent_without_sent_at"]:
             name = row["po_number"] or "#{}".format(row["id"])
@@ -328,6 +411,26 @@ class Command(BaseCommand):
             "inventory.services.supplier_selection scores those links on the deliveries "
             "that ARE recorded."
         )
+
+        self.stdout.write("")
+        self.stdout.write(
+            f"POSITIVE FINDING: {totals['orders_sent_with_no_line_items']} purchase "
+            "order(s) reached a supplier with no line items at all."
+        )
+        self.stdout.write(f"  signature: {signatures['orders_sent_with_no_line_items']}")
+        self.stdout.write(
+            "  such an order cannot finish: refresh_receipt_status never moves an "
+            "order nothing has arrived against, so it sits in its current status "
+            "until somebody voids or cancels it. What it SHOULD have carried is "
+            "not recoverable — a pre-send line delete leaves no reason and no "
+            "ghost — so the remedy is an operator's call, not this command's."
+        )
+        for row in payload["orders_sent_with_no_line_items"]:
+            name = row["po_number"] or "#{}".format(row["id"])
+            self.stdout.write(
+                f"  PO {name} — {row['supplier']} [{row['status']}] "
+                f"sent by {row['sent_by'] or 'unknown'} at {row['sent_at'] or 'no moment'}"
+            )
 
         self.stdout.write("")
         self.stdout.write(

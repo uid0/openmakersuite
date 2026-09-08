@@ -1132,15 +1132,34 @@ describe('PurchaseOrderPage send-to-supplier + confirm (op-alh)', () => {
     localStorage.setItem('is_staff', 'true');
   });
 
-  const makeOrder = (status: string, status_label: string) => ({
+  /**
+   * `send_blocked_reason` is the API's own answer to "may this order be sent?"
+   * (oms-po-send-rule), served the same way `can_receive` is so no client keeps
+   * a second copy of the rule. `null` means nothing blocks it — the ordinary
+   * draft, which HAS lines. `items` stays empty here because the line table is
+   * not what this block exercises; what the server actually puts in this field
+   * is pinned backend-side by
+   * `test_a_draft_with_no_lines_says_on_its_own_payload_why_it_cannot_be_sent`.
+   */
+  const makeOrder = (
+    status: string,
+    status_label: string,
+    send_blocked_reason: string | null = null,
+  ) => ({
     ...baseOrder,
     status,
     status_label,
     // Mirrors what the API computes for this status.
     can_receive: ['sent', 'confirmed', 'partially_received'].includes(status),
+    send_blocked_reason,
     items: [],
     attachments: [],
   });
+
+  /** Verbatim from the backend's `services.send_refusal`. */
+  const NO_LINES =
+    'PO-2026-0001 has no line items, so there is nothing to order. Add at least ' +
+    'one line item to it before sending it to the supplier.';
 
   test('a draft PO shows only the Send to Supplier lifecycle action', async () => {
     (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
@@ -1158,6 +1177,57 @@ describe('PurchaseOrderPage send-to-supplier + confirm (op-alh)', () => {
     expect(
       screen.queryByRole('button', { name: /^mark as delivered$/i }),
     ).not.toBeInTheDocument();
+  });
+
+  test('a draft with no lines offers Send disabled, and says why on the screen', async () => {
+    // The surface that OFFERS the send has to explain the refusal rather than
+    // fail when pressed. The reason is the SERVER'S sentence, read off the
+    // payload — the page never counts lines itself.
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: makeOrder('draft', 'Draft', NO_LINES),
+    });
+
+    renderPage();
+
+    const send = await screen.findByRole('button', { name: /^send to supplier$/i });
+    expect(send).toBeDisabled();
+    // Visible text, not a hover-only tooltip: a tooltip is invisible on a touch
+    // screen and to a screen reader.
+    expect(screen.getByText(NO_LINES)).toBeInTheDocument();
+    // And the refusal names what to do next, not merely that it is refused.
+    expect(NO_LINES).toMatch(/add at least one line item/i);
+  });
+
+  test('a draft with lines offers Send enabled and no refusal text', async () => {
+    // The other half: the reason must not be shown, and the button must not be
+    // disabled, on an order the endpoint would accept. Without this a fix that
+    // disabled Send unconditionally would still pass the check above.
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: makeOrder('draft', 'Draft'),
+    });
+
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: /^send to supplier$/i })).not.toBeDisabled();
+    // The exact sentence, not a loose match: the empty line table renders its
+    // own "No line items found" placeholder, which a /no line items/ regex
+    // would happily find whether or not the refusal text was suppressed.
+    expect(screen.queryByText(NO_LINES)).not.toBeInTheDocument();
+  });
+
+  test('a blocked draft does not call the send endpoint when the button is clicked', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: makeOrder('draft', 'Draft', NO_LINES),
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^send to supplier$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(NO_LINES)).toBeInTheDocument();
+    });
+    expect(api.purchaseOrderAPI.sendToSupplier).not.toHaveBeenCalled();
   });
 
   test('a sent PO shows Confirm alongside receive/mark, but not Send', async () => {
@@ -1269,8 +1339,20 @@ describe('PurchaseOrderPage send-to-supplier + confirm (op-alh)', () => {
     (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
       data: makeOrder('draft', 'Draft'),
     });
+    // The standardized envelope the endpoint actually answers with
+    // (`config.api_errors.error_response`), not a hand-built `{error: string}`
+    // — pinned server-side by
+    // `test_the_send_action_s_draft_refusal_answers_in_the_same_envelope`.
     (api.purchaseOrderAPI.sendToSupplier as jest.Mock).mockRejectedValue({
-      response: { status: 400, data: { error: 'Only draft orders can be sent to suppliers' } },
+      response: {
+        status: 400,
+        data: {
+          error: {
+            code: 'not_draft',
+            message: 'PO-2026-0001 is Confirmed by Supplier. Only draft orders can be sent to suppliers.',
+          },
+        },
+      },
     });
 
     renderPage();
@@ -1278,7 +1360,9 @@ describe('PurchaseOrderPage send-to-supplier + confirm (op-alh)', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^send to supplier$/i }));
 
     await waitFor(() => {
-      expect(showError).toHaveBeenCalledWith('Only draft orders can be sent to suppliers');
+      expect(showError).toHaveBeenCalledWith(
+        'PO-2026-0001 is Confirmed by Supplier. Only draft orders can be sent to suppliers.',
+      );
     });
     // A failed transition does not reload the PO; the action re-enables for retry.
     expect(api.purchaseOrderAPI.getOrder).toHaveBeenCalledTimes(1);

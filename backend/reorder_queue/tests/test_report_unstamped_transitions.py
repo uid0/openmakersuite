@@ -19,10 +19,12 @@ import pytest
 
 from inventory.tests.factories import InventoryItemFactory, ItemSupplierFactory, SupplierFactory
 from reorder_queue.management.commands.report_unstamped_transitions import (
+    EMPTY_ORDER_SIGNATURE,
     ORDER_SIGNATURE,
     REQUEST_SIGNATURE,
     SENT_ONWARD_STATUSES,
     lines_owed_a_lead_time_log,
+    orders_sent_with_no_line_items,
     orders_sent_without_a_moment,
     requests_reviewed_without_a_moment,
 )
@@ -190,6 +192,7 @@ def test_the_json_report_counts_what_it_found():
         "orders_sent_without_sent_at": 1,
         "lead_time_rows_never_written": 1,
         "supplier_links_scored_on_incomplete_evidence": 1,
+        "orders_sent_with_no_line_items": 0,
         "requests_reviewed_without_reviewed_at": 1,
     }
     assert payload["orders_sent_without_sent_at"][0]["id"] == order.pk
@@ -265,6 +268,7 @@ def test_the_report_states_the_signature_each_count_covers():
 
     assert payload["signatures"] == {
         "orders_sent_without_sent_at": ORDER_SIGNATURE,
+        "orders_sent_with_no_line_items": EMPTY_ORDER_SIGNATURE,
         "requests_reviewed_without_reviewed_at": REQUEST_SIGNATURE,
     }
     assert payload["signatures"]["requests_reviewed_without_reviewed_at"] == (
@@ -310,3 +314,114 @@ def test_the_order_signature_admits_the_rows_it_cannot_count():
     printed = text.getvalue()
     assert signature in printed
     assert "whatever it has since become" not in printed
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The second order signature: an order that reached a supplier carrying nothing
+# ─────────────────────────────────────────────────────────────────────────────
+def empty_order(*, status, sent_at=None):
+    """An order with NO line-item rows at all."""
+    return PurchaseOrder.objects.create(
+        supplier=SupplierFactory(),
+        created_by=UserFactory(),
+        status=status,
+        sent_at=sent_at,
+        sent_by=UserFactory(),
+    )
+
+
+def test_it_finds_an_order_that_went_to_a_supplier_with_nothing_on_it():
+    damaged = empty_order(status=PurchaseOrder.Status.SENT, sent_at=timezone.now())
+    with_a_line, _ = order_with_line(status=PurchaseOrder.Status.SENT, sent_at=timezone.now())
+
+    found = list(orders_sent_with_no_line_items())
+
+    assert found == [damaged]
+    assert with_a_line not in found
+
+
+def test_an_empty_draft_is_not_reported():
+    """A draft with no lines is mid-edit, not damage.
+
+    Deleting the wrong line before adding the right one is the workflow line
+    DELETION exists for (oms-po-line-delete); the order has not gone anywhere.
+    """
+    draft = empty_order(status=PurchaseOrder.Status.DRAFT)
+
+    assert draft not in list(orders_sent_with_no_line_items())
+
+
+def test_an_order_emptied_by_VOIDING_after_it_went_out_is_not_reported():
+    """The two kinds of empty are not the same finding.
+
+    Striking every line off an order the supplier already holds is a documented
+    workflow (oms-a8o) and its rows are the record of what was struck off —
+    nothing about it is missing. Counting it here would report a deliberate act
+    as damage, and the number would stop meaning what its signature says.
+    """
+    order, line = order_with_line(status=PurchaseOrder.Status.SENT, sent_at=timezone.now())
+    line.is_voided = True
+    line.save(update_fields=["is_voided"])
+
+    assert order.has_active_items is False
+    assert order not in list(orders_sent_with_no_line_items())
+
+
+def test_the_empty_order_report_names_the_order_and_its_signature():
+    """A count is only readable beside the population it covers, and the rows.
+
+    The remedy is an operator's — void it, cancel it, or add what it should
+    have carried — so the report has to identify WHICH order, not just how
+    many.
+    """
+    order = empty_order(status=PurchaseOrder.Status.CONFIRMED, sent_at=timezone.now())
+
+    out = StringIO()
+    call_command("report_unstamped_transitions", "--format", "json", stdout=out)
+    payload = json.loads(out.getvalue())
+
+    assert payload["totals"]["orders_sent_with_no_line_items"] == 1
+    assert payload["orders_sent_with_no_line_items"][0]["id"] == order.pk
+    assert "no line-item rows at all" in payload["signatures"]["orders_sent_with_no_line_items"]
+
+    text = StringIO()
+    call_command("report_unstamped_transitions", stdout=text)
+    printed = text.getvalue()
+    assert order.po_number in printed
+    assert "no line-item rows at all" in printed
+
+
+def test_the_empty_order_report_writes_nothing_back():
+    """Read-only, like every other finding here — the fix is not this command's.
+
+    What a line-less sent order should have carried is not recoverable: a
+    pre-send line delete leaves no reason, no ghost and no audit row.
+    """
+    order = empty_order(status=PurchaseOrder.Status.SENT, sent_at=timezone.now())
+    before = {
+        "status": order.status,
+        "sent_at": order.sent_at,
+        "sent_by_id": order.sent_by_id,
+        "line_count": order.items.count(),
+    }
+
+    call_command("report_unstamped_transitions", stdout=StringIO())
+
+    order.refresh_from_db()
+    assert {
+        "status": order.status,
+        "sent_at": order.sent_at,
+        "sent_by_id": order.sent_by_id,
+        "line_count": order.items.count(),
+    } == before
+
+
+def test_the_report_reads_the_sent_onward_set_off_the_model():
+    """One definition of "already with the supplier", not two.
+
+    The API's send routing asks the same question of the same set
+    (``send_request_field`` -> ``PurchaseOrder.SENT_ONWARD_STATUSES``). A report
+    and a guard that disagreed about which orders have gone out is the worst
+    possible pair to let drift.
+    """
+    assert set(SENT_ONWARD_STATUSES) == set(PurchaseOrder.SENT_ONWARD_STATUSES)

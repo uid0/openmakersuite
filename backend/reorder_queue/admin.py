@@ -22,7 +22,7 @@
 *
 """
 
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.db import transaction
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
@@ -290,6 +290,203 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
 
     inlines = [PurchaseOrderItemInline]
 
+    #: Where the change form marks a send it has not performed yet, so the two
+    #: hooks below can hand it between them. A plain flag: the actor is
+    #: ``request.user`` at the point of use and never needs carrying. On the
+    #: FORM, never on the ``ModelAdmin``: one ``ModelAdmin`` instance serves
+    #: every request in the process, so state stored on ``self`` would leak
+    #: between operators.
+    _DEFERRED_SEND = "_deferred_send_requested"
+
+    #: The moment the operator actually TYPED into ``sent_at``, or ``None``
+    #: when they left the field as the form rendered it. Parked beside the
+    #: deferred send because only ``save_model`` has the form that can tell
+    #: those two apart.
+    _DEFERRED_SEND_AT = "_deferred_send_typed_at"
+
+    #: The sender the operator actually CHOSE in ``sent_by``, or ``None`` when
+    #: they left the field as the form rendered it. Same question as
+    #: :attr:`_DEFERRED_SEND_AT`, asked of the other stamp column, because both
+    #: are pre-filled and neither can be told from a typed value by its value.
+    _DEFERRED_SEND_BY = "_deferred_send_typed_by"
+
+    #: The ``(sent_at, sent_by_id)`` the row carried BEFORE this save, parked
+    #: beside the deferred send so a refusal can put them back.
+    _DEFERRED_SEND_STAMP = "_deferred_send_previous_stamp"
+
+    def save_model(self, request, obj, form, change):
+        """Save the operator's edits, holding back a move to SENT.
+
+        ``status``, ``sent_at`` and ``sent_by`` are all editable fields on this
+        form — ``AGENTS.md`` records that, and it is a live path to a SENT order
+        with no stamp: base behaviour was to write ``status='sent'`` and leave
+        ``sent_at`` exactly as the operator left it, which is normally blank.
+        That is the same damage the changelist action used to do, and it has the
+        same consequence: ``receiving.create_lead_time_log`` returns early on a
+        falsy ``sent_at``, so the delivery records no lead time.
+
+        So the send is performed by :func:`services.mark_sent` like every other
+        send path. It is DEFERRED to :meth:`save_related` rather than done here
+        because whether the order MAY be sent depends on its lines, and the
+        inline formset that may be adding the first one has not been saved yet:
+        refusing here would tell an operator adding a line and sending it in one
+        save that the order has no lines, which would be false. The row is
+        written in the status it arrived in and moved afterwards.
+
+        Only an ENTRY into "the supplier has it" is a send.
+        ``SENT_ONWARD_STATUSES`` is the source-state predicate, the same one
+        ``send_request_field`` uses on the API and the same shape
+        ``problem_settlement.settle_problem`` uses: re-selecting ``sent`` on an
+        order that already went out is a filing change and must not overwrite
+        the moment it went.
+
+        The stamp the row arrived with is captured alongside, from the DATABASE
+        rather than from ``obj``, which the form has already mutated. The typed
+        ``sent_at``/``sent_by`` have to be written here so ``save_related`` can
+        pin the send on them; if that send is then refused, they are what puts
+        the row back — see there.
+
+        WHETHER THE OPERATOR TYPED THE STAMP is decided here, for BOTH
+        ``sent_at`` and ``sent_by``, because this is the only hook holding the
+        form that can answer it. Their values cannot: on an order that already
+        went out once, the change form PRE-FILLS both from the database, so a
+        re-send nobody touched carries the OLD moment and the OLD sender and
+        neither is distinguishable from a deliberate entry. ``form.changed_data``
+        asks the question directly — it compares what was submitted against
+        ``form.initial``, which on a change form is the stored value — so an
+        untouched field falls through to now and to the operator saving the
+        form, which is what an ordinary send means: nobody named a sender
+        because they are the sender.
+
+        Both matter on a screen. A stale ``sent_at`` writes a months-long
+        ``LeadTimeLog.order_date`` into the column
+        ``inventory.services.supplier_selection`` scores suppliers on; a stale
+        ``sent_by`` says a colleague sent an order they never touched, on the
+        changelist, on ``PurchaseOrderSerializer`` and in
+        ``report_unstamped_transitions``, while the ``po_send`` audit row
+        correctly names whoever saved the form — the same disagreement about
+        one send, one column over.
+
+        Those are the only two: the deferred send touches ``status``,
+        ``sent_at`` and ``sent_by``, and ``status`` is decided from
+        ``previous_status`` rather than from what the form rendered.
+        """
+        previous_status = form.initial.get("status") or PurchaseOrder.Status.DRAFT
+        entering_send = (
+            obj.status == PurchaseOrder.Status.SENT
+            and previous_status not in PurchaseOrder.SENT_ONWARD_STATUSES
+        )
+        if entering_send:
+            setattr(form, self._DEFERRED_SEND, True)
+            setattr(
+                form,
+                self._DEFERRED_SEND_AT,
+                obj.sent_at if "sent_at" in form.changed_data else None,
+            )
+            setattr(
+                form,
+                self._DEFERRED_SEND_BY,
+                obj.sent_by if "sent_by" in form.changed_data else None,
+            )
+            setattr(form, self._DEFERRED_SEND_STAMP, self._stored_send_stamp(obj.pk))
+            obj.status = previous_status
+        super().save_model(request, obj, form, change)
+
+    @staticmethod
+    def _stored_send_stamp(pk):
+        """The ``(sent_at, sent_by_id)`` currently in the row, or the empty pair."""
+        if pk is None:
+            return (None, None)
+        stored = PurchaseOrder.objects.filter(pk=pk).values("sent_at", "sent_by_id").first()
+        if stored is None:
+            return (None, None)
+        return (stored["sent_at"], stored["sent_by_id"])
+
+    def save_related(self, request, form, formsets, change):
+        """Save the line-item inline, then perform any send the form asked for.
+
+        Here rather than in ``save_model`` because this is the first point at
+        which the order's lines are final — see that method. Django wraps both
+        hooks in one transaction, so a send performed here commits with the
+        edits that asked for it.
+
+        ``at`` and ``sent_by`` are both read off the decisions ``save_model``
+        parked, and both honour what the operator ENTERED. Backdating is why
+        those fields are editable: an order written up after the phone call
+        that placed it records when it ACTUALLY went out and who ACTUALLY sent
+        it, and overwriting either with the saving request's own values would
+        discard what they entered. The test for "did they enter this" is
+        ``form.changed_data`` and cannot be the value, because the change form
+        pre-fills both fields and a pre-fill reads exactly like a typed one —
+        see ``save_model``. An untouched field is not an entry, so it falls
+        through to now and to ``request.user``, as does a blank one.
+
+        The ACTOR is ``request.user``, unconditionally, and that is a different
+        question from ``sent_by``. Whoever typed this save is who the
+        ``po_send`` row in the staff audit feed must name — an operator
+        recording a send a colleague made files the send under the colleague
+        and the ACT under themselves. Passing the typed ``sent_by`` as the
+        actor put somebody else's name on the screen whose whole purpose is who
+        did what, and disagreed with the admin's own ``LogEntry`` for the same
+        save. ``PurchaseOrderViewSet.perform_update`` answers the same way.
+
+        A refusal leaves the order EXACTLY as it came in — the status
+        ``save_model`` already held back, and the ``sent_at``/``sent_by`` it had
+        to write so this method could pin the send on them. Reverting the status
+        alone would leave a never-sent DRAFT carrying a moment it never had, and
+        ``PurchaseOrder.days_since_ordered`` reads ``sent_at``: the changelist
+        column and the API field would both report an age for an order that has
+        not gone anywhere, and ``report_unstamped_transitions`` cannot see it
+        because it filters on ``SENT_ONWARD_STATUSES``. The typed date is
+        therefore GONE and has to be entered again on the retry: the POST
+        itself succeeded — only the send was refused — so Django redirects,
+        either to the changelist or to a change page re-rendered from the
+        database, where ``sent_at`` is null once more. That cost is accepted
+        deliberately, because a stamp on an order that never went out is a
+        false record on a screen and re-typing a date is not.
+
+        Any other exception propagates and rolls the whole save back — a send
+        that failed for an unknown reason is not something to report as a tidy
+        refusal.
+
+        THE ORDER IS RE-READ, and that is not defensive tidiness. ``form.instance``
+        came off ``get_queryset``'s ``prefetch_related("items")``, and
+        ``has_active_items`` reads ``self.items.all()`` through the
+        ``_line_item_totals`` cached property — so it answers with the line set
+        as it stood BEFORE the formset saved. On the very case this deferral
+        exists for, adding the first line and sending in one save, that is a
+        refusal over a line the same request had just written.
+        ``test_the_change_form_can_add_the_first_line_and_send_in_one_save``
+        caught exactly that.
+        """
+        super().save_related(request, form, formsets, change)
+        if not getattr(form, self._DEFERRED_SEND, False):
+            return
+        purchase_order = PurchaseOrder.objects.get(pk=form.instance.pk)
+        try:
+            services.mark_sent(
+                purchase_order,
+                request.user,
+                at=getattr(form, self._DEFERRED_SEND_AT, None),
+                sent_by=getattr(form, self._DEFERRED_SEND_BY, None),
+            )
+        except services.SendRefused as exc:
+            previous_sent_at, previous_sent_by_id = getattr(
+                form, self._DEFERRED_SEND_STAMP, (None, None)
+            )
+            if (purchase_order.sent_at, purchase_order.sent_by_id) != (
+                previous_sent_at,
+                previous_sent_by_id,
+            ):
+                purchase_order.sent_at = previous_sent_at
+                purchase_order.sent_by_id = previous_sent_by_id
+                purchase_order.save(update_fields=["sent_at", "sent_by"])
+            self.message_user(
+                request,
+                f"Not sent — {purchase_order.po_number or purchase_order.pk}: {exc.message}",
+                level=messages.ERROR,
+            )
+
     def save_formset(self, request, form, formset, change):
         """Save the line-item inline, recording any price change as one.
 
@@ -453,12 +650,26 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         the LINE model, ``signals.py`` on request CREATION), so there was never
         anything to suppress — while ``updated_at`` is ``auto_now``, which only
         a ``save()`` moves.
+
+        A changelist cannot grey out one row of a selection, so the refusals
+        are reported AFTER the fact and NAMED — an operator who ticked six
+        orders and sent four needs to know which two did not go and why, which
+        a bare "4 orders marked as sent" does not tell them. The successes are
+        kept: a rule broken by one row is not a reason to refuse the rest of
+        the operator's selection.
         """
         updated = 0
+        refusals = []
         for purchase_order in queryset.filter(status=PurchaseOrder.Status.DRAFT):
-            services.mark_sent(purchase_order, request.user)
+            try:
+                services.mark_sent(purchase_order, request.user)
+            except services.SendRefused as exc:
+                refusals.append(f"{purchase_order.po_number or purchase_order.pk}: {exc.message}")
+                continue
             updated += 1
         self.message_user(request, f"{updated} orders marked as sent.")
+        for refusal in refusals:
+            self.message_user(request, f"Not sent — {refusal}", level=messages.ERROR)
 
     @admin.action(description="Mark selected orders as confirmed")
     def mark_as_confirmed(self, request, queryset):

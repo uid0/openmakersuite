@@ -200,6 +200,12 @@ interface PurchaseOrder {
   // and for a sharper reason: this flag decides whether a line's action is an
   // irreversible DESTROY or a recorded void. Never re-derive it from `status`.
   can_delete_items: boolean;
+  // Why this order cannot go to the supplier, or null when nothing blocks it —
+  // served from the same rule the send endpoint enforces (oms-po-send-rule).
+  // It says nothing about status: an order that has already gone out is not
+  // "blocked", so whether to OFFER the send is still this page's call and
+  // whether the offer will WORK is the server's.
+  send_blocked_reason: string | null;
   // Header terms (op-bwo9), all editable here. `order_date` is a datetime that
   // carries a business *day* — the server derives `payment_schedule` from its
   // UTC date — so it is read and written as a day (see `utcYmd`).
@@ -1623,11 +1629,34 @@ const PurchaseOrderPage: React.FC = () => {
   // surface the existing PO lifecycle transitions alongside receive/mark-delivered.
   const heroActions: React.ReactNode[] = [];
   if (canSendToSupplier(order)) {
+    // Offered, but not pretended to work. An order with no line items is
+    // refused by the endpoint (oms-po-send-rule), and a button that only says
+    // so once it has been pressed leaves the operator to guess: the server's
+    // own sentence goes on the screen and the button is disabled, so the reason
+    // is there before the click. Read off `send_blocked_reason` rather than
+    // counted from `items` here — a second copy of the rule is how a button and
+    // an endpoint come to disagree.
+    const blocked = order.send_blocked_reason;
     heroActions.push(
-      <Button key="send-to-supplier" onClick={handleSendToSupplier} disabled={transitioning}>
+      <Button
+        key="send-to-supplier"
+        onClick={handleSendToSupplier}
+        disabled={transitioning || Boolean(blocked)}
+        title={blocked ?? undefined}
+      >
         Send to Supplier
       </Button>,
     );
+    if (blocked) {
+      // Shown, not hidden behind a hover: a tooltip is invisible on a touch
+      // screen and to a screen reader, and this is the sentence that tells the
+      // operator what to do next.
+      heroActions.push(
+        <Text key="send-blocked-reason" size="sm" c="dimmed" maw={340}>
+          {blocked}
+        </Text>,
+      );
+    }
   }
   if (canConfirmOrder(order)) {
     heroActions.push(

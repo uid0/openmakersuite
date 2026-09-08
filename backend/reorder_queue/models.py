@@ -269,6 +269,37 @@ class PurchaseOrder(models.Model):
     #: may re-derive — a draft or cancelled order is never resurrected by one.
     IN_RECEIVING_STATUSES = RECEIVABLE_STATUSES | {Status.RECEIVED}
 
+    #: Statuses in which the order HAS gone to the supplier, whatever has
+    #: happened to it since. The ONE definition of "already out", and it exists
+    #: because two different questions need it:
+    #:
+    #: * ``services.mark_sent`` records the moment an order ENTERED the
+    #:   supplier's hands, so a write that re-asserts a status the order is
+    #:   already at is a filing change and must not re-stamp it — the same
+    #:   source-state predicate ``problem_settlement.settle_problem`` uses, and
+    #:   for the same reason: a moment overwritten is a moment lost.
+    #: * ``report_unstamped_transitions`` reports orders that went out with no
+    #:   ``sent_at``, which is the same population.
+    #:
+    #: Its MEMBERS coincide with :attr:`IN_RECEIVING_STATUSES` today; its
+    #: MEANING does not, and that is why it is written out rather than aliased.
+    #: "The supplier has this" and "receiving still owns this" answer
+    #: differently the moment a post-send terminal state exists — an order
+    #: cancelled after it went out would belong here and not there.
+    #:
+    #: CANCELLED and VOIDED are absent for the reason
+    #: ``PRE_SUPPLIER_STATUSES`` names: a draft can reach both without ever
+    #: going out, and no column separates the order cancelled before the send
+    #: from the one cancelled after it.
+    SENT_ONWARD_STATUSES = frozenset(
+        {
+            Status.SENT,
+            Status.CONFIRMED,
+            Status.PARTIALLY_RECEIVED,
+            Status.RECEIVED,
+        }
+    )
+
     # Days-until-due for the "net N" terms. Every other term anchors the payment
     # to a date rather than to a delay — see :attr:`payment_schedule`.
     NET_PAYMENT_DAYS = {

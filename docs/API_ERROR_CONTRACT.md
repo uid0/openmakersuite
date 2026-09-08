@@ -18,7 +18,7 @@ Every error response from the OpenMakerSuite API uses a single envelope. Fronten
 
 | Key             | Type                       | Notes                                                                                                            |
 | --------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `error.code`    | string (stable identifier) | One of the codes in the table below. Safe to switch on; will not change without a deprecation window.            |
+| `error.code`    | string (stable identifier) | One of the codes in the table below, or an [endpoint-specific code](#endpoint-specific-codes). Safe to switch on; will not change without a deprecation window. |
 | `error.message` | string                     | Single user-safe sentence. Frontends may display this directly. Localization happens client-side.                |
 | `error.details` | object \| array \| null    | Optional. Machine-readable hints. Shape varies by code (see below). Absent when there is no extra context.       |
 
@@ -39,6 +39,17 @@ Every error response from the OpenMakerSuite API uses a single envelope. Fronten
 | 503  | `dependency_unavailable`  | A required dependency (broker, MQTT, email gateway, downstream webhook) is unreachable.  | `{"dependency": "redis" \| "celery" \| ...}` (endpoint may extend it). |
 | 202  | `task_queued`             | Endpoint accepted the request and handed work off to Celery.                             | `{"task_id": "..."}` plus optional `eta`, `queue`.                     |
 | 500  | `server_error`            | Unhandled server error. Reported to Sentry; client should retry idempotent requests.     | `null`.                                                                |
+
+### Endpoint-specific codes
+
+The table above is every code the exception handler can produce: `_classify` resolves an exception to one of those and nothing else. `error_response()` emits the code it is handed, so an endpoint may answer with a narrower one where the generic code would say less than the endpoint knows. Such a code belongs to its endpoint rather than to `ErrorCode`, and a client that does not recognise one must fall back to `error.message`, which carries the same sentence either way.
+
+| HTTP | `code`          | Endpoint                                                     | Meaning                                                                                        | `details` |
+| ---- | --------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- | --------- |
+| 400  | `no_line_items` | `POST /api/reorders/purchase-orders/{id}/send_to_supplier/` | The order carries no line item to order, so it may not go to the supplier. Add one and retry.  | Absent.   |
+| 400  | `not_draft`     | `POST /api/reorders/purchase-orders/{id}/send_to_supplier/` | The order is not a draft; only a draft can be sent. The message names the order and its status. | Absent.   |
+
+The same "no line items" refusal on `PATCH /api/reorders/purchase-orders/{id}/` — where setting `status` to `sent`, or attaching a `sales_order_number` to a draft, also sends the order — is **raised** rather than composed, so it arrives under the generic `validation_failed` with that same sentence in `error.message`. A client must not key this refusal on the code alone.
 
 ## Implementation
 
@@ -64,4 +75,6 @@ Existing endpoints that return their own ad-hoc shapes (e.g. `Response({"detail"
 
 ## Tests
 
-`backend/config/tests/test_api_errors.py` mounts a throwaway router and exercises every code in the table above end-to-end through DRF's dispatch path (URL routing → permission check → throttle → action → exception handler). Adding a new code requires extending both the constants in `config.api_errors.ErrorCode` and a test in this file.
+`backend/config/tests/test_api_errors.py` mounts a throwaway router and exercises every code in the [Codes](#codes) table end-to-end through DRF's dispatch path (URL routing → permission check → throttle → action → exception handler). Adding a code to that table requires extending both the constants in `config.api_errors.ErrorCode` and a test in this file.
+
+An [endpoint-specific code](#endpoint-specific-codes) is pinned by the owning endpoint's own tests instead — `reorder_queue/tests/test_send_requires_lines.py` for the two above — and must be added to that table so a client can find it.

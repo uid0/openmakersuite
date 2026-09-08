@@ -519,13 +519,102 @@ def update_reorder_requests_from_po(purchase_order):
             reorder_request.save()
 
 
-def mark_sent(purchase_order, user):
+class SendRefused(Exception):
+    """A purchase order may not be sent, with an operator-facing reason.
+
+    Same shape as :class:`reorder_queue.services.line_entry.LineEntryError`, and
+    for the same reason: ``code`` lets a non-browser client branch without
+    parsing prose, and ``message`` is the sentence an operator reads. Every
+    argument goes to ``super().__init__`` so the exception survives
+    ``copy``/``pickle``; ``str(exc)`` is therefore the tuple — read
+    :attr:`message` for the operator-facing text.
+    """
+
+    def __init__(self, message: str, code: str):
+        super().__init__(message, code)
+        self.message = message
+        self.code = code
+
+
+#: ``code`` on the one refusal this rule can currently produce.
+REFUSAL_NO_LINE_ITEMS = "no_line_items"
+
+
+def send_refusal(purchase_order):
+    """Why this order may not go to the supplier, or ``None`` — THE rule.
+
+    ONE function, because a rule with more than one writer drifts: this is read
+    by :func:`mark_sent` (the guard every send path passes through),
+    by ``PurchaseOrderViewSet.perform_update`` (so a PATCH is refused before it
+    writes anything — in the VIEW rather than the serializer's ``validate()``,
+    and that method's docstring gives the reason), and by
+    ``PurchaseOrderSerializer.send_blocked_reason`` (so the screen that OFFERS
+    the send can say why it will not work instead of failing when pressed).
+    Adding a second condition is one edit here.
+
+    It answers the CONTENT question only — has this order got anything on it to
+    order? — and deliberately says nothing about ``status``. The DRAFT
+    precondition belongs to the callers and is different at each of them: the
+    API send action answers 400 "only draft orders can be sent", the admin bulk
+    action filters its queryset to drafts, and the auto-send returns quietly on
+    an order already with the supplier. Folding the status into this predicate
+    would make ``send_blocked_reason`` answer "it is already sent" to a screen
+    that is not asking.
+
+    ``has_active_items`` rather than a row count: ``void_item`` carries no
+    status gate, so an order whose only line has been struck off has rows but
+    nothing to order, and the order pad it exports is empty. Two kinds of empty
+    order, one predicate — the model's own.
+    """
+    if not purchase_order.has_active_items:
+        return SendRefused(
+            f"{purchase_order.po_number or 'This purchase order'} has no line items, so "
+            f"there is nothing to order. Add at least one line item to it before sending "
+            f"it to the supplier.",
+            REFUSAL_NO_LINE_ITEMS,
+        )
+    return None
+
+
+def assert_sendable(purchase_order):
+    """Raise :class:`SendRefused` if :func:`send_refusal` names a reason."""
+    refusal = send_refusal(purchase_order)
+    if refusal is not None:
+        raise refusal
+
+
+def mark_sent(purchase_order, user, at=None, sent_by=None):
     """Stamp a purchase order as SENT — THE definition of that transition.
 
     Everything DRAFT -> SENT owes, in one place: status -> SENT,
     ``sent_by``/``sent_at`` stamped, ``updated_at`` moved by the ``save()``,
     the linked reorder requests synced, and the ``po_send`` audit row the staff
     feed reads recorded. The caller owns only the DRAFT precondition.
+
+    ``at`` pins the moment and ``sent_by`` pins whose send it was. Both exist
+    for the same kind of caller: one RECORDING a send somebody else already
+    made, rather than performing one now. The admin change form renders
+    ``sent_at`` and ``sent_by`` as editable fields beside ``status`` precisely
+    so an order typed up after the phone call that placed it records when it
+    ACTUALLY went out and who ACTUALLY sent it, and both are writable on
+    ``PurchaseOrderSerializer`` for the same reason. Overwriting either with
+    the performing request's own values would discard operator input — and
+    ``sent_at`` is what ``receiving.create_lead_time_log`` computes
+    ``LeadTimeLog`` from, so a discarded backdate does not merely lose a fact,
+    it puts a WRONG lead time into the column
+    ``inventory.services.supplier_selection`` scores suppliers on.
+
+    They are separate from ``user``, which stays the ACTOR the ``po_send``
+    audit row names: who typed the save is a different question from whose
+    send is being recorded, and the audit feed must answer the first. Both
+    default to ``user``/now, which is every caller that is sending here and
+    now. (:func:`inventory.services.problem_settlement.settle_problem` carries
+    the same ``at`` for the same reason.)
+
+    :func:`assert_sendable` runs FIRST, before any write: an order with nothing
+    on it must not reach the supplier, and putting the guard here rather than at
+    each caller is the same argument the rest of this docstring makes about the
+    fact set — five performers, one place to add the next condition.
 
     The audit call lives HERE rather than in each caller, unlike the rest of
     this module (see the module docstring — the #883 extraction left the views
@@ -549,10 +638,11 @@ def mark_sent(purchase_order, user):
     the same shape this function exists to prevent. Callers that transition
     several orders (the admin changelist) get one unit of work per order.
     """
+    assert_sendable(purchase_order)
     with transaction.atomic():
         purchase_order.status = PurchaseOrder.Status.SENT
-        purchase_order.sent_by = user
-        purchase_order.sent_at = timezone.now()
+        purchase_order.sent_by = sent_by or user
+        purchase_order.sent_at = at or timezone.now()
         purchase_order.save()
         # Keep linked reorder requests in step with the PO going out.
         update_reorder_requests_from_po(purchase_order)

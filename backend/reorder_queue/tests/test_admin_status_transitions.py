@@ -333,6 +333,15 @@ def test_every_send_path_stamps_the_whole_transition(send, staff):
     item = InventoryItemFactory(current_stock=0)
     order = draft_order(staff, item=item)
     request_row = ReorderRequestFactory(item=item, status=ReorderRequest.Status.APPROVED)
+    # A STALE STAMP the send must replace, not reuse. Every case used to start
+    # from a fresh draft with a null ``sent_at``, so a path that carried an old
+    # moment forward instead of recording the new one answered the same as a
+    # correct one — a fixture that could not tell the two apart. The order
+    # stays DRAFT because three of these paths refuse anything else; what is
+    # under test here is the stamp, not the precondition.
+    stale = timezone.now() - timedelta(days=120)
+    PurchaseOrder.objects.filter(pk=order.pk).update(sent_at=stale)
+    order.refresh_from_db()
 
     def client_for(actor):
         client = Client()
@@ -345,6 +354,8 @@ def test_every_send_path_stamps_the_whole_transition(send, staff):
     assert order.status == PurchaseOrder.Status.SENT
     assert order.sent_by == staff
     assert order.sent_at is not None
+    assert order.sent_at != stale
+    assert order.sent_at > timezone.now() - timedelta(minutes=5)
     # EXACTLY one, not merely one-or-more. The audit call moved from
     # ``views._mark_sent`` into ``services.mark_sent`` so the third caller could
     # not miss it; a count guards the other end of that move, where the view's

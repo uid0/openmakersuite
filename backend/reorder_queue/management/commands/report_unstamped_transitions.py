@@ -74,7 +74,7 @@ never be read as covering something narrower or broader than it does:
 
 It is a signature, so it is not a historical set. What has changed since this
 command was written is that the SEND TRANSITIONS are closed: every path that
-moves an order to ``sent`` goes through ``services.mark_sent``
+ENTERS an order into the supplier's hands goes through ``services.mark_sent``
 (oms-po-send-rule), which stamps.
 
 NOTHING ELSE IS, and that boundary is the honest statement of what a non-zero
@@ -179,8 +179,9 @@ def orders_sent_without_a_moment():
     signature whenever they were written, and a non-zero count next quarter is
     NOT automatically a count of pre-fix rows.
 
-    WHAT IS CLOSED: the send TRANSITIONS. Every path that moves an order to
-    ``sent`` goes through ``services.mark_sent`` (oms-po-send-rule) — all five
+    WHAT IS CLOSED: the send TRANSITIONS. Every path that ENTERS an order into
+    the supplier's hands goes through ``services.mark_sent`` (oms-po-send-rule)
+    — all five
     of them, the API's ``send_to_supplier`` action, ``PATCH {"status": "sent"}``,
     the sales-order-number auto-send on create and update, the admin
     changelist's bulk action, and the admin change form — and that service
@@ -402,8 +403,8 @@ class Command(BaseCommand):
         )
         self.stdout.write(
             "  and it is not necessarily historical. The send TRANSITIONS are "
-            "closed: every path that moves an order to sent goes through "
-            "services.mark_sent, which stamps (oms-po-send-rule)."
+            "closed: every path that ENTERS an order into the supplier's hands "
+            "goes through services.mark_sent, which stamps (oms-po-send-rule)."
         )
         self.stdout.write(
             "  nothing else is. status, sent_at and sent_by are writable on the "

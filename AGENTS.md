@@ -1009,8 +1009,8 @@ into the column that chooses suppliers, which is worse than the honest gap
 
 **A report keyed on a signature is not a report on a closed historical set**,
 and must not read as one. What HAS closed is the send **transitions**: every
-path that moves an order to `sent` goes through `services.mark_sent`, which
-stamps — see "Sending a purchase order" below. **Nothing else is.** `status`,
+path that ENTERS an order into the supplier's hands goes through
+`services.mark_sent`, which stamps — see "Sending a purchase order" below. **Nothing else is.** `status`,
 `sent_at` and `sent_by` are writable on the API and editable on the admin
 change form, so ANY write that leaves an order in a sent-onward status with a
 null `sent_at` lands this signature, whether it moves the status or clears the

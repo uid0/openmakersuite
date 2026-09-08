@@ -298,6 +298,12 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
     #: between operators.
     _DEFERRED_SEND = "_deferred_send_requested"
 
+    #: The moment the operator actually TYPED into ``sent_at``, or ``None``
+    #: when they left the field as the form rendered it. Parked beside the
+    #: deferred send because only ``save_model`` has the form that can tell
+    #: those two apart.
+    _DEFERRED_SEND_AT = "_deferred_send_typed_at"
+
     #: The ``(sent_at, sent_by_id)`` the row carried BEFORE this save, parked
     #: beside the deferred send so a refusal can put them back.
     _DEFERRED_SEND_STAMP = "_deferred_send_previous_stamp"
@@ -339,6 +345,18 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         the sender. It is defaulted HERE, on the column, rather than being
         carried to ``save_related`` as an actor — see there for why the two are
         not the same person.
+
+        WHETHER THE OPERATOR TYPED A ``sent_at`` is decided here too, because
+        this is the only hook holding the form that can answer it.
+        ``obj.sent_at`` cannot: on an order that already went out once, the
+        change form PRE-FILLS the field from the database, so a re-send that
+        nobody touched carries the OLD moment and is indistinguishable from a
+        deliberate backdate. ``form.changed_data`` asks the question directly —
+        it compares what was submitted against ``form.initial``, which on a
+        change form is the stored value — so an untouched field falls through
+        to now and the send records when it actually happened. Getting this
+        wrong writes a months-long ``LeadTimeLog.order_date`` into the column
+        ``inventory.services.supplier_selection`` scores suppliers on.
         """
         previous_status = form.initial.get("status") or PurchaseOrder.Status.DRAFT
         entering_send = (
@@ -349,6 +367,11 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
             if obj.sent_by is None:
                 obj.sent_by = request.user
             setattr(form, self._DEFERRED_SEND, True)
+            setattr(
+                form,
+                self._DEFERRED_SEND_AT,
+                obj.sent_at if "sent_at" in form.changed_data else None,
+            )
             setattr(form, self._DEFERRED_SEND_STAMP, self._stored_send_stamp(obj.pk))
             obj.status = previous_status
         super().save_model(request, obj, form, change)
@@ -371,12 +394,14 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         hooks in one transaction, so a send performed here commits with the
         edits that asked for it.
 
-        ``at``/``sent_by`` are read off the RE-READ row and honour what the
-        operator typed. Backdating is why those fields are editable: an order
-        written up after the phone call that placed it records when it ACTUALLY
-        went out and who ACTUALLY sent it, and overwriting either with the
-        saving request's own values would discard what they entered. Blank
-        ``sent_at`` falls through to now, which is every ordinary send.
+        ``sent_by`` is read off the RE-READ row and ``at`` off the decision
+        ``save_model`` parked, and both honour what the operator typed.
+        Backdating is why those fields are editable: an order written up after
+        the phone call that placed it records when it ACTUALLY went out and who
+        ACTUALLY sent it, and overwriting either with the saving request's own
+        values would discard what they entered. A ``sent_at`` the operator did
+        not touch is not a value they entered — see ``save_model`` — so it
+        falls through to now, as does a blank one.
 
         The ACTOR is ``request.user``, unconditionally, and that is a different
         question from ``sent_by``. Whoever typed this save is who the
@@ -424,7 +449,7 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
             services.mark_sent(
                 purchase_order,
                 request.user,
-                at=purchase_order.sent_at,
+                at=getattr(form, self._DEFERRED_SEND_AT, None),
                 sent_by=purchase_order.sent_by,
             )
         except services.SendRefused as exc:

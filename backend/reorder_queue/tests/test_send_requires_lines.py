@@ -206,6 +206,20 @@ def change_form_payload(order, **overrides):
     return payload
 
 
+def as_split_datetime(moment, field="sent_at"):
+    """``moment`` as the admin's split date/time widget posts it.
+
+    The widget renders to second precision, so a value round-tripped through
+    the form is what the operator's browser actually sends back when they leave
+    the field alone — which is the pre-fill the send rule has to tell apart
+    from a typed backdate.
+    """
+    return {
+        f"{field}_0": moment.date().isoformat(),
+        f"{field}_1": moment.time().strftime("%H:%M:%S"),
+    }
+
+
 def post_change_form(client, order, **overrides):
     url = reverse("admin:reorder_queue_purchaseorder_change", args=[order.pk])
     return client.post(url, change_form_payload(order, **overrides), follow=True)
@@ -737,6 +751,61 @@ def test_the_admin_change_form_keeps_a_sent_at_the_operator_typed(admin_client, 
     assert timezone.localtime(order.sent_at).replace(microsecond=0) == backdated.replace(
         microsecond=0
     )
+
+
+def test_a_change_form_resend_records_now_not_the_pre_filled_old_stamp(admin_client, staff):
+    """The form pre-fills ``sent_at``; leaving it alone is not a backdate.
+
+    An order that went out once, was cancelled, and is now re-placed arrives at
+    the change form with the OLD moment already in the field. Honouring it
+    because it is present would stamp the new send with the old date, and
+    ``receiving.create_lead_time_log`` takes ``LeadTimeLog.order_date`` from
+    ``sent_at`` — so the re-send would write a months-long lead time into the
+    column ``supplier_selection`` scores suppliers on. Wrong data rather than
+    missing, which is worse.
+
+    ``form.changed_data`` is what separates the two: the operator did not touch
+    the field, so the send records when it actually happened.
+    """
+    order = draft_with_a_line(staff)
+    first_sent = timezone.localtime(timezone.now() - timedelta(days=120))
+
+    response = post_change_form(
+        admin_client,
+        order,
+        status=PurchaseOrder.Status.SENT,
+        **as_split_datetime(first_sent),
+    )
+    assert response.redirect_chain, messages_from(response)
+    order.refresh_from_db()
+    original_stamp = order.sent_at
+    assert original_stamp is not None
+
+    # Cancelled with the field left exactly as the form rendered it, which is
+    # what keeps the old stamp on the row for the re-send to trip over.
+    response = post_change_form(
+        admin_client,
+        order,
+        status=PurchaseOrder.Status.CANCELLED,
+        **as_split_datetime(timezone.localtime(original_stamp)),
+    )
+    assert response.redirect_chain, messages_from(response)
+    order.refresh_from_db()
+    assert order.status == PurchaseOrder.Status.CANCELLED
+    assert order.sent_at == original_stamp
+
+    response = post_change_form(
+        admin_client,
+        order,
+        status=PurchaseOrder.Status.SENT,
+        **as_split_datetime(timezone.localtime(original_stamp)),
+    )
+    assert response.redirect_chain, messages_from(response)
+
+    order.refresh_from_db()
+    assert order.status == PurchaseOrder.Status.SENT
+    assert order.sent_at != original_stamp
+    assert order.sent_at > timezone.now() - timedelta(minutes=5)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

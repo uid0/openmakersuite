@@ -766,6 +766,11 @@ def test_a_change_form_resend_records_now_not_the_pre_filled_old_stamp(admin_cli
 
     ``form.changed_data`` is what separates the two: the operator did not touch
     the field, so the send records when it actually happened.
+
+    Pins the MOMENT only. One operator does all three saves here, so the
+    pre-filled ``sent_by`` and the logged-in user are the same person and this
+    check cannot see which of them the row was attributed to — that is
+    ``test_a_change_form_resend_files_under_the_operator_who_re_sent_it``.
     """
     order = draft_with_a_line(staff)
     first_sent = timezone.localtime(timezone.now() - timedelta(days=120))
@@ -806,6 +811,55 @@ def test_a_change_form_resend_records_now_not_the_pre_filled_old_stamp(admin_cli
     assert order.status == PurchaseOrder.Status.SENT
     assert order.sent_at != original_stamp
     assert order.sent_at > timezone.now() - timedelta(minutes=5)
+
+
+def test_a_change_form_resend_files_under_the_operator_who_re_sent_it(admin_client, staff):
+    """``sent_by`` is pre-filled too, and the same rule decides it.
+
+    The re-send arrives with the PREVIOUS sender already in the field. Writing
+    it through says a colleague sent an order they never touched — on the
+    changelist, on ``PurchaseOrderSerializer`` and in
+    ``report_unstamped_transitions`` — while the ``po_send`` audit row
+    correctly names whoever saved the form. One send, two screens, two answers.
+
+    Two clearly distinct users, and the second operator drives their own
+    client: the row's sender and the logged-in user coincide in every other
+    change-form check here, which is why none of them could see this.
+    """
+    order = draft_with_a_line(staff)
+    response = post_change_form(admin_client, order, status=PurchaseOrder.Status.SENT)
+    assert response.redirect_chain, messages_from(response)
+    order.refresh_from_db()
+    assert order.sent_by == staff
+
+    replacement = UserFactory(is_staff=True, is_superuser=True)
+    assert replacement != staff
+    other_client = Client()
+    other_client.force_login(replacement)
+
+    pre_filled = as_split_datetime(timezone.localtime(order.sent_at))
+    response = post_change_form(
+        other_client, order, status=PurchaseOrder.Status.CANCELLED, **pre_filled
+    )
+    assert response.redirect_chain, messages_from(response)
+    order.refresh_from_db()
+    assert order.sent_by == staff
+
+    response = post_change_form(other_client, order, status=PurchaseOrder.Status.SENT, **pre_filled)
+    assert response.redirect_chain, messages_from(response)
+
+    order.refresh_from_db()
+    assert order.status == PurchaseOrder.Status.SENT
+    assert order.sent_by == replacement
+
+    send_event = (
+        PurchaseOrderAuditEvent.objects.filter(
+            purchase_order=order, action=PurchaseOrderAuditEvent.Action.PO_SEND
+        )
+        .order_by("-id")
+        .first()
+    )
+    assert send_event.actor == replacement
 
 
 # ─────────────────────────────────────────────────────────────────────────────

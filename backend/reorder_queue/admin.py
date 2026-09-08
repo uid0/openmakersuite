@@ -304,6 +304,12 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
     #: those two apart.
     _DEFERRED_SEND_AT = "_deferred_send_typed_at"
 
+    #: The sender the operator actually CHOSE in ``sent_by``, or ``None`` when
+    #: they left the field as the form rendered it. Same question as
+    #: :attr:`_DEFERRED_SEND_AT`, asked of the other stamp column, because both
+    #: are pre-filled and neither can be told from a typed value by its value.
+    _DEFERRED_SEND_BY = "_deferred_send_typed_by"
+
     #: The ``(sent_at, sent_by_id)`` the row carried BEFORE this save, parked
     #: beside the deferred send so a refusal can put them back.
     _DEFERRED_SEND_STAMP = "_deferred_send_previous_stamp"
@@ -340,23 +346,30 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         pin the send on them; if that send is then refused, they are what puts
         the row back — see there.
 
-        A blank ``sent_by`` is filled with the operator saving the form, which
-        is what an ordinary send means: nobody typed a name because they are
-        the sender. It is defaulted HERE, on the column, rather than being
-        carried to ``save_related`` as an actor — see there for why the two are
-        not the same person.
+        WHETHER THE OPERATOR TYPED THE STAMP is decided here, for BOTH
+        ``sent_at`` and ``sent_by``, because this is the only hook holding the
+        form that can answer it. Their values cannot: on an order that already
+        went out once, the change form PRE-FILLS both from the database, so a
+        re-send nobody touched carries the OLD moment and the OLD sender and
+        neither is distinguishable from a deliberate entry. ``form.changed_data``
+        asks the question directly — it compares what was submitted against
+        ``form.initial``, which on a change form is the stored value — so an
+        untouched field falls through to now and to the operator saving the
+        form, which is what an ordinary send means: nobody named a sender
+        because they are the sender.
 
-        WHETHER THE OPERATOR TYPED A ``sent_at`` is decided here too, because
-        this is the only hook holding the form that can answer it.
-        ``obj.sent_at`` cannot: on an order that already went out once, the
-        change form PRE-FILLS the field from the database, so a re-send that
-        nobody touched carries the OLD moment and is indistinguishable from a
-        deliberate backdate. ``form.changed_data`` asks the question directly —
-        it compares what was submitted against ``form.initial``, which on a
-        change form is the stored value — so an untouched field falls through
-        to now and the send records when it actually happened. Getting this
-        wrong writes a months-long ``LeadTimeLog.order_date`` into the column
-        ``inventory.services.supplier_selection`` scores suppliers on.
+        Both matter on a screen. A stale ``sent_at`` writes a months-long
+        ``LeadTimeLog.order_date`` into the column
+        ``inventory.services.supplier_selection`` scores suppliers on; a stale
+        ``sent_by`` says a colleague sent an order they never touched, on the
+        changelist, on ``PurchaseOrderSerializer`` and in
+        ``report_unstamped_transitions``, while the ``po_send`` audit row
+        correctly names whoever saved the form — the same disagreement about
+        one send, one column over.
+
+        Those are the only two: the deferred send touches ``status``,
+        ``sent_at`` and ``sent_by``, and ``status`` is decided from
+        ``previous_status`` rather than from what the form rendered.
         """
         previous_status = form.initial.get("status") or PurchaseOrder.Status.DRAFT
         entering_send = (
@@ -364,13 +377,16 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
             and previous_status not in PurchaseOrder.SENT_ONWARD_STATUSES
         )
         if entering_send:
-            if obj.sent_by is None:
-                obj.sent_by = request.user
             setattr(form, self._DEFERRED_SEND, True)
             setattr(
                 form,
                 self._DEFERRED_SEND_AT,
                 obj.sent_at if "sent_at" in form.changed_data else None,
+            )
+            setattr(
+                form,
+                self._DEFERRED_SEND_BY,
+                obj.sent_by if "sent_by" in form.changed_data else None,
             )
             setattr(form, self._DEFERRED_SEND_STAMP, self._stored_send_stamp(obj.pk))
             obj.status = previous_status
@@ -394,14 +410,16 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         hooks in one transaction, so a send performed here commits with the
         edits that asked for it.
 
-        ``sent_by`` is read off the RE-READ row and ``at`` off the decision
-        ``save_model`` parked, and both honour what the operator typed.
-        Backdating is why those fields are editable: an order written up after
-        the phone call that placed it records when it ACTUALLY went out and who
-        ACTUALLY sent it, and overwriting either with the saving request's own
-        values would discard what they entered. A ``sent_at`` the operator did
-        not touch is not a value they entered — see ``save_model`` — so it
-        falls through to now, as does a blank one.
+        ``at`` and ``sent_by`` are both read off the decisions ``save_model``
+        parked, and both honour what the operator ENTERED. Backdating is why
+        those fields are editable: an order written up after the phone call
+        that placed it records when it ACTUALLY went out and who ACTUALLY sent
+        it, and overwriting either with the saving request's own values would
+        discard what they entered. The test for "did they enter this" is
+        ``form.changed_data`` and cannot be the value, because the change form
+        pre-fills both fields and a pre-fill reads exactly like a typed one —
+        see ``save_model``. An untouched field is not an entry, so it falls
+        through to now and to ``request.user``, as does a blank one.
 
         The ACTOR is ``request.user``, unconditionally, and that is a different
         question from ``sent_by``. Whoever typed this save is who the
@@ -450,7 +468,7 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
                 purchase_order,
                 request.user,
                 at=getattr(form, self._DEFERRED_SEND_AT, None),
-                sent_by=purchase_order.sent_by,
+                sent_by=getattr(form, self._DEFERRED_SEND_BY, None),
             )
         except services.SendRefused as exc:
             previous_sent_at, previous_sent_by_id = getattr(

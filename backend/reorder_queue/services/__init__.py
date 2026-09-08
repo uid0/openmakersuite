@@ -29,11 +29,9 @@ from .line_entry import (
 )
 from .numbering import next_po_number
 from .purchase_orders import (
-    REFUSAL_NO_LINE_ITEMS,
     SendRefused,
     add_business_days,
     apply_line_quantity,
-    assert_sendable,
     confirm_order,
     create_purchase_order,
     delete_line_item,
@@ -87,11 +85,9 @@ __all__ = [
     "PO_ELIGIBLE_STATUSES",
     "approved_requests_prefetch",
     "get_approved_reorder_request",
-    "REFUSAL_NO_LINE_ITEMS",
     "SendRefused",
     "add_business_days",
     "apply_line_quantity",
-    "assert_sendable",
     "confirm_order",
     "create_purchase_order",
     "mark_sent",

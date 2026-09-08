@@ -1009,8 +1009,14 @@ into the column that chooses suppliers, which is worse than the honest gap
 
 **A report keyed on a signature is not a report on a closed historical set**,
 and must not read as one — a direct database edit still lands the shape, and no
-application code can close that. What HAS closed since is every application
-route; see "Sending a purchase order" below.
+application code can close that. What HAS closed since is every route that
+SENDS; see "Sending a purchase order" below. What has NOT is a `PATCH` to
+another sent-onward status (`confirmed`, `received`, `partially_received`) on an
+order that never went out: that is not a send, is not routed, and still writes
+the status with `sent_at` null. Open gap, filed as
+[issue 1053](https://github.com/uid0/openmakersuite/issues/1053) — the report
+says so on the line beside the number, because a claim that a count is closed
+is exactly the kind of reassurance that stops somebody looking.
 
 ### Sending a purchase order: the rule, and where it is enforced
 
@@ -1037,7 +1043,16 @@ admin CHANGE FORM. The last two were the ones nobody expects.
   (op-xj1i), because there the PATCH went round a *permission* gate and here it
   goes round a *transition*. `perform_update` pops `status` out of the fields
   `save()` writes and calls the service, so the endpoint keeps its contract and
-  the transition keeps its fact set. A PATCH to any other status is untouched.
+  the transition keeps its fact set. A PATCH to any other status is untouched —
+  deliberately, and that leaves a gap the send rule does not cover: `confirmed`,
+  `received` and `partially_received` are sent-onward statuses, so a PATCH
+  straight to one of them from DRAFT still lands `sent_at` null and still costs
+  the delivery its `LeadTimeLog`. Each has its own service function with its own
+  preconditions (`confirm_order` requires SENT; the receiving statuses are
+  DERIVED by `receiving.refresh_receipt_status`), so routing them is its own
+  product decision — filed as
+  [issue 1053](https://github.com/uid0/openmakersuite/issues/1053), not folded
+  in here.
 - **The admin change form** edits `status`/`sent_at`/`sent_by` directly. Its
   send is DEFERRED from `save_model` to `save_related`, because whether the
   order may be sent depends on lines the inline formset has not saved yet —

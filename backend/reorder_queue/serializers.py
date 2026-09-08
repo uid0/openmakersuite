@@ -511,10 +511,17 @@ def send_request_field(attrs, instance):
       filing change and must never re-stamp the moment the order actually went
       out, while an order that never went out is entering the supplier's hands
       whichever un-sent state it is leaving.
-    * ``sales_order_number`` going from empty to non-empty on a DRAFT, which
-      ``PurchaseOrderViewSet`` treats as "this was already submitted"
-      (oms-qdxss). The same edge the viewset triggers on, so the refusal and
-      the trigger cannot come to disagree about which writes send.
+    * ``sales_order_number`` going from empty to non-empty on an order this
+      write LEAVES in DRAFT, which ``PurchaseOrderViewSet`` treats as "this was
+      already submitted" (oms-qdxss). The status is read off ``attrs`` falling
+      back to the instance, because that is the state
+      ``_auto_transition_to_sent`` gates on AFTER ``save()`` — asking the
+      pre-save question instead would refuse a combined
+      ``{"status": "confirmed", "sales_order_number": ...}`` write for a send
+      that would never fire, discarding the operator's number for a reason that
+      is not true of their request. The same edge the viewset triggers on, so
+      the refusal and the trigger cannot come to disagree about which writes
+      send.
 
     Returned as the FIELD NAME rather than a boolean so the refusal lands on the
     key the operator actually sent — an error against ``status`` on a request
@@ -530,7 +537,7 @@ def send_request_field(attrs, instance):
     incoming = attrs.get("sales_order_number")
     if (
         incoming is not None
-        and instance.status == PurchaseOrder.Status.DRAFT
+        and attrs.get("status", instance.status) == PurchaseOrder.Status.DRAFT
         and not (instance.sales_order_number or "").strip()
         and incoming.strip()
     ):

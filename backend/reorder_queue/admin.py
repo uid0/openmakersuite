@@ -296,6 +296,10 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
     #: process, so state stored on ``self`` would leak between operators.
     _DEFERRED_SEND = "_deferred_send_actor"
 
+    #: The ``(sent_at, sent_by_id)`` the row carried BEFORE this save, parked
+    #: beside the deferred send so a refusal can put them back.
+    _DEFERRED_SEND_STAMP = "_deferred_send_previous_stamp"
+
     def save_model(self, request, obj, form, change):
         """Save the operator's edits, holding back a move to SENT.
 
@@ -321,6 +325,12 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         ``problem_settlement.settle_problem`` uses: re-selecting ``sent`` on an
         order that already went out is a filing change and must not overwrite
         the moment it went.
+
+        The stamp the row arrived with is captured alongside, from the DATABASE
+        rather than from ``obj``, which the form has already mutated. The typed
+        ``sent_at``/``sent_by`` have to be written here so ``save_related`` can
+        pin the send on them; if that send is then refused, they are what puts
+        the row back — see there.
         """
         previous_status = form.initial.get("status") or PurchaseOrder.Status.DRAFT
         entering_send = (
@@ -329,8 +339,19 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         )
         if entering_send:
             setattr(form, self._DEFERRED_SEND, obj.sent_by or request.user)
+            setattr(form, self._DEFERRED_SEND_STAMP, self._stored_send_stamp(obj.pk))
             obj.status = previous_status
         super().save_model(request, obj, form, change)
+
+    @staticmethod
+    def _stored_send_stamp(pk):
+        """The ``(sent_at, sent_by_id)`` currently in the row, or the empty pair."""
+        if pk is None:
+            return (None, None)
+        stored = PurchaseOrder.objects.filter(pk=pk).values("sent_at", "sent_by_id").first()
+        if stored is None:
+            return (None, None)
+        return (stored["sent_at"], stored["sent_by_id"])
 
     def save_related(self, request, form, formsets, change):
         """Save the line-item inline, then perform any send the form asked for.
@@ -346,10 +367,19 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         with "now" would discard what they entered. Blank falls through to now,
         which is every ordinary send.
 
-        A refusal leaves the order in the status it came in with and says so on
-        the operator's next screen. Any other exception propagates and rolls the
-        whole save back — a send that failed for an unknown reason is not
-        something to report as a tidy refusal.
+        A refusal leaves the order EXACTLY as it came in — the status
+        ``save_model`` already held back, and the ``sent_at``/``sent_by`` it had
+        to write so this method could pin the send on them. Reverting the status
+        alone would leave a never-sent DRAFT carrying a moment it never had, and
+        ``PurchaseOrder.days_since_ordered`` reads ``sent_at``: the changelist
+        column and the API field would both report an age for an order that has
+        not gone anywhere, and ``report_unstamped_transitions`` cannot see it
+        because it filters on ``SENT_ONWARD_STATUSES``. The operator's typed
+        value is still in the form in front of them for the retry.
+
+        Any other exception propagates and rolls the whole save back — a send
+        that failed for an unknown reason is not something to report as a tidy
+        refusal.
 
         THE ORDER IS RE-READ, and that is not defensive tidiness. ``form.instance``
         came off ``get_queryset``'s ``prefetch_related("items")``, and
@@ -369,6 +399,16 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         try:
             services.mark_sent(purchase_order, actor, at=purchase_order.sent_at)
         except services.SendRefused as exc:
+            previous_sent_at, previous_sent_by_id = getattr(
+                form, self._DEFERRED_SEND_STAMP, (None, None)
+            )
+            if (purchase_order.sent_at, purchase_order.sent_by_id) != (
+                previous_sent_at,
+                previous_sent_by_id,
+            ):
+                purchase_order.sent_at = previous_sent_at
+                purchase_order.sent_by_id = previous_sent_by_id
+                purchase_order.save(update_fields=["sent_at", "sent_by"])
             self.message_user(
                 request,
                 f"Not sent — {purchase_order.po_number or purchase_order.pk}: {exc.message}",

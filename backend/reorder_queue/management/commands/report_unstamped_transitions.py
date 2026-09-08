@@ -74,12 +74,23 @@ never be read as covering something narrower or broader than it does:
 
 It is a signature, so it is not a historical set — a DIRECT DATABASE EDIT
 still lands the order shape, and no application code can close that. What has
-changed since this command was written is that every APPLICATION route is now
-closed: ``PATCH {"status": "sent"}`` and the admin change form both go through
+changed since this command was written is that every SEND route is now closed:
+``PATCH {"status": "sent"}`` and the admin change form both go through
 ``services.mark_sent`` (oms-po-send-rule), which stamps the whole transition.
 ``status``, ``sent_at`` and ``sent_by`` are still WRITABLE — the endpoint was
 not narrowed, because the rule was what needed enforcing, not the contract —
-but writing ``status`` no longer bypasses the transition.
+but writing ``status`` SENT no longer bypasses the transition.
+
+The send routes are not every route into this shape. ``PATCH`` to ANOTHER
+``SENT_ONWARD`` status — ``confirmed``, ``received``, ``partially_received`` —
+is not a send and is not routed, so it still writes the status straight through
+with ``sent_at`` left null, and the row lands squarely on the signature below.
+That gap is open and filed as
+https://github.com/uid0/openmakersuite/issues/1053; closing it is a separate
+product decision, because each of those statuses has its own service function
+with its own preconditions (``services.confirm_order`` requires SENT, and the
+receiving statuses are DERIVED by ``receiving.refresh_receipt_status`` rather
+than set by hand).
 
 A SECOND ORDER SIGNATURE
 ------------------------
@@ -168,28 +179,32 @@ def orders_sent_without_a_moment():
     NOT automatically a count of pre-fix rows. Two routes can still produce the
     shape today:
 
-      * a direct database edit;
+      * a direct database edit, which no application code can close;
       * ``PATCH /api/reorders/purchase-orders/<id>/`` with
-        ``{"status": "sent"}``. ``PurchaseOrderSerializer.read_only_fields`` is
-        ``["po_number", "updated_at"]``, so ``status``, ``sent_at`` and
-        ``sent_by`` are all writable, and ``perform_update``'s auto-send does
-        not catch it — ``_auto_transition_to_sent`` returns immediately on an
-        order that is no longer DRAFT. The row lands SENT with a null
-        ``sent_at``, no ``po_send`` event and no reorder-request sweep, and its
-        delivery writes no ``LeadTimeLog``: the whole chain this branch closed
-        on the admin path, reachable through the API.
+        ``{"status": "confirmed"}`` — or ``received``/``partially_received`` —
+        on an order that never went out. ``PurchaseOrderSerializer.read_only_fields``
+        is ``["po_number", "updated_at"]``, so ``status`` is writable and the
+        serializer checks no transition; only a write to ``sent`` is treated as
+        a send and routed. The row lands ``confirmed`` with a null ``sent_at``,
+        and its delivery writes no ``LeadTimeLog`` because
+        ``receiving.create_lead_time_log`` returns early on a falsy
+        ``sent_at``: the same chain, through a status the send rule says
+        nothing about.
 
-    That second one is REPORTED, NOT FIXED here. The sibling entity already
-    shut the same door — ``ReorderRequestSerializer.read_only_fields`` carries
-    ``status``/``reviewed_by``/``reviewed_at``/``ordered_at`` for exactly this
-    reason (op-xj1i) — so the shape of the fix is known, but narrowing a
-    writable field on the purchase-order API is an operator-visible contract
-    change and a separate product decision, not a review's to make.
+    That second one is REPORTED, NOT FIXED here, and is filed as
+    https://github.com/uid0/openmakersuite/issues/1053. Each of those statuses
+    has its own service function with its own preconditions
+    (``services.confirm_order`` requires SENT; the receiving statuses are
+    DERIVED by ``receiving.refresh_receipt_status``, not set by hand), so
+    routing them is a separate product decision rather than part of the send
+    rule.
 
-    What IS closed: every workflow route. ``services.mark_sent`` has always
-    stamped ``sent_at`` and now records the send inside one transaction, the
-    API's send action refuses a non-DRAFT order, and the admin changelist goes
-    through the service.
+    What IS closed: every route that SENDS, all five through
+    ``services.mark_sent`` (oms-po-send-rule) — the API's ``send_to_supplier``
+    action, ``PATCH {"status": "sent"}``, the sales-order-number auto-send on
+    create and update, the admin changelist's bulk action, and the admin change
+    form. That service has always stamped ``sent_at`` and now records the whole
+    transition inside one unit of work.
     """
     return (
         PurchaseOrder.objects.filter(status__in=SENT_ONWARD_STATUSES, sent_at__isnull=True)
@@ -209,8 +224,9 @@ def orders_sent_with_no_line_items():
     voids or cancels it by hand.
 
     Like its sibling above this is a SHAPE, not a closed historical set, and for
-    the same remaining reason: a direct database edit. Every application route
-    now passes ``services.assert_sendable`` (oms-po-send-rule).
+    the same remaining reasons: a direct database edit, and the unrouted PATCH
+    to another SENT_ONWARD status (issue 1053). Every path that SENDS passes the
+    guard inside ``services.mark_sent`` (oms-po-send-rule).
     """
     return (
         PurchaseOrder.objects.filter(status__in=SENT_ONWARD_STATUSES)
@@ -383,9 +399,15 @@ class Command(BaseCommand):
         )
         self.stdout.write(
             "  and it is not necessarily historical: a direct database edit still "
-            "lands this shape. Every APPLICATION route is closed — PATCH "
-            "status=sent and the admin change form both go through "
-            "services.mark_sent now (oms-po-send-rule)."
+            "lands this shape. Every SEND route is closed — PATCH status=sent "
+            "and the admin change form both go through services.mark_sent now "
+            "(oms-po-send-rule)."
+        )
+        self.stdout.write(
+            "  but a PATCH to ANOTHER sent-onward status (confirmed, received, "
+            "partially_received) is not a send, is not routed, and still lands "
+            "this shape with sent_at null — open gap, filed as "
+            "https://github.com/uid0/openmakersuite/issues/1053."
         )
         for row in payload["orders_sent_without_sent_at"]:
             name = row["po_number"] or "#{}".format(row["id"])

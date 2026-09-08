@@ -395,6 +395,40 @@ def test_the_admin_change_form_says_why_the_status_did_not_move(admin_client, st
     assert "line item" in reported.lower()
 
 
+def test_a_refused_change_form_send_leaves_no_moment_behind(admin_client, staff):
+    """A refusal must leave the row EXACTLY as it arrived, stamp included.
+
+    ``status``, ``sent_at`` and ``sent_by`` are all editable here, and the
+    deferral has to WRITE the typed stamp in ``save_model`` so ``save_related``
+    can pin the send on it. If the refusal then reverts only the status, the
+    order is left a never-sent DRAFT carrying a moment it never had:
+    ``PurchaseOrder.days_since_ordered`` reads ``sent_at``, so the changelist
+    column and the API field would both report an age for an order still sitting
+    on somebody's desk, and ``report_unstamped_transitions`` cannot see it
+    because it filters on ``SENT_ONWARD_STATUSES``. A false record on a screen
+    is the exact class this rule exists to remove.
+    """
+    order = empty_draft(staff)
+    order.refresh_from_db()
+    typed = timezone.localtime(timezone.now() - timedelta(days=6))
+
+    response = post_change_form(
+        admin_client,
+        order,
+        status=PurchaseOrder.Status.SENT,
+        sent_at_0=typed.date().isoformat(),
+        sent_at_1=typed.time().strftime("%H:%M:%S"),
+        sent_by=str(staff.pk),
+    )
+    assert response.redirect_chain, messages_from(response)
+
+    order.refresh_from_db()
+    assert order.status == PurchaseOrder.Status.DRAFT
+    assert order.sent_at is None
+    assert order.sent_by is None
+    assert order.days_since_ordered == 0
+
+
 def test_a_draft_with_no_lines_says_on_its_own_payload_why_it_cannot_be_sent(api, staff):
     """The surface that OFFERS the send must be able to explain the refusal.
 
@@ -626,6 +660,31 @@ def test_a_patch_to_sent_leaves_an_already_sent_order_s_moment_alone(api, staff)
     assert response.status_code == 200
     order.refresh_from_db()
     assert order.sent_at == original
+
+
+def test_a_sales_order_number_beside_a_status_that_is_not_a_send_is_recorded(api, staff):
+    """The refusal must only fire on a write that actually sends.
+
+    ``_auto_transition_to_sent`` gates on the status the write LEAVES the order
+    in: a PATCH that moves a DRAFT to ``confirmed`` in the same request never
+    reaches the auto-send at all. Asking the pre-save question instead refused
+    the whole request with "has no line items, so there is nothing to order" —
+    a sentence about a send the operator was not performing, and it threw away
+    the number they did supply. A sales order number is accepted and never
+    required; the rule is about lines, on the writes that send.
+    """
+    order = empty_draft(staff)
+
+    response = api.patch(
+        detail_url(order),
+        {"status": "confirmed", "sales_order_number": "SO-1"},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
+    order.refresh_from_db()
+    assert order.status == PurchaseOrder.Status.CONFIRMED
+    assert order.sales_order_number == "SO-1"
 
 
 def test_a_patch_can_still_move_a_status_the_rule_says_nothing_about(api, staff):

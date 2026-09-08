@@ -324,7 +324,7 @@ const AssetReservationsAndOOSSection: React.FC<Props> = ({ assetId }) => {
                 {historicReservations.length + pastOOS.length})
               </Button>
             </Group>
-            <Collapse in={historyOpen}>
+            <Collapse expanded={historyOpen}>
               <Stack gap="xs" mt="sm">
                 {pastOOS.map((o) => (
                   <Paper key={o.id} withBorder p="sm" radius="sm" bg="gray.0">

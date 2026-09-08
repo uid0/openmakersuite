@@ -41,6 +41,7 @@ from inventory.services.kits import build_kit_snapshot
 from inventory.tests.factories import InventoryItemFactory, SupplierFactory
 from reorder_queue import services
 from reorder_queue.models import (
+    DeliveryItem,
     LeadTimeLog,
     PurchaseOrder,
     PurchaseOrderAuditEvent,
@@ -1939,15 +1940,22 @@ class TestRejectedReceiptWritesNothing:
         assert received["quantity_received"] == 8
 
 
-def scan_barcode(client, purchase_order, upc, quantity):
-    """The older inline UPC receive path, driven as a real request."""
+def scan_barcode(client, purchase_order, upc, quantity, **extra):
+    """The older inline UPC receive path, driven as a real request.
+
+    ``extra`` carries the optional fields the scanner client can send —
+    ``is_damaged`` / ``is_expired`` / ``condition_notes`` — so the tests exercise
+    the same request body ScanTTY posts rather than a reduced one.
+    """
+    body = {
+        "purchase_order_id": purchase_order.id,
+        "scanned_upc": upc,
+        "quantity_received": quantity,
+    }
+    body.update(extra)
     return client.post(
         "/api/reorders/receipts/scan_barcode/",
-        {
-            "purchase_order_id": purchase_order.id,
-            "scanned_upc": upc,
-            "quantity_received": quantity,
-        },
+        body,
         format="json",
     )
 
@@ -2608,6 +2616,125 @@ class TestAScannedReceiptIsOnTheAuditTrail:
         assert received["purchase_order_item"] == line.pk
         assert received["quantity_variance"] == 2
         assert received["receipt_state"] == PurchaseOrderItem.ReceiptState.OVER_RECEIVED
+
+    @pytest.mark.parametrize(
+        "flag,other",
+        [("is_damaged", "is_expired"), ("is_expired", "is_damaged")],
+    )
+    def test_a_scan_flagged_damaged_or_expired_says_so_on_the_trail(
+        self, client, supplier, operator, flag, other
+    ):
+        """The condition the operator flagged reaches the audit row.
+
+        Both flags were already accepted, persisted on the ``DeliveryItem`` and
+        served by ``DeliveryItemSerializer``; the trail was the one reader that
+        could not see them, so a delivery that arrived broken read as a clean
+        receipt to the captain whose job is chasing the vendor for it.
+        """
+        purchase_order, _item, _line = self.scannable_po(supplier, operator)
+
+        response = scan_barcode(client, purchase_order, "0123456789012", 5, **{flag: True})
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        metadata = self.receipt_rows(purchase_order).get().metadata
+        assert metadata[flag] is True
+        # The OTHER flag is recorded false rather than omitted: the scanner
+        # asked about both, so both have an answer.
+        assert metadata[other] is False
+        # And the row still says which path took it, because that is what
+        # makes the condition keys legible as scanner answers.
+        assert metadata["source"] == "scan_barcode"
+
+    def test_a_scan_flagged_damaged_matches_the_delivery_item_it_wrote(
+        self, client, supplier, operator
+    ):
+        """The trail quotes the stored row, rather than a second opinion of it.
+
+        Reading the flag twice out of the request is how a trail drifts from the
+        record it describes; this pins them together.
+        """
+        purchase_order, _item, _line = self.scannable_po(supplier, operator)
+
+        assert scan_barcode(
+            client,
+            purchase_order,
+            "0123456789012",
+            5,
+            is_damaged=True,
+            is_expired=True,
+        ).status_code == (status.HTTP_200_OK)
+
+        delivery_item = DeliveryItem.objects.get(delivery__purchase_order=purchase_order)
+        metadata = self.receipt_rows(purchase_order).get().metadata
+        assert metadata["is_damaged"] == delivery_item.is_damaged is True
+        assert metadata["is_expired"] == delivery_item.is_expired is True
+
+    def test_a_clean_scan_records_the_answer_the_operator_gave(self, client, supplier, operator):
+        """``false`` is an answer, and it is not the same as no answer.
+
+        A scan row always carries both keys because the scanner always asks. It
+        is the DESK row that must carry neither — see
+        :meth:`test_the_desk_path_carries_no_condition_keys`.
+        """
+        purchase_order, _item, _line = self.scannable_po(supplier, operator)
+
+        assert scan_barcode(client, purchase_order, "0123456789012", 5).status_code == (
+            status.HTTP_200_OK
+        )
+
+        metadata = self.receipt_rows(purchase_order).get().metadata
+        assert metadata["is_damaged"] is False
+        assert metadata["is_expired"] is False
+
+    def test_the_desk_path_carries_no_condition_keys(self, client, supplier, operator):
+        """Nobody at the desk is asked, so the desk row must not answer.
+
+        Defaulting ``is_damaged: false`` onto a desk receipt would claim the
+        operator was asked and said no. They were never asked.
+        """
+        purchase_order, _item, line = self.scannable_po(supplier, operator)
+
+        response = receive(
+            client,
+            purchase_order,
+            [{"purchase_order_item": line.pk, "quantity_received": 5}],
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        metadata = self.receipt_rows(purchase_order).get().metadata
+        # A desk row, positively identified: it carries the desk-only keys and
+        # not the scan marker.
+        assert metadata["tracking_number"] == ""
+        assert "source" not in metadata
+        assert "is_damaged" not in metadata
+        assert "is_expired" not in metadata
+
+    def test_the_captains_audit_feed_shows_a_damaged_scanned_receipt(
+        self, client, supplier, operator
+    ):
+        """The condition reaches the surface the captain actually reads.
+
+        Asserting on the model row alone would not prove the flag survives the
+        audit-feed normalizer into ``/api/dashboard/audit-feed/``.
+        """
+        purchase_order, _item, _line = self.scannable_po(supplier, operator)
+
+        assert scan_barcode(
+            client, purchase_order, "0123456789012", 5, is_damaged=True
+        ).status_code == (status.HTTP_200_OK)
+
+        response = client.get(reverse("get_audit_feed"), {"domain": "purchase_orders"})
+
+        assert response.status_code == status.HTTP_200_OK
+        receipts = [
+            event
+            for event in response.data["events"]
+            if event["action"] == PurchaseOrderAuditEvent.Action.PO_RECEIVE_ITEMS
+            and event["entity_id"] == str(purchase_order.pk)
+        ]
+        assert len(receipts) == 1, response.data["events"]
+        assert receipts[0]["metadata"]["is_damaged"] is True
+        assert receipts[0]["metadata"]["is_expired"] is False
 
 
 @pytest.mark.django_db

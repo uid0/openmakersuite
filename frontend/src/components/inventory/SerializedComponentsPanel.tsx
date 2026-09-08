@@ -435,7 +435,7 @@ const SerializedComponentsPanel: React.FC<Props> = ({
         </Alert>
       )}
 
-      <Collapse in={showAdd}>
+      <Collapse expanded={showAdd}>
         <Paper withBorder p="sm" mb="sm" bg="var(--mantine-color-gray-0)">
           <Group align="flex-end" gap="sm">
             <TextInput
@@ -553,7 +553,7 @@ const SerializedComponentsPanel: React.FC<Props> = ({
                   </Table.Tr>
                   <Table.Tr>
                     <Table.Td colSpan={7} p={0} style={{ border: isExpanded ? undefined : 'none' }}>
-                      <Collapse in={isExpanded}>
+                      <Collapse expanded={isExpanded}>
                         <div style={{ padding: '0.5rem 1rem 1rem 3rem' }}>
                           {historyLoadingId === unit.id ? (
                             <Group gap="xs">

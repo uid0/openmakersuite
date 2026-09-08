@@ -13,6 +13,12 @@
  * client-side: actor username substring (cheap, avoids a user
  * lookup round-trip). Click a row to expand the JSON metadata
  * blob — kept collapsed by default to keep the page scannable.
+ *
+ * One thing does NOT wait for the row to be opened: a receipt a
+ * scanner operator flagged damaged or expired is badged on the row
+ * itself (see `conditionFlags`), because the captain scrolling this
+ * feed for vendors to chase should not have to open every row to
+ * find the deliveries that arrived broken.
  */
 import {
   Alert,
@@ -66,12 +72,62 @@ const DOMAIN_COLORS: Record<string, string> = {
   third_party_work_orders: 'cyan',
 };
 
+/**
+ * Stable identity for one audit event, derived from the event's own fields.
+ *
+ * `AuditFeedEvent` carries no `id`, and the feed is a union of eight
+ * per-domain tables whose primary keys do not share a namespace, so identity
+ * has to be composed. It deliberately contains NO positional component: the
+ * actor filter re-indexes the visible list on every keystroke, so an
+ * index-keyed expansion set both opens rows nobody clicked and closes rows
+ * that merely shifted up. `JSON.stringify` over the tuple keeps `null` and
+ * `''` distinct and escapes the separator, which a template string cannot.
+ *
+ * Used for BOTH the React key and the expansion lookup so the two cannot
+ * drift apart.
+ */
+const eventKey = (event: AuditFeedEvent): string =>
+  JSON.stringify([
+    event.domain,
+    event.created_at,
+    event.action,
+    event.entity_type,
+    event.entity_id,
+  ]);
+
 const formatTimestamp = (iso: string): string => {
   try {
     return new Date(iso).toLocaleString();
   } catch {
     return iso;
   }
+};
+
+/**
+ * Condition an operator flagged at the scanner, lifted out of the metadata
+ * blob onto the row itself.
+ *
+ * The captain reads this feed to chase vendors, and "the box arrived smashed"
+ * is the single most chase-worthy thing on it — burying it inside a collapsed
+ * JSON blob means scrolling the feed does not show it at all.
+ *
+ * Scan-path rows only. The desk receive path never asks about condition and
+ * so writes neither key, which is why this tests for `=== true` rather than
+ * truthiness: `undefined` there means *nobody was asked*, and `false` means
+ * *the operator was asked and said it was sound*. Neither earns a badge —
+ * only a flag actually raised does.
+ */
+const conditionFlags = (
+  metadata: Record<string, unknown> | null | undefined,
+): { key: string; label: string; color: string }[] => {
+  const flags = [];
+  if (metadata?.is_damaged === true) {
+    flags.push({ key: 'damaged', label: 'Damaged', color: 'red' });
+  }
+  if (metadata?.is_expired === true) {
+    flags.push({ key: 'expired', label: 'Expired', color: 'orange' });
+  }
+  return flags;
 };
 
 const AuditFeedPage: React.FC = () => {
@@ -88,7 +144,7 @@ const AuditFeedPage: React.FC = () => {
   const [until, setUntil] = useState<string>('');
   const [limit, setLimit] = useState<string>('200');
   const [actorFilter, setActorFilter] = useState<string>('');
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -126,13 +182,13 @@ const AuditFeedPage: React.FC = () => {
     );
   }, [events, actorFilter]);
 
-  const toggleRow = useCallback((index: number) => {
+  const toggleRow = useCallback((key: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(index)) {
-        next.delete(index);
+      if (next.has(key)) {
+        next.delete(key);
       } else {
-        next.add(index);
+        next.add(key);
       }
       return next;
     });
@@ -230,12 +286,14 @@ const AuditFeedPage: React.FC = () => {
                 </Table.Thead>
                 <Table.Tbody>
                   {visibleEvents.map((event, index) => {
-                    const open = expanded.has(index);
+                    const key = eventKey(event);
+                    const open = expanded.has(key);
+                    const conditions = conditionFlags(event.metadata);
                     return (
-                      <React.Fragment key={`${event.domain}-${event.created_at}-${index}`}>
+                      <React.Fragment key={key}>
                         <Table.Tr
                           style={{ cursor: 'pointer' }}
-                          onClick={() => toggleRow(index)}
+                          onClick={() => toggleRow(key)}
                           data-testid={`audit-row-${index}`}
                         >
                           <Table.Td>{formatTimestamp(event.created_at)}</Table.Td>
@@ -258,11 +316,32 @@ const AuditFeedPage: React.FC = () => {
                               <Text c="dimmed">—</Text>
                             )}
                           </Table.Td>
-                          <Table.Td>{event.notes || <Text c="dimmed">—</Text>}</Table.Td>
+                          <Table.Td>
+                            <Group gap={6} wrap="wrap">
+                              {conditions.map((flag) => (
+                                <Badge
+                                  key={flag.key}
+                                  color={flag.color}
+                                  variant="filled"
+                                  size="sm"
+                                  data-testid={`audit-condition-${flag.key}-${index}`}
+                                >
+                                  {flag.label}
+                                </Badge>
+                              ))}
+                              {event.notes ? (
+                                <Text size="sm">{event.notes}</Text>
+                              ) : (
+                                conditions.length === 0 && (
+                                  <Text c="dimmed">—</Text>
+                                )
+                              )}
+                            </Group>
+                          </Table.Td>
                         </Table.Tr>
                         <Table.Tr>
                           <Table.Td colSpan={6} style={{ padding: 0, border: 0 }}>
-                            <Collapse in={open}>
+                            <Collapse expanded={open}>
                               <Paper p="sm" m="sm" withBorder bg="var(--mantine-color-gray-0)">
                                 <Stack gap="xs">
                                   <Text size="xs" c="dimmed">

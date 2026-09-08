@@ -290,11 +290,13 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
 
     inlines = [PurchaseOrderItemInline]
 
-    #: Where the change form parks a send it has not performed yet, so the two
-    #: hooks below can hand it between them. On the FORM, never on the
-    #: ``ModelAdmin``: one ``ModelAdmin`` instance serves every request in the
-    #: process, so state stored on ``self`` would leak between operators.
-    _DEFERRED_SEND = "_deferred_send_actor"
+    #: Where the change form marks a send it has not performed yet, so the two
+    #: hooks below can hand it between them. A plain flag: the actor is
+    #: ``request.user`` at the point of use and never needs carrying. On the
+    #: FORM, never on the ``ModelAdmin``: one ``ModelAdmin`` instance serves
+    #: every request in the process, so state stored on ``self`` would leak
+    #: between operators.
+    _DEFERRED_SEND = "_deferred_send_requested"
 
     #: The ``(sent_at, sent_by_id)`` the row carried BEFORE this save, parked
     #: beside the deferred send so a refusal can put them back.
@@ -331,6 +333,12 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         ``sent_at``/``sent_by`` have to be written here so ``save_related`` can
         pin the send on them; if that send is then refused, they are what puts
         the row back — see there.
+
+        A blank ``sent_by`` is filled with the operator saving the form, which
+        is what an ordinary send means: nobody typed a name because they are
+        the sender. It is defaulted HERE, on the column, rather than being
+        carried to ``save_related`` as an actor — see there for why the two are
+        not the same person.
         """
         previous_status = form.initial.get("status") or PurchaseOrder.Status.DRAFT
         entering_send = (
@@ -338,7 +346,9 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
             and previous_status not in PurchaseOrder.SENT_ONWARD_STATUSES
         )
         if entering_send:
-            setattr(form, self._DEFERRED_SEND, obj.sent_by or request.user)
+            if obj.sent_by is None:
+                obj.sent_by = request.user
+            setattr(form, self._DEFERRED_SEND, True)
             setattr(form, self._DEFERRED_SEND_STAMP, self._stored_send_stamp(obj.pk))
             obj.status = previous_status
         super().save_model(request, obj, form, change)
@@ -361,11 +371,21 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         hooks in one transaction, so a send performed here commits with the
         edits that asked for it.
 
-        ``at=obj.sent_at`` honours a moment the operator typed. Backdating is
-        why that field is editable: an order written up after the phone call
-        that placed it records when it ACTUALLY went out, and overwriting that
-        with "now" would discard what they entered. Blank falls through to now,
-        which is every ordinary send.
+        ``at``/``sent_by`` are read off the RE-READ row and honour what the
+        operator typed. Backdating is why those fields are editable: an order
+        written up after the phone call that placed it records when it ACTUALLY
+        went out and who ACTUALLY sent it, and overwriting either with the
+        saving request's own values would discard what they entered. Blank
+        ``sent_at`` falls through to now, which is every ordinary send.
+
+        The ACTOR is ``request.user``, unconditionally, and that is a different
+        question from ``sent_by``. Whoever typed this save is who the
+        ``po_send`` row in the staff audit feed must name — an operator
+        recording a send a colleague made files the send under the colleague
+        and the ACT under themselves. Passing the typed ``sent_by`` as the
+        actor put somebody else's name on the screen whose whole purpose is who
+        did what, and disagreed with the admin's own ``LogEntry`` for the same
+        save. ``PurchaseOrderViewSet.perform_update`` answers the same way.
 
         A refusal leaves the order EXACTLY as it came in — the status
         ``save_model`` already held back, and the ``sent_at``/``sent_by`` it had
@@ -397,12 +417,16 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         caught exactly that.
         """
         super().save_related(request, form, formsets, change)
-        actor = getattr(form, self._DEFERRED_SEND, None)
-        if actor is None:
+        if not getattr(form, self._DEFERRED_SEND, False):
             return
         purchase_order = PurchaseOrder.objects.get(pk=form.instance.pk)
         try:
-            services.mark_sent(purchase_order, actor, at=purchase_order.sent_at)
+            services.mark_sent(
+                purchase_order,
+                request.user,
+                at=purchase_order.sent_at,
+                sent_by=purchase_order.sent_by,
+            )
         except services.SendRefused as exc:
             previous_sent_at, previous_sent_by_id = getattr(
                 form, self._DEFERRED_SEND_STAMP, (None, None)

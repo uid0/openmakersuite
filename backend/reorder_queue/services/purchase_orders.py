@@ -545,10 +545,12 @@ def send_refusal(purchase_order):
 
     ONE function, because a rule with more than one writer drifts: this is read
     by :func:`mark_sent` (the guard every send path passes through),
-    by ``PurchaseOrderSerializer`` (so a PATCH is refused before it writes
-    anything), and by ``PurchaseOrderSerializer.send_blocked_reason`` (so the
-    screen that OFFERS the send can say why it will not work instead of
-    failing when pressed). Adding a second condition is one edit here.
+    by ``PurchaseOrderViewSet.perform_update`` (so a PATCH is refused before it
+    writes anything — in the VIEW rather than the serializer's ``validate()``,
+    and that method's docstring gives the reason), and by
+    ``PurchaseOrderSerializer.send_blocked_reason`` (so the screen that OFFERS
+    the send can say why it will not work instead of failing when pressed).
+    Adding a second condition is one edit here.
 
     It answers the CONTENT question only — has this order got anything on it to
     order? — and deliberately says nothing about ``status``. The DRAFT

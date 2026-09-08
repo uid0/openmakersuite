@@ -70,7 +70,12 @@ from freezegun import freeze_time
 from rest_framework.test import APIClient
 
 from inventory.tests.factories import InventoryItemFactory, ItemSupplierFactory, SupplierFactory
-from reorder_queue.models import LeadTimeLog, PurchaseOrder, PurchaseOrderItem
+from reorder_queue.models import (
+    LeadTimeLog,
+    PurchaseOrder,
+    PurchaseOrderAuditEvent,
+    PurchaseOrderItem,
+)
 from reorder_queue.services.receiving import receive_delivery
 from reorder_queue.tests.factories import UserFactory
 
@@ -544,6 +549,90 @@ def test_a_patch_that_does_not_send_still_writes_sent_at_straight_through(api, s
     assert response.status_code == 200, response.data
     order.refresh_from_db()
     assert order.sent_at == corrected
+
+
+def test_the_change_form_files_the_send_under_the_typed_sender_and_the_act_under_the_operator(
+    admin_client, staff
+):
+    """Two different questions, two different answers, one save.
+
+    ``sent_by`` is an editable field, so an operator can record a send a
+    colleague made — that is what the column is for. The ``po_send`` row in the
+    staff audit feed answers the OTHER question: who did this, now. Filing the
+    act under the colleague puts somebody else's name on the one screen whose
+    whole purpose is who did what, and disagrees with the admin's own
+    ``LogEntry`` for the same save.
+
+    The two users here are deliberately distinct, so the check fails if the
+    arguments are swapped as well as if the actor is taken from the column.
+    """
+    colleague = UserFactory(is_staff=True)
+    order = draft_with_a_line(staff)
+    assert colleague != staff
+
+    response = post_change_form(
+        admin_client,
+        order,
+        status=PurchaseOrder.Status.SENT,
+        sent_by=str(colleague.pk),
+    )
+    assert response.redirect_chain, messages_from(response)
+
+    order.refresh_from_db()
+    assert order.status == PurchaseOrder.Status.SENT
+    assert order.sent_by == colleague
+
+    send_event = PurchaseOrderAuditEvent.objects.get(
+        purchase_order=order, action=PurchaseOrderAuditEvent.Action.PO_SEND
+    )
+    assert send_event.actor == staff
+
+
+def test_the_change_form_files_an_unattributed_send_under_the_operator(admin_client, staff):
+    """A blank ``sent_by`` means "I am the sender" — both columns say so.
+
+    The ordinary send, and the reason the actor cannot simply be read off the
+    column: here they coincide, which is exactly why every other change-form
+    check in this file is blind to the distinction above.
+    """
+    order = draft_with_a_line(staff)
+
+    response = post_change_form(admin_client, order, status=PurchaseOrder.Status.SENT)
+    assert response.redirect_chain, messages_from(response)
+
+    order.refresh_from_db()
+    assert order.sent_by == staff
+    assert order.sent_at is not None
+
+    send_event = PurchaseOrderAuditEvent.objects.get(
+        purchase_order=order, action=PurchaseOrderAuditEvent.Action.PO_SEND
+    )
+    assert send_event.actor == staff
+
+
+def test_a_patch_send_files_the_act_under_the_requesting_user(api, staff):
+    """The API path answers the same pair the change form does.
+
+    Pinned rather than taken on inspection: the two send surfaces must not be
+    allowed to drift into disagreeing about who a send is filed under.
+    """
+    colleague = UserFactory(is_staff=True)
+    order = draft_with_a_line(staff)
+
+    response = api.patch(
+        detail_url(order),
+        {"status": "sent", "sent_by": colleague.pk},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
+    order.refresh_from_db()
+    assert order.sent_by == colleague
+
+    send_event = PurchaseOrderAuditEvent.objects.get(
+        purchase_order=order, action=PurchaseOrderAuditEvent.Action.PO_SEND
+    )
+    assert send_event.actor == staff
 
 
 def test_a_patch_sent_order_records_its_supplier_s_lead_time_when_it_arrives(api, staff):

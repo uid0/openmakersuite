@@ -581,7 +581,7 @@ def assert_sendable(purchase_order):
         raise refusal
 
 
-def mark_sent(purchase_order, user, at=None):
+def mark_sent(purchase_order, user, at=None, sent_by=None):
     """Stamp a purchase order as SENT — THE definition of that transition.
 
     Everything DRAFT -> SENT owes, in one place: status -> SENT,
@@ -589,12 +589,25 @@ def mark_sent(purchase_order, user, at=None):
     the linked reorder requests synced, and the ``po_send`` audit row the staff
     feed reads recorded. The caller owns only the DRAFT precondition.
 
-    ``at`` pins the moment, for the one caller that has one to pin: the admin
-    change form renders ``sent_at`` as an editable field beside ``status``
-    precisely so an order typed up after the phone call that placed it records
-    when it ACTUALLY went out. Defaults to now, which is every other caller.
-    (:func:`inventory.services.problem_settlement.settle_problem` carries the
-    same parameter for the same reason.)
+    ``at`` pins the moment and ``sent_by`` pins whose send it was. Both exist
+    for the same kind of caller: one RECORDING a send somebody else already
+    made, rather than performing one now. The admin change form renders
+    ``sent_at`` and ``sent_by`` as editable fields beside ``status`` precisely
+    so an order typed up after the phone call that placed it records when it
+    ACTUALLY went out and who ACTUALLY sent it, and both are writable on
+    ``PurchaseOrderSerializer`` for the same reason. Overwriting either with
+    the performing request's own values would discard operator input — and
+    ``sent_at`` is what ``receiving.create_lead_time_log`` computes
+    ``LeadTimeLog`` from, so a discarded backdate does not merely lose a fact,
+    it puts a WRONG lead time into the column
+    ``inventory.services.supplier_selection`` scores suppliers on.
+
+    They are separate from ``user``, which stays the ACTOR the ``po_send``
+    audit row names: who typed the save is a different question from whose
+    send is being recorded, and the audit feed must answer the first. Both
+    default to ``user``/now, which is every caller that is sending here and
+    now. (:func:`inventory.services.problem_settlement.settle_problem` carries
+    the same ``at`` for the same reason.)
 
     :func:`assert_sendable` runs FIRST, before any write: an order with nothing
     on it must not reach the supplier, and putting the guard here rather than at
@@ -626,7 +639,7 @@ def mark_sent(purchase_order, user, at=None):
     assert_sendable(purchase_order)
     with transaction.atomic():
         purchase_order.status = PurchaseOrder.Status.SENT
-        purchase_order.sent_by = user
+        purchase_order.sent_by = sent_by or user
         purchase_order.sent_at = at or timezone.now()
         purchase_order.save()
         # Keep linked reorder requests in step with the PO going out.

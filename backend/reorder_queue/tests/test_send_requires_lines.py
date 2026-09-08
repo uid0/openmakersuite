@@ -55,13 +55,15 @@ DELIBERATELY EXCLUDED, with the reason:
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 import pytest
 from freezegun import freeze_time
@@ -407,6 +409,10 @@ def test_a_refused_change_form_send_leaves_no_moment_behind(admin_client, staff)
     on somebody's desk, and ``report_unstamped_transitions`` cannot see it
     because it filters on ``SENT_ONWARD_STATUSES``. A false record on a screen
     is the exact class this rule exists to remove.
+
+    The typed date does not survive the refusal — the POST succeeded and Django
+    redirects, so the operator re-enters it on the retry. That is the accepted
+    cost of the revert, not an oversight.
     """
     order = empty_draft(staff)
     order.refresh_from_db()
@@ -451,13 +457,93 @@ def test_a_draft_with_no_lines_says_on_its_own_payload_why_it_cannot_be_sent(api
 # Half two: sending stamps the moment — and what the moment is FOR
 # ─────────────────────────────────────────────────────────────────────────────
 def test_a_patch_to_sent_answers_with_the_moment_it_recorded(api, staff):
-    """The response body describes the row the caller now has, stamp included."""
+    """The response body describes the row the caller now has, stamp included.
+
+    Asserting the exact moment rather than "not None": a stamp that is merely
+    present is what let a supplied ``sent_at`` be silently overwritten, so the
+    check has to name the value it expects.
+    """
     order = draft_with_a_line(staff)
 
-    response = api.patch(detail_url(order), {"status": "sent"}, format="json")
+    with freeze_time("2026-04-07 09:30:00"):
+        response = api.patch(detail_url(order), {"status": "sent"}, format="json")
 
     assert response.data["status"] == PurchaseOrder.Status.SENT
-    assert response.data["sent_at"] is not None
+    order.refresh_from_db()
+    assert order.sent_at == datetime(2026, 4, 7, 9, 30, tzinfo=dt_timezone.utc)
+    assert order.sent_by == staff
+    assert parse_datetime(response.data["sent_at"]) == order.sent_at
+
+
+def test_a_patch_to_sent_records_the_moment_the_caller_supplied(api, staff):
+    """A send that RECORDS an earlier send must keep the moment it was given.
+
+    ``sent_at`` is writable, and the reason is the same one that makes it
+    editable on the admin change form: an order written up after the phone call
+    that placed it records when it ACTUALLY went out. Routing the PATCH through
+    ``services.mark_sent`` without forwarding the value overwrote it with now —
+    and because ``receiving.create_lead_time_log`` computes ``LeadTimeLog``
+    from ``sent_at``, that does not lose the lead time, it records a WRONG one
+    in the column ``supplier_selection`` scores suppliers on.
+    """
+    order = draft_with_a_line(staff)
+    backdated = datetime(2026, 3, 1, 10, 0, tzinfo=dt_timezone.utc)
+    other = UserFactory(is_staff=True)
+
+    with freeze_time("2026-04-07 09:30:00"):
+        response = api.patch(
+            detail_url(order),
+            {
+                "status": "sent",
+                "sent_at": backdated.isoformat(),
+                "sent_by": other.pk,
+            },
+            format="json",
+        )
+
+    assert response.status_code == 200, response.data
+    order.refresh_from_db()
+    assert order.status == PurchaseOrder.Status.SENT
+    assert order.sent_at == backdated
+    assert order.sent_by == other
+
+
+def test_a_patch_to_sent_that_supplies_no_moment_is_stamped_with_now(api, staff):
+    """The fallback is now and the requesting user, not null.
+
+    The half of the rule that says a send records its moment: forwarding a
+    supplied ``sent_at`` must not turn "none supplied" into "no stamp", which
+    is the exact shape ``create_lead_time_log`` returns early on.
+    """
+    order = draft_with_a_line(staff)
+
+    with freeze_time("2026-04-07 09:30:00"):
+        response = api.patch(detail_url(order), {"status": "sent"}, format="json")
+
+    assert response.status_code == 200, response.data
+    order.refresh_from_db()
+    assert order.sent_at == datetime(2026, 4, 7, 9, 30, tzinfo=dt_timezone.utc)
+    assert order.sent_by == staff
+
+
+def test_a_patch_that_does_not_send_still_writes_sent_at_straight_through(api, staff):
+    """``sent_at``/``sent_by`` are ordinary writable columns on any other write.
+
+    Only the branch that SENDS pops them; the endpoint is not otherwise
+    narrowed, so a PATCH that touches them without asking for a send lands
+    exactly as it did.
+    """
+    order = draft_with_a_line(staff)
+    order.status = PurchaseOrder.Status.SENT
+    order.sent_at = timezone.now() - timedelta(days=9)
+    order.save()
+    corrected = datetime(2026, 2, 2, 8, 0, tzinfo=dt_timezone.utc)
+
+    response = api.patch(detail_url(order), {"sent_at": corrected.isoformat()}, format="json")
+
+    assert response.status_code == 200, response.data
+    order.refresh_from_db()
+    assert order.sent_at == corrected
 
 
 def test_a_patch_sent_order_records_its_supplier_s_lead_time_when_it_arrives(api, staff):

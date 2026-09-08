@@ -973,6 +973,18 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         order's status only ever moves inside that service's transaction,
         instead of being written SENT here and stamped a moment later.
 
+        ``sent_at`` and ``sent_by`` are popped ALONGSIDE it, on that branch
+        only, and handed to the same call. They are writable fields, so a
+        caller may supply them to record a send that already happened; letting
+        ``save()`` write them and then having the service overwrite them with
+        now/``request.user`` would discard that silently. Worse than losing the
+        fact: ``receiving.create_lead_time_log`` computes ``LeadTimeLog`` from
+        ``sent_at``, so a discarded backdate records a WRONG lead time in the
+        column ``inventory.services.supplier_selection`` scores on. Absent,
+        both fall through to now and the requesting user, which is every
+        ordinary send. A PATCH that does NOT send leaves them alone — they are
+        ordinary writable columns on any other write.
+
         The send rule is checked BEFORE ``save()`` writes anything, so a
         refusal turns the whole request away rather than half-applying it
         behind a 400. It is checked HERE rather than in the serializer's
@@ -1000,15 +1012,19 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             if refusal is not None:
                 raise SendRefusedError(refusal.message)
         sends_via_status = send_field == "status"
+        sent_at = None
+        sent_by = None
         if sends_via_status:
             serializer.validated_data.pop("status")
+            sent_at = serializer.validated_data.pop("sent_at", None)
+            sent_by = serializer.validated_data.pop("sent_by", None)
         # Capture the pre-update value so we only auto-send on the empty ->
         # non-empty edge. Editing other fields, or clearing the number, must
         # never change status (oms-qdxss).
         had_sales_order_number = self._has_sales_order_number(serializer.instance)
         purchase_order = serializer.save()
         if sends_via_status:
-            self._mark_sent(purchase_order, self.request.user)
+            self._mark_sent(purchase_order, self.request.user, at=sent_at, sent_by=sent_by)
         elif not had_sales_order_number and self._has_sales_order_number(purchase_order):
             self._auto_transition_to_sent(purchase_order)
 
@@ -1049,7 +1065,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 "Auto-transition to SENT failed for PO %s", purchase_order.pk
             )
 
-    def _mark_sent(self, purchase_order, user):
+    def _mark_sent(self, purchase_order, user, at=None, sent_by=None):
         """Stamp a purchase order as SENT and record the transition.
 
         Shared by the manual ``send_to_supplier`` action and the automatic
@@ -1059,8 +1075,12 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         the linked reorder requests AND records the ``po_send`` audit event.
         This method used to record that event itself; the third caller is why
         it does not any more. Callers own the DRAFT precondition.
+
+        ``at``/``sent_by`` are forwarded for the one caller that has them:
+        ``perform_update``, where both are writable fields the request may have
+        supplied. ``user`` stays the audit actor either way — see the service.
         """
-        services.mark_sent(purchase_order, user)
+        services.mark_sent(purchase_order, user, at=at, sent_by=sent_by)
 
     @action(detail=False, methods=["post"])
     def create_optimized_order(self, request):

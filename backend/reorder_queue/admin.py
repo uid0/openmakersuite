@@ -374,8 +374,13 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         ``PurchaseOrder.days_since_ordered`` reads ``sent_at``: the changelist
         column and the API field would both report an age for an order that has
         not gone anywhere, and ``report_unstamped_transitions`` cannot see it
-        because it filters on ``SENT_ONWARD_STATUSES``. The operator's typed
-        value is still in the form in front of them for the retry.
+        because it filters on ``SENT_ONWARD_STATUSES``. The typed date is
+        therefore GONE and has to be entered again on the retry: the POST
+        itself succeeded — only the send was refused — so Django redirects,
+        either to the changelist or to a change page re-rendered from the
+        database, where ``sent_at`` is null once more. That cost is accepted
+        deliberately, because a stamp on an order that never went out is a
+        false record on a screen and re-typing a date is not.
 
         Any other exception propagates and rolls the whole save back — a send
         that failed for an unknown reason is not something to report as a tidy

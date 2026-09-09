@@ -1,0 +1,138 @@
+{
+ "summary": {
+  "total_orders_with_financial_data": 2,
+  "total_amount_spent": 150.25,
+  "total_purchase_orders": 1,
+  "total_po_amount_spent": 0.0,
+  "last_updated": "2026-09-09T19:00:36.492334+00:00",
+  "transparency_note": "Dallas Makerspace publishes what it spends. You are signed in, so supplier names and per-order costs are shown here as well; they are withheld from readers who are not."
+ },
+ "orders": [
+  {
+   "id": 2,
+   "item_id": "c24eb1d7-ccf9-4d03-8896-dadc292009de",
+   "item_name": "item-1",
+   "item_category": null,
+   "quantity_ordered": 4,
+   "status": "received",
+   "requested_at": "2026-09-09T19:00:36.087238+00:00",
+   "ordered_at": "2026-09-09T19:00:36.082114+00:00",
+   "delivered_at": null,
+   "actual_cost": 0.0,
+   "cost_per_unit": 0.0,
+   "order_number": "ORD-2026-0043",
+   "invoice_number": "",
+   "invoice_url": "",
+   "purchase_order_url": "",
+   "delivery_tracking_url": "",
+   "supplier_url": "",
+   "public_notes": "Donated by a member.",
+   "item_supplier_choice": {
+    "item_supplier_id": 2,
+    "supplier_name": "supplier-1",
+    "basis": "flagged_primary",
+    "reason": null,
+    "flagged_primary_unorderable": false,
+    "scored_without_price": false,
+    "scored_without_history": false,
+    "alternatives": []
+   },
+   "item_estimated_cost_today": 569.72
+  },
+  {
+   "id": 1,
+   "item_id": "7f3e63ad-ec4b-4dff-8a25-c11138c5fa73",
+   "item_name": "item-0",
+   "item_category": null,
+   "quantity_ordered": 10,
+   "status": "received",
+   "requested_at": "2026-09-09T19:00:36.058530+00:00",
+   "ordered_at": "2026-09-09T19:00:36.021925+00:00",
+   "delivered_at": "2026-09-09",
+   "actual_cost": 150.25,
+   "cost_per_unit": 15.025,
+   "order_number": "ORD-2026-0042",
+   "invoice_number": "INV-2026-0042",
+   "invoice_url": "",
+   "purchase_order_url": "",
+   "delivery_tracking_url": "",
+   "supplier_url": "",
+   "public_notes": "Installed in the laser shop.",
+   "item_supplier_choice": {
+    "item_supplier_id": 1,
+    "supplier_name": "supplier-0",
+    "basis": "flagged_primary",
+    "reason": null,
+    "flagged_primary_unorderable": false,
+    "scored_without_price": false,
+    "scored_without_history": false,
+    "alternatives": []
+   },
+   "item_estimated_cost_today": 1243.7
+  }
+ ],
+ "ledger": [
+  {
+   "id": 2,
+   "item_id": "c24eb1d7-ccf9-4d03-8896-dadc292009de",
+   "item_name": "item-1",
+   "quantity": 4,
+   "requested_at": "2026-09-09T19:00:36.087238+00:00",
+   "ordered_at": "2026-09-09T19:00:36.082114+00:00",
+   "delivered_at": null,
+   "actual_cost": 0.0,
+   "status": "received",
+   "order_number": "ORD-2026-0043",
+   "invoice_number": "",
+   "item_supplier_choice": {
+    "item_supplier_id": 2,
+    "supplier_name": "supplier-1",
+    "basis": "flagged_primary",
+    "reason": null,
+    "flagged_primary_unorderable": false,
+    "scored_without_price": false,
+    "scored_without_history": false,
+    "alternatives": []
+   }
+  },
+  {
+   "id": 1,
+   "item_id": "7f3e63ad-ec4b-4dff-8a25-c11138c5fa73",
+   "item_name": "item-0",
+   "quantity": 10,
+   "requested_at": "2026-09-09T19:00:36.058530+00:00",
+   "ordered_at": "2026-09-09T19:00:36.021925+00:00",
+   "delivered_at": "2026-09-09",
+   "actual_cost": 150.25,
+   "status": "received",
+   "order_number": "ORD-2026-0042",
+   "invoice_number": "INV-2026-0042",
+   "item_supplier_choice": {
+    "item_supplier_id": 1,
+    "supplier_name": "supplier-0",
+    "basis": "flagged_primary",
+    "reason": null,
+    "flagged_primary_unorderable": false,
+    "scored_without_price": false,
+    "scored_without_history": false,
+    "alternatives": []
+   }
+  }
+ ],
+ "purchase_orders": [
+  {
+   "id": "1",
+   "po_number": "PO-2026-0007",
+   "supplier_name": "supplier-0",
+   "status": "sent",
+   "status_label": "Sent to Supplier",
+   "order_date": "2026-09-09T19:00:36.094771+00:00",
+   "expected_delivery_date": null,
+   "estimated_total": 250.0,
+   "actual_total": null,
+   "total_items": 1,
+   "total_quantity": 5,
+   "is_fully_received": false
+  }
+ ]
+}

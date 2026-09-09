@@ -664,23 +664,31 @@ That list is the branch's evidence, not standing guidance; do not copy it back
 here.
 
 **Two more deliberate exclusions, on the boundary the gate made visible.** Both
-are the same falsy shape on a value this branch does NOT own, so repairing them
-would move output for a reason that is not "base presented an unknown price as a
-real number":
+were the same falsy shape on a value op-9m2v does NOT own, so repairing them
+would have moved output for a reason that is not "base presented an unknown
+price as a real number". The first has since been closed by the branch that DID
+own it — an exclusion here records who owned a value, never that a guard was
+correct:
 
-- `ReorderRequest.actual_cost` and `ReorderRequest.cost_per_unit`, and the
+- ~~`ReorderRequest.actual_cost` and `ReorderRequest.cost_per_unit`, and the
   truthiness on them in the TRANSPARENCY PAYLOAD specifically — both the
   `orders` block and the `ledger` block. `actual_cost` is a nullable column an
   operator types in, not a derived price, and this branch did not change it.
   `PurchaseOrder.actual_total` in the `purchase_orders` block is the same
-  shape and excluded for the same reason: `null=True` and operator-typed. That
-  is precisely what separates it from `estimated_total` beside it, which is
-  non-nullable-with-default and therefore inside the branch — the nullability
-  of the column, not the name of the field, is what decides.
+  shape and excluded for the same reason: `null=True` and operator-typed.~~
+  **CLOSED, op-transparency-substituted-supplier.** All three now guard on
+  `is None`, so a comped order publishes `0.0` rather than `null` on that
+  page; `cost_per_unit` was repaired at its model property, its only reader.
+  The exclusion held only because the value was outside op-9m2v's branch — the
+  guards were never right — and a `null` there is the one thing this payload's
+  `null` is documented not to mean. `PurchaseOrder.estimated_total` beside it
+  was already inside op-9m2v because it is non-nullable-with-default: the
+  nullability of the column, not the name of the field, is what decided which
+  branch owned it.
   Read that narrowly: it does NOT extend to `PurchaseOrderItem.actual_cost`,
-  which is DERIVED from `unit_cost_actual` and IS inside the branch (the
+  which is DERIVED from `unit_cost_actual` and IS inside op-9m2v (the
   `receiving.py` twin was the real defect), and whose two admin columns are
-  named in the branch record's change list.
+  named in that branch record's change list.
 - `MaintenanceItem.estimated_cost` on the work-order PDF
   (`inventory/utils/work_order_pdf.py`), where `if item.estimated_cost:` omits
   the "Est. Cost" line for a task budgeted at a recorded `0.00`. A maintenance

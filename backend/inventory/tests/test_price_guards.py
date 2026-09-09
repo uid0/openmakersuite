@@ -1288,12 +1288,16 @@ def test_the_public_transparency_feed_publishes_a_free_order_as_costing_zero(api
 
     ``float(order.estimated_cost) if order.estimated_cost else None`` re-collapsed
     the real ``Decimal("0.00")`` the derivation now returns, so the community
-    feed published ``estimated_cost: null`` — "we do not know what this cost" —
-    for a request whose cost is a known $0.00.
+    feed published "we do not know what this cost" for a request whose cost is a
+    known $0.00.
+
+    The key moved to ``item_estimated_cost_today`` (op-transparency-substituted-
+    supplier) because that figure is the ITEM's live quote and never was the
+    order's estimate. The zero it must not collapse is the same one.
     """
     req = _free_transparency_request()
 
-    assert _transparency_row(api, req.id)["estimated_cost"] == 0.0
+    assert _transparency_row(api, req.id)["item_estimated_cost_today"] == 0.0
 
 
 def test_the_public_transparency_feed_still_publishes_null_for_an_unpriced_order(api):
@@ -1304,45 +1308,51 @@ def test_the_public_transparency_feed_still_publishes_null_for_an_unpriced_order
     _link(item, "Acme", unit_cost=None, is_primary=True)
     req = ReorderRequest.objects.create(item=_fresh(item), quantity=6, order_number="PO-UNPRICED-1")
 
-    assert _transparency_row(api, req.id)["estimated_cost"] is None
+    assert _transparency_row(api, req.id)["item_estimated_cost_today"] is None
 
 
-def test_the_public_transparency_feed_computes_a_variance_against_a_free_estimate(api):
-    """BEFORE/AFTER on the CLAIM. Same payload, the ``cost_variance`` column.
+def test_the_public_transparency_feed_publishes_no_variance_against_a_live_quote(api):
+    """The two figures are published side by side and NEVER subtracted.
 
-    ``if (order.actual_cost and order.estimated_cost)`` refused to subtract from
-    a known ``0.00`` estimate, so a donated item that ended up being invoiced
-    published no variance at all — the one number that says the estimate was
-    wrong.
+    This replaces a ``cost_variance`` assertion. That column differenced
+    ``actual_cost`` against ``ReorderRequest.estimated_cost`` — a quote fetched
+    from the item's CURRENT supplier links when the page was loaded — and
+    printed the result as an over/under-BUDGET verdict. The order records no
+    estimate, so editing a supplier link flipped a finished order from one
+    verdict to the other. The zero-estimate case it was written for is still
+    here: a donated item later invoiced at $12.00 publishes both facts.
     """
     req = _free_transparency_request(actual_cost=Decimal("12.00"))
 
-    assert _transparency_row(api, req.id)["cost_variance"] == 12.0
+    row = _transparency_row(api, req.id)
+    assert row["item_estimated_cost_today"] == 0.0
+    assert row["actual_cost"] == 12.0
+    assert "cost_variance" not in row
 
 
-def test_the_public_transparency_ledger_carries_the_free_estimate_too(api):
+def test_the_public_transparency_ledger_carries_the_free_cost_too(api):
     """BEFORE/AFTER on the CLAIM. The ledger block is a SECOND copy of the read.
 
     Two spellings of the same collapse in one response body is exactly the
-    "all but one site" shape the gate exists to stop.
+    "all but one site" shape the gate exists to stop. The pair it applies to is
+    now ``actual_cost``, which both blocks still carry.
     """
-    req = _free_transparency_request()
+    req = _free_transparency_request(actual_cost=Decimal("0.00"))
 
     response = api.get(TRANSPARENCY_URL)
     entry = next(e for e in response.data["ledger"] if e["id"] == req.id)
-    assert entry["estimated_cost"] == 0.0
+    assert entry["actual_cost"] == 0.0
+    assert _transparency_row(api, req.id)["actual_cost"] == 0.0
 
 
-def test_the_public_transparency_feed_reports_no_variance_it_cannot_stand_behind(api):
-    """CONTROL restored to base. The two halves of the payload must agree.
+def test_the_public_transparency_feed_publishes_a_comped_order_as_costing_zero(api):
+    """The exclusion AGENTS.md recorded against op-9m2v, now closed.
 
-    ``ReorderRequest.actual_cost`` is an operator-typed nullable column this
-    branch deliberately does NOT own, so a recorded ``0.00`` there still
-    publishes ``actual_cost: null``. A variance computed against it would be a
-    number that can only be true if the actual cost is a known ``0.00`` —
-    published beside a field saying it is unknown. ``cost_variance`` is gated on
-    the SAME predicate ``actual_cost`` is, so the exclusion boundary does not
-    run through one arithmetic expression.
+    ``ReorderRequest.actual_cost`` and ``cost_per_unit`` kept their truthiness
+    guards through that branch — recorded as a deliberate exclusion because the
+    VALUE was outside it, never because the guard was right. A comped order
+    published ``actual_cost: null`` and ``cost_per_unit: null``: "we do not know
+    what this cost", about a cost we were told.
     """
     from reorder_queue.models import ReorderRequest
 
@@ -1356,9 +1366,9 @@ def test_the_public_transparency_feed_reports_no_variance_it_cannot_stand_behind
     )
 
     row = _transparency_row(api, req.id)
-    assert row["estimated_cost"] == 10.0
-    assert row["actual_cost"] is None
-    assert row["cost_variance"] is None
+    assert row["item_estimated_cost_today"] == 10.0
+    assert row["actual_cost"] == 0.0
+    assert row["cost_per_unit"] == 0.0
 
 
 def test_the_public_transparency_feed_prices_a_free_purchase_order_at_zero(api):
@@ -1393,7 +1403,18 @@ def test_the_public_transparency_feed_prices_a_free_purchase_order_at_zero(api):
     assert response.status_code == 200
     row = next(p for p in response.data["purchase_orders"] if p["id"] == str(order.id))
     assert row["estimated_total"] == 0.0
+    # CONTROL: nothing was ever written to ``actual_total`` here, so ``null``
+    # is the true answer. The settled-at-zero case is the test below.
     assert row["actual_total"] is None
+
+    # And once the order settles at a recorded zero, the feed says zero — the
+    # second half of the exclusion AGENTS.md recorded against op-9m2v.
+    order.actual_total = Decimal("0.00")
+    order.save(update_fields=["actual_total"])
+
+    response = api.get(TRANSPARENCY_URL)
+    row = next(p for p in response.data["purchase_orders"] if p["id"] == str(order.id))
+    assert row["actual_total"] == 0.0
 
 
 def _po_with_lines_at(unit_cost, user_name, status=None):
@@ -1489,9 +1510,11 @@ def test_the_public_transparency_feed_is_unchanged_for_a_priced_order(api):
     )
 
     row = _transparency_row(api, req.id)
-    assert row["estimated_cost"] == 10.0
+    assert row["item_estimated_cost_today"] == 10.0
     assert row["actual_cost"] == 12.0
-    assert row["cost_variance"] == 2.0
+    # No verdict is drawn between the two: the first is a live quote at the
+    # ITEM's current supplier price and the second is what this order paid.
+    assert "cost_variance" not in row
 
 
 def test_a_rise_from_free_is_reported_under_its_own_label(api):

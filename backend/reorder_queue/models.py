@@ -154,10 +154,19 @@ class ReorderRequest(models.Model):
 
     @property
     def cost_per_unit(self) -> Optional[Decimal]:
-        """Calculate cost per unit if actual cost is available."""
-        if self.actual_cost and self.quantity > 0:
-            return self.actual_cost / self.quantity
-        return None
+        """What one unit of this order actually cost, or ``None`` if unrecorded.
+
+        ``is None``, never truthiness (op-9m2v). ``actual_cost`` of
+        ``Decimal("0.00")`` is a RECORDED cost — a donation, a free sample, a
+        warranty replacement — and ``if self.actual_cost:`` reported it as
+        ``None``, which every reader of this property takes for "nobody wrote
+        the cost down". The transparency feed then published ``null`` beside a
+        ``0.00`` it had been told, which is the one thing this payload's
+        ``null`` is documented not to mean.
+        """
+        if self.actual_cost is None or self.quantity <= 0:
+            return None
+        return self.actual_cost / self.quantity
 
 
 def outstanding_of(items) -> list:

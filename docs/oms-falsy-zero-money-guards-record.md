@@ -90,7 +90,14 @@ complete, and it was twice not:
   records no price at all: three facts, three labels, and `direction` is the
   one thing two known prices still establish when the percentage cannot.
 - Public transparency feed (`GET /api/reorders/analytics/transparency/`, no
-  auth) — `estimated_cost` on both the `orders` and the `ledger` block:
+  auth). **Superseded, op-transparency-substituted-supplier:** `estimated_cost`
+  is now `item_estimated_cost_today` and carried on the `orders` block only,
+  `cost_variance` is gone (there is no recorded estimate for a variance to be
+  measured against), and the two exclusions this record left open —
+  `ReorderRequest.actual_cost` / `cost_per_unit` and `PurchaseOrder.actual_total`
+  — are closed, so a comped order now publishes `0.0` rather than `null`. The
+  paragraph below is the state as of op-9m2v.
+  `estimated_cost` on both the `orders` and the `ledger` block:
   `null` -> `0.0` for a donated item, so the community feed no longer says "we
   do not know what this cost" about a cost that is known to be nothing. And
   `cost_variance`: `null` -> the real difference when the ESTIMATE is a known

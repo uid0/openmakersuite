@@ -72,6 +72,26 @@ footer claim ("ALL financial information is made available") were reworded for
 the reader they have rather than left making a claim the payload no longer
 honours.
 
+> **Superseded in part, op-transparency-substituted-supplier.**
+> `LEDGER_VENDOR_KEYS` is gone: `orders` and `ledger` are gated by the one
+> `ORDER_VENDOR_KEYS` tuple, so the drift this record warned about is
+> structural rather than remembered. The tuple's membership moved with it —
+> `supplier_name`, `estimated_cost` and `cost_variance` left the order rows
+> entirely (they were the ITEM's, resolved at request time, published under the
+> order's name) and `item_supplier_choice` / `item_estimated_cost_today` took
+> their place. The anonymous payload is unchanged, and the SIGNED-IN
+> `transparency_note` was reworded too: it still said "All purchase information
+> is publicly available", which the anonymous branch beside it disproves.
+>
+> One figure an anonymous reader sees DID change, and it was routed for a
+> decision rather than taken: `summary`'s counts and totals were computed by
+> walking the capped arrays, so they were subtotals published as totals. They
+> are aggregates over the whole qualifying set now, and the published total goes
+> UP because it becomes correct. Firstmate's ruling: aggregates were already
+> public and a total that under-reports spend is a false figure on a financial
+> page, not a disclosure choice — so the line this record describes does not
+> move.
+
 ## Media, before and after, through real nginx
 
 Base `nginx/templates/default.conf.template` carried a single

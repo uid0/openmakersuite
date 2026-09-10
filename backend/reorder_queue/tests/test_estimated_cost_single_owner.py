@@ -76,12 +76,15 @@ BACKEND = pathlib.Path(__file__).resolve().parents[2]
 #: entry names the MODEL the read is on, because the AST cannot.
 ALLOWED: dict[str, tuple[int, str]] = {
     "reorder_queue/views.py": (
-        7,
+        3,
         "ReorderRequest.estimated_cost on the PUBLIC AllowAny transparency "
-        "action (6): the order payload's ``estimated_cost`` (2) and "
-        "``cost_variance`` (2), and the ledger block's ``estimated_cost`` (2). "
-        "All spelled ``is not None`` — a free request publishes ``0.0``, and "
-        "``null`` means only that no price is on file. Plus one "
+        "action (2), building ``item_estimated_cost_today`` ONCE per order and "
+        "spelled ``is None`` — a free request publishes ``0.0``, and ``null`` "
+        "means only that no price is on file. It was six reads across three "
+        "sites while the payload also carried ``estimated_cost`` and "
+        "``cost_variance`` under the ORDER's name; both are gone, because "
+        "``ReorderRequest`` records no estimate and this property is a live "
+        "quote at the ITEM's current supplier price. Plus one "
         "PurchaseOrderItem.estimated_cost read (1), ``str(line_item."
         "estimated_cost)`` on the line-edit response: that property is "
         "non-nullable, and this is a verbatim copy with no guard at all.",

@@ -23,6 +23,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from config.api_errors import error_response
 from inventory.models import InventoryItem, Supplier
+from inventory.serializers import SupplierChoiceSerializer
 from inventory.services.pack_size import declares_a_case
 from inventory.services.packaging import (
     base_reorder_quantity,
@@ -46,6 +47,7 @@ from inventory.services.supplier_selection import (
     primary_item_supplier,
     select_supplier,
 )
+from inventory.services.vendor_visibility import VENDOR_WITHHELD_KEY, may_see_vendor_data
 
 from . import services
 from .audit import record_event as record_audit_event
@@ -3547,30 +3549,39 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
         return Response(order_data)
 
 
-#: The transparency feed's vendor block, per array (op-anonymous-read-posture).
+#: The transparency feed's vendor block (op-anonymous-read-posture).
 #:
 #: Withheld from a caller with no session, and named here rather than inline so
-#: the three arrays cannot drift: ``orders`` and ``ledger`` are the same order
+#: the arrays cannot drift: ``orders`` and ``ledger`` are the same order
 #: rendered twice, and a key dropped from one and left on the other is a leak
 #: that reads as a fix.
 #:
+#: ONE TUPLE FOR BOTH ARRAYS, and that is the drift fix rather than a tidy-up.
+#: ``ledger`` used to carry its own hand-written subset, kept correct by
+#: whoever remembered to edit two lists at once. :func:`_withhold_vendor_block`
+#: pops with a default, so naming a key an array does not carry costs nothing
+#: and there is no second list to fall behind.
+#:
 #: What each entry is, and why it is on the list:
 #:
-#: * ``supplier_name`` / ``supplier_url`` — the vendor's identity, and a link to
-#:   their listing for the item;
+#: * ``item_supplier_choice`` — the ITEM's supplier derivation, vendor identity
+#:   entire (the winner's name AND every alternative's);
+#: * ``supplier_url`` — ``ReorderRequest.supplier_url``, the order's own link to
+#:   a vendor's listing;
 #: * ``invoice_number`` / ``invoice_url`` / ``purchase_order_url`` — the
 #:   paperwork the captain's decision names outright;
-#: * ``estimated_cost`` / ``actual_cost`` / ``cost_per_unit`` / ``cost_variance``
-#:   and ``estimated_total`` / ``actual_total`` — what we paid a vendor for one
-#:   order. ``cost_variance`` is on the list because it is the difference of two
-#:   figures that are: publishing it beside either would reconstruct the other;
+#: * ``actual_cost`` / ``cost_per_unit`` and ``estimated_total`` /
+#:   ``actual_total`` — what we paid a vendor for one order;
+#: * ``item_estimated_cost_today`` — a live quote from the item's current
+#:   supplier. Vendor money as surely as a paid invoice is, and it would put a
+#:   vendor's unit price one division by ``quantity_ordered`` away;
 #: * ``order_number`` — ``ReorderRequest.order_number``, which is operator-typed
 #:   free text with no help text, filed after an order is placed with a vendor.
 #:   It holds the VENDOR'S reference at least as often as anything else, and an
 #:   ambiguous field has to fall closed. Not to be confused with
 #:   ``po_number`` below, which is a different model's field and unambiguous.
 #:
-#: DELIBERATELY NOT ON THE LIST, and this is the line this branch drew:
+#: DELIBERATELY NOT ON THE LIST, and this is the line the captain drew:
 #:
 #: * ``summary.total_amount_spent`` / ``total_po_amount_spent``, the aggregates.
 #:   They name no vendor and quote no vendor's price — they are what the space
@@ -3582,35 +3593,44 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
 #:   unambiguously ours;
 #: * ``item_name`` / ``item_category`` / ``quantity_ordered`` and the dates —
 #:   the item and the timeline, not the vendor.
+#:
+#: GONE RATHER THAN GATED, because they were never the order's to state:
+#: ``supplier_name``, ``estimated_cost`` and ``cost_variance``. See
+#: :meth:`AnalyticsViewSet.transparency`.
 ORDER_VENDOR_KEYS = (
-    "supplier_name",
+    "item_supplier_choice",
+    "item_estimated_cost_today",
     "supplier_url",
     "invoice_number",
     "invoice_url",
     "purchase_order_url",
     "order_number",
-    "estimated_cost",
     "actual_cost",
     "cost_per_unit",
-    "cost_variance",
 )
 
-#: ``ledger`` is the same order with fewer keys, so its block is the subset of
-#: :data:`ORDER_VENDOR_KEYS` it actually carries.
-LEDGER_VENDOR_KEYS = (
-    "supplier_name",
-    "invoice_number",
-    "order_number",
-    "estimated_cost",
-    "actual_cost",
-)
-
-#: ``purchase_orders`` is a different model with its own money field names.
+#: ``purchase_orders`` is a different model with its own money field names, and
+#: a real ``supplier`` foreign key — so its ``supplier_name`` IS that order's
+#: own and stays, gated.
 PO_VENDOR_KEYS = (
     "supplier_name",
     "estimated_total",
     "actual_total",
 )
+
+
+def _withhold_vendor_block(row: dict, keys) -> dict:
+    """Drop ``keys`` from ``row`` and mark that the gate ran.
+
+    The keys are OMITTED, not nulled, for the reason recorded on
+    ``inventory.services.vendor_visibility.VENDOR_WITHHELD_KEY``: ``null``
+    already means "no figure recorded" in this payload, and a consumer's
+    ``?? 0`` would render a withheld cost as a real $0.00.
+    """
+    for key in keys:
+        row.pop(key, None)
+    row[VENDOR_WITHHELD_KEY] = True
+    return row
 
 
 class AnalyticsViewSet(viewsets.ViewSet):
@@ -3778,16 +3798,53 @@ class AnalyticsViewSet(viewsets.ViewSet):
         ``inventory.services.vendor_visibility.VENDOR_WITHHELD_KEY``: ``null``
         already means "no figure recorded" in this payload, and a consumer's
         ``?? 0`` would render a withheld cost as a real $0.00.
-        """
-        from inventory.services.vendor_visibility import (
-            VENDOR_WITHHELD_KEY,
-            may_see_vendor_data,
-        )
 
+        NO VALUE HERE IS THE ORDER'S UNLESS THE ORDER OWNS IT.
+        ``ReorderRequest`` (reorder_queue/models.py) has an ``item`` FK, a
+        quantity, the timeline, ``actual_cost`` and the paperwork strings. It
+        has NO supplier relationship and NO recorded estimate. Three keys used
+        to imply otherwise, and all three were resolved from ``order.item`` by
+        ``inventory.services.supplier_selection`` AT REQUEST TIME:
+
+        * ``supplier_name`` was ``order.item.supplier.name`` — the item's
+          best-scoring ORDERABLE link as of this HTTP request. Add a flagged
+          primary to the item today and a delivered order from last year
+          reported a vendor it could not have bought from. GONE; the item's
+          whole derivation is published as ``item_supplier_choice`` instead,
+          which names the question it answers and carries the alternatives.
+        * ``estimated_cost`` was ``ReorderRequest.estimated_cost`` — a live
+          quote at that same link's CURRENT unit price. Renamed
+          ``item_estimated_cost_today``, which is what it is.
+        * ``cost_variance`` was ``actual_cost - estimated_cost``, rendered as an
+          over/under-BUDGET verdict. There is no budget: the order records no
+          estimate, so the subtrahend was a price fetched moments ago. Editing
+          a supplier link flipped a finished order from "under budget" to "over
+          budget". GONE, with no replacement — no honest order-scoped form of
+          it exists, and inventing "paid versus today's price" would be a claim
+          nobody asked for.
+
+        WHAT THIS IS NOT. It is not a narrowing of what a reader may see: every
+        one of those keys was already withheld from a caller with no session,
+        so an anonymous reader's payload is byte-for-byte the shape it was.
+
+        THE ONE FIGURE AN ANONYMOUS READER SEES DIFFERENTLY, and it goes UP.
+        ``summary``'s counts and totals were computed by walking the CAPPED
+        arrays, so they were subtotals of a page published under the word
+        "total": 105 qualifying orders worth $1,050.00 reported as 100 and
+        $1,000.00. They are aggregates over the whole qualifying set now. The
+        arrays stay capped — a hundred rows is a page — and the page says which
+        slice it is showing. This was routed to firstmate rather than decided
+        here, because it changes what a caller with no session reads; the ruling
+        was that it moves no line: aggregates were already public, and a total
+        that under-reports spend is a false figure on a financial page rather
+        than a disclosure choice.
+        """
         may_see_vendors = may_see_vendor_data(request)
         try:
-            # Get orders with transparency data (recent first)
-            transparency_orders = (
+            # EVERY order this page is accountable for. Named once, because the
+            # summary and the arrays are two readings of ONE set and a second
+            # copy of this filter is how they come to disagree.
+            qualifying_orders = (
                 self.get_transparency_queryset()
                 .filter(
                     models.Q(actual_cost__isnull=False)
@@ -3805,21 +3862,36 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     & models.Q(delivery_tracking_url="")
                     & models.Q(order_number="")
                 )
-                .order_by("-ordered_at", "-requested_at")[
-                    :100
-                ]  # Last 100 orders with financial data
+                .order_by("-ordered_at", "-requested_at")
             )
 
+            # THE TOTALS ARE OVER ALL OF THEM, and the slice below is a PAGE.
+            # These were computed by walking the sliced rows, so a space with
+            # more than a hundred qualifying orders published less than it had
+            # spent — 105 orders worth $1,050.00 reported as 100 and $1,000.00.
+            # ``SUM`` skips NULLs exactly as the walk's ``is not None`` did, and
+            # is ``None`` rather than zero over an empty set, which is the one
+            # difference and is answered here rather than at the reader.
+            order_totals = qualifying_orders.aggregate(count=Count("id"), spent=Sum("actual_cost"))
+            total_spent = order_totals["spent"] or Decimal("0.00")
+
+            transparency_orders = qualifying_orders[:100]  # the page, newest first
+
             transparency_data = []
-            total_spent = Decimal("0.00")
             ledger_entries = []
 
             for order in transparency_orders:
-                if order.actual_cost:
-                    total_spent += order.actual_cost
-
-                supplier = order.item.supplier
-                supplier_name = supplier.name if supplier else None
+                # THE ITEM'S supplier derivation, said in the key's own name.
+                # ``order.item.supplier_choice`` is memoised per item instance
+                # and rides the ``item__item_suppliers`` prefetch this
+                # queryset already sets up, so naming the whole choice costs no
+                # extra query over naming the winner did.
+                item_supplier_choice = SupplierChoiceSerializer(
+                    order.item.supplier_choice, context={"request": request}
+                ).data
+                item_estimated_cost_today = (
+                    None if order.estimated_cost is None else float(order.estimated_cost)
+                )
 
                 # Public transparency information
                 order_data: dict = {
@@ -3834,16 +3906,17 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     "delivered_at": (
                         order.actual_delivery.isoformat() if order.actual_delivery else None
                     ),
-                    # Financial transparency
-                    "estimated_cost": (
-                        None if order.estimated_cost is None else float(order.estimated_cost)
+                    # Financial transparency — what this order ACTUALLY cost.
+                    # ``is None``, never truthiness: a recorded ``0.00`` is a
+                    # known cost (a donation, a free sample) and ``null`` means
+                    # "no figure recorded" everywhere else in this payload
+                    # (op-9m2v), so publishing a real zero as null says we do
+                    # not know what we paid when we do.
+                    "actual_cost": (
+                        None if order.actual_cost is None else float(order.actual_cost)
                     ),
-                    "actual_cost": (float(order.actual_cost) if order.actual_cost else None),
-                    "cost_per_unit": (float(order.cost_per_unit) if order.cost_per_unit else None),
-                    "cost_variance": (
-                        float(order.actual_cost - order.estimated_cost)
-                        if (order.actual_cost and order.estimated_cost is not None)
-                        else None
+                    "cost_per_unit": (
+                        None if order.cost_per_unit is None else float(order.cost_per_unit)
                     ),
                     # Document links
                     "order_number": order.order_number,
@@ -3854,64 +3927,62 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     "supplier_url": order.supplier_url,
                     # Public notes
                     "public_notes": order.public_notes,
-                    # Supplier info
-                    "supplier_name": supplier_name,
+                    # The ITEM's, as of NOW — not this order's. See the action
+                    # docstring for why they cannot be either.
+                    "item_supplier_choice": item_supplier_choice,
+                    "item_estimated_cost_today": item_estimated_cost_today,
                 }
                 if not may_see_vendors:
-                    for key in ORDER_VENDOR_KEYS:
-                        order_data.pop(key, None)
-                    order_data[VENDOR_WITHHELD_KEY] = True
+                    _withhold_vendor_block(order_data, ORDER_VENDOR_KEYS)
 
                 transparency_data.append(order_data)
 
-                ledger_entries.append(
-                    {
-                        "id": order.id,
-                        "item_id": str(order.item.id),
-                        "item_name": order.item.name,
-                        "supplier_name": supplier_name,
-                        "quantity": order.quantity,
-                        "requested_at": order.requested_at.isoformat(),
-                        "ordered_at": (order.ordered_at.isoformat() if order.ordered_at else None),
-                        "delivered_at": (
-                            order.actual_delivery.isoformat() if order.actual_delivery else None
-                        ),
-                        "actual_cost": (float(order.actual_cost) if order.actual_cost else None),
-                        "estimated_cost": (
-                            None if order.estimated_cost is None else float(order.estimated_cost)
-                        ),
-                        "status": order.status,
-                        "order_number": order.order_number,
-                        "invoice_number": order.invoice_number,
-                    }
-                )
+                ledger_entry: dict = {
+                    "id": order.id,
+                    "item_id": str(order.item.id),
+                    "item_name": order.item.name,
+                    "quantity": order.quantity,
+                    "requested_at": order.requested_at.isoformat(),
+                    "ordered_at": (order.ordered_at.isoformat() if order.ordered_at else None),
+                    "delivered_at": (
+                        order.actual_delivery.isoformat() if order.actual_delivery else None
+                    ),
+                    "actual_cost": (
+                        None if order.actual_cost is None else float(order.actual_cost)
+                    ),
+                    "status": order.status,
+                    "order_number": order.order_number,
+                    "invoice_number": order.invoice_number,
+                    "item_supplier_choice": item_supplier_choice,
+                }
                 if not may_see_vendors:
-                    for key in LEDGER_VENDOR_KEYS:
-                        ledger_entries[-1].pop(key, None)
-                    ledger_entries[-1][VENDOR_WITHHELD_KEY] = True
+                    _withhold_vendor_block(ledger_entry, ORDER_VENDOR_KEYS)
 
-            # Get purchase orders for transparency
+                ledger_entries.append(ledger_entry)
+
+            # The same shape on the same summary, over a different model: one
+            # definition of "which purchase orders", totals over all of them,
+            # and a page of fifty.
+            qualifying_pos = PurchaseOrder.objects.filter(
+                status__in=[
+                    PurchaseOrder.Status.SENT,
+                    PurchaseOrder.Status.CONFIRMED,
+                    PurchaseOrder.Status.PARTIALLY_RECEIVED,
+                    PurchaseOrder.Status.RECEIVED,
+                ]
+            )
+            po_totals = qualifying_pos.aggregate(count=Count("id"), spent=Sum("actual_total"))
+            po_total_spent = po_totals["spent"] or Decimal("0.00")
+
             purchase_orders = (
-                PurchaseOrder.objects.filter(
-                    status__in=[
-                        PurchaseOrder.Status.SENT,
-                        PurchaseOrder.Status.CONFIRMED,
-                        PurchaseOrder.Status.PARTIALLY_RECEIVED,
-                        PurchaseOrder.Status.RECEIVED,
-                    ]
-                )
-                .select_related("supplier")
+                qualifying_pos.select_related("supplier")
                 .prefetch_related("items__item_supplier__item", "items__asset")
-                .order_by("-order_date")[:50]  # Last 50 purchase orders
+                .order_by("-order_date")[:50]  # the page, newest first
             )
 
             po_transparency_data = []
-            po_total_spent = Decimal("0.00")
 
             for po in purchase_orders:
-                if po.actual_total:
-                    po_total_spent += po.actual_total
-
                 # Count items (excluding voided)
                 active_items = po.items.filter(is_voided=False)
                 total_items = active_items.count()
@@ -3930,33 +4001,43 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     "estimated_total": (
                         None if po.estimated_total is None else float(po.estimated_total)
                     ),
-                    "actual_total": float(po.actual_total) if po.actual_total else None,
+                    # ``is None``, never truthiness — same rule as the order
+                    # block above. An order every line of which was donated
+                    # settles at a recorded ``0.00``, and publishing that as
+                    # ``null`` says we do not know what it cost.
+                    "actual_total": (None if po.actual_total is None else float(po.actual_total)),
                     "total_items": total_items,
                     "total_quantity": total_quantity,
                     "is_fully_received": po.is_fully_received,
                 }
                 if not may_see_vendors:
-                    for key in PO_VENDOR_KEYS:
-                        po_data.pop(key, None)
-                    po_data[VENDOR_WITHHELD_KEY] = True
+                    _withhold_vendor_block(po_data, PO_VENDOR_KEYS)
 
                 po_transparency_data.append(po_data)
 
             summary = {
-                "total_orders_with_financial_data": len(transparency_data),
+                # Off the AGGREGATES, not off ``len()`` of the page above.
+                "total_orders_with_financial_data": order_totals["count"],
                 "total_amount_spent": float(total_spent),
-                "total_purchase_orders": len(po_transparency_data),
+                "total_purchase_orders": po_totals["count"],
                 "total_po_amount_spent": float(po_total_spent),
                 "last_updated": timezone.now().isoformat(),
+                # WORDED FOR THE READER IT HAS. The signed-in sentence used
+                # to say "All purchase information is publicly available",
+                # which the anonymous branch of this very expression disproves
+                # — the vendor block is withheld from a caller with no session
+                # (op-anonymous-read-posture). A page whose subject is
+                # accountability cannot carry a claim its own payload denies.
                 "transparency_note": (
                     "Dallas Makerspace publishes what it spends. Totals, items, "
                     "quantities and dates are public; supplier names and "
                     "per-order costs are shown to signed-in members."
                     if not may_see_vendors
                     else (
-                        "Dallas Makerspace operates with full financial "
-                        "transparency. All purchase information is publicly "
-                        "available."
+                        "Dallas Makerspace publishes what it spends. You are "
+                        "signed in, so supplier names and per-order costs are "
+                        "shown here as well; they are withheld from readers "
+                        "who are not."
                     )
                 ),
             }

@@ -323,8 +323,26 @@
 /* Detail Sections */
 .order-details,
 .financial-info,
+.item-price-today,
 .timeline {
   margin-bottom: 1.5rem;
+}
+
+/*
+ * The item-scoped block, set apart from `.financial-info` on purpose: what the
+ * order cost and what the item would cost today are different facts, and a
+ * reader who takes the second for this order's estimate reaches the
+ * over/under-budget verdict this page used to print for them.
+ */
+.item-price-today {
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  padding-top: 0.75rem;
+}
+
+.item-scope-note {
+  margin: 0.25rem 0 0;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.85rem;
 }
 
 .detail-row {
@@ -342,18 +360,6 @@
 .detail-row .value {
   color: #ffffff;
   font-weight: 600;
-}
-
-.over-budget {
-  color: #ef4444 !important;
-}
-
-.under-budget {
-  color: #10b981 !important;
-}
-
-.on-budget {
-  color: #94a3b8 !important;
 }
 
 /* Timeline */

@@ -1,0 +1,79 @@
+{
+ "summary": {
+  "total_orders_with_financial_data": 2,
+  "total_amount_spent": 150.25,
+  "total_purchase_orders": 1,
+  "total_po_amount_spent": 0.0,
+  "last_updated": "2026-09-09T19:00:36.502943+00:00",
+  "transparency_note": "Dallas Makerspace publishes what it spends. Totals, items, quantities and dates are public; supplier names and per-order costs are shown to signed-in members.",
+  "vendor_data_withheld": true
+ },
+ "orders": [
+  {
+   "id": 2,
+   "item_id": "c24eb1d7-ccf9-4d03-8896-dadc292009de",
+   "item_name": "item-1",
+   "item_category": null,
+   "quantity_ordered": 4,
+   "status": "received",
+   "requested_at": "2026-09-09T19:00:36.087238+00:00",
+   "ordered_at": "2026-09-09T19:00:36.082114+00:00",
+   "delivered_at": null,
+   "delivery_tracking_url": "",
+   "public_notes": "Donated by a member.",
+   "vendor_data_withheld": true
+  },
+  {
+   "id": 1,
+   "item_id": "7f3e63ad-ec4b-4dff-8a25-c11138c5fa73",
+   "item_name": "item-0",
+   "item_category": null,
+   "quantity_ordered": 10,
+   "status": "received",
+   "requested_at": "2026-09-09T19:00:36.058530+00:00",
+   "ordered_at": "2026-09-09T19:00:36.021925+00:00",
+   "delivered_at": "2026-09-09",
+   "delivery_tracking_url": "",
+   "public_notes": "Installed in the laser shop.",
+   "vendor_data_withheld": true
+  }
+ ],
+ "ledger": [
+  {
+   "id": 2,
+   "item_id": "c24eb1d7-ccf9-4d03-8896-dadc292009de",
+   "item_name": "item-1",
+   "quantity": 4,
+   "requested_at": "2026-09-09T19:00:36.087238+00:00",
+   "ordered_at": "2026-09-09T19:00:36.082114+00:00",
+   "delivered_at": null,
+   "status": "received",
+   "vendor_data_withheld": true
+  },
+  {
+   "id": 1,
+   "item_id": "7f3e63ad-ec4b-4dff-8a25-c11138c5fa73",
+   "item_name": "item-0",
+   "quantity": 10,
+   "requested_at": "2026-09-09T19:00:36.058530+00:00",
+   "ordered_at": "2026-09-09T19:00:36.021925+00:00",
+   "delivered_at": "2026-09-09",
+   "status": "received",
+   "vendor_data_withheld": true
+  }
+ ],
+ "purchase_orders": [
+  {
+   "id": "1",
+   "po_number": "PO-2026-0007",
+   "status": "sent",
+   "status_label": "Sent to Supplier",
+   "order_date": "2026-09-09T19:00:36.094771+00:00",
+   "expected_delivery_date": null,
+   "total_items": 1,
+   "total_quantity": 5,
+   "is_fully_received": false,
+   "vendor_data_withheld": true
+  }
+ ]
+}

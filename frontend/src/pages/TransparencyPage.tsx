@@ -7,6 +7,8 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import { analyticsAPI } from '../services/api';
+import { supplierChoiceSummary } from '../utils/supplierChoice';
+import { SupplierChoice } from '../types';
 import { vendorDataWithheld } from '../utils/vendorVisibility';
 import '../styles/TransparencyPage.css';
 
@@ -27,10 +29,8 @@ interface TransparencyOrder {
    * `null` still means "no figure recorded", which is a claim about the ORDER.
    */
   vendor_data_withheld?: boolean;
-  estimated_cost?: number | null;
   actual_cost?: number | null;
   cost_per_unit?: number | null;
-  cost_variance?: number | null;
   order_number?: string;
   invoice_number?: string;
   invoice_url?: string;
@@ -38,10 +38,34 @@ interface TransparencyOrder {
   delivery_tracking_url?: string;
   supplier_url?: string;
   public_notes: string;
-  supplier_name?: string | null;
+  /**
+   * THE ITEM'S supplier derivation, as of this response — never the order's.
+   *
+   * `ReorderRequest` has no supplier relationship (backend/reorder_queue/models.py),
+   * so the flat `supplier_name` this row used to carry was `order.item.supplier`
+   * resolved at request time: edit the item's links today and a delivered order
+   * reported a vendor it could not have bought from. The key says whose answer
+   * it is, and every surface below labels it the same way.
+   */
+  item_supplier_choice?: SupplierChoice;
+  /**
+   * What this quantity would cost at that supplier's CURRENT price — a live
+   * quote, not what the order was estimated at. No estimate is recorded on a
+   * reorder request, which is why `cost_variance` is gone rather than renamed:
+   * there is no budget for a variance to be measured against.
+   */
+  item_estimated_cost_today?: number | null;
 }
 
 interface TransparencySummary {
+  /**
+   * Every qualifying order, not the number of rows below.
+   *
+   * The server used to compute this and `total_amount_spent` by walking the
+   * capped page, so a space with more than a hundred qualifying orders
+   * published less than it had spent. They are aggregates over the whole set
+   * now, which is why the ledger says which slice of it the table is showing.
+   */
   total_orders_with_financial_data: number;
   total_amount_spent: number;
   last_updated: string;
@@ -67,9 +91,9 @@ interface LedgerEntry {
   status: string;
   /** Withheld from an anonymous caller — see `TransparencyOrder`. */
   vendor_data_withheld?: boolean;
-  supplier_name?: string | null;
+  /** The ITEM's supplier today — see `TransparencyOrder.item_supplier_choice`. */
+  item_supplier_choice?: SupplierChoice;
   actual_cost?: number | null;
-  estimated_cost?: number | null;
   order_number?: string;
   invoice_number?: string;
 }
@@ -105,28 +129,29 @@ const TransparencyPage: React.FC = () => {
    * Is there a figure to show at all?
    *
    * `!= null`, never truthiness (op-9m2v). A recorded `0.00` is a KNOWN cost —
-   * the server publishes `estimated_cost: 0.0` for a donated order — and in JSX
+   * the server publishes `actual_cost: 0.0` for a donated order — and in JSX
    * a numeric `0` does not merely fail to render the row, it RENDERS: `{0 &&
    * <div/>}` prints a bare "0" into the card and drops the figure beside it.
+   *
+   * EVERY money row on this card asks it. `actual_cost` and `cost_per_unit`
+   * still guarded on truthiness after the rows beside them were repaired, so a
+   * comped order printed a stray "0" where its cost should have been — and the
+   * server had only just started sending a real `0.0` there instead of `null`.
    */
   const isReported = (amount: number | null | undefined): amount is number =>
     amount !== null && amount !== undefined;
 
   /**
-   * Which of the THREE things a variance can say — over, under, or exactly on.
+   * The one sentence every item-scoped figure on this page is labelled with.
    *
-   * Landing exactly on estimate is its own fact, not a favourable one (op-9m2v).
-   * The zero case only became reachable when the truthiness guard above was
-   * replaced: `{0 && <div/>}` used to drop the row, so `> 0 ? over : under`
-   * never had to answer for it and called a $0.00 variance "under budget".
-   * Named and rendered in words as well as colour, because colour alone is not
-   * a distinction a reader can act on.
+   * `ReorderRequest` records no supplier and no estimate, so the supplier name
+   * and the price beside it are the ITEM's, resolved when this response was
+   * built. A cost VARIANCE used to be rendered here too — `actual_cost` minus
+   * that live quote, printed as "over budget" / "under budget" — and it is gone
+   * rather than relabelled: editing a supplier link flipped a finished order
+   * from one verdict to the other, because there was never a budget under it.
    */
-  const varianceTone = (variance: number) => {
-    if (variance > 0) return { className: 'over-budget', sign: '+', note: ' over budget' };
-    if (variance < 0) return { className: 'under-budget', sign: '', note: ' under budget' };
-    return { className: 'on-budget', sign: '', note: ' on budget' };
-  };
+  const ITEM_SCOPE_NOTE = "The item's supplier and price as of now — not this order's.";
 
   const formatCurrency = (amount: number | null | undefined) => {
     // `undefined` as well as `null`: the server WITHHOLDS the per-order money
@@ -247,6 +272,18 @@ const TransparencyPage: React.FC = () => {
               Totals, items, quantities and dates are public.
             </p>
           )}
+          {/* The table is a PAGE of the ledger, and the summary above it is
+              not. Derived from the two numbers the page already holds rather
+              than from a hard-coded 100, so it cannot disagree with the server
+              about where the cut is. Rendered only when there IS a cut: a note
+              about a truncation that did not happen is its own false claim. */}
+          {data.ledger.length < data.summary.total_orders_with_financial_data && (
+            <p className="section-subtitle" data-testid="ledger-window">
+              Showing the {data.ledger.length} most recent of{' '}
+              {data.summary.total_orders_with_financial_data}. The totals above
+              cover all of them.
+            </p>
+          )}
         </div>
         {data.ledger.length === 0 ? (
           <div className="empty-ledger">
@@ -264,14 +301,18 @@ const TransparencyPage: React.FC = () => {
                   <th>Qty</th>
                   {/* Dropped, not blanked, for a caller with no session
                       (op-anonymous-read-posture). The server withholds
-                      `supplier_name` and the per-order costs, so these columns
-                      would read "N/A" and "$NaN" on every row — "no supplier on
-                      file" and a nonsense figure, both claims about the ORDER
-                      rather than about the reader. An absent column cannot be
-                      misread as an empty value; the note above the table says
-                      where the numbers went. */}
-                  {!vendorWithheld && <th>Supplier</th>}
-                  {!vendorWithheld && <th>Cost</th>}
+                      `item_supplier_choice` and the per-order costs, so these
+                      columns would read "N/A" and "$NaN" on every row — "no
+                      supplier on file" and a nonsense figure, both claims about
+                      the DATA rather than about the reader. An absent column
+                      cannot be misread as an empty value; the note above the
+                      table says where the numbers went.
+
+                      The supplier column is headed "Item supplier today" and
+                      not "Supplier": what it names is the item's current
+                      source, and this order never had one of its own. */}
+                  {!vendorWithheld && <th>Item supplier today</th>}
+                  {!vendorWithheld && <th>Paid</th>}
                   <th>Status</th>
                 </tr>
               </thead>
@@ -314,10 +355,18 @@ const TransparencyPage: React.FC = () => {
                       </div>
                     </td>
                     <td>{entry.quantity}</td>
-                    {!vendorWithheld && <td>{entry.supplier_name || 'N/A'}</td>}
+                    {/* The ITEM's supplier as of now, through the one shared
+                        reading of that answer (`utils/supplierChoice`) so the
+                        alternatives travel with the name. Never `entry.supplier_name`:
+                        this order never had one. */}
                     {!vendorWithheld && (
-                      <td>{formatCurrency(entry.actual_cost ?? entry.estimated_cost ?? null)}</td>
+                      <td>{supplierChoiceSummary(entry.item_supplier_choice) || 'N/A'}</td>
                     )}
+                    {/* What was PAID, and only that. The column used to fall
+                        through to a live re-quote when no actual was recorded,
+                        which put a price nobody paid under a heading that said
+                        we had. */}
+                    {!vendorWithheld && <td>{formatCurrency(entry.actual_cost)}</td>}
                     <td>
                       <span className={`ledger-status status-${entry.status}`}>
                         {formatStatus(entry.status)}
@@ -363,10 +412,12 @@ const TransparencyPage: React.FC = () => {
                     <span className="value">{order.item_category}</span>
                   </div>
                 )}
-                {order.supplier_name && (
+                {supplierChoiceSummary(order.item_supplier_choice) && (
                   <div className="detail-row">
-                    <span className="label">Supplier:</span>
-                    <span className="value">{order.supplier_name}</span>
+                    <span className="label">Item supplier today:</span>
+                    <span className="value">
+                      {supplierChoiceSummary(order.item_supplier_choice)}
+                    </span>
                   </div>
                 )}
                 <div className="detail-row" style={{ marginTop: '0.5rem' }}>
@@ -385,36 +436,44 @@ const TransparencyPage: React.FC = () => {
                 </div>
               </div>
 
+              {/* WHAT THIS ORDER COST. Only figures the order itself records
+                  belong in this block; the live re-quote sits below it, under
+                  its own heading, so the two cannot be read as a budget and an
+                  outturn. `isReported`, never truthiness, on BOTH rows: a
+                  recorded $0.00 (a donation, a warranty replacement) is a known
+                  cost, and `{0 && <div/>}` does not merely drop the row — it
+                  renders a bare "0" into the card (op-9m2v). */}
               <div className="financial-info">
-                {isReported(order.estimated_cost) && (
-                  <div className="detail-row">
-                    <span className="label">Estimated Cost:</span>
-                    <span className="value">{formatCurrency(order.estimated_cost)}</span>
-                  </div>
-                )}
-                {order.actual_cost && (
+                {isReported(order.actual_cost) && (
                   <div className="detail-row">
                     <span className="label">Actual Cost:</span>
                     <span className="value">{formatCurrency(order.actual_cost)}</span>
                   </div>
                 )}
-                {order.cost_per_unit && (
+                {isReported(order.cost_per_unit) && (
                   <div className="detail-row">
                     <span className="label">Cost per Unit:</span>
                     <span className="value">{formatCurrency(order.cost_per_unit)}</span>
                   </div>
                 )}
-                {isReported(order.cost_variance) && (
+              </div>
+
+              {/* THE ITEM'S, AS OF NOW. Separated from the block above and
+                  labelled, because the two used to sit in one list where a
+                  reader could only take the second for this order's estimate —
+                  which is precisely what the removed "Cost Variance" row did
+                  for them, in words, with a verdict. */}
+              {isReported(order.item_estimated_cost_today) && (
+                <div className="item-price-today">
                   <div className="detail-row">
-                    <span className="label">Cost Variance:</span>
-                    <span className={`value ${varianceTone(order.cost_variance).className}`}>
-                      {varianceTone(order.cost_variance).sign}
-                      {formatCurrency(order.cost_variance)}
-                      {varianceTone(order.cost_variance).note}
+                    <span className="label">Same quantity at today's price:</span>
+                    <span className="value">
+                      {formatCurrency(order.item_estimated_cost_today)}
                     </span>
                   </div>
-                )}
-              </div>
+                  <p className="item-scope-note">{ITEM_SCOPE_NOTE}</p>
+                </div>
+              )}
 
               <div className="timeline">
                 <div className="timeline-item">
@@ -475,18 +534,20 @@ const TransparencyPage: React.FC = () => {
       </div>
 
       <footer className="transparency-footer">
-        {/* "ALL financial information is made available" stopped being true for
-            a reader with no session (op-anonymous-read-posture). A page whose
-            whole subject is accountability cannot carry a claim its own payload
-            no longer honours, so it is worded for the reader it has — the same
-            edit the server makes to `summary.transparency_note`. */}
+        {/* "ALL financial information is made available" stopped being true
+            for EVERY reader when op-anonymous-read-posture gated the vendor
+            block: the signed-in branch went on making the claim about the page
+            as a whole, which its own anonymous branch disproves. A page whose
+            subject is accountability cannot carry a claim its payload denies,
+            so both branches are worded for the reader they have — the same edit
+            the server makes to `summary.transparency_note`. */}
         <p>
           This transparency page reflects our commitment to open operations.
           {vendorWithheld
             ? ' What the makerspace spends is published here; supplier names and ' +
               'per-order costs are shown to signed-in members.'
-            : ' All financial information is made available to promote trust and ' +
-              'accountability within the makerspace community.'}
+            : ' You are signed in, so supplier names and per-order costs are shown ' +
+              'here as well; they are withheld from readers who are not.'}
         </p>
         <p>
           <a href="/tv-dashboard">← Back to Dashboard</a>

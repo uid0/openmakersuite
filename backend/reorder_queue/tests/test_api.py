@@ -425,7 +425,13 @@ class TestReorderRequestAPI:
 
         assert response.status_code == status.HTTP_200_OK
         order_entry = response.data["orders"][0]
-        assert order_entry["supplier_name"] == request_obj.item.supplier.name
+        # The vendor identity a signed-in caller gets is the ITEM's supplier
+        # derivation, under a key that says so: ``ReorderRequest`` has no
+        # supplier relationship, so an order-scoped ``supplier_name`` was a
+        # value substituted from the item (see the action's docstring).
+        assert (
+            order_entry["item_supplier_choice"]["supplier_name"] == request_obj.item.supplier.name
+        )
         assert order_entry["invoice_number"] == "INV-LEDGER-2"
         assert order_entry["actual_cost"] == float(request_obj.actual_cost)
         assert "vendor_data_withheld" not in order_entry

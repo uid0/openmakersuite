@@ -663,24 +663,14 @@ payload that shows it, in
 That list is the branch's evidence, not standing guidance; do not copy it back
 here.
 
-**Two more deliberate exclusions, on the boundary the gate made visible.** Both
-are the same falsy shape on a value this branch does NOT own, so repairing them
-would move output for a reason that is not "base presented an unknown price as a
-real number":
+The transparency payload's former exclusions for
+`ReorderRequest.actual_cost` / `cost_per_unit` and
+`PurchaseOrder.actual_total` are closed: recorded zeroes now remain zeroes.
+The authoritative change record is
+[`docs/oms-falsy-zero-money-guards-record.md`](docs/oms-falsy-zero-money-guards-record.md).
 
-- `ReorderRequest.actual_cost` and `ReorderRequest.cost_per_unit`, and the
-  truthiness on them in the TRANSPARENCY PAYLOAD specifically — both the
-  `orders` block and the `ledger` block. `actual_cost` is a nullable column an
-  operator types in, not a derived price, and this branch did not change it.
-  `PurchaseOrder.actual_total` in the `purchase_orders` block is the same
-  shape and excluded for the same reason: `null=True` and operator-typed. That
-  is precisely what separates it from `estimated_total` beside it, which is
-  non-nullable-with-default and therefore inside the branch — the nullability
-  of the column, not the name of the field, is what decides.
-  Read that narrowly: it does NOT extend to `PurchaseOrderItem.actual_cost`,
-  which is DERIVED from `unit_cost_actual` and IS inside the branch (the
-  `receiving.py` twin was the real defect), and whose two admin columns are
-  named in the branch record's change list.
+**One deliberate exclusion remains on the boundary the gate made visible:**
+
 - `MaintenanceItem.estimated_cost` on the work-order PDF
   (`inventory/utils/work_order_pdf.py`), where `if item.estimated_cost:` omits
   the "Est. Cost" line for a task budgeted at a recorded `0.00`. A maintenance

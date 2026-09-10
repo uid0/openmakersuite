@@ -1,13 +1,18 @@
 /**
- * The public transparency page must not hide a cost it KNOWS is zero (op-9m2v).
+ * The public transparency page must not hide a cost it KNOWS is zero (op-9m2v),
+ * and must not print a figure the order does not own.
  *
- * The server publishes `estimated_cost: 0.0` for a donated order — a known
- * $0.00, not an absence — and `null` only where no price is on file. The page
- * guarded both with truthiness, which fails twice over in JSX: a numeric `0` is
- * falsy, so the "Estimated Cost" row disappeared, AND `{0 && <div/>}` evaluates
- * to `0`, which React RENDERS as a bare "0" into the card. The same shape sat
- * on `cost_variance`, which the server newly computes against a known `0.00`
- * estimate.
+ * The zero half: the server publishes a recorded `0.00` as `0.0` — a known
+ * cost, not an absence — and `null` only where no figure is on file. The page
+ * guarded with truthiness, which fails twice over in JSX: a numeric `0` is
+ * falsy, so the row disappeared, AND `{0 && <div/>}` evaluates to `0`, which
+ * React RENDERS as a bare "0" into the card.
+ *
+ * The attribution half: `estimated_cost` and `cost_variance` used to sit in
+ * this same block. Both were resolved from the ITEM's current supplier links at
+ * request time, and the variance was printed as an over/under-BUDGET verdict on
+ * an order that records no budget. They are gone from the payload; what remains
+ * is `item_estimated_cost_today`, under its own heading and its own sentence.
  */
 import { MantineProvider } from '@mantine/core';
 import { render, screen, waitFor, within } from '@testing-library/react';
@@ -17,6 +22,13 @@ import TransparencyPage from '../../pages/TransparencyPage';
 import { analyticsAPI } from '../../services/api';
 
 vi.mock('../../services/api');
+
+const choice = (name: string | null = 'Charity') => ({
+  item_supplier_id: name === null ? null : 7,
+  supplier_name: name,
+  reason: name === null ? 'no_suppliers' : null,
+  alternatives: [],
+});
 
 const order = (overrides: Record<string, unknown> = {}) => ({
   id: 1,
@@ -28,10 +40,8 @@ const order = (overrides: Record<string, unknown> = {}) => ({
   requested_at: '2026-01-01T00:00:00Z',
   ordered_at: '2026-01-02T00:00:00Z',
   delivered_at: null,
-  estimated_cost: 0,
-  actual_cost: null,
-  cost_per_unit: null,
-  cost_variance: null,
+  actual_cost: 0,
+  cost_per_unit: 0,
   order_number: 'PO-FREE-1',
   invoice_number: '',
   invoice_url: '',
@@ -39,7 +49,8 @@ const order = (overrides: Record<string, unknown> = {}) => ({
   delivery_tracking_url: '',
   supplier_url: '',
   public_notes: '',
-  supplier_name: 'Charity',
+  item_supplier_choice: choice(),
+  item_estimated_cost_today: 0,
   ...overrides,
 });
 
@@ -47,13 +58,12 @@ const ledgerEntry = (overrides: Record<string, unknown> = {}) => ({
   id: 1,
   item_id: 'item-1',
   item_name: 'Ledger Filament',
-  supplier_name: 'Charity',
+  item_supplier_choice: choice(),
   quantity: 6,
   requested_at: '2026-01-01T00:00:00Z',
   ordered_at: '2026-01-02T00:00:00Z',
   delivered_at: null,
-  actual_cost: null,
-  estimated_cost: 0,
+  actual_cost: 0,
   status: 'ordered',
   order_number: 'PO-FREE-1',
   invoice_number: '',
@@ -62,7 +72,8 @@ const ledgerEntry = (overrides: Record<string, unknown> = {}) => ({
 
 const renderFeed = async (
   orders: Record<string, unknown>[],
-  ledger: Record<string, unknown>[] = []
+  ledger: Record<string, unknown>[] = [],
+  summary: Record<string, unknown> = {}
 ) => {
   (analyticsAPI.getTransparencyLedger as jest.Mock).mockResolvedValue({
     data: {
@@ -71,6 +82,7 @@ const renderFeed = async (
         total_amount_spent: 0,
         last_updated: '2026-01-03T00:00:00Z',
         transparency_note: 'note',
+        ...summary,
       },
       orders,
       ledger,
@@ -98,7 +110,7 @@ describe('the public transparency order card', () => {
     const card = await renderFeed([order()]);
     const financials = card.querySelector('.financial-info')!;
 
-    expect(within(financials as HTMLElement).getByText('Estimated Cost:')).toBeInTheDocument();
+    expect(within(financials as HTMLElement).getByText('Actual Cost:')).toBeInTheDocument();
     expect(financials).toHaveTextContent('$0.00');
   });
 
@@ -106,98 +118,189 @@ describe('the public transparency order card', () => {
     const card = await renderFeed([order()]);
     const financials = card.querySelector('.financial-info')!;
 
-    // `{0 && <div/>}` renders the number itself. The row text is "Estimated
-    // Cost:" + "$0.00" and nothing else.
-    expect(financials.textContent).toBe('Estimated Cost:$0.00');
-  });
-
-  it('shows a genuine 0.00 variance, and calls it ON budget not UNDER', async () => {
-    const card = await renderFeed([
-      order({ estimated_cost: 10, actual_cost: 10, cost_variance: 0 }),
-    ]);
-    const financials = card.querySelector('.financial-info')!;
-
-    expect(within(financials as HTMLElement).getByText('Cost Variance:')).toBeInTheDocument();
-    expect(financials.textContent).toContain('Cost Variance:$0.00 on budget');
-    // Landing exactly on estimate is a THIRD state, not the favourable one.
-    expect(financials.querySelector('.on-budget')).not.toBeNull();
-    expect(financials.querySelector('.under-budget')).toBeNull();
-    expect(financials.querySelector('.over-budget')).toBeNull();
-  });
-
-  it('still calls a real overrun over budget', async () => {
-    const card = await renderFeed([order({ cost_variance: 2 })]);
-
-    expect(card.querySelector('.financial-info')!.textContent).toContain('+$2.00 over budget');
-    expect(card.querySelector('.over-budget')).not.toBeNull();
-    expect(card.querySelector('.on-budget')).toBeNull();
-  });
-
-  it('still calls a real saving under budget', async () => {
-    const card = await renderFeed([order({ cost_variance: -2 })]);
-
-    expect(card.querySelector('.financial-info')!.textContent).toContain('-$2.00 under budget');
-    expect(card.querySelector('.under-budget')).not.toBeNull();
-    expect(card.querySelector('.on-budget')).toBeNull();
+    // `{0 && <div/>}` renders the number itself. The block is the two rows the
+    // order owns and nothing else.
+    expect(financials.textContent).toBe('Actual Cost:$0.00Cost per Unit:$0.00');
   });
 
   it('still renders nothing where the server reported no figure', async () => {
-    const card = await renderFeed([
-      order({ estimated_cost: null, cost_variance: null }),
-    ]);
+    const card = await renderFeed([order({ actual_cost: null, cost_per_unit: null })]);
     const financials = card.querySelector('.financial-info')!;
 
     expect(financials.textContent).toBe('');
-    expect(screen.queryByText('Estimated Cost:')).not.toBeInTheDocument();
-    expect(screen.queryByText('Cost Variance:')).not.toBeInTheDocument();
+    expect(screen.queryByText('Actual Cost:')).not.toBeInTheDocument();
+    expect(screen.queryByText('Cost per Unit:')).not.toBeInTheDocument();
   });
 
   it('is unchanged for an ordinary priced order — the branch invariant', async () => {
-    const card = await renderFeed([
-      order({ estimated_cost: 10, actual_cost: 12, cost_per_unit: 2, cost_variance: 2 }),
-    ]);
+    const card = await renderFeed([order({ actual_cost: 12, cost_per_unit: 2 })]);
     const financials = card.querySelector('.financial-info')!;
 
-    expect(financials).toHaveTextContent('$10.00');
     expect(financials).toHaveTextContent('$12.00');
-    expect(financials).toHaveTextContent('+$2.00');
+    expect(financials).toHaveTextContent('$2.00');
+  });
+});
+
+/**
+ * A value resolved from the ITEM must never be shown as the order's, and must
+ * never be presented as something the order's actual cost can be measured
+ * against.
+ */
+describe("the order card's item-scoped block", () => {
+  it("names the supplier as the item's, and says so beside the price", async () => {
+    const card = await renderFeed([
+      order({ item_supplier_choice: choice('Acme Filament'), item_estimated_cost_today: 30 }),
+    ]);
+
+    expect(card).toHaveTextContent('Item supplier today:');
+    expect(card).toHaveTextContent('Acme Filament');
+    expect(card).toHaveTextContent("Same quantity at today's price:");
+    expect(card).toHaveTextContent('$30.00');
+    expect(card.querySelector('.item-scope-note')!.textContent).toBe(
+      "The item's supplier and price as of now — not this order's."
+    );
+  });
+
+  it("never labels anything on the card as this order's supplier or estimate", async () => {
+    // FED THE KEYS THE OLD SERVER SENT, deliberately. A fixture carrying only
+    // the new shape cannot tell a page that dropped these labels apart from one
+    // that simply had nothing to fill them with, and would pass on the very
+    // code this pins.
+    const card = await renderFeed([
+      order({
+        supplier_name: 'Ghost Vendor Co.',
+        estimated_cost: 99,
+        item_supplier_choice: choice('Acme Filament'),
+        item_estimated_cost_today: 30,
+      }),
+    ]);
+
+    expect(card.textContent).not.toContain('Supplier:');
+    expect(card.textContent).not.toContain('Estimated Cost:');
+    expect(card.textContent).not.toContain('Ghost Vendor Co.');
+    expect(card.textContent).not.toContain('$99.00');
+  });
+
+  it('prints no budget verdict, for any figures at all', async () => {
+    // ``cost_variance`` is on the fixture for the same reason: the removed row
+    // rendered off THIS key, so a fixture without it proves nothing.
+    const card = await renderFeed([
+      order({
+        actual_cost: 12,
+        cost_per_unit: 2,
+        cost_variance: 20,
+        item_estimated_cost_today: 10,
+      }),
+    ]);
+
+    // The order records no estimate, so "over"/"under"/"on budget" was a
+    // verdict against a live re-quote — it flipped sign when somebody edited a
+    // supplier link, with nothing about the order having changed.
+    expect(card.textContent).not.toContain('budget');
+    expect(card.textContent).not.toContain('Cost Variance');
+    expect(card.querySelector('.over-budget')).toBeNull();
+    expect(card.querySelector('.under-budget')).toBeNull();
+    expect(card.querySelector('.on-budget')).toBeNull();
+  });
+
+  it('says how many other suppliers the item has, rather than implying one', async () => {
+    const card = await renderFeed([
+      order({
+        item_supplier_choice: {
+          ...choice('Acme Filament'),
+          alternatives: [
+            { id: 2, supplier_name: 'Beta Parts' },
+            { id: 3, supplier_name: 'Gamma Wholesale' },
+          ],
+        },
+      }),
+    ]);
+
+    expect(card).toHaveTextContent('Acme Filament, or 2 others');
+  });
+
+  it('renders no supplier row at all where the item has none', async () => {
+    // A legacy ``supplier_name`` is on the fixture so that "no row" means the
+    // page declined to name one, not that it had nothing to hand.
+    const card = await renderFeed([
+      order({ item_supplier_choice: choice(null), supplier_name: 'Ghost Vendor Co.' }),
+    ]);
+
+    expect(card.textContent).not.toContain('Item supplier today:');
+    expect(card.textContent).not.toContain('Ghost Vendor Co.');
+  });
+});
+
+/**
+ * The ledger table's cost column publishes what was PAID. It used to read
+ * `actual_cost ?? estimated_cost`, so a delivered order with no recorded actual
+ * showed a live re-quote under a heading that said we had paid it.
+ */
+describe('the public transparency ledger table', () => {
+  const cell = (index: number) =>
+    screen.getByRole('table').querySelectorAll('tbody tr td')[index];
+  const supplierCell = () => cell(5);
+  const paidCell = () => cell(6);
+
+  it('shows a donated purchase as $0.00 rather than N/A', async () => {
+    await renderFeed([order()], [ledgerEntry()]);
+
+    expect(paidCell().textContent).toBe('$0.00');
+  });
+
+  it('shows N/A where nothing was recorded, and never a substitute figure', async () => {
+    // ``estimated_cost`` is on the fixture because the cell used to fall
+    // through to it. Without it this asserts nothing about the fallback.
+    await renderFeed([order()], [ledgerEntry({ actual_cost: null, estimated_cost: 10 })]);
+
+    expect(paidCell().textContent).toBe('N/A');
+  });
+
+  it('shows a real actual cost — the branch invariant', async () => {
+    await renderFeed([order()], [ledgerEntry({ actual_cost: 12, estimated_cost: 10 })]);
+
+    expect(paidCell().textContent).toBe('$12.00');
+  });
+
+  it("heads the supplier column as the item's, and fills it from the item's choice", async () => {
+    await renderFeed(
+      [order()],
+      [ledgerEntry({ item_supplier_choice: choice('Acme Filament') })]
+    );
+
+    const headers = Array.from(
+      screen.getByRole('table').querySelectorAll('thead th')
+    ).map((th) => th.textContent);
+    expect(headers).toContain('Item supplier today');
+    expect(headers).not.toContain('Supplier');
+    expect(supplierCell().textContent).toBe('Acme Filament');
   });
 });
 
 
 /**
- * The ledger table's Cost column reads `actual_cost ?? estimated_cost`, so it
- * moved when the feed started publishing `estimated_cost: 0.0` for a donated
- * order: base sent `null` for both and the cell read "N/A".
+ * The summary counts every qualifying order; the table below it is a page of
+ * one hundred. The server used to compute the summary by walking that page, so
+ * both numbers agreed and both were wrong. Now that the total is right, the
+ * table has to say which slice of it a reader is looking at.
  */
-describe('the public transparency ledger table', () => {
-  const costCell = () =>
-    screen.getByRole('table').querySelectorAll('tbody tr td')[6];
+describe('the ledger window note', () => {
+  it('says how many of how many, when the table is a page of a longer ledger', async () => {
+    await renderFeed([order()], [ledgerEntry()], {
+      total_orders_with_financial_data: 250,
+    });
 
-  it('shows a donated purchase as $0.00 rather than N/A', async () => {
-    await renderFeed([order()], [ledgerEntry()]);
-
-    expect(costCell().textContent).toBe('$0.00');
+    expect(screen.getByTestId('ledger-window')).toHaveTextContent(
+      'Showing the 1 most recent of 250.'
+    );
   });
 
-  it('still shows N/A where neither cost is known', async () => {
-    await renderFeed([order()], [ledgerEntry({ estimated_cost: null })]);
+  it('says nothing at all when the table IS the whole ledger', async () => {
+    // A truncation note where nothing was truncated is its own false claim.
+    await renderFeed([order()], [ledgerEntry()], {
+      total_orders_with_financial_data: 1,
+    });
 
-    expect(costCell().textContent).toBe('N/A');
-  });
-
-  it('still prefers a real actual cost — the branch invariant', async () => {
-    await renderFeed([order()], [ledgerEntry({ actual_cost: 12, estimated_cost: 10 })]);
-
-    expect(costCell().textContent).toBe('$12.00');
-  });
-
-  it('shows a comped purchase as $0.00, not as its estimate', async () => {
-    // `??`, never `||`: a recorded actual cost of 0 is what the purchase
-    // ACTUALLY cost, and falling through to the estimate would publish a
-    // number nobody paid (op-9m2v).
-    await renderFeed([order()], [ledgerEntry({ actual_cost: 0, estimated_cost: 10 })]);
-
-    expect(costCell().textContent).toBe('$0.00');
+    expect(screen.queryByTestId('ledger-window')).not.toBeInTheDocument();
   });
 });

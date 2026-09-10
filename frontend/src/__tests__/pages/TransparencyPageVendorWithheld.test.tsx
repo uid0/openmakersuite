@@ -10,8 +10,8 @@
  * Two failure modes this pins, both of which are the page saying something
  * FALSE about an order rather than something true about the reader:
  *
- *  - `entry.supplier_name || 'N/A'` renders "N/A" in the Supplier column of
- *    every row, which reads as "no supplier on file";
+ *  - `supplierChoiceSummary(entry.item_supplier_choice) || 'N/A'` renders "N/A"
+ *    in the supplier column of every row, which reads as "no supplier on file";
  *  - `formatCurrency` guarded on `=== null` only, so the withheld cost reached
  *    `Intl.NumberFormat().format(undefined)` and rendered "$NaN".
  */
@@ -74,8 +74,16 @@ const withheldPayload = {
 
 /** The same feed as a caller WITH a session gets it: no marker, vendor block intact. */
 const SIGNED_IN_NOTE =
-  'Dallas Makerspace operates with full financial transparency. All purchase ' +
-  'information is publicly available.';
+  'Dallas Makerspace publishes what it spends. You are signed in, so supplier ' +
+  'names and per-order costs are shown here as well; they are withheld from ' +
+  'readers who are not.';
+
+const itemSupplierChoice = {
+  item_supplier_id: 9,
+  supplier_name: 'Belt Vendor Co.',
+  reason: null,
+  alternatives: [],
+};
 
 const signedInPayload = {
   summary: {
@@ -84,10 +92,18 @@ const signedInPayload = {
     vendor_data_withheld: undefined,
   },
   orders: [
-    { ...withheldPayload.orders[0], supplier_name: 'Belt Vendor Co.', actual_cost: 200.0 },
+    {
+      ...withheldPayload.orders[0],
+      item_supplier_choice: itemSupplierChoice,
+      actual_cost: 200.0,
+    },
   ],
   ledger: [
-    { ...withheldPayload.ledger[0], supplier_name: 'Belt Vendor Co.', actual_cost: 200.0 },
+    {
+      ...withheldPayload.ledger[0],
+      item_supplier_choice: itemSupplierChoice,
+      actual_cost: 200.0,
+    },
   ],
   purchase_orders: [],
 };
@@ -127,19 +143,21 @@ describe('TransparencyPage — vendor data withheld', () => {
     expect(container.textContent).not.toContain('NaN');
   });
 
-  it('drops the Supplier and Cost columns instead of filling them with "N/A"', async () => {
+  it('drops the supplier and paid columns instead of filling them with "N/A"', async () => {
     renderPage();
 
     await waitFor(() => {
       expect(screen.getAllByText('Laser Cutter Belt').length).toBeGreaterThan(0);
     });
-    expect(screen.queryByRole('columnheader', { name: 'Supplier' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('columnheader', { name: 'Cost' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('columnheader', { name: 'Item supplier today' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Paid' })).not.toBeInTheDocument();
     // ...and says so once, above the table, rather than down a column.
     expect(screen.getByTestId('ledger-vendor-withheld')).toBeInTheDocument();
   });
 
-  it('CONTROL: gives a signed-in reader the Supplier and Cost columns back', async () => {
+  it('CONTROL: gives a signed-in reader the supplier and paid columns back', async () => {
     (analyticsAPI.getTransparencyLedger as jest.Mock).mockResolvedValue({
       data: signedInPayload,
     });
@@ -148,8 +166,11 @@ describe('TransparencyPage — vendor data withheld', () => {
     await waitFor(() => {
       expect(screen.getAllByText('Laser Cutter Belt').length).toBeGreaterThan(0);
     });
-    expect(screen.getByRole('columnheader', { name: 'Supplier' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Cost' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('columnheader', { name: 'Item supplier today' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Paid' })).toBeInTheDocument();
+    expect(screen.getAllByText('Belt Vendor Co.').length).toBeGreaterThan(0);
     expect(screen.queryByTestId('ledger-vendor-withheld')).not.toBeInTheDocument();
   });
 
@@ -192,7 +213,7 @@ describe('TransparencyPage — vendor data withheld', () => {
       );
     });
 
-    it('CONTROL: a signed-in reader of the same empty feed keeps the original claim', async () => {
+    it('CONTROL: a signed-in reader of the same empty feed is told who is not shown it', async () => {
       (analyticsAPI.getTransparencyLedger as jest.Mock).mockResolvedValue({
         data: {
           ...emptyWithheldPayload,
@@ -210,7 +231,13 @@ describe('TransparencyPage — vendor data withheld', () => {
           screen.getByText(/No logistics purchases with transparency data/i),
         ).toBeInTheDocument();
       });
-      expect(container.textContent).toContain('All financial information is made available');
+      // NOT "All financial information is made available": that sentence was
+      // false for every reader once the vendor block went behind a login, and
+      // the branch above proves it by withholding from the same feed.
+      expect(container.textContent).not.toContain('All financial information is made available');
+      expect(container.textContent).toContain(
+        'they are withheld from readers who are not',
+      );
     });
   });
 });

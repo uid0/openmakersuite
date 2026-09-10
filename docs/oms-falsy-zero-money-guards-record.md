@@ -89,19 +89,16 @@ complete, and it was twice not:
   zero. `no_baseline` is deliberately NOT `no_data`, which means a snapshot
   records no price at all: three facts, three labels, and `direction` is the
   one thing two known prices still establish when the percentage cannot.
-- Public transparency feed (`GET /api/reorders/analytics/transparency/`, no
-  auth) — `estimated_cost` on both the `orders` and the `ledger` block:
-  `null` -> `0.0` for a donated item, so the community feed no longer says "we
-  do not know what this cost" about a cost that is known to be nothing. And
-  `cost_variance`: `null` -> the real difference when the ESTIMATE is a known
-  `0.00`, which is the one number that says the estimate was wrong.
-  `cost_variance` is gated on the same predicate `actual_cost` is, so where the
-  ACTUAL cost is a recorded `0.00` it stays `null` exactly as base had it: that
-  column is a ratified exclusion (AGENTS.md), and a variance published beside an
-  `actual_cost: null` would be a number that can only be true if the actual
-  cost were known. The exclusion boundary must not run through one arithmetic
-  expression. The `ledger` block needs no such pairing — it carries no derived
-  figure, only the two independent fields.
+- Transparency feed (`GET /api/reorders/analytics/transparency/`).
+  **Superseded, op-transparency-substituted-supplier:** `estimated_cost` became
+  `item_estimated_cost_today` on the `orders` block only, because it is today's
+  item quote rather than an order estimate. `cost_variance` was removed because
+  no recorded estimate exists to compare. The exclusions this record left open
+  — `ReorderRequest.actual_cost` / `cost_per_unit` and
+  `PurchaseOrder.actual_total` — are closed, so a recorded zero now remains
+  `0.0` rather than becoming `null`. These per-row fields are visible only to a
+  signed-in reader; the public contract is owned by
+  [`API_PERMISSION_MATRIX.md`](API_PERMISSION_MATRIX.md).
 - Public transparency feed, `purchase_orders` block — `estimated_total`:
   `null` -> `0.0` for an order whose every line is donated. That column is
   NON-nullable with `default=Decimal("0.00")`, so `null` was never a true

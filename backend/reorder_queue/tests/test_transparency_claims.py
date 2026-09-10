@@ -21,12 +21,11 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.urls import reverse
 from django.utils import timezone
 
 import pytest
-
-from django.contrib.auth import get_user_model
 
 from inventory.models import ItemSupplier
 from inventory.tests.factories import InventoryItemFactory, SupplierFactory

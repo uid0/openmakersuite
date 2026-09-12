@@ -1285,20 +1285,16 @@ quoted at that line's cost on a scan-to-add, and `add_line_item` wrote it. The
 rule is stated on the queryset rather than per field so the next derived value
 inherits it instead of choosing again.
 
-**The guard is `reorder_queue/tests/test_voided_line_counting.py`**, and it has
-two halves for the two ways this goes wrong. Parametrized equality tests assert
-the CLASS — a voided line changes no derived value, and an item whose only line
-is voided reads exactly like one never bought — over a registry every derivation
-joins, because a test per field pins the field that was fixed and says nothing
-about the one added beside it. A source scan then catches a derivation nobody
-added to that registry: any query filtering or grouping `PurchaseOrderItem` by
-its item must pass through the rule, with exemptions named and reasoned in
-`_COUNTS_VOIDED_ON_PURPOSE`. Its limits are in its docstring; it sees keyword
-filters on a chain rooted at `PurchaseOrderItem.objects` and nothing else.
+**The guard is `reorder_queue/tests/test_voided_line_counting.py`**. Its
+parametrized behavioral registry asserts the CLASS — a voided line changes no
+derived value, and an item whose only line is voided reads exactly like one never
+bought. A new purchase-history derivation joins `DERIVATIONS` with the callable
+that reads its observable value, so both scenarios exercise it alongside the
+existing price, trend, quantity and cadence derivations.
 
 **Showing a voided line is a different question from counting it**, and it is
-open: `purchase_history` is the one exemption in that scan, because what an
-item's history should DISPLAY for a struck-off line is
+open: the behavioral test records that `purchase_history` currently displays the
+line, but what an item's history should DISPLAY for a struck-off line is
 `oms-voided-line-in-purchase-history`, not this rule.
 
 ### Which stock-changing actions owe an audit row (op-scan-audit)

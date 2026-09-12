@@ -22,14 +22,14 @@ echo ""
 
 # Check database container
 echo "3. Checking database..."
-if docker compose -f docker-compose.prod.yml exec -T db pg_isready -U makerspace 2>/dev/null; then
+if docker compose -f docker-compose.prod.yml exec -T db sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>/dev/null; then
     echo "✅ Database is accepting connections"
 
     # Try to connect with the password from .env
     export $(cat .env | grep -v '^#' | grep POSTGRES_PASSWORD | xargs)
     if [ -n "$POSTGRES_PASSWORD" ]; then
         echo "   Testing with POSTGRES_PASSWORD from .env..."
-        if PGPASSWORD=$POSTGRES_PASSWORD docker compose -f docker-compose.prod.yml exec -T db psql -U makerspace -d makerspace_inventory -c "SELECT 1" >/dev/null 2>&1; then
+        if docker compose -f docker-compose.prod.yml exec -T db sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT 1"' >/dev/null 2>&1; then
             echo "   ✅ Password from .env works!"
         else
             echo "   ❌ Password from .env does NOT work"

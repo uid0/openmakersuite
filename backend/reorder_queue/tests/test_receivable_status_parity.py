@@ -153,4 +153,3 @@ class TestGatesFollowTheConstant:
             f"quantity_on_order counted {on_order} units on a {status_value} order, "
             f"expected {expected} from RECEIVABLE_STATUSES"
         )
-

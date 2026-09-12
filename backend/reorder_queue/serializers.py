@@ -976,13 +976,7 @@ class BarcodeReceiptSerializer(serializers.Serializer):
         """Validate that the purchase order exists and is in the correct state."""
         try:
             po = PurchaseOrder.objects.get(id=value)
-            # ``RECEIVABLE_STATUSES`` is the ONE definition of which orders can
-            # accept a delivery, and the scan path gates on it rather than on a
-            # second spelling of the same three statuses. A copy here that fell
-            # behind the constant would refuse a scan against an order the rest
-            # of the system considers open, with nothing reporting the
-            # contradiction — the operator at the scanner would be the only one
-            # to find out.
+            # Keep the scan gate aligned with every other receiving path.
             if po.status not in PurchaseOrder.RECEIVABLE_STATUSES:
                 raise serializers.ValidationError(
                     "Purchase order must be sent, confirmed, or partially received to accept deliveries"

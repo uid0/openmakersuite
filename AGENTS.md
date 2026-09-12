@@ -1094,24 +1094,6 @@ moment nobody recorded cannot be reconstructed, and a pre-send line delete
 leaves no reason, no ghost and no audit row, so what a line-less order was for
 is gone too.
 
-### The receivable set: which orders can take a delivery
-
-`PurchaseOrder.RECEIVABLE_STATUSES` is the ONE definition. Every gate reads it —
-the `receive` / `mark-delivered` / `close-short` / `mark-received` actions, the
-barcode scan path (`BarcodeReceiptSerializer`), the `pending_orders` worksheet,
-and `item_metrics.ON_ORDER_STATUSES` (QOO is the same fact: units committed on
-an order still in flight). The API serves the answer as `can_receive` so no
-client derives it. Never spell the statuses out — a copy that falls behind the
-constant refuses a scan against an order the rest of the system considers open,
-and the operator at the scanner is the only one who finds out.
-
-`reorder_queue/tests/test_receivable_status_parity.py` is what makes that fail
-the build: it drives EVERY member of `Status` through each gate and asserts the
-answer is exactly `status in RECEIVABLE_STATUSES` (so widening the constant
-fails any gate that kept its own list). One client-side copy remains:
-`canMarkDelivered` in `PurchaseOrderPage.tsx` — it should read `po.can_receive`
-like its sibling `canReceiveItems`.
-
 ### The pre-send boundary: when a PO is still the shop's own document
 
 `PurchaseOrder.PRE_SUPPLIER_STATUSES` is the ONE definition of "the supplier has

@@ -159,7 +159,13 @@ describe('WorkOrderPage — work-order timer (op-m3so)', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Start' })).toBeInTheDocument());
     expect(mockWorkOrderAPI.timer).toHaveBeenCalledWith('wo-1', 'pause');
-    expect(clock()).toHaveTextContent('02:05');
+    // One commit behind, by construction: `useTickingSeconds` mirrors the
+    // server total into local state from a useEffect, so the button flips to
+    // "Start" a render BEFORE the clock re-anchors on 125s. Reading the clock
+    // synchronously off the button's arrival is a race the test loses whenever
+    // the machine is loaded enough to split those two commits. Same assertion,
+    // retried — 02:05 is still the only value that passes.
+    await waitFor(() => expect(clock()).toHaveTextContent('02:05'));
   });
 
   it('ticks once a second while running', async () => {

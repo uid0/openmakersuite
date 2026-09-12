@@ -118,6 +118,42 @@ if (typeof document !== 'undefined' && !(document as Document & { fonts?: unknow
 }
 
 // ---------------------------------------------------------------------------
+// The OTHER flake class in this suite, which no setup file can fix for you:
+// a synchronous query racing an asynchronous render.
+//
+// `getBy*` / `queryBy*` read the DOM once, right now. `findBy*` and `waitFor`
+// retry until the element or value arrives. Reach for a synchronous query only
+// when the thing you are asserting on was committed by a render you have
+// ALREADY awaited; otherwise the assertion is a race that a loaded machine
+// loses. That is why these read as "passes alone, fails at random inside the
+// full suite, on a branch that never touched the page" — the defect is
+// load-dependent, not cross-file pollution, so do not go hunting for a shared
+// mock or an unreset store until an await fix has been tried and has failed.
+//
+// Two commit boundaries in this app are NOT obvious from the markup, and both
+// have already shipped a random CI failure:
+//
+//   * A Mantine <Modal> mounts its ROOT a frame before its BODY: the root div
+//     (where a `data-testid` on <Modal> lands) is committed by the opening
+//     <Transition>, the content one requestAnimationFrame later. Anchoring on
+//     the root and then querying inside it synchronously races. Anchor on
+//     something that only exists WITH the content — `role="dialog"` sits on
+//     Modal.Content — or just await the element you actually want.
+//     <Collapse> is the same shape: keepMounted puts the node in the document
+//     from first paint, so assert `toBeVisible`, and await it.
+//
+//   * A component that mirrors a prop into local state from a useEffect (see
+//     `useTickingSeconds` in pages/WorkOrderPage.tsx) renders the mirrored
+//     value one commit AFTER the prop lands. Its siblings update first, so
+//     settling on a sibling and then reading the mirrored value synchronously
+//     races. Wrap that read in `waitFor`.
+//
+// Never "fix" one of these by dropping the assertion, sleeping a fixed amount,
+// or running the file on its own in CI. Those hide a live defect and leave the
+// next person a red check they cannot trust.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // Cancel leaked timers after every test (Mantine transition + @mantine/
 // notifications auto-close timers).
 //

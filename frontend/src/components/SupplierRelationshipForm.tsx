@@ -16,6 +16,7 @@ import { ActionIcon, Button, Group, Select, Stack, Text, TextInput } from '@mant
 import { IconPlus, IconTrash } from '@tabler/icons-react';
 import React from 'react';
 import { Supplier } from '../types';
+import { LEAD_TIME_DEFAULT_NOTE, LEAD_TIME_NOT_RECORDED } from '../utils/leadTime';
 
 export interface SupplierRelationship {
   id?: number; // For existing relationships
@@ -25,7 +26,13 @@ export interface SupplierRelationship {
   unit_cost: string | null;
   package_cost: string | null;
   quantity_per_package: number;
-  average_lead_time: number;
+  /**
+   * `null` where the operator has recorded nothing — the box is empty and the
+   * row sends no key, so the model's own default applies. A number is this
+   * supplier's quote, and `0` is a real one (same-day counter pickup), never a
+   * placeholder. See `utils/leadTime.ts`.
+   */
+  average_lead_time: number | null;
   is_primary: boolean;
 }
 
@@ -57,7 +64,12 @@ export const SupplierRelationshipForm: React.FC<SupplierRelationshipFormProps> =
         unit_cost: null,
         package_cost: null,
         quantity_per_package: 1,
-        average_lead_time: 0,
+        // A new row records NO lead time. Seeding `0` made an operator who
+        // added a supplier and never touched the box assert same-day delivery
+        // — a figure nobody supplied, feeding planning and reorder scoring —
+        // while every other create path omits the key and takes the model's
+        // default of 7.
+        average_lead_time: null,
         is_primary: relationships.length === 0, // First one is primary by default
       },
     ]);
@@ -207,11 +219,20 @@ export const SupplierRelationshipForm: React.FC<SupplierRelationshipFormProps> =
                 />
                 <TextInput
                   label="Average Lead Time (days)"
+                  description={LEAD_TIME_DEFAULT_NOTE}
                   type="number"
-                  value={rel.average_lead_time}
+                  min={0}
+                  placeholder={LEAD_TIME_NOT_RECORDED}
+                  // An empty box is an absence, not a zero: `Number('')` is 0
+                  // and `|| 0` made both of them same-day pickup. A typed `0`
+                  // is kept, because that is a vendor you can collect from.
+                  value={rel.average_lead_time ?? ''}
                   onChange={(e) =>
                     updateRelationship(index, {
-                      average_lead_time: Number(e.target.value) || 0,
+                      average_lead_time:
+                        e.target.value.trim() === '' || Number.isNaN(Number(e.target.value))
+                          ? null
+                          : Number(e.target.value),
                     })
                   }
                   disabled={disabled}

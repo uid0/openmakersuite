@@ -1466,6 +1466,23 @@ class ItemSupplier(models.Model):
         blank=True,
         help_text="Total cost for one package from this supplier (what you actually pay)",
     )
+    # NOT NULL with a default, so every link carries a number and "nobody
+    # recorded one" has no representation here. Two consequences worth knowing
+    # before you read this column anywhere:
+    #
+    # * ``0`` is a RECORDED answer — a counter-pickup vendor — never a
+    #   placeholder. Guarding it with truthiness grades the fastest possible
+    #   supplier as the slowest; see ``supplier_selection._lead_time_factor``.
+    # * this ``7`` is the system's planning default and the ONE definition of
+    #   it. Write paths take it by OMITTING the key rather than restating the
+    #   number (``KitSupplierTermsSerializer``,
+    #   ``InventoryItemViewSet._process_lead_time_value``, and the web's
+    #   relationship editor through ``utils/supplierRelationships.ts``). The
+    #   editor's help text quotes "7 days" as prose for the operator — change
+    #   this default and `frontend/src/utils/leadTime.ts` has to say so too.
+    #
+    # That a stored 7 cannot be told from a quoted 7 is a schema-level absence
+    # and is deliberately still open (``oms-lead-time-nullable``).
     average_lead_time = models.PositiveIntegerField(
         default=7, help_text="Average lead time in days from this supplier"
     )

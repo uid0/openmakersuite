@@ -565,7 +565,13 @@ export interface ItemSupplierWritePayload {
   unit_cost: string | null;
   package_cost: string | null;
   quantity_per_package: number;
-  average_lead_time: number;
+  /**
+   * Omitted where the editor has no figure, so a create takes the model's own
+   * default and an update leaves the stored value alone. Sending a number here
+   * asserts it as the supplier's quote — including `0`, which is same-day
+   * pickup rather than a neutral placeholder.
+   */
+  average_lead_time?: number;
   is_primary: boolean;
 }
 
@@ -1942,7 +1948,12 @@ export interface ReorderDataItem {
   unit_cost_detail?: string | null;
   package_cost: string | null;
   quantity_per_package: number;
-  lead_time_days: number;
+  /**
+   * The chosen supplier's own quoted wait. `0` is a recorded answer — same-day
+   * counter pickup — and `null` is an absence, not a seven. `utils/leadTime.ts`
+   * owns the reading; never guard this with truthiness.
+   */
+  lead_time_days: number | null;
   supplier_sku: string;
   supplier_url: string;
   is_primary: boolean;

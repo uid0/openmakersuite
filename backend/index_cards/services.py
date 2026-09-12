@@ -850,11 +850,17 @@ class IndexCardRenderer:
         if not self.include_vendor_data:
             return info_lines
 
-        if item.average_lead_time:
+        # ``is not None``, never truthiness: ``average_lead_time`` is NOT NULL
+        # with a default of 7, so a ``0`` is a RECORDED answer — a vendor you
+        # collect from the same day — and the falsy guard this replaces dropped
+        # the line entirely, printing a card that looked as though nobody had
+        # quoted a wait at all. ``None`` here means no orderable link, which IS
+        # an absence and still prints nothing.
+        if item.average_lead_time is not None:
             info_lines.append(f"Avg Lead: {self._pluralize(item.average_lead_time, 'day')}")
 
         longest_lead_time = self._get_longest_lead_time(item)
-        if longest_lead_time and longest_lead_time != item.average_lead_time:
+        if longest_lead_time is not None and longest_lead_time != item.average_lead_time:
             info_lines.append(f"Max Lead: {self._pluralize(longest_lead_time, 'day')}")
 
         return info_lines
@@ -876,7 +882,7 @@ class IndexCardRenderer:
         lead_times = [
             link.average_lead_time
             for link in item.item_suppliers.all()
-            if link.average_lead_time and link.is_active and not link.is_discontinued
+            if link.average_lead_time is not None and link.is_active and not link.is_discontinued
         ]
 
         return max(lead_times) if lead_times else None

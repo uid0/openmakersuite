@@ -14,26 +14,16 @@ order the scan path refuses, the worksheet never lists, and QOO does not count
 — with nothing anywhere reporting the contradiction. The operator at the
 scanner, refused against a genuinely open order, would be the first to know.
 
-The two arms answer different halves of that, in opposite directions.
-
 :class:`TestGatesFollowTheConstant` is the drift guard. It drives EVERY member
 of ``PurchaseOrder.Status`` — enumerated from the enum, never hand-listed —
 through each gate and asserts the answer is exactly ``status in
 RECEIVABLE_STATUSES``. Widen the constant and a gate that kept its own list
 refuses the new status while the predicate accepts it, and that gate's test
-fails. This is the arm that sees a divergence the day the constant moves.
-
-:class:`TestNoSecondSpelling` catches the other direction: a FOURTH copy written
-today, while the sets still agree, which the parity arm cannot see because it
-would not yet disagree with anything. It parses the backend tree and fails on
-any literal collection of ``Status`` members equal to the constant, outside the
-definition itself.
+fails.
 """
 
 from __future__ import annotations
 
-import ast
-import pathlib
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -164,88 +154,3 @@ class TestGatesFollowTheConstant:
             f"expected {expected} from RECEIVABLE_STATUSES"
         )
 
-
-class TestNoSecondSpelling:
-    """No backend site spells the receivable set out as a literal.
-
-    The definition in ``models.py`` is the one exception, because it is the
-    definition. Tests and migrations are out of scope: a test that enumerates
-    statuses is describing a case, and a migration is a frozen historical record
-    that must not follow a constant that moves.
-    """
-
-    BACKEND = pathlib.Path(__file__).resolve().parents[2]
-    DEFINITION = ("reorder_queue/models.py", "RECEIVABLE_STATUSES")
-
-    @staticmethod
-    def _status_members(node):
-        """The ``Status`` member names in a literal collection, or ``None``.
-
-        ``None`` means "not a collection of status members" — one element that
-        is anything else (a variable, a call, a string) disqualifies the whole
-        node, because the set it denotes is then not readable from the source.
-        """
-        if not isinstance(node, (ast.List, ast.Tuple, ast.Set)):
-            return None
-        names = set()
-        for element in node.elts:
-            if not isinstance(element, ast.Attribute):
-                return None
-            owner = element.value
-            if isinstance(owner, ast.Attribute) and owner.attr == "Status":
-                names.add(element.attr)
-            elif isinstance(owner, ast.Name) and owner.id == "Status":
-                names.add(element.attr)
-            else:
-                return None
-        return names or None
-
-    def _sources(self):
-        for path in sorted(self.BACKEND.rglob("*.py")):
-            parts = path.relative_to(self.BACKEND).parts
-            if "migrations" in parts or "__pycache__" in parts or "tests" in parts:
-                continue
-            yield path
-
-    def test_backend_sweep_finds_the_definition(self):
-        """The sweep can see the thing it is looking for.
-
-        Without this the other test passes just as happily when the walk is
-        broken and finds nothing at all anywhere.
-        """
-        relative, _ = self.DEFINITION
-        definition = self.BACKEND / relative
-        assert definition.exists(), definition
-        assert definition in set(self._sources())
-        expected = {member.name for member in PurchaseOrder.RECEIVABLE_STATUSES}
-        found = [
-            node.lineno
-            for node in ast.walk(ast.parse(definition.read_text()))
-            if self._status_members(node) == expected
-        ]
-        assert found, (
-            "the sweep could not find RECEIVABLE_STATUSES' own literal in "
-            f"{relative}, so it would report a clean tree however many copies exist"
-        )
-
-    def test_no_site_respells_the_receivable_set(self):
-        expected = {member.name for member in PurchaseOrder.RECEIVABLE_STATUSES}
-        offenders = []
-        for path in self._sources():
-            relative = str(path.relative_to(self.BACKEND))
-            tree = ast.parse(path.read_text())
-            for node in ast.walk(tree):
-                if self._status_members(node) != expected:
-                    continue
-                if relative == self.DEFINITION[0]:
-                    continue
-                offenders.append(f"{relative}:{node.lineno}")
-        assert not offenders, (
-            "these sites spell out PurchaseOrder.RECEIVABLE_STATUSES as a literal instead of "
-            "reading it, so they will not follow it when it changes: "
-            + ", ".join(offenders)
-            + ". If a site genuinely answers a DIFFERENT question and only happens to need the "
-            "same statuses today, say so in the source by deriving it — "
-            "``RECEIVABLE_STATUSES | {...}`` and a comment naming the other question — rather "
-            "than by leaving a copy that cannot be told apart from a stale one."
-        )

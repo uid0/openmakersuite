@@ -1106,14 +1106,11 @@ constant refuses a scan against an order the rest of the system considers open,
 and the operator at the scanner is the only one who finds out.
 
 `reorder_queue/tests/test_receivable_status_parity.py` is what makes that fail
-the build, in two directions: it drives EVERY member of `Status` through each
-gate and asserts the answer is exactly `status in RECEIVABLE_STATUSES` (so
-widening the constant fails any gate that kept its own list), and it parses the
-backend tree for a literal collection of `Status` members equal to the constant
-(so a fresh copy fails the day it is written, before it can drift). One
-client-side copy remains, outside the guard's reach: `canMarkDelivered` in
-`PurchaseOrderPage.tsx` — it should read `po.can_receive` like its sibling
-`canReceiveItems`.
+the build: it drives EVERY member of `Status` through each gate and asserts the
+answer is exactly `status in RECEIVABLE_STATUSES` (so widening the constant
+fails any gate that kept its own list). One client-side copy remains:
+`canMarkDelivered` in `PurchaseOrderPage.tsx` — it should read `po.can_receive`
+like its sibling `canReceiveItems`.
 
 ### The pre-send boundary: when a PO is still the shop's own document
 

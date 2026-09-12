@@ -176,7 +176,8 @@ def create_purchase_order(validated_data, items_data, user):
     # Create line items. Coalesced so an order with twenty lines asks its status
     # question once rather than once per line — each line is created on its own
     # and each creation is a settlement write. ``settlement_batch`` opens no
-    # transaction, so this loop stays as (non-)atomic as it has always been.
+    # transaction of its own; this function's ``transaction.atomic`` owns the
+    # unit of work, so coalescing does not change its atomicity.
     total_cost = Decimal("0.00")
     with settlement_batch():
         for idx, item_data in enumerate(items_data):

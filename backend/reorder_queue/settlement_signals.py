@@ -362,6 +362,10 @@ def settlement_batch():
     atomicity keep saying so; the flush then runs inside whatever transaction
     they opened, and a rollback takes the re-derivation with it.
 
+    An exceptional exit drops the queued re-derivations. Every caller is
+    atomic, so the writes that queued them roll back too; a future non-atomic
+    caller would have to account for that boundary explicitly.
+
     The flush runs before the block returns, never on
     ``transaction.on_commit``: endpoints serialize the order's status into the
     response they return after receiving, and ScanTTY reads it.

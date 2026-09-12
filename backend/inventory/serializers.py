@@ -485,11 +485,7 @@ class SupplierDetailSerializer(SupplierSerializer):
 
             from django.utils import timezone
 
-            from inventory.services.pricing import (
-                package_price_of,
-                price_float,
-                unit_price_of,
-            )
+            from inventory.services.pricing import package_price_of, price_float, unit_price_of
 
             # Get price history for items from this supplier
             price_history = PriceHistory.objects.filter(item_supplier__supplier=obj).order_by(

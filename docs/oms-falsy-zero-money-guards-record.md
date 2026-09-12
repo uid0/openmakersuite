@@ -289,10 +289,11 @@ were filed from this branch, each verified against base `7c078de`. They were
 taken whole by `oms-supplier-cost-write-path`, which fixed the derivation itself
 rather than the callers: the fabricated pack size, the overwritten unit cost, the
 `package_cost` dropped from `update_fields`, the kit form's fabricated `'0'` and
-the partial-write echo are all closed and pinned there. Of the six, only the
+the partial-write echo are all closed and pinned there. The last of the six, the
 unvalidated `DictField` (a non-numeric `supplier` id, a malformed
 `average_lead_time` or a cost overflowing `max_digits` returning 500 rather than
-400) is still open. What remains open on this path is now owned by
+400), was subsequently closed by `op-kit-terms`. What remains open on this path
+is owned by
 [`oms-supplier-cost-write-path-record.md`](oms-supplier-cost-write-path-record.md)
 under "Still open, filed not fixed". **Do not work the list from this section** —
 it described what was true at the time of the withdrawal.

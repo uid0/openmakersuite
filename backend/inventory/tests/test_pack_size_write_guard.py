@@ -77,11 +77,7 @@ from inventory.admin import ItemSupplierAdmin
 from inventory.models import InventoryItem, ItemSupplier
 from inventory.serializers import UNSUPPORTED_TERM
 from inventory.services.pack_size import PACK_SIZE_RECORDED_ZERO, pack_size_of
-from inventory.tests.factories import (
-    InventoryItemFactory,
-    ItemSupplierFactory,
-    SupplierFactory,
-)
+from inventory.tests.factories import InventoryItemFactory, ItemSupplierFactory, SupplierFactory
 
 pytestmark = pytest.mark.django_db
 

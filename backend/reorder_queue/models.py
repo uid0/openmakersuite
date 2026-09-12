@@ -821,6 +821,39 @@ class PurchaseOrderItemQuerySet(models.QuerySet):
         """Lines receiving is finished with — the queryset twin of ``is_settled``."""
         return self.filter(self.model.q_settled())
 
+    def standing(self):
+        """Lines that still stand — the ONE rule for what a derived value may count.
+
+        **A struck-off line is not evidence.** Voiding a line says the shop is
+        not buying that, so nothing derived from purchase history — a price, a
+        trend, a quantity, a cadence — may count it. Every derived value asks
+        the question the same way, through here, and gets the same answer about
+        the same line.
+
+        That consistency is the point, because it was absent. The quantity side
+        of ``inventory.services.item_metrics`` had excluded voided lines from
+        the start; the money side beside it (``last_po_unit_cost``,
+        ``cost_trend``) and ``reorder_queue.services.line_entry`` 's
+        ``default_unit_cost`` each read the whole history. One response
+        therefore treated the same struck-off line as real and as not-real at
+        once, and ``default_unit_cost`` is a price that flows onward: an item
+        whose newest line was voided quoted that line's cost as the figure to
+        order at. The rule is stated here rather than per field so the next
+        derived value inherits it instead of choosing again.
+
+        Distinct from :meth:`settled` / :meth:`outstanding`, which ask whether
+        RECEIVING is finished with a line. A line received in full is settled
+        and still stands — it is exactly the purchase these values want to
+        count. ``outstanding()`` already excludes voided lines as a consequence
+        of ``q_settled``, so a site asking the settlement question does not
+        need this one as well.
+
+        A plain ``Q`` for the same reason ``outstanding()`` is: it adds no
+        column, so it survives ``.values(...).annotate(...)`` without joining
+        the GROUP BY and splitting the per-item totals it is filtering.
+        """
+        return self.filter(is_voided=False)
+
     def outstanding(self):
         """Lines receiving is still waiting on — the queryset twin of ``outstanding_of``.
 
@@ -1305,6 +1338,17 @@ class PurchaseOrderItem(TypedTargetModel):
     def has_receipt_variance(self) -> bool:
         """Whether this line's settled record differs from what was ordered."""
         return self.receipt_state in self.VARIANCE_RECEIPT_STATES
+
+    @property
+    def stands(self) -> bool:
+        """Whether this line counts as a purchase that happened.
+
+        In-memory twin of :meth:`PurchaseOrderItemQuerySet.standing`, which
+        carries the rule and the reasoning. Here so a site holding loaded rows
+        asks the same question by the same name as a site holding a query,
+        rather than spelling ``not line.is_voided`` for itself and drifting.
+        """
+        return not self.is_voided
 
     # -- the same three answers, for code that has a query rather than a line --
     #

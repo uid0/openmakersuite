@@ -215,16 +215,19 @@ def compute_item_metrics_batch(items):
 
     item_ids = [item.id for item in items]
 
-    # QOO — units on open (non-voided) PO lines, grouped by item. The trailing
-    # ``order_by()`` clears ``PurchaseOrderItem``'s Meta ordering, which would
-    # otherwise leak into GROUP BY and split an item's total across its POs.
-    # (1 query)
+    # QOO — units on open PO lines, grouped by item. "Does this line count?" is
+    # asked through ``standing()`` — the ONE rule (see the queryset method) —
+    # rather than by spelling ``is_voided=False`` here, so this metric and the
+    # cost ones below cannot come to disagree about the same line again. The
+    # trailing ``order_by()`` clears ``PurchaseOrderItem``'s Meta ordering, which
+    # would otherwise leak into GROUP BY and split an item's total across its
+    # POs. (1 query)
     quantity_on_order = {
         row["item_supplier__item"]: row["total"] or 0
         for row in (
-            PurchaseOrderItem.objects.filter(
+            PurchaseOrderItem.objects.standing()
+            .filter(
                 item_supplier__item_id__in=item_ids,
-                is_voided=False,
                 purchase_order__status__in=ON_ORDER_STATUSES,
             )
             .values("item_supplier__item")
@@ -265,9 +268,17 @@ def compute_item_metrics_batch(items):
 
     # Most-recent PO unit cost per item (drives cost_trend / last_po_unit_cost).
     # Rows arrive newest-first within each item; keep the first one seen. (1 query)
+    #
+    # ``standing()`` for the same reason the quantities above exclude voided
+    # lines, and it used to be missing here: this endpoint priced an item from a
+    # line the shop had struck off while the quantity metrics beside it, in this
+    # same payload, refused to count that line at all. "Most recent" now means
+    # the most recent purchase that STANDS, so ``last_po_unit_cost`` is a figure
+    # someone agreed to pay and ``cost_trend`` compares against one.
     last_po_unit_cost = {}
     for row in (
-        PurchaseOrderItem.objects.filter(item_supplier__item_id__in=item_ids)
+        PurchaseOrderItem.objects.standing()
+        .filter(item_supplier__item_id__in=item_ids)
         .order_by("item_supplier__item", "-created_at")
         .values("item_supplier__item", "unit_cost_ordered")
     ):

@@ -238,31 +238,6 @@ class TestDimensionalAdminInterface(TestCase):
         result = self.admin.package_dimensions_display(None)
         self.assertEqual(result, "—")
 
-    def test_admin_lead_time_change_records_provenance(self):
-        self.item_supplier.average_lead_time_provenance = "unknown"
-        self.item_supplier.save(update_fields=["average_lead_time_provenance"])
-        form_class = self.admin.get_form(None)
-        form = form_class(
-            instance=self.item_supplier,
-            data={
-                "item": str(self.item.pk),
-                "supplier": str(self.supplier.pk),
-                "supplier_sku": self.item_supplier.supplier_sku,
-                "supplier_url": self.item_supplier.supplier_url,
-                "quantity_per_package": str(self.item_supplier.quantity_per_package),
-                "package_cost": self.item_supplier.package_cost,
-                "average_lead_time": "10",
-                "is_active": "on",
-            },
-        )
-
-        self.assertTrue(form.is_valid(), form.errors)
-        form.save()
-        self.item_supplier.refresh_from_db()
-        self.assertEqual(self.item_supplier.average_lead_time, 10)
-        self.assertEqual(self.item_supplier.average_lead_time_provenance, "recorded")
-        self.assertNotIn("average_lead_time_provenance", form.fields)
-
     def test_admin_package_volume_display(self):
         """Test admin method for displaying package volume."""
         result = self.admin.package_volume_display(self.item_supplier)

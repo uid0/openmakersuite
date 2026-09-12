@@ -2642,21 +2642,6 @@ class TestReorderDataExcludesRetired:
         # Only the active item counts toward the active-request tally.
         assert response.data["items_with_requests"] == 1
 
-    def test_assets_only_supplier_has_no_average_lead_time(self, authenticated_client):
-        from inventory.tests.factories import AssetFactory
-
-        client, _ = authenticated_client
-        supplier = SupplierFactory()
-        AssetFactory(manufacturer=supplier)
-
-        response = client.get(self.URL)
-
-        assert response.status_code == status.HTTP_200_OK
-        group = next(row for row in response.data["suppliers"] if row["id"] == supplier.id)
-        assert group["items"] == []
-        assert group["avg_lead_time"] is None
-        assert group["avg_lead_time_provenance"] is None
-
 
 @pytest.mark.integration
 class TestReorderQuantityIsModeAware:

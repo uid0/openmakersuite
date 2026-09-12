@@ -131,7 +131,6 @@ class LeadTime:
 
     days: Optional[float]
     basis: str
-    provenance: Optional[str]
 
     @property
     def known(self) -> bool:
@@ -140,7 +139,7 @@ class LeadTime:
 
 
 #: The answer for an item :func:`lead_times_for` was never asked about.
-_NO_LEAD_TIME = LeadTime(days=None, basis=LEAD_TIME_UNKNOWN, provenance=None)
+_NO_LEAD_TIME = LeadTime(days=None, basis=LEAD_TIME_UNKNOWN)
 
 
 def lead_times_for(items: list[InventoryItem]) -> dict[Any, LeadTime]:
@@ -241,9 +240,9 @@ def lead_times_for(items: list[InventoryItem]) -> dict[Any, LeadTime]:
         for row in (
             ItemSupplier.objects.filter(item_id__in=unorderable_item_ids)
             .order_by("item_id", "-is_primary")
-            .values("item_id", "average_lead_time", "average_lead_time_provenance")
+            .values("item_id", "average_lead_time")
         ):
-            estimated_unorderable.setdefault(row["item_id"], row)
+            estimated_unorderable.setdefault(row["item_id"], row["average_lead_time"])
 
     resolved: dict[Any, LeadTime] = {}
     for item in items:
@@ -252,12 +251,9 @@ def lead_times_for(items: list[InventoryItem]) -> dict[Any, LeadTime]:
         if link is not None:
             basis = LEAD_TIME_FROM_ORDERABLE
             estimate = link.average_lead_time
-            provenance = link.average_lead_time_provenance
         elif choice is not None and choice.reason == NONE_ORDERABLE:
             basis = LEAD_TIME_FROM_UNORDERABLE
-            fallback = estimated_unorderable.get(item.id)
-            estimate = fallback["average_lead_time"] if fallback else None
-            provenance = fallback["average_lead_time_provenance"] if fallback else None
+            estimate = estimated_unorderable.get(item.id)
         else:
             resolved[item.id] = _NO_LEAD_TIME
             continue
@@ -265,7 +261,6 @@ def lead_times_for(items: list[InventoryItem]) -> dict[Any, LeadTime]:
         observed_mean = observed.get(item.id)
         if observed_mean is not None:
             days: Optional[float] = float(observed_mean)
-            provenance = ItemSupplier.LeadTimeProvenance.RECORDED
         elif estimate is not None:
             days = float(estimate)
         else:
@@ -275,7 +270,7 @@ def lead_times_for(items: list[InventoryItem]) -> dict[Any, LeadTime]:
             # have a supplier and no number for it" — NOT the ``no_supplier``
             # basis, which is a different fact and a different operator action.
             days = None
-        resolved[item.id] = LeadTime(days=days, basis=basis, provenance=provenance)
+        resolved[item.id] = LeadTime(days=days, basis=basis)
     return resolved
 
 
@@ -464,7 +459,6 @@ def build_component_forecast(
                     projected_stockout_date.isoformat() if projected_stockout_date else None
                 ),
                 "lead_time_days": round(lead_time_days, 1) if lead_time_known else None,
-                "lead_time_provenance": lead_time.provenance,
                 # Whether ``reorder_point`` includes a lead component at all.
                 # ``False`` means the number below is the safety stock alone —
                 # a lower bound, not the classic reorder point this module's

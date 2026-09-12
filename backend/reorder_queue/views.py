@@ -1336,8 +1336,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         # The group's money, and what it could not price
                         # (op-9m2v) — see the rollup read-out below.
                         "rollup": PriceRollup(),
-                        "avg_lead_time": None,
-                        "avg_lead_time_provenance": None,
+                        "avg_lead_time": 0,
                     }
 
                 # Calculate suggested quantity (base units, mode-aware — op-es7c)
@@ -1403,7 +1402,6 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         "package_cost": (None if not package_price else str(package_price.amount)),
                         "quantity_per_package": item_supplier.quantity_per_package,
                         "lead_time_days": item_supplier.average_lead_time,
-                        "lead_time_provenance": item_supplier.average_lead_time_provenance,
                         "supplier_sku": item_supplier.supplier_sku,
                         "supplier_url": item_supplier.supplier_url,
                         "is_primary": item_supplier.is_primary,
@@ -1477,8 +1475,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                             "kits": [],
                             "total_items": 0,
                             "rollup": PriceRollup(),
-                            "avg_lead_time": None,
-                            "avg_lead_time_provenance": None,
+                            "avg_lead_time": 0,
                         }
                     # A kit row is informational and never an action row, so it
                     # touches no total — but it is still a price on a screen,
@@ -1525,24 +1522,9 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
             # Calculate average lead time for supplier
             lead_times = [
-                item["lead_time_days"]
-                for item in data["items"]
-                if item["lead_time_days"] is not None
+                item["lead_time_days"] for item in data["items"] if item["lead_time_days"]
             ]
-            data["avg_lead_time"] = (
-                sum(lead_times) / len(lead_times) if lead_times else None
-            )
-            provenances = {
-                item["lead_time_provenance"]
-                for item in data["items"]
-                if item["lead_time_days"] is not None
-            }
-            if "unknown" in provenances:
-                data["avg_lead_time_provenance"] = "unknown"
-            elif "default" in provenances:
-                data["avg_lead_time_provenance"] = "default"
-            elif provenances:
-                data["avg_lead_time_provenance"] = "recorded"
+            data["avg_lead_time"] = sum(lead_times) / len(lead_times) if lead_times else 0
             # The group's money, read off the rollup rather than accumulated
             # into the payload dict: ``estimated_total`` is the sum of the
             # lines this pad COULD price and ``unpriced_item_count`` is how
@@ -1604,8 +1586,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 "estimated_total": "0.00",
                 "unpriced_item_count": 0,
                 "estimated_total_is_partial": False,
-                "avg_lead_time": None,
-                "avg_lead_time_provenance": None,
+                "avg_lead_time": 0,
             }
 
         # Convert to list and sort by estimated total (highest first)

@@ -15,11 +15,8 @@
 import { ActionIcon, Button, Group, Select, Stack, Text, TextInput } from '@mantine/core';
 import { IconPlus, IconTrash } from '@tabler/icons-react';
 import React from 'react';
-import { LeadTimeProvenance, Supplier } from '../types';
-import {
-  LEAD_TIME_NOT_RECORDED,
-  leadTimeProvenanceText,
-} from '../utils/leadTime';
+import { Supplier } from '../types';
+import { LEAD_TIME_DEFAULT_NOTE, LEAD_TIME_NOT_RECORDED } from '../utils/leadTime';
 
 export interface SupplierRelationship {
   id?: number; // For existing relationships
@@ -36,7 +33,6 @@ export interface SupplierRelationship {
    * placeholder. See `utils/leadTime.ts`.
    */
   average_lead_time: number | null;
-  average_lead_time_provenance?: LeadTimeProvenance | null;
   is_primary: boolean;
 }
 
@@ -223,7 +219,7 @@ export const SupplierRelationshipForm: React.FC<SupplierRelationshipFormProps> =
                 />
                 <TextInput
                   label="Average Lead Time (days)"
-                  description={leadTimeProvenanceText(rel.average_lead_time_provenance)}
+                  description={LEAD_TIME_DEFAULT_NOTE}
                   type="number"
                   min={0}
                   placeholder={LEAD_TIME_NOT_RECORDED}
@@ -237,8 +233,6 @@ export const SupplierRelationshipForm: React.FC<SupplierRelationshipFormProps> =
                         e.target.value.trim() === '' || Number.isNaN(Number(e.target.value))
                           ? null
                           : Number(e.target.value),
-                      average_lead_time_provenance:
-                        e.target.value.trim() === '' ? null : 'recorded',
                     })
                   }
                   disabled={disabled}

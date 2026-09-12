@@ -70,7 +70,6 @@ class TestItemSupplierWrites:
         assert created.supplier_sku == "SKU-1"
         assert created.quantity_per_package == 12
         assert created.average_lead_time == 3
-        assert created.average_lead_time_provenance == "recorded"
         assert created.package_cost == Decimal("24.00")
         assert created.is_primary is True
 
@@ -97,25 +96,6 @@ class TestItemSupplierWrites:
         assert link.package_cost == Decimal("36.00")
         assert link.quantity_per_package == 6
         assert link.average_lead_time == 21
-        assert link.average_lead_time_provenance == "recorded"
-
-    def test_omitted_lead_time_is_marked_as_the_planning_default(
-        self, authenticated_client, item
-    ):
-        client, _ = authenticated_client
-        response = client.post(
-            reverse("itemsupplier-list"),
-            {
-                "item": str(item.pk),
-                "supplier": SupplierFactory().pk,
-                "supplier_sku": "DEFAULTED",
-            },
-            format="json",
-        )
-
-        assert response.status_code == 201
-        assert response.data["average_lead_time"] == 7
-        assert response.data["average_lead_time_provenance"] == "default"
 
     def test_patch_leaves_the_fields_the_form_does_not_offer(self, authenticated_client, item):
         """The item form shows no UPCs, dimensions, notes or flags — a PUT would blank them."""

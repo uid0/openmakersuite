@@ -118,8 +118,6 @@ export interface Location {
 }
 
 /** One supplier that was on offer for an item and did not win. */
-export type LeadTimeProvenance = 'default' | 'recorded' | 'unknown';
-
 export interface SupplierChoiceAlternative {
   /** The `ItemSupplier.id` — look it up in `suppliers[]` for the full row. */
   id: number;
@@ -202,7 +200,6 @@ export interface ItemSupplier {
   // payload that carries no lead time at all. Renderers must not collapse the
   // two into one blank.
   average_lead_time: number;
-  average_lead_time_provenance?: LeadTimeProvenance;
   is_primary: boolean;
   is_active: boolean;
   // Discontinued BY this supplier: the link still exists (and its history is
@@ -351,7 +348,6 @@ export interface InventoryItem {
    */
   unit_cost?: number | null;
   average_lead_time?: number | null;
-  average_lead_time_provenance?: LeadTimeProvenance | null;
   qr_code: string | null;
   is_active: boolean;
   // Retirement (op-jv7r). A retired item is never flagged for reorder and is
@@ -519,7 +515,6 @@ export interface InventoryItemMetrics {
    */
   vendor_data_withheld?: boolean;
   lead_time_days?: number | null; // Lead
-  lead_time_provenance?: LeadTimeProvenance | null;
   unit_cost?: string | null; // Cost — per-item, or per-case when case-based
   cost_trend?: InventoryCostTrend;
   last_po_unit_cost?: string | null;

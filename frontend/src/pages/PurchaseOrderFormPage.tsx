@@ -27,7 +27,7 @@ import '../styles/PurchaseOrderFormPage.css';
 import { workOrderOptionLabel } from '../utils/associations';
 import { utcYmd, ymdToUtcDateTime } from '../utils/dates';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
-import { aggregateLeadTimeText, leadTimeText } from '../utils/leadTime';
+import { leadTimeText } from '../utils/leadTime';
 import {
   derivePaymentSchedule,
   paymentScheduleSummary,
@@ -565,7 +565,6 @@ const PurchaseOrderFormPage: React.FC = () => {
         // order at all. A payload with no lead time is an absence and reads as
         // one. See `utils/leadTime.ts` for the whole reading of the column.
         lead_time_days: matchingItemSupplier.average_lead_time ?? null,
-        lead_time_provenance: matchingItemSupplier.average_lead_time_provenance,
         supplier_sku: matchingItemSupplier.supplier_sku || '',
         supplier_url: matchingItemSupplier.supplier_url || '',
         is_primary: matchingItemSupplier.is_primary || false,
@@ -935,14 +934,7 @@ const PurchaseOrderFormPage: React.FC = () => {
                       </span>
                     </div>
                     <div className="stat">
-                      <span className="stat-value">
-                        {aggregateLeadTimeText(
-                          supplier.avg_lead_time == null
-                            ? null
-                            : Math.round(supplier.avg_lead_time),
-                          supplier.avg_lead_time_provenance
-                        )}
-                      </span>
+                      <span className="stat-value">{Math.round(supplier.avg_lead_time)} days</span>
                       <span className="stat-label">avg lead time</span>
                     </div>
                   </div>
@@ -1366,7 +1358,7 @@ const PurchaseOrderFormPage: React.FC = () => {
                             )}
                           </td>
                           <td className="col-lead" data-testid={`po-line-lead-time-${item.item_supplier_id}`}>
-                            {leadTimeText(item.lead_time_days, item.lead_time_provenance)}
+                            {leadTimeText(item.lead_time_days)}
                           </td>
                           <td className="col-shipment">
                             <input

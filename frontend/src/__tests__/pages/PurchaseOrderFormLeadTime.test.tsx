@@ -65,13 +65,7 @@ const supplier = {
   items: [seededLine],
   assets: [] as api.ReorderDataAsset[],
   estimated_total: '2.50',
-  avg_lead_time: 5 as number | null,
-  avg_lead_time_provenance: undefined as
-    | 'default'
-    | 'recorded'
-    | 'unknown'
-    | null
-    | undefined,
+  avg_lead_time: 5,
 };
 
 const inventoryItem = {
@@ -164,58 +158,11 @@ describe('the line the server put on the pad', () => {
   });
 });
 
-describe('the supplier aggregate', () => {
-  test('renders an absent average as not recorded', async () => {
-    const previousLeadTime = supplier.avg_lead_time;
-    supplier.avg_lead_time = null;
-    await addBySearch(
-      itemSupplierRow({ average_lead_time: 7, average_lead_time_provenance: 'recorded' })
-    );
-
-    expect(screen.getByText('Not recorded')).toBeInTheDocument();
-    expect(screen.queryByText('0 days')).not.toBeInTheDocument();
-    supplier.avg_lead_time = previousLeadTime;
-  });
-
-  test('marks an average that includes a planning default', async () => {
-    supplier.avg_lead_time_provenance = 'default';
-    await addBySearch(
-      itemSupplierRow({ average_lead_time: 7, average_lead_time_provenance: 'default' })
-    );
-
-    expect(screen.getByText('5 days (includes planning default)')).toBeInTheDocument();
-    delete supplier.avg_lead_time_provenance;
-  });
-});
-
 describe('a supplier that really did quote a week', () => {
   test('still shows its own seven days', async () => {
-    await addBySearch(
-      itemSupplierRow({ average_lead_time: 7, average_lead_time_provenance: 'recorded' })
-    );
+    await addBySearch(itemSupplierRow({ average_lead_time: 7 }));
 
     expect(screen.getByTestId('po-line-lead-time-99')).toHaveTextContent('7 days');
-    expect(screen.getByTestId('po-line-lead-time-99')).not.toHaveTextContent('default');
-  });
-
-  test('marks the model-provided seven as a planning default', async () => {
-    await addBySearch(
-      itemSupplierRow({ average_lead_time: 7, average_lead_time_provenance: 'default' })
-    );
-
-    expect(screen.getByTestId('po-line-lead-time-99')).toHaveTextContent(
-      '7 days (planning default)'
-    );
-  });
-
-  test('does not guess the provenance of existing rows', async () => {
-    await addBySearch(
-      itemSupplierRow({ average_lead_time: 7, average_lead_time_provenance: 'unknown' })
-    );
-
-    expect(screen.getByTestId('po-line-lead-time-99')).toHaveTextContent(
-      '7 days (provenance unknown)'
-    );
   });
 
   test('and a one-day quote is not pluralised', async () => {

@@ -1720,20 +1720,10 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             return
 
         cost_data = self._process_cost_data(data)
-        lead_time, lead_time_provenance = self._process_lead_time_value(
-            data.get("average_lead_time")
-        )
+        lead_time = self._process_lead_time_value(data.get("average_lead_time"))
         pack_size = self._process_pack_size(data)
 
-        self._create_supplier_relationship(
-            item,
-            supplier,
-            data,
-            cost_data,
-            lead_time,
-            lead_time_provenance,
-            pack_size,
-        )
+        self._create_supplier_relationship(item, supplier, data, cost_data, lead_time, pack_size)
 
     def _validate_supplier(self, supplier_id):
         """Validate and return supplier or None if invalid."""
@@ -1767,13 +1757,14 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
 
     def _process_lead_time_value(self, lead_time):
         """Process and validate lead time value."""
-        default = ItemSupplier._meta.get_field("average_lead_time").default
-        if lead_time in (None, "", "null"):
-            return default, ItemSupplier.LeadTimeProvenance.DEFAULT
         try:
-            return int(lead_time), ItemSupplier.LeadTimeProvenance.RECORDED
+            return (
+                int(lead_time)
+                if lead_time not in (None, "", "null")
+                else ItemSupplier._meta.get_field("average_lead_time").default
+            )
         except (ValueError, TypeError):
-            return default, ItemSupplier.LeadTimeProvenance.DEFAULT
+            return ItemSupplier._meta.get_field("average_lead_time").default
 
     def _process_pack_size(self, data):
         """The pack size this request RECORDS, or ``None`` to leave the column alone.
@@ -1811,16 +1802,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             return None
         return clean_pack_size(quantity)
 
-    def _create_supplier_relationship(
-        self,
-        item,
-        supplier,
-        data,
-        cost_data,
-        lead_time,
-        lead_time_provenance,
-        pack_size,
-    ):
+    def _create_supplier_relationship(self, item, supplier, data, cost_data, lead_time, pack_size):
         """Create or update the ItemSupplier relationship.
 
         A cost the request did not carry is OMITTED rather than sent as ``None``.
@@ -1860,7 +1842,6 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             "supplier_sku": data.get("supplier_sku") or item.sku or str(item.id),
             "supplier_url": data.get("supplier_url", ""),
             "average_lead_time": lead_time,
-            "average_lead_time_provenance": lead_time_provenance,
             "package_upc": data.get("package_upc", ""),
             "unit_upc": data.get("unit_upc", ""),
             "is_primary": True,

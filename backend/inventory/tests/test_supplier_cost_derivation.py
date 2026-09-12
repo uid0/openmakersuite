@@ -424,7 +424,6 @@ class TestInvariantEveryWriteSiteObeysTheSameRule:
             {"supplier_sku": "SKU-EDITED"},
             (None, LOSSY_UNIT_COST),
             7,
-            ItemSupplier.LeadTimeProvenance.DEFAULT,
             None,
         )
 

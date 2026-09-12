@@ -33,7 +33,6 @@ import {
 import React, { useCallback, useEffect, useState } from 'react';
 
 import { reportsAPI, SerializedForecastRow } from '../../services/api';
-import { leadTimeText } from '../../utils/leadTime';
 import { extractErrorMessage } from '../../utils/extractErrorMessage';
 
 interface Props {
@@ -205,7 +204,7 @@ const SerializedForecastPanel: React.FC<Props> = ({
                       // one that still carries the part rather than to fill in
                       // a blank.
                       <Tooltip
-                        label={`Allows ${leadTimeText(row.lead_time_days, row.lead_time_provenance)} — the wait recorded for this item's supplier, which is discontinued or inactive. Nothing can be ordered through it; add a supplier that still carries this part.`}
+                        label={`Allows ${row.lead_time_days} days — the wait recorded for this item's supplier, which is discontinued or inactive. Nothing can be ordered through it; add a supplier that still carries this part.`}
                       >
                         <Text
                           span
@@ -214,13 +213,6 @@ const SerializedForecastPanel: React.FC<Props> = ({
                         >
                           {row.reorder_point} *
                         </Text>
-                      </Tooltip>
-                    ) : row.lead_time_provenance === 'default' ||
-                      row.lead_time_provenance === 'unknown' ? (
-                      <Tooltip
-                        label={`Reorder point allows ${leadTimeText(row.lead_time_days, row.lead_time_provenance)}.`}
-                      >
-                        <Text span>{row.reorder_point} †</Text>
                       </Tooltip>
                     ) : (
                       row.reorder_point

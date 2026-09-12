@@ -302,7 +302,6 @@ def compute_item_metrics_batch(items):
         unit_cost = unit_price_of(supplier).amount
         package_cost = package_price_of(supplier).amount
         lead_time_days = supplier.average_lead_time if supplier else None
-        lead_time_provenance = supplier.average_lead_time_provenance if supplier else None
         # ``case_size`` — units per case from that same link, read through the
         # ONE pack-size derivation (op-c1ke) rather than off the column. Fed the
         # row ``select_suppliers_for`` already resolved, so the query budget
@@ -329,7 +328,6 @@ def compute_item_metrics_batch(items):
             "quantity_in_transit": quantity_in_transit.get(item.id, 0),
             "reorder_point": item.reorder_quantity,
             "lead_time_days": lead_time_days,
-            "lead_time_provenance": lead_time_provenance,
             "unit_cost": display_cost,
             "cost_trend": _cost_trend(unit_cost, last_po_unit_cost.get(item.id)),
             "last_po_unit_cost": last_po_unit_cost.get(item.id),

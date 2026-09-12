@@ -73,25 +73,6 @@ describe('a supplier row the operator has just added', () => {
     expect('average_lead_time' in payload).toBe(false);
   });
 
-  test('does not reclassify a stored default during an unrelated edit', () => {
-    const payload = relationshipPayload(
-      {
-        supplier: 1,
-        supplier_sku: 'EDITED',
-        supplier_url: '',
-        unit_cost: '10.99',
-        package_cost: null,
-        quantity_per_package: 1,
-        average_lead_time: 7,
-        is_primary: true,
-        average_lead_time_provenance: 'default',
-      },
-      'item-1'
-    );
-
-    expect('average_lead_time' in payload).toBe(false);
-  });
-
   test('shows the absence in the box, and names what will be used instead', () => {
     // The editor is controlled, so the row it just handed back has to be fed
     // in before the box it produces can be read.

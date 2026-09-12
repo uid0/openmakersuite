@@ -1026,36 +1026,6 @@ describe('ScanPage', () => {
     expect(estimatedCostRow().textContent).toContain('— (no price on file)');
   });
 
-  test('marks a default lead time in the order summary', async () => {
-    const supplier = {
-      ...unpricedSupplier,
-      average_lead_time_provenance: 'default',
-    };
-    await renderWithSupplier(supplier);
-    selectSupplier(supplier);
-
-    expect(document.querySelector('.order-summary')?.textContent).toContain(
-      '7 days (planning default)'
-    );
-  });
-
-  test.each([
-    [null, null, 'Not recorded'],
-    [7, 'default', '7 days (planning default)'],
-    [7, 'unknown', '7 days (provenance unknown)'],
-  ])('renders selected supplier lead time %s with provenance %s', async (days, provenance, expected) => {
-    const supplier = {
-      ...unpricedSupplier,
-      average_lead_time: days,
-      average_lead_time_provenance: provenance,
-    };
-    await renderWithSupplier(supplier);
-    selectSupplier(supplier);
-
-    expect(packageDetails().textContent).toContain(expected);
-    expect(document.querySelector('.order-summary')?.textContent).toContain(expected);
-  });
-
   test('the unknown price names what is missing and does not block the request', async () => {
     await renderWithSupplier(unpricedSupplier);
     selectSupplier(unpricedSupplier);

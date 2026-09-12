@@ -598,19 +598,4 @@ describe('AdminDashboard — which supplier a queued request would go to', () =>
 
     expect(await screen.findByTestId('reorder-lead-time-1')).toHaveTextContent('7 days');
   });
-
-  it.each([
-    [null, null, 'Not recorded'],
-    [7, 'default', '7 days (planning default)'],
-    [7, 'unknown', '7 days (provenance unknown)'],
-  ])('renders lead time %s with provenance %s', async (days, provenance, expected) => {
-    await showRow(
-      withChoice(1, choice(), {
-        average_lead_time: days,
-        average_lead_time_provenance: provenance,
-      }),
-    );
-
-    expect(await screen.findByTestId('reorder-lead-time-1')).toHaveTextContent(expected);
-  });
 });

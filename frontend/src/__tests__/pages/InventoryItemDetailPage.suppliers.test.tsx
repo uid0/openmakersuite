@@ -529,24 +529,6 @@ describe('InventoryItemDetailPage — suppliers card', () => {
     expect(row.getByTestId('supplier-lead-time-1')).toHaveTextContent('Not recorded');
   });
 
-  it.each([
-    [7, 'default', '7 days (planning default)'],
-    [7, 'unknown', '7 days (provenance unknown)'],
-  ])('renders a %s-day lead time with %s provenance', async (days, provenance, expected) => {
-    renderWith([
-      supplierLink({
-        id: 1,
-        supplier_name: 'Provenance Supply',
-        average_lead_time: days,
-        average_lead_time_provenance: provenance,
-      }),
-    ]);
-
-    await waitFor(() => expect(suppliersCard()).toBeInTheDocument());
-
-    expect(screen.getByTestId('supplier-lead-time-1')).toHaveTextContent(expected);
-  });
-
   it('shows a zero-day lead time as zero, not as unrecorded', async () => {
     renderWith([supplierLink({ id: 1, supplier_name: 'Same Day Co.', average_lead_time: 0 })]);
 

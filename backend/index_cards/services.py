@@ -34,7 +34,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph
 
-from inventory.models import InventoryItem, ItemSupplier
+from inventory.models import InventoryItem
 
 logger = logging.getLogger(__name__)
 
@@ -857,28 +857,15 @@ class IndexCardRenderer:
         # quoted a wait at all. ``None`` here means no orderable link, which IS
         # an absence and still prints nothing.
         if item.average_lead_time is not None:
-            lead = self._pluralize(item.average_lead_time, "day")
-            if item.average_lead_time_provenance == "default":
-                lead += " (planning default)"
-            elif item.average_lead_time_provenance != "recorded":
-                lead += " (provenance unknown)"
-            info_lines.append(f"Avg Lead: {lead}")
+            info_lines.append(f"Avg Lead: {self._pluralize(item.average_lead_time, 'day')}")
 
         longest_lead_time = self._get_longest_lead_time(item)
-        if (
-            longest_lead_time is not None
-            and longest_lead_time.average_lead_time != item.average_lead_time
-        ):
-            lead = self._pluralize(longest_lead_time.average_lead_time, "day")
-            if longest_lead_time.average_lead_time_provenance == "default":
-                lead += " (planning default)"
-            elif longest_lead_time.average_lead_time_provenance != "recorded":
-                lead += " (provenance unknown)"
-            info_lines.append(f"Max Lead: {lead}")
+        if longest_lead_time is not None and longest_lead_time != item.average_lead_time:
+            info_lines.append(f"Max Lead: {self._pluralize(longest_lead_time, 'day')}")
 
         return info_lines
 
-    def _get_longest_lead_time(self, item: InventoryItem) -> ItemSupplier | None:
+    def _get_longest_lead_time(self, item: InventoryItem) -> int | None:
         """Longest lead time across the suppliers this item can still be BOUGHT from.
 
         The card is printed and stuck on a shelf, where "Max Lead: 30 days"
@@ -892,13 +879,13 @@ class IndexCardRenderer:
         if not hasattr(item, "item_suppliers"):
             return None
 
-        links = [
-            link
+        lead_times = [
+            link.average_lead_time
             for link in item.item_suppliers.all()
             if link.average_lead_time is not None and link.is_active and not link.is_discontinued
         ]
 
-        return max(links, key=lambda link: link.average_lead_time) if links else None
+        return max(lead_times) if lead_times else None
 
     def _pluralize(self, count: int, word: str) -> str:
         """Return properly pluralized string based on count."""

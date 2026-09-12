@@ -8,11 +8,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { checklistsAPI, inventoryAPI, reorderAPI } from '../services/api';
 import '../styles/ScanPage.css';
-import { Checklist, InventoryItem, ItemSupplier, LeadTimeProvenance } from '../types';
+import { Checklist, InventoryItem, ItemSupplier } from '../types';
 import { formatDateOnly } from '../utils/dates';
 import { promptInput, showError } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
-import { leadTimeText } from '../utils/leadTime';
 import { reorderFiling, reorderQuantityLabel } from '../utils/packaging';
 import {
   alternativeSupplierNamesText,
@@ -157,8 +156,6 @@ const ScanPage: React.FC = () => {
   const [totalUnits, setTotalUnits] = useState<number>(0);
   const [estimatedCost, setEstimatedCost] = useState<number | null>(0);
   const [estimatedLeadTime, setEstimatedLeadTime] = useState<number>(0);
-  const [estimatedLeadTimeProvenance, setEstimatedLeadTimeProvenance] =
-    useState<LeadTimeProvenance | null>(null);
 
   // Update calculations when supplier or quantity changes
   const updateCalculations = useCallback((supplier: ItemSupplier, packages: number) => {
@@ -172,7 +169,6 @@ const ScanPage: React.FC = () => {
     setTotalUnits(units);
     setEstimatedCost(cost);
     setEstimatedLeadTime(supplier.average_lead_time);
-    setEstimatedLeadTimeProvenance(supplier.average_lead_time_provenance ?? null);
   }, []);
 
   const loadChecklists = useCallback(async () => {
@@ -734,12 +730,7 @@ const ScanPage: React.FC = () => {
 
                 <div className="info-item">
                   <span className="label">Their Lead Time:</span>
-                  <span className="value">
-                    {leadTimeText(
-                      item.average_lead_time,
-                      item.average_lead_time_provenance
-                    )}
-                  </span>
+                  <span className="value">{item.average_lead_time} days</span>
                 </div>
 
                 <div className="info-item">
@@ -847,11 +838,7 @@ const ScanPage: React.FC = () => {
                         <strong>Unit cost:</strong> {money(selectedSupplier.unit_cost)}
                       </div>
                       <div>
-                        <strong>Lead time:</strong>{' '}
-                        {leadTimeText(
-                          selectedSupplier.average_lead_time,
-                          selectedSupplier.average_lead_time_provenance
-                        )}
+                        <strong>Lead time:</strong> {selectedSupplier.average_lead_time} days
                       </div>
                       {selectedSupplier.package_dimensions_display !== 'No dimensions specified' && (
                         <div>
@@ -910,11 +897,7 @@ const ScanPage: React.FC = () => {
                     </div>
                     <div className="summary-item">
                       <span>Estimated Lead Time:</span>
-                      <span>
-                        <strong>
-                          {leadTimeText(estimatedLeadTime, estimatedLeadTimeProvenance)}
-                        </strong>
-                      </span>
+                      <span><strong>{estimatedLeadTime} days</strong></span>
                     </div>
                   </div>
                 </>

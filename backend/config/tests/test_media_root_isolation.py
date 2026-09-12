@@ -27,7 +27,11 @@ PROBE_NAME = "media-isolation-probe/receipt.pdf"
 
 
 def _working_tree():
-    return Path(settings.BASE_DIR).resolve().parent
+    base_dir = Path(settings.BASE_DIR).resolve()
+    parent = base_dir.parent
+    # The Docker image copies the backend directly to /app, so BASE_DIR's
+    # parent is the filesystem root rather than a repository checkout.
+    return base_dir if parent == Path(base_dir.anchor) else parent
 
 
 def _assert_isolated():

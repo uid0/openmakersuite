@@ -444,6 +444,41 @@ def recalculate_estimated_total(purchase_order):
     return total
 
 
+def snapshot_quoted_lead_times(purchase_order):
+    """Freeze each line's supplier quote onto the line as the order goes out.
+
+    ``PurchaseOrderItem.quoted_lead_time_days`` is the promise
+    :func:`reorder_queue.services.receiving.create_lead_time_log` grades the
+    delivery against. It is captured HERE, in the send, because
+    ``LeadTimeLog.order_date`` is ``PurchaseOrder.sent_at``: the quote and the
+    clock have to start on the same day or the subtraction spans two different
+    promises. ``ItemSupplier.average_lead_time`` is live — operators edit it and
+    :func:`inventory.tasks.update_average_lead_times` rewrites it on a schedule
+    — so without this the grading moved under finished orders.
+
+    Deliberately NOT captured at line creation, where ``unit_cost_ordered`` and
+    ``kit_snapshot`` are. Those record what the shop committed to when it wrote
+    the line; this records what the vendor was promising at the moment the order
+    actually reached it, and a draft can sit for weeks before that.
+
+    Overwrites whatever is already on the line, for the same reason
+    :func:`mark_sent` overwrites ``sent_at`` rather than reusing a stale one:
+    this send is the one being recorded. Lines with no supplier link (asset,
+    freeform) have no vendor promise to freeze and keep their ``NULL``.
+
+    ``bulk_update`` so a fifty-line order costs one statement inside the send's
+    transaction. Returns the lines it stamped.
+    """
+    lines = list(
+        purchase_order.items.filter(item_supplier__isnull=False).select_related("item_supplier")
+    )
+    for line in lines:
+        line.quoted_lead_time_days = line.item_supplier.average_lead_time
+    if lines:
+        PurchaseOrderItem.objects.bulk_update(lines, ["quoted_lead_time_days"])
+    return lines
+
+
 def update_reorder_requests_from_po(purchase_order):
     """Update associated ReorderRequest objects when a PurchaseOrder is finalized.
 
@@ -580,8 +615,10 @@ def mark_sent(purchase_order, user, at=None, sent_by=None):
 
     Everything DRAFT -> SENT owes, in one place: status -> SENT,
     ``sent_by``/``sent_at`` stamped, ``updated_at`` moved by the ``save()``,
-    the linked reorder requests synced, and the ``po_send`` audit row the staff
-    feed reads recorded. The caller owns only the DRAFT precondition.
+    each line's supplier lead-time quote frozen onto it
+    (:func:`snapshot_quoted_lead_times`), the linked reorder requests synced,
+    and the ``po_send`` audit row the staff feed reads recorded. The caller owns
+    only the DRAFT precondition.
 
     ``at`` pins the moment and ``sent_by`` pins whose send it was. Both exist
     for the same kind of caller: one RECORDING a send somebody else already
@@ -636,6 +673,9 @@ def mark_sent(purchase_order, user, at=None, sent_by=None):
         purchase_order.sent_by = sent_by or user
         purchase_order.sent_at = at or timezone.now()
         purchase_order.save()
+        # BEFORE the request sweep, which publishes a delivery date from the
+        # same quote: both ends of the send read one number.
+        snapshot_quoted_lead_times(purchase_order)
         # Keep linked reorder requests in step with the PO going out.
         update_reorder_requests_from_po(purchase_order)
         record_event(

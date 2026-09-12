@@ -265,8 +265,8 @@ export function exportPurchasingReportToCSV(
       'Total Spend': item.total_spend ? `$${item.total_spend.toFixed(2)}` : '$0.00',
     }));
   } else if (reportType === 'lead_time_analysis') {
-    // Variance and rate are both against the supplier link's standing quoted
-    // lead time, not against the delivery dates confirmed on the orders. A
+    // Variance and rate are both against the lead time quoted when each order
+    // was sent, not against the delivery dates confirmed on the orders. A
     // spreadsheet built on "On-Time Rate" alone reads as missed agreed dates and
     // sends the buyer after the wrong vendors, so each header names the quote —
     // in the web's single copy of those words, not a fourth restatement.

@@ -2,12 +2,13 @@
  * The one place the web spells the promise every lead-time number is scored
  * against.
  *
- * `variance_days` and every rate derived from it measure the supplier link's
- * STANDING QUOTED lead time, never the delivery date the operator confirmed on
- * the order, so a vendor that quotes 3, is confirmed for day 10 and delivers on
- * day 10 is 7 over its quote having hit the date it agreed. Labels that restate
- * that yardstick from memory drift apart; these constants mirror the backend's
- * single source, `LeadTimeLog.VARIANCE_YARDSTICK_LABEL`.
+ * `variance_days` and every rate derived from it measure the lead time the
+ * supplier quoted when each order was sent, never the delivery date the
+ * operator confirmed on the order. A vendor that quotes 3, is confirmed for
+ * day 10 and delivers on day 10 is therefore 7 over its quote having hit the
+ * date it agreed. Labels that restate that yardstick from memory drift apart;
+ * these constants mirror the backend's single source,
+ * `LeadTimeLog.VARIANCE_YARDSTICK_LABEL`.
  */
 
 /** The yardstick in running prose: "…days vs. quoted lead time". */

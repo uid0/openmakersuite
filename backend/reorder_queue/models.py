@@ -1043,6 +1043,45 @@ class PurchaseOrderItem(TypedTargetModel):
         help_text="Actual unit cost charged",
     )
 
+    # The lead time this vendor QUOTED WHEN THE ORDER WENT OUT (oms-ltsnap) —
+    # the promise ``receiving.create_lead_time_log`` grades the delivery
+    # against, frozen so that grading cannot move afterwards.
+    #
+    # ``ItemSupplier.average_lead_time`` is a LIVE column: an operator edits it,
+    # and :func:`inventory.tasks.update_average_lead_times` rewrites it every
+    # run from the last six months of receipts. Reading it at RECEIPT time —
+    # which is what ``create_lead_time_log`` used to do, having nothing else to
+    # read — judged a finished order against a promise made after it. A vendor
+    # that quoted three days and delivered in three became retroactively late
+    # the moment the quote was revised to one, and the reverse made a late
+    # delivery punctual. ``supplier_selection``'s performance term scores the
+    # result, so that is a wrong purchase, not a cosmetic number.
+    #
+    # Stamped by ``services.purchase_orders.mark_sent``, not at line creation
+    # like ``unit_cost_ordered`` and :attr:`kit_snapshot` beside it. Those two
+    # record what the SHOP committed to when it wrote the line; this one is
+    # graded from ``PurchaseOrder.sent_at``, which is the moment
+    # ``LeadTimeLog.order_date`` measures from, so it has to be the quote in
+    # force at THAT moment or the two ends of the subtraction come from
+    # different days.
+    #
+    # NULL is "not recorded", and it means one of three things, none of them a
+    # quote of zero: the line carries no supplier link at all (asset and
+    # freeform lines, which have no vendor promise to keep), the order has not
+    # been sent yet, or the order was sent before this column existed. Only the
+    # last one is lossy, and it is deliberately NOT backfilled — see
+    # ``create_lead_time_log``, which falls back to the live quote for those and
+    # records on the log that it did.
+    quoted_lead_time_days = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Supplier's quoted lead time in calendar days, captured when this "
+            "order was sent. NULL on lines with no supplier link, on unsent "
+            "orders, and on orders sent before this was recorded."
+        ),
+    )
+
     # Shipment tracking
     expected_shipment_date = models.DateField(
         null=True,
@@ -1619,21 +1658,29 @@ class LeadTimeLog(models.Model):
     to improve future ordering decisions and supplier evaluation.
 
     **Two different promises live on this row, and only one of them is scored.**
-    ``estimated_lead_time_days`` is the link's STANDING QUOTE
-    (``ItemSupplier.average_lead_time``), which ``services.receiving`` reads at
-    RECEIPT time — there is no order-time snapshot of it — and ``variance_days``
-    is measured against that and nothing else. ``expected_delivery_date`` is the
-    order's separately confirmed date and is a different fact that no column
-    here scores. So a row whose ``expected_delivery_date`` equals its
-    ``actual_delivery_date`` can still carry a positive ``variance_days``: the
-    vendor met the date it confirmed while missing the lead time it advertises.
-    Pinned by ``test_variance_scores_the_standing_quote_not_the_confirmed_date``.
+    ``estimated_lead_time_days`` is the vendor's QUOTED LEAD TIME
+    (``ItemSupplier.average_lead_time``) **as it stood when the order was
+    sent**, copied from ``PurchaseOrderItem.quoted_lead_time_days``, and
+    ``variance_days`` is measured against that and nothing else.
+    ``expected_delivery_date`` is the order's separately confirmed date and is a
+    different fact that no column here scores. So a row whose
+    ``expected_delivery_date`` equals its ``actual_delivery_date`` can still
+    carry a positive ``variance_days``: the vendor met the date it confirmed
+    while missing the lead time it advertises. Pinned by
+    ``test_variance_scores_the_standing_quote_not_the_confirmed_date``.
 
     That is deliberate. ``inventory.services.supplier_selection`` scores the
-    standing quote on its lead-time axis and uses ``variance_days`` only to
-    discount that same quote by how often the vendor broke it; scoring the
-    discount against a per-order date would let a vendor quote three days,
-    confirm ten, deliver ten, and win on both axes.
+    quote on its lead-time axis and uses ``variance_days`` only to discount that
+    same quote by how often the vendor broke it; scoring the discount against a
+    per-order date would let a vendor quote three days, confirm ten, deliver
+    ten, and win on both axes.
+
+    :attr:`estimated_lead_time_basis` says WHICH reading of that quote the row
+    holds. ``average_lead_time`` is a live column — an operator edits it and
+    :func:`inventory.tasks.update_average_lead_times` rewrites it on a schedule
+    — so a row graded against it at receipt time is graded against a promise
+    that may have been made after the order was placed. Every row written before
+    ``quoted_lead_time_days`` existed is exactly that, and says so.
 
     Because the number is right and only the rendering could lie, the display
     rule lives here rather than in each surface: no screen, payload or export
@@ -1666,10 +1713,45 @@ class LeadTimeLog(models.Model):
     variance_days = models.IntegerField(
         help_text=(
             "Actual minus estimated lead time, in calendar days (positive = "
-            "later than quoted). Measured against the supplier link's standing "
-            "quoted lead time, NOT against expected_delivery_date, which is the "
-            "order's separately confirmed date and a different fact."
+            "later than quoted). Measured against the supplier's quoted lead "
+            "time, NOT against expected_delivery_date, which is the order's "
+            "separately confirmed date and a different fact."
         )
+    )
+
+    #: :attr:`estimated_lead_time_basis` for a row graded against the quote the
+    #: line carried out of ``PurchaseOrderItem.quoted_lead_time_days`` — the one
+    #: in force when the order was sent. What every row written since that
+    #: column existed holds.
+    ESTIMATE_FROM_ORDER_SNAPSHOT = "order_snapshot"
+
+    #: :attr:`estimated_lead_time_basis` for a row graded against the link's
+    #: quote as it stood AT RECEIPT, because the line carried no snapshot. The
+    #: order predates the snapshot, so the promise it was actually given is not
+    #: recorded anywhere and was not invented here; this value is the row
+    #: saying so rather than claiming an order-time quote it does not have.
+    ESTIMATE_FROM_RECEIPT_QUOTE = "receipt_quote"
+
+    ESTIMATE_BASIS_CHOICES = [
+        (ESTIMATE_FROM_ORDER_SNAPSHOT, "Quote when the order was sent"),
+        (ESTIMATE_FROM_RECEIPT_QUOTE, "Quote at receipt (order predates the snapshot)"),
+    ]
+
+    # Defaults to the WEAKER claim on purpose. Applied to every row that existed
+    # before this column — all of which were written from the receipt-time
+    # quote, so the default is not a guess but the recorded truth — and to any
+    # future writer that forgets to say, which then under-claims rather than
+    # asserting an order-time promise it never read.
+    estimated_lead_time_basis = models.CharField(
+        max_length=32,
+        choices=ESTIMATE_BASIS_CHOICES,
+        default=ESTIMATE_FROM_RECEIPT_QUOTE,
+        help_text=(
+            "Which reading of the supplier's quoted lead time "
+            "estimated_lead_time_days holds: the one captured when the order "
+            "was sent, or the link's quote at receipt for an order that "
+            "predates that capture."
+        ),
     )
 
     # Order details
@@ -1720,7 +1802,7 @@ class LeadTimeLog(models.Model):
 
     @property
     def was_late(self) -> bool:
-        """Later than the STANDING QUOTE — never "late" on its own.
+        """Later than the QUOTED LEAD TIME — never "late" on its own.
 
         The yardstick is :attr:`VARIANCE_YARDSTICK`, not
         :attr:`confirmed_delivery_date`, so this can be ``True`` on a row that
@@ -1732,7 +1814,7 @@ class LeadTimeLog(models.Model):
 
     @property
     def was_early(self) -> bool:
-        """Inside the standing quote. Same yardstick as :attr:`was_late`."""
+        """Inside the quoted lead time. Same yardstick as :attr:`was_late`."""
         return self.variance_days < 0
 
     @property
@@ -1741,7 +1823,7 @@ class LeadTimeLog(models.Model):
 
         This row's own ``expected_delivery_date`` cannot answer that:
         :func:`~reorder_queue.services.receiving.create_lead_time_log` falls back
-        to ``order_date + the standing quote`` when the purchase order carries no
+        to ``order_date + the quoted lead time`` when the purchase order carries no
         confirmed date, and a date derived from the quote is not a promise
         anybody agreed to. Calling that fallback "the confirmed date" would
         assert a second promise the row does not hold — the same false claim the

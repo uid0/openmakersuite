@@ -328,11 +328,24 @@ anywhere that it is; adding the column and a reader is filed as follow-up
 ### A lead-time lateness must name the promise it scores
 
 `LeadTimeLog` carries TWO promises and only one is scored. `variance_days`,
-`was_late` and every rate derived from them measure the supplier link's STANDING
-QUOTE; `expected_delivery_date` is the separately confirmed order date and
-nothing scores it. That is deliberate — the model docstring carries the
-reasoning, and `test_variance_scores_the_standing_quote_not_the_confirmed_date`
-pins it. Do not reopen it.
+`was_late` and every rate derived from them measure the lead time the supplier
+QUOTED WHEN THE ORDER WAS SENT; `expected_delivery_date` is the separately
+confirmed order date and nothing scores it. That is deliberate — the model
+docstring carries the reasoning, and
+`test_variance_scores_the_standing_quote_not_the_confirmed_date` pins it. Do not
+reopen it.
+
+**As of the ORDER, not as of now.** `ItemSupplier.average_lead_time` is a live
+column — operators edit it and `inventory.tasks.update_average_lead_times`
+rewrites it on a schedule — so `mark_sent` freezes it onto each line as
+`PurchaseOrderItem.quoted_lead_time_days` and `create_lead_time_log` grades
+against that copy. Never reach back to the link to judge a delivery that has
+already happened: requoting a vendor must change what the NEXT order is judged
+against and nothing that is already in. Orders sent before that column existed
+carry no snapshot and were NOT back-filled, for the reason the read-only report
+below gives in general terms — a promise nobody recorded cannot be recovered —
+so they fall back to the live quote and say so on
+`LeadTimeLog.estimated_lead_time_basis`.
 
 The consequence for anything you build: a row can read `+7, was_late` having
 arrived on the day the operator agreed, so **no screen, payload or export may

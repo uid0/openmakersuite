@@ -62,6 +62,9 @@ def _ordered_line(*, quote=QUOTE_DAYS, primary=False):
     po_item = PurchaseOrderItem.objects.create(
         purchase_order=po,
         item_supplier=link,
+        # Frozen by ``mark_sent`` on every real send path (oms-ltsnap); set here
+        # so the graded end reads the same quote the published date came from.
+        quoted_lead_time_days=quote,
         quantity_ordered=1,
         unit_cost_ordered=Decimal("2.00"),
         order_in_packages=1,

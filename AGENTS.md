@@ -1079,29 +1079,6 @@ admin CHANGE FORM. The last two were the ones nobody expects.
   ScanTTY's `APIError.Error()` display — falls back to the generic "One or more
   fields failed validation.". A hand-built `{"error": "<prose>"}` is worse
   still: ScanTTY's `parseError` cannot decode it and shows the raw body.
-- **`{"error": "<prose>", "code": "<code>"}` was the most deceptive refusal
-  shape, and no endpoint writes it any more.** It carries both halves the
-  envelope carries and a client still cannot read either: `error` is a STRING
-  where every reader expects an object, so `error.code` and `error.message` both
-  come back empty and the whole raw body lands in front of the operator. ScanTTY
-  papered over it with per-endpoint recognisers (`omsapi.AsLineEntryError` for
-  the coded shape, `AsReceivingRefusal` for the bare one) — which is exactly the
-  duplication that converting removes. The line endpoints (`POST .../items/`,
-  `DELETE .../items/{id}/`) and the kiosk weather proxy were its last users; all
-  three now answer through `error_response` with the SAME codes, one level in,
-  and `views.py`'s `_line_refusal` is the one place a `LineEntryError` becomes a
-  response.
-- **A refusal-shape change is a WIRE-CONTRACT change, and ScanTTY is a live
-  consumer with its own parsers.** Read `internal/omsapi/` in the ScanTTY repo
-  BEFORE changing one: a recogniser tuned to the old shape means the server
-  change alone makes its rendering WORSE, not better. To measure that without
-  writing into the ScanTTY tree, drive its real client against an
-  `httptest` stub through `go test -overlay=<json>` — the overlay maps a test
-  file in from elsewhere, so `git status` there stays clean.
-- **The ~130 remaining bare `{"error": "<prose>"}` sites are the repo-wide gh
-  #330 migration, not a drive-by.** They span `inventory`, `donations`,
-  `forgekey`, `dashboard`, `location_checkins` and `project_storage`. Converting
-  one means INVENTING a code it does not have, which is a decision per endpoint.
 - **The screen that offers the send explains the refusal before the click.**
   `send_blocked_reason` is served like `can_receive` / `can_delete_items` so no
   client keeps its own copy; `PurchaseOrderPage` disables the button and prints

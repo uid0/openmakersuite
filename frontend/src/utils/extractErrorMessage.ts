@@ -23,7 +23,6 @@
 export function extractErrorMessage(err: unknown, fallback: string): string {
   // Axios shape: ``err.response.data``. Also handle a bare ``data`` payload
   // for code paths that already destructured the response.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const anyErr = err as any;
   const data = anyErr?.response?.data ?? anyErr?.data ?? anyErr;
 
@@ -58,7 +57,6 @@ export function extractErrorMessage(err: unknown, fallback: string): string {
 
   return fallback;
 }
-
 
 /**
  * Pull the machine-readable error CODE off the same shapes.

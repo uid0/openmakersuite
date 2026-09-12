@@ -9,13 +9,15 @@ vi.mock('../../../services/api', () => ({
   default: { get: vi.fn() },
 }));
 
+const mockApiGet = vi.mocked(api.get);
+
 describe('SharedWeatherBlock', () => {
   beforeEach(() => {
-    api.get.mockReset();
+    mockApiGet.mockReset();
   });
 
   it('renders the native weather panel when the backend returns data', async () => {
-    api.get.mockResolvedValueOnce({
+    mockApiGet.mockResolvedValueOnce({
       data: {
         location_name: 'Carrollton',
         country: 'US',
@@ -44,7 +46,7 @@ describe('SharedWeatherBlock', () => {
 
   it('shows "not configured" message when the backend reports it', async () => {
     // The STANDARDIZED envelope the backend emits (backend/config/api_errors.py).
-    api.get.mockRejectedValueOnce({
+    mockApiGet.mockRejectedValueOnce({
       isAxiosError: true,
       response: {
         data: {
@@ -64,7 +66,7 @@ describe('SharedWeatherBlock', () => {
   });
 
   it('falls back to the legacy iframe URL when the native fetch fails', async () => {
-    api.get.mockRejectedValueOnce(new Error('network fail'));
+    mockApiGet.mockRejectedValueOnce(new Error('network fail'));
 
     render(<SharedWeatherBlock weatherUrl="https://example.com/weather" />);
 
@@ -75,7 +77,7 @@ describe('SharedWeatherBlock', () => {
   });
 
   it('shows "Weather unavailable" when the fetch fails and no fallback URL is supplied', async () => {
-    api.get.mockRejectedValueOnce(new Error('network fail'));
+    mockApiGet.mockRejectedValueOnce(new Error('network fail'));
 
     render(<SharedWeatherBlock />);
 

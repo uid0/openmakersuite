@@ -48,7 +48,11 @@ from inventory.models import ItemSupplier
 from inventory.tests.factories import InventoryItemFactory, SupplierFactory
 from reorder_queue import settlement_sites
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
-from reorder_queue.settlement_signals import DERIVED_ORDER_VALUES, settlement_batch
+from reorder_queue.settlement_signals import (
+    DERIVED_ORDER_VALUES,
+    NON_STORED_DERIVED_ORDER_VALUES,
+    settlement_batch,
+)
 
 #: Every ``(value, input field)`` pair the model declares, so one case exists
 #: per pair without any of them being written down. ``pytest`` needs the ids to
@@ -56,6 +60,56 @@ from reorder_queue.settlement_signals import DERIVED_ORDER_VALUES, settlement_ba
 VALUE_FIELD_PAIRS = [
     (value, field) for value in DERIVED_ORDER_VALUES for field in sorted(value.inputs)
 ]
+
+EXPECTED_NON_STORED_VALUES = {
+    "outstanding_items": False,
+    "total_items": True,
+    "total_quantity": True,
+    "total_received_quantity": True,
+    "effective_estimated_total": True,
+    "payment_schedule": True,
+    "has_active_items": True,
+    "has_received_anything": True,
+    "is_fully_received": True,
+    "is_settled": True,
+    "outstanding_line_count": True,
+    "variance_line_count": True,
+    "has_receipt_variance": True,
+}
+
+
+class TestNonStoredDerivedValues:
+    def test_the_complete_non_stored_set_is_classified(self):
+        assert {
+            value.name: value.cache_backed for value in NON_STORED_DERIVED_ORDER_VALUES
+        } == EXPECTED_NON_STORED_VALUES
+
+    @pytest.mark.django_db
+    def test_a_line_save_invalidates_the_parent_instances_cached_values(
+        self, supplier, operator
+    ):
+        purchase_order = make_po(supplier, operator)
+        line = add_line(purchase_order, make_item("Cached save", supplier), quantity=4)
+        assert purchase_order.total_quantity == 4
+
+        line.quantity_ordered = 7
+        line.save(update_fields=["quantity_ordered"])
+
+        assert purchase_order.total_quantity == 7
+        assert purchase_order.outstanding_line_count == 1
+
+    @pytest.mark.django_db
+    def test_a_line_delete_invalidates_the_parent_instances_cached_values(
+        self, supplier, operator
+    ):
+        purchase_order = make_po(supplier, operator)
+        line = add_line(purchase_order, make_item("Cached delete", supplier), quantity=4)
+        assert purchase_order.total_items == 1
+
+        line.delete()
+
+        assert purchase_order.total_items == 0
+        assert purchase_order.total_quantity == 0
 
 
 def pair_id(pair):

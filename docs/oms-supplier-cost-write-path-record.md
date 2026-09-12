@@ -79,7 +79,7 @@ which is why the fix is there and not at any of them.
 |---|---|---|---|
 | 1 | `ItemSupplier.save()` | the derivation | **the root** — one rule, `derive_costs` |
 | 2 | `views.InventoryItemViewSet._create_supplier_relationship` | item CREATE only; its update branch is unreachable (`_sync_primary_supplier` is called from `create()` alone, and `suppliers` is `read_only` on the item serializer) | omits an absent cost instead of sending `None` |
-| 3 | `serializers.KitSerializer._apply_supplier_terms` | kit create + update | stopped fabricating a pack size |
+| 3 | `serializers.KitSerializer._apply_supplier_terms` | kit create + update | update assigns only submitted terms and performs a full save; create alone supplies the primary flag |
 | 4 | `serializers.ItemSupplierSerializer` via `ItemSupplierViewSet` | `POST`/`PUT`/`PATCH /api/inventory/item-suppliers/` — **the live edit path**, used by the web item form and by ScanTTY | fixed at the root; nothing site-local |
 | 5 | `views.ItemSupplierViewSet.mark_discontinued` | flips flags, calls `save()` | fixed at the root — was filing false history |
 | 6 | `reorder_queue.services.purchase_orders.void_line_item` | same shape | fixed at the root — same |
@@ -507,24 +507,21 @@ money-moving one wherever the named link ALREADY EXISTS and carries a case
 price. The new-link case is identical to base: with no stored row there is
 nothing to move.
 
-**A fix was attempted on this branch and WITHDRAWN, because it did not
-converge.** Three successive rounds each generated the next round's findings in
-the same file. The decisive one: closing the "stale box" case by seeding
-`supplierId` from the chosen link on load turned every kit save into a
-supplier-primary write. `ItemSupplier.supplier_sku` is a non-blank CharField, so
-seeding made both halves of `handleSave`'s `supplierId && supplierSku` gate
-truthy for every existing kit, `_apply_supplier_terms` forces
-`defaults["is_primary"] = True`, and `enforce_single_primary` then demotes every
-sibling — so renaming a kit would pin its supplier selection and unflag another
-vendor. That escaped the suite only because the fixture behind
-`CONTROL: a save that never touches the purchase terms sends none at all`
-carries no `supplier_choice` key, which real payloads always do.
+**CLOSED — an update no longer promotes the named link.**
+`KitSerializer._apply_supplier_terms` now fetches or creates the relationship,
+assigns only the submitted keys on an existing row, and performs a full save so
+derived costs are persisted coherently. `is_primary=True` is confined to the
+create branch. A SKU-only or lead-time-only edit therefore preserves the stored
+pack size, both costs, and the operator's primary selection, and files no false
+`PriceHistory` row. A real price edit still re-derives and persists its case
+price at the stored pack size. The endpoint-level contract, including a sibling
+that already holds the primary flag, is pinned by
+`inventory/tests/test_kit_supplier_terms_update.py`.
 
-**So the next attempt must not start by seeding the id.** The likelier shapes are
-a dirty check on the terms themselves (has the operator touched them since load)
-or dropping `is_primary` from `_apply_supplier_terms`' defaults on an update —
-and whichever is taken, that CONTROL has to be re-run against a fixture that
-carries `supplier_choice`, or it proves nothing.
+This closes the primary-write regression that made seeding `supplierId` unsafe;
+it does not close the stale cost and SKU persistence routes above. A future UI
+fix still needs to establish which supplier the visible terms belong to and
+clear or re-seed those terms when that identity changes.
 
 Until then the standing warning is the comment above the attribution line on
 that page: changing Supplier there is not a supported way to retarget the terms.

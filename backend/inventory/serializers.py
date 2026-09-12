@@ -1513,14 +1513,14 @@ class KitSupplierTermsSerializer(serializers.ModelSerializer):
 
     **Every field is optional, and an omitted one stays out of
     ``validated_data``.** That is load-bearing rather than lax:
-    :meth:`KitSerializer._apply_supplier_terms` sends a PARTIAL ``defaults``, and
-    ``derive_costs`` decides what an omitted cost means by comparing against the
-    stored row. A serializer default here would put a key the operator never
-    typed into that dict, which is exactly the ``setdefault`` that used to reset
-    a recorded pack size to 1 on every kit save. Model-level defaults
-    (``average_lead_time``, and the pack size this does not offer) are left to
-    the model, where a create still takes them and an update still leaves the
-    stored value alone.
+    :meth:`KitSerializer._apply_supplier_terms` assigns only the keys that reach
+    ``validated_data``, and ``derive_costs`` decides what an omitted cost means
+    by comparing against the stored row. A serializer default here would make
+    this block send a key the operator never typed, which is exactly the
+    ``setdefault`` that used to reset a recorded pack size to 1 on every kit
+    save. Model-level defaults (``average_lead_time``, and the pack size this
+    does not offer) are left to the model, where a create still takes them and
+    an update still leaves the stored value alone.
     """
 
     class Meta:
@@ -1720,22 +1720,63 @@ class KitSerializer(InventoryItemSerializer):
         pack size alone. ``inventory/tests/test_pack_size_write_guard.py`` pins
         that this path cannot reach the column.
 
-        The keys this does send remain a PARTIAL ``defaults``, and that is
-        safe: :func:`inventory.services.suppliers.derive_costs`, called from
+        The keys this does send remain a PARTIAL write, and that is safe:
+        :func:`inventory.services.suppliers.derive_costs`, called from
         ``ItemSupplier.save()``, decides what a partial write means by comparing
         against the stored row, so an omitted cost is left alone rather than
         re-derived from its twin. The nested serializer keeps it partial by
         declaring no defaults of its own.
+
+        **``is_primary=True`` is a CREATE-time convenience and now only reaches a
+        create.** It used to sit in the ``update_or_create`` ``defaults``, which
+        Django applies to the row it FINDS as well as the one it makes, so every
+        kit edit promoted this link and demoted whichever sibling the operator
+        had flagged — on a payload that named only a part number. A kit created
+        with terms still needs a primary, because a kit with no primary link is
+        not what any purchasing surface expects from "define a kit in one
+        request"; an EXISTING link's primary flag is the operator's, set through
+        ``/api/inventory/item-suppliers/``, and nothing in a terms block asks to
+        change it.
+
+        **Why this is a fetch-or-create and a FULL save rather than
+        ``create_defaults=``.** ``create_defaults`` is the obvious way to say
+        "on create only", and on today's tree it measures identically to this.
+        It is not used because it makes this path's correctness depend on a
+        repair that lives somewhere else. ``QuerySet.update_or_create`` saves
+        the row it found with ``update_fields`` restricted to its own
+        ``defaults`` keys, and ``package_cost`` is never one of them — the kit
+        terms do not offer it. So the ``package_cost`` that ``save()`` derives
+        from an edited ``unit_cost`` is computed and then dropped, leaving the
+        stored pair INCOHERENT: a unit price of 99.99 beside a case price of
+        2249.75 at a pack size of 25. ``ItemSupplier.save()`` compensates by
+        adding a derived column back to ``update_fields``, which is why the
+        defect is not reachable today — remove that block and a kit price edit
+        stores the new unit cost against the old case price, with a 200 and a
+        ``PriceHistory`` row asserting the pair. Saving the whole row instead
+        means this path never restricts ``update_fields`` at all, so the
+        derivation cannot be half-applied here whatever ``save()`` does later.
+
+        The lock and the transaction are kept from ``update_or_create``, whose
+        ``select_for_update()`` is the only thing serialising a concurrent
+        writer against the read that ``derive_costs`` compares to.
         """
         if not terms:
             return
-        defaults = {key: value for key, value in terms.items() if key != "supplier"}
-        defaults["is_primary"] = True
-        ItemSupplier.objects.update_or_create(
-            item=instance,
-            supplier=terms["supplier"],
-            defaults=defaults,
-        )
+        sent = {key: value for key, value in terms.items() if key != "supplier"}
+        with transaction.atomic():
+            link, created = ItemSupplier.objects.select_for_update().get_or_create(
+                item=instance,
+                supplier=terms["supplier"],
+                defaults={**sent, "is_primary": True},
+            )
+            if created:
+                return
+            # Only the keys the caller actually sent. An absent key is not a
+            # value: it must leave the stored column exactly as it was, which is
+            # what makes editing a SKU an edit to the SKU and nothing else.
+            for field, value in sent.items():
+                setattr(link, field, value)
+            link.save()
 
     def create(self, validated_data):
         validated_data["is_kit"] = True

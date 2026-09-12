@@ -1,10 +1,11 @@
 /**
  * The supplier lead-time surface names what its lateness is measured against.
  *
- * Every rate and variance this component reads scores the supplier link's
- * STANDING QUOTED lead time — never the delivery date the operator confirmed on
- * the order. Those are two promises, and a vendor that quotes 3 days, has the
- * order confirmed for day 10 and delivers on day 10 reaches this component as
+ * Every rate and variance this component reads scores the lead time the
+ * supplier quoted when each order was sent — never the delivery date the
+ * operator confirmed on the order. Those are two promises, and a vendor that
+ * quotes 3 days, has the order confirmed for day 10 and delivers on day 10
+ * reaches this component as
  * `expected_delivery_date == actual_delivery_date` beside `variance_days: 7,
  * was_over_quoted_lead_time: true`.
  *

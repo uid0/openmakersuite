@@ -342,13 +342,14 @@ const PurchasingReportPage: React.FC = () => {
                         Avg Actual Lead Time (days)
                       </Table.Th>
                       {/*
-                        Both of these are measured against the supplier link's
-                        standing quoted lead time, never against the delivery
-                        dates confirmed on the orders — a supplier can sit at a
-                        low rate here having hit every date it agreed to. The
-                        headers say the yardstick so nobody chases a vendor for
-                        the wrong broken promise, in the web's single copy of
-                        those words rather than a restatement from memory.
+                        Both of these are measured against the lead time the
+                        supplier quoted when each order was sent, never against
+                        the delivery dates confirmed on the orders — a supplier
+                        can sit at a low rate here having hit every date it
+                        agreed to. The headers say the yardstick so nobody
+                        chases a vendor for the wrong broken promise, in the
+                        web's single copy of those words rather than a
+                        restatement from memory.
                       */}
                       <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('avg_variance')}>
                         Avg Variance vs. {YARDSTICK_LABEL_TITLE} (days)

@@ -1881,7 +1881,7 @@ export interface PurchasingLeadTimeAnalysis {
   supplier_name: string;
   item_name: string;
   total_orders: number;
-  /** The supplier link's standing quote — the yardstick, not an order estimate. */
+  /** Mean lead time quoted when each order was sent — not its confirmed date. */
   avg_estimated_lead_time: number;
   avg_actual_lead_time: number;
   /** Against `avg_estimated_lead_time`, not against the confirmed delivery dates. */

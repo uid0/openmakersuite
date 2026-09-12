@@ -607,9 +607,10 @@ def test_the_performance_term_is_a_real_ten_percent_of_the_delivery_record():
     scoring that did not exist.
 
     Now it is that scoring: **the share of the deliveries recorded against this
-    supplier link that arrived no later than the vendor's STANDING QUOTED lead
-    time** — the yardstick because it is the promise the lead-time term scores,
-    not the order's separately confirmed ``expected_delivery_date``. Asserted by
+    supplier link that arrived no later than the lead time quoted when each
+    order was sent** — the yardstick because it is the promise the lead-time
+    term scores, not the order's separately confirmed
+    ``expected_delivery_date``. Asserted by
     subtracting each candidate's cost and lead-time contributions, computed here
     independently of the implementation, and checking that what is LEFT OVER is
     the link's on-time share times a tenth. An earlier version of this test

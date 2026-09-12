@@ -1428,6 +1428,26 @@ def _scan_ts(
 # --------------------------------------------------------------------------
 
 
+#: What each swept tree is CALLED in the report, as opposed to where it happens
+#: to sit on the machine doing the sweeping.
+#:
+#: These are logical source trees, and the distinction is not cosmetic.
+#: :func:`_roots` deliberately takes the backend root as "the directory this
+#: module's package lives in, whatever that directory is called" — which is
+#: exactly right for FINDING the tree and useless for NAMING it, because the
+#: docker-compose job bind-mounts ``./backend`` at ``/app``. Reporting the path
+#: relative to the checkout there printed ``Scanned: app``, so a sweep that had
+#: read the whole backend read as one that had skipped it, and a test written
+#: against the name failed on the deployment layout rather than on the code.
+#:
+#: Stated ONCE, and read from here by every site that names a tree — the
+#: scanned label, the unscanned label, and the tests that assert on them — so a
+#: label and its assertion cannot drift apart. They were previously typed out
+#: at three call sites, which is how they came to disagree with each other.
+BACKEND_TREE = "backend"
+FRONTEND_TREE = "frontend/src"
+
+
 def _roots(start: Path | None = None) -> tuple[Path, Path, Path | None]:
     """``(base, backend, frontend_or_None)``, anchored on this module's own home.
 
@@ -1436,6 +1456,10 @@ def _roots(start: Path | None = None) -> tuple[Path, Path, Path | None]:
     frontend tree at all, and a search for both would simply crash there. The
     backend root is the directory this module's package lives in, whatever that
     directory is called, and the frontend is looked for beside it.
+
+    That last clause is why the report does not name a tree by its resolved
+    path: see :data:`BACKEND_TREE` and :data:`FRONTEND_TREE`, which carry the
+    names, and the reasoning.
     """
     backend = (start or Path(__file__).resolve()).parents[1]
     frontend = backend.parent / "frontend" / "src"
@@ -1496,7 +1520,7 @@ def scan(start: Path | None = None) -> Report:
     # mounts the contents of ``backend/`` at ``/app``; reporting that mount
     # basename as ``app`` makes a complete backend sweep look like it skipped
     # the backend altogether.
-    report = Report(anchors=anchors, order=order_shape, scanned=["backend"])
+    report = Report(anchors=anchors, order=order_shape, scanned=[BACKEND_TREE])
 
     functions: dict[str, dict] = {}
     for path in _walk(backend, ".py"):
@@ -1531,9 +1555,9 @@ def scan(start: Path | None = None) -> Report:
         # report has to be able to tell them apart — the frontend arm is covered
         # by the Frontend Lint job on a full checkout, but a run that could not
         # see the tree must not read as one that cleared it.
-        report.unscanned.append("frontend/src (not present in this checkout)")
+        report.unscanned.append(f"{FRONTEND_TREE} (not present in this checkout)")
     else:
-        report.scanned.append("frontend/src")
+        report.scanned.append(FRONTEND_TREE)
         for path in _walk(frontend, ".ts", ".tsx"):
             rel = rel_to_base(path)
             try:

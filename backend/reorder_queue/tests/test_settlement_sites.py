@@ -172,8 +172,8 @@ class TestDerivationIsHonoured:
         """
         report = sweep
         assert report.scanned, "the report claims to have read nothing"
-        assert "frontend" in " ".join(
-            report.scanned + report.unscanned
+        assert any(
+            settlement_sites.FRONTEND_TREE in entry for entry in report.scanned + report.unscanned
         ), "the frontend tree is neither reported as scanned nor as unreadable"
 
     def test_the_command_line_form_reports_and_exits_zero(self, capsys):
@@ -454,7 +454,7 @@ class TestASweepCannotClaimAClearItDidNotEarn:
         assert settlement_sites.main([]) == 0
 
         printed = capsys.readouterr().out
-        assert "NOT scanned: frontend/src" in printed
+        assert f"NOT scanned: {settlement_sites.FRONTEND_TREE}" in printed
         assert "No site bypasses the derivation." not in printed
         assert "NOT a whole-tree sweep" in printed
 

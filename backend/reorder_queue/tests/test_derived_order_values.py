@@ -32,6 +32,7 @@ exercises per value.
 
 import importlib
 import json
+import pathlib
 from decimal import Decimal
 
 from django.contrib import admin
@@ -621,10 +622,64 @@ class TestTheGuardCoversEveryValue:
             assert anchor.all_fields, f"{anchor.column} is derived from nothing"
 
     def test_the_available_tree_bypasses_no_values_derivation(self, sweep):
-        assert sweep.findings == []
-        assert sweep.unreadable == []
-        assert "backend" in sweep.scanned
-        assert sweep.unscanned in ([], ["frontend/src (not present in this checkout)"])
+        """No site bypasses a derivation, in whatever tree this run could read.
+
+        Deliberately NOT ``assert sweep.swept_whole_tree``, and deliberately
+        not a literal tree name either: the docker-compose job mounts
+        ``./backend`` at ``/app`` and carries no frontend tree, so a run there
+        structurally cannot sweep everything. Both earlier versions of this
+        test failed that job rather than the code — once by demanding a whole
+        tree, once by hardcoding ``"backend"``.
+
+        The names come from :data:`settlement_sites.BACKEND_TREE` /
+        :data:`FRONTEND_TREE`, the same constants the report itself is built
+        from, so the label and the assertion cannot drift apart.
+        """
+        assert sweep.findings == [], "\n\n" + "\n\n".join(str(f) for f in sweep.findings)
+        assert sweep.unreadable == [], "a file in a swept tree was not judged"
+        assert settlement_sites.BACKEND_TREE in sweep.scanned
+        assert sweep.unscanned in (
+            [],
+            [f"{settlement_sites.FRONTEND_TREE} (not present in this checkout)"],
+        )
+
+    def test_a_backend_only_checkout_is_judged_and_says_what_it_could_not_read(self, tmp_path):
+        """The shape CI actually runs this in: the backend mounted alone.
+
+        The docker-compose job mounts ``./backend`` at ``/app`` with no
+        frontend tree beside it, so every guard assertion has to hold in a
+        checkout that CANNOT be swept whole. Two successive versions of the
+        sibling test above asserted something that shape cannot satisfy and
+        passed on a full local checkout while failing that job — the guard
+        reporting correctly and the test demanding the impossible.
+
+        This pins the real contract instead, and pins it in the shape that
+        broke: the values are still derived, no site bypasses one, nothing is
+        left unreadable, the sweep is honest that it was NOT whole, and the
+        missing tree is NAMED rather than passed over.
+        """
+        package = tmp_path / "app" / "reorder_queue"
+        package.mkdir(parents=True)
+        real_package = pathlib.Path(settlement_sites.__file__).resolve().parent
+        for name in ("models.py", settlement_sites.ROUTING_MODULE):
+            (package / name).write_text((real_package / name).read_text())
+
+        report = settlement_sites.scan(start=package / "settlement_sites.py")
+
+        assert report.anchors, "no order-level value was derived"
+        assert report.findings == []
+        assert report.unreadable == []
+        assert report.scanned == [settlement_sites.BACKEND_TREE], (
+            "the backend tree is named by its logical identity, not by the "
+            "directory the checkout happens to be mounted at"
+        )
+        assert not report.swept_whole_tree, (
+            "a backend-only checkout cannot be swept whole; if this now passes, "
+            "the frontend arm silently believes it ran"
+        )
+        assert report.unscanned == [
+            f"{settlement_sites.FRONTEND_TREE} (not present in this checkout)"
+        ], "the frontend tree was neither swept nor reported as unscanned"
 
     def test_the_report_names_every_value_and_its_re_derivation(self, capsys):
         assert settlement_sites.main([]) == 0

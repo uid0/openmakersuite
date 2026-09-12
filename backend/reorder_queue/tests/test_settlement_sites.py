@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import re
 import sys
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -193,16 +194,16 @@ class TestDerivationIsHonoured:
     def test_the_report_names_the_write_shapes_it_cannot_see(self, capsys):
         """A clean run must not read as "there is nothing left".
 
-        The write arm has been blind to a write SHAPE three times over, so the
-        report carries its own edges: what it can see and what it cannot, every
-        run, beside the clean verdict. The module's docstring says the limits
-        are stated in the report — this is that claim being honoured rather
-        than asserted.
+        The write arm has been blind to write shapes it did not know about —
+        see ``WRITE_ARM_SURPRISES`` — so the report carries its own edges: what
+        it can see and what it cannot, every run, beside the clean verdict. The
+        module's docstring says the limits are stated in the report; this is
+        that claim being honoured rather than asserted.
         """
         assert settlement_sites.main([]) == 0
         printed = capsys.readouterr().out
 
-        assert "Write shapes this scan CAN see:" in printed
+        assert "Write shapes this scan CAN see" in printed
         assert "Write shapes it CANNOT see" in printed
         for shape in settlement_sites.WRITE_SHAPES_SEEN:
             assert shape in printed
@@ -210,8 +211,80 @@ class TestDerivationIsHonoured:
             assert shape in printed
         assert settlement_sites.WRITE_SHAPES_UNSEEN, (
             "the scan claims to name its own holes but lists none — that is a "
-            "claim of completeness this arm has already been wrong about twice"
+            "claim of completeness this arm has already been wrong about"
         )
+
+    def test_every_count_the_report_states_is_the_length_of_the_list_it_states_it_for(self, capsys):
+        """A report about the guard's own limits may not miscount them.
+
+        This is the first defect in this file's history in PROSE. The number of
+        write shapes the arm was blind to was written out by hand in three
+        places by one change — the module docstring, the comment above the
+        printing code, and ``AGENTS.md`` — and the three disagreed with each
+        other AND with every list in the report. A self-contradicting count,
+        sitting inside the one report whose whole job is to state honestly what
+        the guard cannot see.
+
+        So it is not checked here that the three agree. It is checked that
+        every number the report prints was COUNTED off the list it introduces,
+        which is what leaves nothing to keep in step.
+        """
+        assert settlement_sites.main([]) == 0
+        printed = capsys.readouterr().out
+
+        counted = {}
+        heading = None
+        for line in printed.splitlines():
+            stated = re.match(r"^Write shapes .*?\((\d+)\)", line)
+            if stated:
+                heading = int(stated.group(1))
+                counted[heading] = counted.get(heading, 0)
+                bullets = 0
+                continue
+            if heading is None:
+                continue
+            if line.startswith(("  + ", "  - ")):
+                bullets += 1
+                counted[heading] = bullets
+            elif line.strip():
+                heading = None
+
+        assert sorted(counted) == sorted(
+            {len(settlement_sites.WRITE_SHAPES_SEEN), len(settlement_sites.WRITE_SHAPES_UNSEEN)}
+        ), "the report stated a count for a list it did not print"
+        for stated_count, bullets in counted.items():
+            assert stated_count == bullets, (
+                f"the report says {stated_count} write shapes and then prints " f"{bullets} of them"
+            )
+
+        assert (
+            f"reach {len(settlement_sites.WRITE_ARM_SURPRISES)} times" in printed
+        ), "the surprise count in the report is not len(WRITE_ARM_SURPRISES)"
+
+    def test_no_prose_restates_a_count_the_lists_already_carry(self):
+        """The three drifting copies, kept out rather than merely corrected.
+
+        Correcting them would have left three hand-written numbers that agree
+        today. The fix is that there is nothing left to keep in sync, so this
+        fails if a spelled-out or written-out count of these lists comes back
+        into the guard's own prose or into ``AGENTS.md``.
+        """
+        restated = re.compile(
+            r"blind[^.\n]{0,40}?\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b"
+            r"|grown\s+(?:\d+|once|twice|three|four|five)\b"
+            r"|surprised\s+(?:\d+|once|twice|three|four|five|six)\b",
+            re.IGNORECASE,
+        )
+        repo = Path(settlement_sites.__file__).resolve().parents[2]
+        for path in (Path(settlement_sites.__file__).resolve(), repo / "AGENTS.md"):
+            offenders = [
+                f"{path.name}:{number}: {line.strip()}"
+                for number, line in enumerate(path.read_text().splitlines(), start=1)
+                if restated.search(line)
+            ]
+            assert not offenders, "a count of the blind list is restated in prose: " + "; ".join(
+                offenders
+            )
 
     def test_the_command_line_form_can_list_the_whole_derived_set(self, capsys, sweep):
         """``--sites`` is how the derived set was read off for the PR."""
@@ -1377,6 +1450,285 @@ class TestTheWriteArmDischargesOnlyAlongRealCallEdges:
         )
         assert findings == []
 
+    def test_an_unrelated_receiver_in_the_same_module_does_not_discharge_it(self, sweep):
+        """The reported hole, one scope tighter than the one above.
+
+        ``appa`` defines the writer AND, beside it, a function that calls
+        ``close_short()`` on a purchase-order LINE — the model's own method,
+        nothing to do with the module-level function of that name — and
+        refreshes. Resolving a same-module call by name alone credited that as
+        a call edge into the writer, so an uncalled settlement writer was
+        reported clean on a coincidence of naming.
+        """
+        findings = self._findings(
+            sweep,
+            [
+                (
+                    "appa/service.py",
+                    "from reorder_queue.services.receiving import refresh_receipt_status\n"
+                    "\n\n" + self.WRITER + "\n\n"
+                    "def close_lines_short(purchase_order, closures):\n"
+                    "    for line, reason in closures:\n"
+                    "        line.close_short(reason=reason)\n"
+                    "    refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert [f.arm for f in findings] == ["write"]
+        assert "close_short" in findings[0].detail
+
+    def test_a_sibling_method_is_not_reached_by_a_bare_name(self, sweep):
+        """A bare ``close_short()`` inside a method does not reach the class's own.
+
+        Python looks a bare name up through enclosing FUNCTIONS and then the
+        module; a class body is not in that chain. Treating it as one invents
+        an edge into a method nothing calls.
+        """
+        findings = self._findings(
+            sweep,
+            [
+                (
+                    "appa/service.py",
+                    "from reorder_queue.services.receiving import refresh_receipt_status\n"
+                    "\n\n"
+                    "class Closer:\n"
+                    "    def close_short(self, line):\n"
+                    "        line.quantity_received = 0\n"
+                    "\n"
+                    "    def run(self, purchase_order):\n"
+                    "        close_short(purchase_order)\n"
+                    "        refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert [f.arm for f in findings] == ["write"]
+        assert "close_short" in findings[0].detail
+
+    def test_self_reaches_the_writer_on_its_own_class(self, sweep):
+        findings = self._findings(
+            sweep,
+            [
+                (
+                    "appa/service.py",
+                    "from reorder_queue.services.receiving import refresh_receipt_status\n"
+                    "\n\n"
+                    "class Closer:\n"
+                    "    def _close(self, line):\n"
+                    "        line.quantity_received = 0\n"
+                    "\n"
+                    "    def run(self, line, purchase_order):\n"
+                    "        self._close(line)\n"
+                    "        refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert findings == []
+
+    def test_self_does_not_reach_a_same_named_method_on_another_class(self, sweep):
+        """``self.f()`` reaches this class's ``f``, not the neighbour's."""
+        findings = self._findings(
+            sweep,
+            [
+                (
+                    "appa/service.py",
+                    "from reorder_queue.services.receiving import refresh_receipt_status\n"
+                    "\n\n"
+                    "class Writer:\n"
+                    "    def _close(self, line):\n"
+                    "        line.quantity_received = 0\n"
+                    "\n\n"
+                    "class Caller:\n"
+                    "    def _close(self, line):\n"
+                    "        return None\n"
+                    "\n"
+                    "    def run(self, line, purchase_order):\n"
+                    "        self._close(line)\n"
+                    "        refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert [f.arm for f in findings] == ["write"]
+        assert "_close" in findings[0].detail
+
+    def test_naming_the_class_outright_does_reach_its_method(self, sweep):
+        findings = self._findings(
+            sweep,
+            [
+                (
+                    "appa/service.py",
+                    "from reorder_queue.services.receiving import refresh_receipt_status\n"
+                    "\n\n"
+                    "class Writer:\n"
+                    "    def close(self, line):\n"
+                    "        line.quantity_received = 0\n"
+                    "\n\n"
+                    "def run(writer, line, purchase_order):\n"
+                    "    Writer.close(writer, line)\n"
+                    "    refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert findings == []
+
+    def test_a_receiver_that_is_not_a_plain_name_discharges_nothing(self, sweep):
+        """``get_closer().close()`` names no receiver this scan can identify."""
+        findings = self._findings(
+            sweep,
+            [
+                (
+                    "appa/service.py",
+                    "from reorder_queue.services.receiving import refresh_receipt_status\n"
+                    "\n\n"
+                    "class Writer:\n"
+                    "    def close(self, line):\n"
+                    "        line.quantity_received = 0\n"
+                    "\n\n"
+                    "def get_closer():\n"
+                    "    return Writer()\n"
+                    "\n\n"
+                    "def run(line, purchase_order):\n"
+                    "    get_closer().close(line)\n"
+                    "    refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert [f.arm for f in findings] == ["write"]
+        assert "close" in findings[0].detail
+
+
+class TestTheFrontendArmJudgesValuesAndNotKeys:
+    """A property KEY names the API's shape; the VALUE beside it is an expression.
+
+    The arm used to decide that with one regex anchored at the start of the
+    line, and skipped the WHOLE line when it matched. Two failures fell out of
+    one rule, in opposite directions:
+
+    * an object literal whose value re-derives settlement — ``ordered:
+      line.quantity_ordered - line.quantity_received,`` — begins with a key, so
+      the judgement in it was thrown away with the key. That is the arm failing
+      OPEN on the exact shape it exists to catch;
+    * a literal written along one line — ``{ quantity_received: a,
+      quantity_ordered: b }`` — does not begin with a key, so two keys naming
+      the API's shape were read as one expression bringing two settlement
+      fields together, and flagged.
+
+    One rule replaces both: a key is a key wherever it sits, and a value is a
+    value wherever it sits.
+    """
+
+    def _findings(self, sweep, line):
+        findings, _sites = settlement_sites._scan_ts(sweep.anchor, "frontend/src/x.ts", line)
+        return findings
+
+    def test_a_value_that_re_derives_a_variance_is_flagged_inside_an_object_literal(self, sweep):
+        findings = self._findings(
+            sweep, "  ordered: line.quantity_ordered - line.quantity_received,"
+        )
+        assert [f.arm for f in findings] == ["predicate"]
+
+    def test_a_one_line_object_literal_naming_the_shape_is_not_a_judgement(self, sweep):
+        findings = self._findings(
+            sweep, "  const payload = { quantity_received: qty, quantity_ordered: ordered };"
+        )
+        assert findings == []
+
+    def test_an_interface_declaration_is_still_not_a_judgement(self, sweep):
+        assert self._findings(sweep, "  quantity_received: number;") == []
+        assert self._findings(sweep, "  readonly closed_short_at?: string | null;") == []
+
+    def test_a_bare_expression_is_still_judged(self, sweep):
+        """The control: dropping keys must not drop everything."""
+        findings = self._findings(
+            sweep, "  const variance = line.quantity_received - line.quantity_ordered;"
+        )
+        assert [f.arm for f in findings] == ["predicate"]
+
+    def test_a_ternary_is_not_mistaken_for_a_property_key(self, sweep):
+        """``cond ? a : b`` puts a name before a colon and declares nothing.
+
+        Without the delimiter the key pattern is anchored on, the first branch
+        of every ternary would be stripped as a key — which would be the
+        original fail-open back in a new place.
+        """
+        findings = self._findings(
+            sweep, "  const n = short ? line.quantity_received : line.quantity_ordered;"
+        )
+        assert [f.arm for f in findings] == ["predicate"]
+
+
+class TestTheSweepDoesNotWalkVendoredSource:
+    """A virtualenv inside the tree is not this repository's code.
+
+    The skip list named ``.venv`` and nothing else, so an environment called
+    anything else — ``venv``, ``env``, ``.venv-3.14`` — had the whole of its
+    ``site-packages`` swept as first-party source. That is cost and noise on
+    its own, and it widens the surface the run-failing "could not read this
+    file" rule sits on: a third-party module the running interpreter cannot
+    parse would fail this repository's build on somebody else's syntax.
+
+    So the environment is DETECTED, by the ``pyvenv.cfg`` every ``venv`` writes
+    at its root, rather than named.
+    """
+
+    def _vendored(self, checkout, name, *, marker=True):
+        env = checkout / "backend" / name
+        packages = env / "lib" / "python3.14" / "site-packages" / "thirdparty"
+        packages.mkdir(parents=True)
+        if marker:
+            (env / "pyvenv.cfg").write_text("home = /usr/bin\n")
+        # Valid Python that would be swept, plus source no interpreter here can
+        # parse — which is what turns a walked vendor tree into a failed run.
+        (packages / "ok.py").write_text("value = 1\n")
+        (packages / "broken.py").write_text("def unparseable(:\n")
+        return packages
+
+    def test_a_virtualenv_by_any_name_is_not_swept(self, checkout):
+        self._vendored(checkout, "venv")
+        self._vendored(checkout, ".venv-3.14")
+
+        report = scan_checkout(checkout)
+
+        assert report.unreadable == [], "the sweep walked into a virtualenv"
+        assert report.swept_whole_tree
+        assert not [path for path, *_ in report.sites if "site-packages" in path]
+
+    def test_a_vendored_site_packages_without_a_marker_is_not_swept_either(self, checkout):
+        """A tree copied in without the marker still is not this repo's source."""
+        self._vendored(checkout, "vendor", marker=False)
+
+        report = scan_checkout(checkout)
+
+        assert report.unreadable == []
+
+    def test_the_repository_own_source_is_still_swept(self, checkout):
+        """The control. A skip rule that skips everything reports a clean sweep."""
+        self._vendored(checkout, "venv")
+        (checkout / "backend" / "reorder_queue" / "broken.py").write_text("def x(:\n")
+
+        report = scan_checkout(checkout)
+
+        assert [path for path, _ in report.unreadable] == ["backend/reorder_queue/broken.py"]
+
+    def test_a_checkout_living_under_a_skipped_name_is_still_swept(self, tmp_path):
+        """The skip is about directories BELOW the root, not about the path to it.
+
+        The filter this replaced tested every component of the absolute path,
+        so a checkout under a directory called ``media`` — or inside any
+        virtualenv, which is where a ``pip install -e .`` checkout normally
+        lives — matched on an ancestor nobody chose and yielded nothing. A
+        sweep of no files reports as a sweep that found no site.
+        """
+        home = tmp_path / "media"
+        package = home / "backend" / "reorder_queue"
+        package.mkdir(parents=True)
+        real_models = Path(settlement_sites.__file__).resolve().parent / "models.py"
+        (package / "models.py").write_text(real_models.read_text())
+        (home / "frontend" / "src").mkdir(parents=True)
+
+        report = settlement_sites.scan(start=package / "settlement_sites.py")
+
+        assert report.sites, "the sweep read nothing and would have reported it clean"
+
 
 class TestTheScannerSeesAnUpdateItCannotResolve:
     """An ``update()`` it cannot trace back to a model is treated as a line.
@@ -1827,13 +2179,37 @@ class TestOnlyASettlementChangeReDerivesTheOrder:
         assert destination.status == PurchaseOrder.Status.PARTIALLY_RECEIVED, "the order it joined"
 
     def test_the_dirty_check_reads_the_same_fields_the_guard_derives(self, sweep):
-        """One definition, not two.
+        """One definition, two independent derivations of it, held to agree.
 
-        The signal decides "did settlement move?" from the closure
-        ``settlement_sites`` walks off ``PurchaseOrderItem.is_settled`` — the
-        same one the guard enforces the rest of the tree against. A field list
-        typed into the signal module would be the hand-maintained list this
-        whole change exists to delete, one layer down.
+        The signal decides "did settlement move?" by following
+        ``PurchaseOrderItem.is_settled`` through the IMPORTED CLASS; the guard
+        follows the same seed through the SOURCE. A field list typed into
+        either would be the hand-maintained list this whole change exists to
+        delete, one layer down — and either derivation drifting from the other
+        means one of them has stopped describing the definition.
         """
         assert settlement_signals.settlement_fields() == sweep.anchor.all_fields
         assert settlement_signals.settlement_fields(), "the dirty check checks nothing"
+
+    def test_the_dirty_check_never_reads_a_source_file(self, monkeypatch):
+        """A line save must not depend on ``models.py`` being on disk.
+
+        The closure used to be taken by handing ``models.py`` to the guard's
+        AST walk from inside ``pre_save``, so every purchase-order line write
+        depended on the source being present, readable and parseable by the
+        running interpreter — and any of those failing failed a DATABASE WRITE
+        rather than a build. The class is already imported; nothing on this
+        path needs the file.
+        """
+
+        def refuse(self, *args, **kwargs):
+            raise AssertionError(f"the write path read source: {self}")
+
+        settlement_signals.settlement_fields.cache_clear()
+        monkeypatch.setattr(Path, "read_text", refuse)
+        monkeypatch.setattr(Path, "open", refuse)
+        try:
+            assert settlement_signals.settlement_fields()
+        finally:
+            monkeypatch.undo()
+            settlement_signals.settlement_fields.cache_clear()

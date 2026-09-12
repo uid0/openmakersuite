@@ -790,10 +790,10 @@ class InventoryItemSerializer(VendorGatedSerializerMixin, serializers.ModelSeria
     #
     # A per-surface web reader set used to be maintained here by hand. It is
     # gone deliberately: nothing checked it, so it was only ever true once.
-    # DERIVE it when a removal is actually on the table
-    # (``rg supplier_sku frontend/src``), and when you do, count a read only
-    # where the object is an ``InventoryItem`` (or ``Kit``) payload from THIS
-    # serializer. Reads off an ``ItemSupplier`` row (``suppliers[]``,
+    # DERIVE it when a removal is actually on the table: for every key asserted
+    # by the authoritative test above, run ``rg '<field>' frontend/src``. Count
+    # a read only where the object is an ``InventoryItem`` (or ``Kit``) payload
+    # from THIS serializer. Reads off an ``ItemSupplier`` row (``suppliers[]``,
     # ``SupplierRelationshipForm``) are that row's own columns, and the order
     # pad's look-alike keys are built per ``item_supplier`` in
     # ``reorder_queue/views.py:by_supplier`` — neither is this field.

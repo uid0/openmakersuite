@@ -571,7 +571,11 @@ class _PyScanner:
 
     @staticmethod
     def _scope_nodes(scope: ast.AST):
-        stack = list(scope.body) if isinstance(scope, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef)) else []
+        stack = (
+            list(scope.body)
+            if isinstance(scope, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef))
+            else []
+        )
         while stack:
             node = stack.pop()
             yield node
@@ -644,7 +648,9 @@ class _PyScanner:
         for name in names:
             candidates = set().union(*(self.imports[scope].get(name, set()) for scope in scopes))
             shadowed = any(name in self.shadows[scope] for scope in scopes)
-            visible[name] = next(iter(candidates)) if len(candidates) == 1 and not shadowed else None
+            visible[name] = (
+                next(iter(candidates)) if len(candidates) == 1 and not shadowed else None
+            )
         return visible
 
     def _class_dotted(self) -> frozenset[str]:

@@ -201,12 +201,20 @@ task with a pointer comment at the line.
 ## Cross-project
 
 ScanTTY was checked against its REAL remote default branch (`uid0/scantty` main
-at `de380e1f`), not a local checkout. **No contract change**: `reorder_display`
-gained two keys additively and ScanTTY does not read that block; it decodes
-`reorder_qty` from `check_material_stock` into `MaterialStockAlert.ReorderQty`
-but never renders or files with it, so correcting that value is safe there. Its
-own reorder form has the operator type the quantity, prefilled from the
-supplier's pack size, so it already shows what it files.
+at `de380e1f`), not a local checkout. The reorder-quantity change made no
+contract change: `reorder_display` gained two keys additively and ScanTTY does
+not read that block; it decodes `reorder_qty` from `check_material_stock` into
+`MaterialStockAlert.ReorderQty` but never renders or files with it, so correcting
+that value is safe there. Its own reorder form has the operator type the
+quantity, prefilled from the supplier's pack size, so it already shows what it
+files.
+
+The later anonymous-deduplication change does alter the create response
+contract. ScanTTY safely ignores the additive `already_requested` field, but
+until it reads that marker it reports every successful response as “created,”
+including a 200 response where the server filed no row. The authoritative wire
+shape and compatibility note live on `duplicate_response` in
+`backend/reorder_queue/serializers.py`.
 
 ## Evidence
 

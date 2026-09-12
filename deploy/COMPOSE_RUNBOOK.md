@@ -71,7 +71,7 @@ or when investigating drift — is:
 ```bash
 # 1. Ensure the database is up.
 $COMPOSE up -d db
-$COMPOSE exec db pg_isready -U "${POSTGRES_USER:-makerspace}"
+$COMPOSE exec db pg_isready -U "${POSTGRES_USER:-makerspace}" -d "${POSTGRES_DB:-makerspace_inventory}"
 
 # 2. Inspect pending migrations against the live DB. The --no-deps flag
 #    keeps this from accidentally starting backend/celery/etc. SKIP_DB_MIGRATIONS=1
@@ -277,7 +277,7 @@ git pull
 export GIT_HASH=$(git rev-parse --short HEAD)
 $COMPOSE build
 $COMPOSE up -d db
-$COMPOSE exec db pg_isready -U "${POSTGRES_USER:-makerspace}"
+$COMPOSE exec db pg_isready -U "${POSTGRES_USER:-makerspace}" -d "${POSTGRES_DB:-makerspace_inventory}"
 $COMPOSE run --rm --no-deps -e SKIP_DB_MIGRATIONS=1 backend \
     python manage.py showmigrations --plan --no-color
 $COMPOSE run --rm --no-deps -e SKIP_DB_MIGRATIONS=1 backend \

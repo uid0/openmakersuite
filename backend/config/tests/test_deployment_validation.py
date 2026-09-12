@@ -441,6 +441,69 @@ class TestDeploymentArtifactsAC36:
             "(checks DB + cache + broker; 503s on failure)."
         )
 
+    def test_pg_isready_probes_name_a_database(self):
+        """Every shipped `pg_isready` probe must pass `-d`.
+
+        `pg_isready` defaults the database name to the *user* name, and it
+        exits 0 whenever the server answers at all — including when the
+        server answers by rejecting the connection. So a probe that omits
+        `-d` still reports healthy while postgres logs
+
+            FATAL:  database "makerspace" does not exist
+
+        once per probe interval, forever. Those lines land in CI's "Show
+        logs on failure" dump and in `docker compose logs`, where they
+        crowd out the real failure: on 2026-09-12 a repeating FATAL from
+        the dev compose db probe was read as the cause of a job that had
+        actually failed on a single test. A permanently-complaining probe
+        trains readers to skip fatal errors, which is what hides a real one.
+
+        The user and database names themselves are correct everywhere
+        (`makerspace` / `makerspace_inventory`); only the probes were wrong.
+        """
+        probe_files = [
+            "docker-compose.yml",
+            "docker-compose.prod.yml",
+            ".github/workflows/ci.yml",
+            "diagnose.sh",
+            "scripts/diagnose.sh",
+            "deploy/COMPOSE_RUNBOOK.md",
+            "deploy/k8s/base/postgres-statefulset.yaml",
+            "deploy/helm/openmakersuite/templates/postgres.yaml",
+        ]
+        offenders = []
+        for rel in probe_files:
+            path = REPO_ROOT / rel
+            assert path.is_file(), f"missing file with a pg_isready probe: {rel}"
+            lines = path.read_text().splitlines()
+            for i, line in enumerate(lines, start=1):
+                if "pg_isready" not in line or line.lstrip().startswith("#"):
+                    continue
+                if line.strip() == "- pg_isready":
+                    # k8s/Helm exec-probe form: the flags are their own
+                    # list items on the following lines. Scan only those
+                    # items, so an unrelated later line carrying `-d`
+                    # cannot vouch for this probe.
+                    flags = []
+                    for nxt in lines[i:]:
+                        stripped = nxt.strip()
+                        if not stripped.startswith("- "):
+                            break
+                        flags.append(stripped[2:])
+                    ok = "-d" in flags
+                else:
+                    # Shell/one-liner form: `-d` must be on the same line.
+                    ok = bool(re.search(r"(^|\s)-d(\s|$)", line))
+                if not ok:
+                    offenders.append(f"{rel}:{i}: {line.strip()}")
+
+        assert not offenders, (
+            "pg_isready probe(s) omit `-d`, so they ask postgres for a "
+            "database named after the user. The probe still exits 0 and the "
+            "check goes healthy, but every probe logs a FATAL into the "
+            "container log and CI's failure dump:\n  " + "\n  ".join(offenders)
+        )
+
     def test_helm_backend_uses_livez_readyz_probes(self):
         """AC-11/AC-12/AC-33: Helm chart defaults must match the k8s + compose
         liveness/readiness contract (livez for liveness, readyz for readiness).

@@ -22,7 +22,7 @@ echo ""
 
 # Check database container
 echo "3. Checking database..."
-if docker compose -f docker compose.prod.yml exec -T db pg_isready -U makerspace 2>/dev/null; then
+if docker compose -f docker compose.prod.yml exec -T db pg_isready -U makerspace -d makerspace_inventory 2>/dev/null; then
     echo "✅ Database is accepting connections"
 
     # Try to connect with the password from .env

@@ -16,7 +16,15 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U makerspace"]
+      # -d is required, not optional: pg_isready defaults the database name to
+      # the user name, so `-U makerspace` alone asks for a database called
+      # "makerspace" that does not exist here. pg_isready still exits 0 (the
+      # server answered, which is all it reports), so the check goes healthy
+      # while postgres logs `FATAL: database "makerspace" does not exist` on
+      # every probe — every 10s, for the life of the container, straight into
+      # CI's "Show logs on failure" dump. $$VAR reads the container's own
+      # environment (set above), so this cannot drift from POSTGRES_DB/USER.
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 10s
       timeout: 5s
       retries: 5

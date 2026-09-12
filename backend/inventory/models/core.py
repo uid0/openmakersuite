@@ -802,10 +802,14 @@ class InventoryItem(OwnableModel):
             ordered_request = (
                 self.reorder_requests.filter(status="ordered").order_by("-ordered_at").first()
             )
-        if ordered_request and ordered_request.ordered_at and self.average_lead_time:
-            from datetime import timedelta
+        if ordered_request and ordered_request.ordered_at and self.average_lead_time is not None:
+            # The SAME derivation the reorder queue publishes as
+            # ``ReorderRequest.estimated_delivery`` — two screens answering one
+            # question must not count the quote in two units. See
+            # :mod:`inventory.services.lead_times`.
+            from inventory.services.lead_times import published_delivery_date
 
-            return ordered_request.ordered_at.date() + timedelta(days=self.average_lead_time)
+            return published_delivery_date(ordered_request.ordered_at, self.average_lead_time)
         return None
 
     @property
@@ -1501,7 +1505,8 @@ class ItemSupplier(models.Model):
     # That a stored 7 cannot be told from a quoted 7 is a schema-level absence
     # and is deliberately still open (``oms-lead-time-nullable``).
     average_lead_time = models.PositiveIntegerField(
-        default=7, help_text="Average lead time in days from this supplier"
+        default=7,
+        help_text="Average lead time in CALENDAR days from this supplier",
     )
 
     # Preferences

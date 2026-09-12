@@ -317,9 +317,17 @@ class TestStatusTransitions:
         assert item_supplier.is_discontinued is True
         assert item_supplier.is_active is False
 
-    def test_add_business_days_skips_weekend(self):
-        # 2026-01-15 is a Thursday; +3 business days -> Tuesday 2026-01-20.
-        assert services.add_business_days(date(2026, 1, 15), 3) == date(2026, 1, 20)
+    def test_the_quote_becomes_a_date_in_calendar_days_across_a_weekend(self):
+        """2026-01-15 is a Thursday; a three-day quote lands on the Sunday.
+
+        The weekend is NOT skipped. ``services.add_business_days`` used to be
+        the only route from a quote to a date and skipped it, which is how the
+        published date drifted off the unit the delivery is graded in — see
+        :mod:`inventory.services.lead_times`.
+        """
+        from inventory.services.lead_times import published_delivery_date
+
+        assert published_delivery_date(date(2026, 1, 15), 3) == date(2026, 1, 18)
 
 
 class TestPurchaseOrderAggregates:

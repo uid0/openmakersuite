@@ -38,7 +38,6 @@ meet on a PO line and the reconciliation between them is deliberate:
 
 from __future__ import annotations
 
-from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -49,6 +48,7 @@ from rest_framework import serializers
 
 from inventory.models import ItemSupplier
 from inventory.services.kits import build_kit_snapshot
+from inventory.services.lead_times import published_delivery_date
 from inventory.services.pack_size import declares_a_case
 from inventory.services.packaging import order_level, parse_at_level, resolve_base_quantity
 from inventory.services.pricing import unit_price_of
@@ -441,30 +441,15 @@ def recalculate_estimated_total(purchase_order):
     return total
 
 
-def add_business_days(start_date, business_days):
-    """Add business days to a date (excluding weekends)."""
-    if isinstance(start_date, timezone.datetime):
-        start_date = start_date.date()
-
-    current_date = start_date
-    days_added = 0
-
-    while days_added < business_days:
-        current_date += timedelta(days=1)
-        # Monday = 0, Sunday = 6
-        if current_date.weekday() < 5:  # Monday to Friday
-            days_added += 1
-
-    return current_date
-
-
 def update_reorder_requests_from_po(purchase_order):
     """Update associated ReorderRequest objects when a PurchaseOrder is finalized.
 
     Updates requests with:
     - order_number (PO number)
     - actual_cost (from PO line items)
-    - estimated_delivery (calculated from expected_delivery_date or lead time)
+    - estimated_delivery (the order's confirmed date, else the supplier link's
+      quoted lead time counted in CALENDAR days via
+      ``inventory.services.lead_times.published_delivery_date``)
     - ordered_at (when PO was sent)
     - status = "ordered"
 
@@ -491,13 +476,17 @@ def update_reorder_requests_from_po(purchase_order):
         estimated_delivery = None
         if purchase_order.expected_delivery_date:
             estimated_delivery = purchase_order.expected_delivery_date
-        elif po_item.item_supplier.average_lead_time:
-            # Calculate from lead time in business days
-            order_date = (
-                purchase_order.sent_at.date() if purchase_order.sent_at else timezone.now().date()
+        else:
+            # CALENDAR days, through the one derivation in
+            # ``inventory.services.lead_times`` — see its module docstring. This
+            # used to count the quote in BUSINESS days, so the date shown to the
+            # operator sat later than the one ``create_lead_time_log`` grades the
+            # delivery against, and a vendor hitting the published date exactly
+            # was filed two days late.
+            order_date = purchase_order.sent_at or timezone.now()
+            estimated_delivery = published_delivery_date(
+                order_date, po_item.item_supplier.average_lead_time
             )
-            lead_time_days = po_item.item_supplier.average_lead_time
-            estimated_delivery = add_business_days(order_date, lead_time_days)
 
         # Update each active request
         for reorder_request in active_requests:

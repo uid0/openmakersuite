@@ -176,42 +176,64 @@ const AssetScanPage: React.FC = () => {
   const handleDisable = () => {
     if (!asset || !isLoggedIn) return;
 
-    confirmDelete('Are you sure you want to disable this asset?', async () => {
-      try {
-        setSubmitting(true);
-        await assetsAPI.disableAsset(asset.id);
-        await loadAsset(); // Reload to get updated data
-        setActionSuccess('Asset disabled successfully');
-        setTimeout(() => setActionSuccess(null), 3000);
-      } catch (err: any) {
-        showError(extractErrorMessage(err, 'Failed to disable asset'));
-        console.error('Error disabling asset:', err);
-      } finally {
-        setSubmitting(false);
-      }
-    });
-  };
-
-  const handleLock = () => {
-    if (!asset || !isLoggedIn) return;
-
+    // `disable` only flips Asset.is_active ("hidden from most views"); it is
+    // not part of the ForgeKey authorization path, so say so — an operator
+    // reaching for this to stop an unsafe machine needs Lock instead.
     confirmDelete(
-      'Are you sure you want to lock this asset? Non-admins will not be able to use it.',
+      'Disable only hides this asset from most views. It does NOT stop the '
+        + 'machine — use Lock asset to take an unsafe machine out of service. '
+        + 'Disable this asset?',
       async () => {
         try {
           setSubmitting(true);
-          await assetsAPI.lockAsset(asset.id);
+          await assetsAPI.disableAsset(asset.id);
           await loadAsset(); // Reload to get updated data
-          setActionSuccess('Asset locked successfully');
+          setActionSuccess('Asset disabled (record hidden; machine still runs)');
           setTimeout(() => setActionSuccess(null), 3000);
         } catch (err: any) {
-          showError(extractErrorMessage(err, 'Failed to lock asset'));
-          console.error('Error locking asset:', err);
+          showError(extractErrorMessage(err, 'Failed to disable asset'));
+          console.error('Error disabling asset:', err);
         } finally {
           setSubmitting(false);
         }
       },
     );
+  };
+
+  // Locking is the action that actually stops the machine (it creates a
+  // ForgeKey DeviceLockout, which makes `is_authorized` deny every user), so
+  // ask for the reason rather than confirming a yes/no: the server requires
+  // one, and it is kept on the lockout record for whoever reads it later.
+  const handleLock = async () => {
+    if (!asset || !isLoggedIn) return;
+
+    const reason = await promptInput(
+      'Lock asset — stops the machine',
+      'Why is this machine being locked out? (required, kept on the lockout record)',
+      undefined,
+      { placeholder: 'e.g. Blade guard missing — do not run until replaced' },
+    );
+    // Cancelled: leave the machine alone rather than guessing an intent.
+    if (reason === null) return;
+    // Never substitute a placeholder for an operator who submitted nothing —
+    // an invented lockout reason is worse than no lockout at all.
+    if (!reason.trim()) {
+      showError('A lockout reason is required — the machine was not locked.');
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      await assetsAPI.lockAsset(asset.id, reason.trim());
+      await loadAsset(); // Reload to get updated data
+      setActionSuccess('Asset locked — the machine will not start');
+      setTimeout(() => setActionSuccess(null), 3000);
+    } catch (err: any) {
+      showError(extractErrorMessage(err, 'Failed to lock asset'));
+      console.error('Error locking asset:', err);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleUnlock = () => {
@@ -642,6 +664,16 @@ const AssetScanPage: React.FC = () => {
               <div className="asset-actions">
                 <h3>Actions</h3>
                 <div className="action-buttons">
+                  {/* Lock and Disable are easy to confuse and only one of them
+                      stops the machine, so the pair is labelled inline rather
+                      than only inside each confirmation. */}
+                  {!asset.report_only && (asset.can_enable || asset.can_unlock) && (
+                    <p className="action-semantics-note">
+                      <strong>Lock</strong> stops the machine (nobody can start it).{' '}
+                      <strong>Disable</strong> only hides the record — the machine still runs.
+                    </p>
+                  )}
+
                   {/* Only show enable/disable buttons if not report_only and user has permission */}
                   {!asset.report_only && asset.can_enable && (
                     <>
@@ -650,8 +682,9 @@ const AssetScanPage: React.FC = () => {
                           onClick={handleDisable}
                           className="btn-disable"
                           disabled={submitting}
+                          title="Hides the asset record. Does NOT stop the machine."
                         >
-                          Disable Asset
+                          Disable Asset (does not stop machine)
                         </button>
                       ) : (
                         <button
@@ -681,8 +714,9 @@ const AssetScanPage: React.FC = () => {
                           onClick={handleLock}
                           className="btn-lock"
                           disabled={submitting}
+                          title="Locks out the machine so nobody can start it. Requires a reason."
                         >
-                          Lock Asset
+                          Lock Asset (stops the machine)
                         </button>
                       )}
                     </>

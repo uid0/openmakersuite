@@ -25,7 +25,7 @@ import api, {
 import '../styles/AssetDetailPage.css';
 import { Asset, AssetPart, AssetProblem, MaintenanceItem, WorkOrder } from '../types';
 import { formatDateOnly } from '../utils/dates';
-import { showError } from '../utils/dialogs';
+import { promptInput, showError } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface VendorOption {
@@ -228,11 +228,29 @@ const AssetDetailPage: React.FC = () => {
     }
   };
 
+  // Locking creates a ForgeKey DeviceLockout, which is what actually stops the
+  // machine (`is_authorized` denies once a lockout is active) — unlike
+  // disabling, which only hides the record. The server requires a reason and
+  // keeps it on that lockout for whoever reads it later, so prompt for it
+  // instead of sending a default the operator never wrote.
   const handleLock = async () => {
     if (!id) return;
+
+    const reason = await promptInput(
+      'Lock asset — stops the machine',
+      'Why is this machine being locked out? (required, kept on the lockout record)',
+      undefined,
+      { placeholder: 'e.g. Blade guard missing — do not run until replaced' },
+    );
+    if (reason === null) return;
+    if (!reason.trim()) {
+      showError('A lockout reason is required — the machine was not locked.');
+      return;
+    }
+
     try {
       setActionLoading('lock');
-      await assetsAPI.lockAsset(id);
+      await assetsAPI.lockAsset(id, reason.trim());
       await loadAssetDetails();
     } catch (err: any) {
       showError(extractErrorMessage(err, 'Failed to lock asset'));
@@ -575,7 +593,7 @@ const AssetDetailPage: React.FC = () => {
                   disabled={actionLoading === 'lock'}
                   loading={actionLoading === 'lock'}
                 >
-                  Lock asset
+                  Lock asset (stops the machine)
                 </Button>
               )
             )}

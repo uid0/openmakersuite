@@ -723,17 +723,45 @@ describe('API Service', () => {
       expect(response.data).toEqual(mockResponse);
     });
 
-    test('lockAsset locks an asset', async () => {
-      const mockResponse = {
-        id: 'test-id',
-        is_locked: true,
-      };
+    // The lock endpoint (inventory/views.py AssetViewSet.lock) rejects a
+    // missing/blank `reason` with 400 before it creates the DeviceLockout, so
+    // the stub answers exactly as the server does rather than accepting any
+    // POST. A client that sends no body fails this the way the browser did.
+    const replyLikeLockEndpoint = () =>
+      mock.onPost('/inventory/assets/test-id/lock/').reply((config) => {
+        const body = config.data ? JSON.parse(config.data) : {};
+        if (!body.reason) {
+          return [400, { error: { code: 'validation_failed', message: 'reason is required' } }];
+        }
+        return [201, { id: 'test-id', is_locked: true, lockout_reason: body.reason }];
+      });
 
-      mock.onPost('/inventory/assets/test-id/lock/').reply(200, mockResponse);
+    test('lockAsset sends the reason the lock endpoint requires', async () => {
+      replyLikeLockEndpoint();
 
-      const response = await assetsAPI.lockAsset('test-id');
+      const response = await assetsAPI.lockAsset('test-id', 'Blade guard missing');
 
+      expect(response.status).toBe(201);
       expect(response.data.is_locked).toBe(true);
+      expect(JSON.parse(mock.history.post[0].data)).toEqual({
+        reason: 'Blade guard missing',
+      });
+    });
+
+    test('lockAsset forwards the operator reason verbatim to the audit record', async () => {
+      replyLikeLockEndpoint();
+
+      // Long, punctuated, multi-line: the reason lands in DeviceLockout.reason
+      // and someone reads it later, so the client must not truncate or reshape it.
+      const reason = [
+        'E-stop latched open after the 2026-09-11 PM; interlock relay chatters',
+        'under load. Do not return to service until the relay is replaced -- ',
+        'see WO-4471. Tagged by B. Keeler.',
+      ].join('\n');
+
+      await assetsAPI.lockAsset('test-id', reason);
+
+      expect(JSON.parse(mock.history.post[0].data).reason).toBe(reason);
     });
 
     test('unlockAsset unlocks an asset', async () => {

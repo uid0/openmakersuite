@@ -473,3 +473,17 @@
 .info-item.supplier-note {
   grid-column: 1 / -1;
 }
+
+/* Lock and Disable sit next to each other and only Lock stops the machine, so
+   the pair carries a plain-language note above the buttons. Full width — it is
+   a sentence about both controls, not a label on either one. */
+.action-semantics-note {
+  grid-column: 1 / -1;
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid #d97706;
+  background: #fffbeb;
+  color: #78350f;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}

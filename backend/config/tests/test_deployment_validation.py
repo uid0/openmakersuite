@@ -443,25 +443,8 @@ class TestDeploymentArtifactsAC36:
         )
 
     def test_pg_isready_probes_name_a_database(self):
-        """Every shipped `pg_isready` probe must pass `-d`.
+        """Every shipped probe names the configured database explicitly."""
 
-        `pg_isready` defaults the database name to the *user* name, and it
-        exits 0 whenever the server answers at all — including when the
-        server answers by rejecting the connection. So a probe that omits
-        `-d` still reports healthy while postgres logs
-
-            FATAL:  database "makerspace" does not exist
-
-        once per probe interval, forever. Those lines land in CI's "Show
-        logs on failure" dump and in `docker compose logs`, where they
-        crowd out the real failure: on 2026-09-12 a repeating FATAL from
-        the dev compose db probe was read as the cause of a job that had
-        actually failed on a single test. A permanently-complaining probe
-        trains readers to skip fatal errors, which is what hides a real one.
-
-        The user and database names themselves are correct everywhere
-        (`makerspace` / `makerspace_inventory`); only the probes were wrong.
-        """
         def environment_map(entries):
             if isinstance(entries, dict):
                 return entries
@@ -500,9 +483,7 @@ class TestDeploymentArtifactsAC36:
                 )
             )
 
-        k8s = yaml.safe_load(
-            (REPO_ROOT / "deploy/k8s/base/postgres-statefulset.yaml").read_text()
-        )
+        k8s = yaml.safe_load((REPO_ROOT / "deploy/k8s/base/postgres-statefulset.yaml").read_text())
         container = k8s["spec"]["template"]["spec"]["containers"][0]
         expected = environment_map(
             {entry["name"]: entry.get("value") for entry in container["env"]}
@@ -516,9 +497,7 @@ class TestDeploymentArtifactsAC36:
                 )
             )
 
-        helm_source = (
-            REPO_ROOT / "deploy/helm/openmakersuite/templates/postgres.yaml"
-        ).read_text()
+        helm_source = (REPO_ROOT / "deploy/helm/openmakersuite/templates/postgres.yaml").read_text()
         helm_yaml = "\n".join(
             re.sub(r"{{.*?}}", "HELM_VALUE", line)
             for line in helm_source.splitlines()
@@ -531,9 +510,7 @@ class TestDeploymentArtifactsAC36:
         )
         container = helm["spec"]["template"]["spec"]["containers"][0]
         expected = next(
-            entry["value"]
-            for entry in container["env"]
-            if entry["name"] == "POSTGRES_DB"
+            entry["value"] for entry in container["env"] if entry["name"] == "POSTGRES_DB"
         )
         for probe_name in ("livenessProbe", "readinessProbe"):
             probes.append(
@@ -558,9 +535,7 @@ class TestDeploymentArtifactsAC36:
                 continue
             if database == "$$POSTGRES_DB":
                 continue
-            assert database == expected, (
-                f"{source} probes {database!r}, expected {expected!r}"
-            )
+            assert database == expected, f"{source} probes {database!r}, expected {expected!r}"
 
     def test_helm_backend_uses_livez_readyz_probes(self):
         """AC-11/AC-12/AC-33: Helm chart defaults must match the k8s + compose
@@ -673,7 +648,8 @@ def test_validator_handles_quoted_values(tmp_path):
     secret stores) must be parsed correctly without leaking the quotes into
     length/comparison checks."""
     env = tmp_path / ".env"
-    body = textwrap.dedent("""\
+    body = textwrap.dedent(
+        """\
         DOMAIN="oms.example.com"
         LETSENCRYPT_EMAIL='admin@oms.example.com'
         LETSENCRYPT_DOMAINS=oms.example.com
@@ -693,7 +669,8 @@ def test_validator_handles_quoted_values(tmp_path):
         DEFAULT_FROM_EMAIL=noreply@oms.example.com
         POSTMARK_INBOUND_TOKEN=tok
         LOCATION_PING_TOKEN=tok
-        """)
+        """
+    )
     env.write_text(body)
     result = _run_validator(env)
     assert result.returncode == 0, result.stdout

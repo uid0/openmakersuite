@@ -5,10 +5,12 @@ Serializers for reorder queue API.
 from datetime import timedelta
 from decimal import Decimal
 
+from django.db import connection, transaction
 from django.utils import timezone
 
 from rest_framework import serializers
 
+from inventory.models import InventoryItem
 from inventory.serializers import InventoryItemSerializer, ItemSupplierSerializer
 
 from .models import (
@@ -84,6 +86,57 @@ class ReorderRequestSerializer(serializers.ModelSerializer):
         ]
 
 
+#: The states that make an item's existing reorder request BLOCK a second
+#: anonymous one. Exactly ``pending``, which is the captain's word for it:
+#: "one pending anon request per item".
+#:
+#: Every other state in :class:`ReorderRequest.Status` CLEARS the block, and
+#: deliberately so. ``approved`` and ``ordered`` mean a human has already acted
+#: on the earlier request — purchasing owns it now — so a fresh scan is a new
+#: signal of need rather than the same submission arriving twice; ``received``
+#: means it was fulfilled and ``cancelled`` means it was refused, and neither
+#: should leave the item unable to be requested again, which suppressing on
+#: them would amount to.
+#:
+#: ⚠️ NOT the same set as :meth:`inventory.models.InventoryItem.has_pending_reorder`,
+#: which spans ``pending``/``approved``/``ordered``. That property answers "is a
+#: reorder in flight for this item?" and the scan page reads it to decide what
+#: to SHOW. This answers the narrower "would filing this create a duplicate of a
+#: request nobody has touched yet?", which is the only window the retry race
+#: this rule closes can live in. Widening it here would suppress genuine new
+#: need for an item already in purchasing's hands — a bigger behaviour change
+#: than was asked for.
+DUPLICATE_BLOCKING_STATUSES = (ReorderRequest.Status.PENDING,)
+
+
+def pending_request_for(item):
+    """The request an anonymous scan for ``item`` would duplicate, or ``None``.
+
+    The oldest blocking row, so repeat scans keep naming the same request
+    rather than hopping between rows if several pending ones predate this rule.
+    """
+    return (
+        ReorderRequest.objects.filter(item=item, status__in=DUPLICATE_BLOCKING_STATUSES)
+        .order_by("requested_at", "id")
+        .first()
+    )
+
+
+def already_requested_detail(existing) -> str:
+    """What the person who just scanned is told when nothing new was filed.
+
+    Says their need IS recorded, in those words. The one thing this must never
+    read as is a failure: a member told "we could not submit that" scans again,
+    which is the duplicate this rule exists to prevent — and a member told
+    nothing at all is worse still.
+    """
+    return (
+        f"Your reorder request for {existing.item.name} is already recorded: an earlier "
+        "request is still pending, so this scan did not file a second one. Purchasing "
+        "can see it — nothing more is needed from you."
+    )
+
+
 class ReorderRequestCreateSerializer(serializers.ModelSerializer):
     """Simplified serializer for creating reorder requests (public-facing).
 
@@ -93,7 +146,30 @@ class ReorderRequestCreateSerializer(serializers.ModelSerializer):
     back to an anonymous caller. ``id`` and ``status`` are exposed
     read-only so the QR-scan flow can confirm the row landed and which
     state it's in (typically ``pending``).
+
+    ONE PENDING ANONYMOUS REQUEST PER ITEM. :meth:`create` refuses to add a
+    second row while a request for the same item is still
+    ``DUPLICATE_BLOCKING_STATUSES``, and hands the existing one back instead
+    with :attr:`already_requested` set. ``/reorders/requests/`` is not
+    idempotent and the scan page retries a failed submit up to three times, so
+    a POST whose RESPONSE was lost — a phone off the network, a proxy
+    answering 502 after the server committed — filed the item twice and
+    purchasing saw two rows for one need. The client-side re-read in
+    ``ScanPage.tsx`` narrows that window; only the server closes it, and only
+    the server covers ScanTTY and any other caller of this endpoint.
+
+    This constrains DUPLICATES, not access: an anonymous caller is never
+    refused, never asked to log in, and never told nothing happened. The
+    known cost, accepted deliberately, is that a member scanning a second
+    time because they believe MORE is needed is folded into the pending
+    request. Telling the two apart is not attempted.
     """
+
+    #: Set by :meth:`create`: True when this submission duplicated a pending
+    #: request and no row was added. The view maps it to 200-plus-``detail``
+    #: rather than 201, so "already recorded" never reaches the member as
+    #: either a success that happened or a failure that didn't.
+    already_requested = False
 
     class Meta:
         model = ReorderRequest
@@ -104,6 +180,55 @@ class ReorderRequestCreateSerializer(serializers.ModelSerializer):
             "request_notes": {"required": False},
             "priority": {"required": False},
         }
+
+    def create(self, validated_data):
+        """Create the request — or return the pending one it duplicates.
+
+        The rule applies to ANONYMOUS submissions only, which is what the
+        decision covers. An authenticated member goes through the unchanged
+        path: they have the queue, the request list and a name on the row, so
+        a second request from them is a deliberate act rather than a retried
+        POST.
+
+        The blocking row is looked for under a lock on the ITEM row, not on the
+        request rows — there is nothing to lock when the first request does not
+        exist yet, which is exactly the race (two scans landing together, each
+        finding no pending row, both inserting). Taking the item row serialises
+        every anonymous create for that item, so the second one reads the
+        first's committed row and reports it. Postgres at the default READ
+        COMMITTED re-reads after the lock is granted, which is what makes the
+        second SELECT see it.
+
+        ACCEPTED RACES, stated rather than left to chance:
+
+        * An anonymous create racing an AUTHENTICATED one can still leave two
+          pending rows — the authenticated path takes no lock, by design, since
+          the rule does not constrain it.
+        * On a backend without ``SELECT … FOR UPDATE`` (sqlite, used by local
+          tooling only — see ``config.settings``) the lock is skipped and the
+          check is a plain read. Deployments run PostgreSQL.
+
+        A partial unique index on ``(item) WHERE status = 'pending'`` would be
+        stronger, and is deliberately NOT used: it would also forbid the
+        authenticated second request this rule leaves alone, and existing
+        queues already hold several pending rows for one item, so the migration
+        adding it could not apply.
+        """
+        self.already_requested = False
+
+        request = self.context.get("request")
+        if request is not None and request.user.is_authenticated:
+            return super().create(validated_data)
+
+        item = validated_data["item"]
+        with transaction.atomic():
+            if connection.features.has_select_for_update:
+                list(InventoryItem.objects.select_for_update().filter(pk=item.pk))
+            existing = pending_request_for(item)
+            if existing is not None:
+                self.already_requested = True
+                return existing
+            return super().create(validated_data)
 
 
 # Purchase Order Serializers

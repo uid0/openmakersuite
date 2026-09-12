@@ -20,10 +20,14 @@ vi.mock('react-router-dom', async () => ({
   useNavigate: () => mockNavigate,
 }));
 
-const renderPage = () =>
+// `state` is how ScanPage says WHICH success this was — a request filed, or a
+// pending one named. Routed through MemoryRouter's initial entry rather than a
+// mocked `useLocation` so the page reads it the way the router really delivers
+// it.
+const renderPage = (state?: { alreadyRequested?: boolean }) =>
   render(
     <MantineProvider>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[{ pathname: '/thanks', state }]}>
         <ThanksPage />
       </MemoryRouter>
     </MantineProvider>,
@@ -44,6 +48,50 @@ describe('ThanksPage (AC-15: final-state surface for public reorder)', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(/your reorder request has been submitted/i),
+    ).toBeInTheDocument();
+  });
+
+  // --- Filed, and already recorded are DIFFERENT things to be told ---------
+  // The server files at most one PENDING anonymous request per item, so a scan
+  // either filed one or named one that was already on file. Both are successes
+  // and both end here; what neither may read as is a failure, and what
+  // "already recorded" may not claim is that a second request was filed.
+
+  test('an already-recorded scan is told its need is on file, not that it filed one', () => {
+    renderPage({ alreadyRequested: true });
+
+    expect(
+      screen.getByRole('heading', { name: /already recorded/i }),
+    ).toBeInTheDocument();
+    const body = screen.getByTestId('thanks-body');
+    expect(body).toHaveTextContent(/already open/i);
+    expect(body).toHaveTextContent(/your need is recorded/i);
+    // Never a failure, and never an instruction to act again.
+    expect(body).not.toHaveTextContent(/could not|failed|try again|ask a member of staff/i);
+    // And it does not claim a request was just submitted.
+    expect(screen.queryByText(/your reorder request has been submitted/i)).toBeNull();
+  });
+
+  test('a filed scan is not worded as a duplicate', () => {
+    renderPage({ alreadyRequested: false });
+
+    expect(
+      screen.getByRole('heading', { name: /thanks for letting us know/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('thanks-body')).toHaveTextContent(
+      /your reorder request has been submitted/i,
+    );
+  });
+
+  test('a direct visit with no state gets the plain wording', () => {
+    // A reload or a back-navigation loses the state. The plain wording claims
+    // nothing about which outcome it was beyond "your request is in", which is
+    // true of both — better than guessing the duplicate wording for someone who
+    // just filed.
+    renderPage();
+
+    expect(
+      screen.getByRole('heading', { name: /thanks for letting us know/i }),
     ).toBeInTheDocument();
   });
 

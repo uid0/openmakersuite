@@ -721,6 +721,32 @@ export interface ReorderRequest {
   updated_at: string;
 }
 
+/**
+ * What `POST /reorders/requests/` answers with.
+ *
+ * The server files at most ONE pending anonymous request per item, so a create
+ * has three outcomes and this is how a caller tells them apart:
+ *
+ * - filed — 201, `already_requested: false`, the new request.
+ * - already recorded — 200, `already_requested: true`, the request this
+ *   duplicates, plus a member-facing `detail`. NOTHING was created, and the
+ *   need is on file either way.
+ * - could not tell — the usual error, thrown by axios. No `already_requested`.
+ *
+ * Read the FLAG, not the status code: `response.ok`, `status < 300` and a bare
+ * `await` all flatten 200 and 201 into "worked", and reporting "reorder
+ * request created" for a request that was not created is the false message
+ * this field exists to prevent.
+ *
+ * Anonymous callers get the limited create shape (no admin metadata), which is
+ * why everything but the identifying fields is optional here.
+ */
+export type ReorderRequestCreateResponse = Partial<ReorderRequest> &
+  Pick<ReorderRequest, 'id' | 'item' | 'quantity' | 'status'> & {
+    already_requested: boolean;
+    detail?: string;
+  };
+
 export interface CreateReorderRequest {
   item: string;
   quantity: number;

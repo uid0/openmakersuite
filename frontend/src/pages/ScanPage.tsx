@@ -256,7 +256,8 @@ const ScanPage: React.FC = () => {
   // guessing is what the old code did.
   //
   // HOW OFTEN IT FILES. It is bounded to AUTO_SUBMIT_ATTEMPTS tries and ends in
-  // exactly one of: filed (→ /thanks), already pending, or a stated failure.
+  // exactly one of: filed (→ /thanks), already recorded (→ /thanks, worded as
+  // such), already pending before it started, or a stated failure.
   // Base cleared `submitting` in the catch while `submitting` was a dependency,
   // so a failed submit re-entered the effect for as long as the page was open —
   // 19 POSTs to the public endpoint in 150 ms against a rejection delayed 5 ms.
@@ -268,18 +269,20 @@ const ScanPage: React.FC = () => {
   // rather than in the dependency array, and the last failure is rendered.
   // `ScanPage.test.tsx` pins the bound, the wording and the no-drop guarantee.
   //
-  // WHAT IT CAN STILL FILE TWICE. Every failed attempt re-reads the item before
-  // acting on the rejection — a retry stops rather than re-POSTing, and the
-  // LAST attempt stops rather than telling the member nothing was ordered. That
-  // NARROWS the duplicate window; it does NOT close it. `/reorders/requests/`
-  // is not idempotent, so a POST whose response was lost but whose row commits
-  // AFTER the re-read is still filed a second time. Closing that needs
-  // idempotency at the public create endpoint — a contract change affecting
-  // every caller of it, ScanTTY included — which is routed separately and
-  // deliberately not taken here. When the re-read ITSELF fails the loop carries
-  // on as if nothing were filed: a missed reorder is worse than a possible
-  // duplicate, and an unverifiable outcome is still stated rather than
-  // swallowed. No re-read consumes an attempt from the bound.
+  // WHAT IT CAN NO LONGER FILE TWICE. Every failed attempt re-reads the item
+  // before acting on the rejection — a retry stops rather than re-POSTing, and
+  // the LAST attempt stops rather than telling the member nothing was ordered.
+  // That NARROWED the duplicate window; the server now closes it. While a
+  // request for the item is still PENDING the public create endpoint files no
+  // second row and answers 200 with `already_requested: true`, so a POST whose
+  // response was lost and whose row commits after the re-read is recognised
+  // rather than duplicated. This loop's job is unchanged — it must still reach
+  // a terminal state the member can see — but "filed" and "already recorded"
+  // are now distinct outcomes and the /thanks screen words them differently.
+  // When the re-read ITSELF fails the loop carries on as if nothing were filed:
+  // a missed reorder is worse than a possible duplicate, and an unverifiable
+  // outcome is still stated rather than swallowed. No re-read consumes an
+  // attempt from the bound.
   useEffect(() => {
     // Each invocation owns exactly one run — the one it adopts or creates — and
     // can neither abandon nor revive any other. The ref carries only what the
@@ -358,8 +361,14 @@ const ScanPage: React.FC = () => {
       setSubmitting(true);
       for (let attempt = 1; ; attempt += 1) {
         try {
-          await submitOnce();
-          if (!startedRun.abandoned) navigate('/thanks');
+          const { data } = await submitOnce();
+          // `already_requested` distinguishes the server's two successes, and
+          // it is the FLAG that is read, not the 201-vs-200: a member whose
+          // need was already on file is told that, and is never told a second
+          // request was filed when none was.
+          if (!startedRun.abandoned) {
+            navigate('/thanks', { state: { alreadyRequested: !!data?.already_requested } });
+          }
           return;
         } catch (err: any) {
           console.error(
@@ -374,7 +383,13 @@ const ScanPage: React.FC = () => {
             // be reported as a failure, and the remedy it prescribes is a
             // second request for an item that already has one.
             if ((await reorderNowPending()) === true) {
-              if (!startedRun.abandoned) navigate('/thanks');
+              // The re-read establishes that a request for this item IS
+              // pending; it cannot establish that this scan is what filed it.
+              // "Already recorded" is the statement that is true either way,
+              // and it is the one the member needs: nothing more to do.
+              if (!startedRun.abandoned) {
+                navigate('/thanks', { state: { alreadyRequested: true } });
+              }
               return;
             }
             if (startedRun.abandoned) return;
@@ -390,9 +405,13 @@ const ScanPage: React.FC = () => {
           await new Promise((resolve) => setTimeout(resolve, autoSubmitRetry.delayMs * attempt));
           if (startedRun.abandoned) return;
           if ((await reorderNowPending()) === true) {
-            // From the member's side the scan DID file a request, so this ends
-            // where a successful submit ends rather than in the failure notice.
-            if (!startedRun.abandoned) navigate('/thanks');
+            // From the member's side the need IS on file, so this ends where a
+            // successful submit ends rather than in the failure notice — worded
+            // as "already recorded" for the same reason as the last-attempt
+            // re-read above: which POST filed it is not knowable from here.
+            if (!startedRun.abandoned) {
+              navigate('/thanks', { state: { alreadyRequested: true } });
+            }
             return;
           }
           if (startedRun.abandoned) return;

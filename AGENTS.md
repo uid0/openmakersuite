@@ -913,14 +913,28 @@ lost-update window on `stored_pricing`, are in
 [`docs/oms-supplier-cost-write-path-record.md`](docs/oms-supplier-cost-write-path-record.md)
 under "Still open, filed not fixed".
 
-Two consequences worth keeping in mind when touching this path:
+Three consequences worth keeping in mind when touching this path:
 - **A derived column is added to `update_fields`.** `QuerySet.update_or_create`
   restricts `update_fields` to its own `defaults` keys, so without that a
   `package_cost` the model derives is computed and then dropped on the floor.
-- **Test it at a pack size that does not divide the case price evenly.** Every
-  pre-existing test of this behaviour used `quantity_per_package=1`, where the
-  derivation is exact and NO defect on this path is reachable. That is how five
-  symptoms reached main under a green suite.
+  A writer that wants no part of this restricts nothing: fetch the row, assign
+  the keys the caller sent, and save the WHOLE row, so the derivation cannot be
+  half-applied. `KitSerializer._apply_supplier_terms` is the worked example.
+- **`update_or_create(defaults=)` applies to the row it FINDS, not just the one
+  it makes.** A create-time convenience parked there — `is_primary=True`, a
+  `setdefault` pack size — silently rewrites that column on every later edit, so
+  a caller who sent a part number also changed which supplier the item is bought
+  from. Create-time values belong in `create_defaults=`, or in the create branch
+  of a fetch-or-create.
+- **Test it against a row that is not sitting on the column defaults.** Every
+  pre-existing test of the derivation used `quantity_per_package=1`, where the
+  arithmetic is exact and NO defect on this path is reachable; the kit control
+  test additionally built its fixture through the create endpoint, so the row
+  held a null price, a pack size of 1 and a sole primary — and passed unchanged
+  while the update branch rewrote all three. A fixture made by the endpoint
+  under test cannot witness that endpoint overwriting anything. Give the row a
+  pack size that does not divide evenly, a real case price, and a sibling.
+  That is how five symptoms reached main under a green suite.
 
 ### A status transition owes a SET of facts, and every path owes all of it
 

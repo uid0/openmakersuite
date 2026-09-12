@@ -415,11 +415,22 @@ class TestTheTermsAKitFormACTUALLYSENDSStillWork:
     ):
         """The regression a defaulting serializer would reintroduce.
 
-        A serializer ``default`` on ``average_lead_time`` would put 7 into
-        ``defaults`` on every save, resetting a recorded 21 the operator never
+        A serializer ``default`` on ``average_lead_time`` would put 7 into the
+        write on every save, resetting a recorded 21 the operator never
         touched — the same shape as the ``setdefault`` that used to reset a
         recorded pack size to 1. Declaring the fields optional with no defaults
         is what keeps the write PARTIAL.
+
+        **What this does NOT prove, stated because it was once trusted to.**
+        The link here is the one the kit-create endpoint made, so it holds a
+        pack size of 1, a ``package_cost`` of ``None``, the primary flag, and no
+        sibling. Against that row an unasked pack size cannot be seen to reset,
+        an unasked price cannot be seen to move, and an unasked promotion cannot
+        be seen to demote anything — this test passed unchanged while the update
+        branch was rewriting all three. ``inventory/tests/
+        test_kit_supplier_terms_update.py`` is the file that answers those, on a
+        link that carries a pack size of 25, a real case price and a rival
+        holding the primary flag.
         """
         client, _ = authenticated_client
         created = post_kit(

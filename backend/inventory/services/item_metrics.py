@@ -25,12 +25,11 @@ from inventory.services.supplier_selection import select_suppliers_for
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
 
 # PO statuses that count as "on order" (QOO): units committed on a live PO that
-# has been sent but not fully received, voided, or cancelled.
-ON_ORDER_STATUSES = (
-    PurchaseOrder.Status.SENT,
-    PurchaseOrder.Status.CONFIRMED,
-    PurchaseOrder.Status.PARTIALLY_RECEIVED,
-)
+# has been sent but not fully received, voided, or cancelled. That is the same
+# fact as "can still be received against", so it is DERIVED from
+# ``PurchaseOrder.RECEIVABLE_STATUSES`` instead of respelling it — a status the
+# receive path accepts is a status whose units are still on order.
+ON_ORDER_STATUSES = PurchaseOrder.RECEIVABLE_STATUSES
 
 # Work-order statuses that keep a material "committed" (QC).
 OPEN_WO_STATUSES = (

@@ -3546,14 +3546,12 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def pending_orders(self, request):
         """Get all orders that are expecting deliveries."""
+        # "Expecting a delivery" is the same fact as "can be received against",
+        # so this reads ``RECEIVABLE_STATUSES`` rather than keeping its own
+        # spelling of it: an order the receive endpoints accept is an order this
+        # worksheet must list.
         pending_orders = (
-            PurchaseOrder.objects.filter(
-                status__in=[
-                    PurchaseOrder.Status.SENT,
-                    PurchaseOrder.Status.CONFIRMED,
-                    PurchaseOrder.Status.PARTIALLY_RECEIVED,
-                ]
-            )
+            PurchaseOrder.objects.filter(status__in=PurchaseOrder.RECEIVABLE_STATUSES)
             .select_related("supplier")
             .prefetch_related("items__item_supplier__item")
         )

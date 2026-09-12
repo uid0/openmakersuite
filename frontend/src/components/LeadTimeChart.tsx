@@ -21,9 +21,9 @@ export interface LeadTimeAnalytics {
   min_lead_time: number | null;
   max_lead_time: number | null;
   /**
-   * Average of `variance_days`, measured against the supplier link's STANDING
-   * QUOTED lead time — never against the delivery dates confirmed on the
-   * orders, which is why the key itself says so. `variance_measured_against`
+   * Average of `variance_days`, measured against the lead time the supplier
+   * QUOTED WHEN THE ORDER WENT OUT — never against the delivery dates
+   * confirmed on the orders, which is why the key itself says so. `variance_measured_against`
    * carries the yardstick's MACHINE name (`quoted_lead_time`) from the API; the
    * words shown to a person come from `YARDSTICK_LABEL`, the web's single copy
    * of `LeadTimeLog.VARIANCE_YARDSTICK_LABEL`.
@@ -42,6 +42,14 @@ export interface LeadTimeAnalytics {
     variance_days: number;
     /** Later than the QUOTE. A row can be `true` having hit the agreed date. */
     was_over_quoted_lead_time: boolean;
+    /**
+     * Which reading of the quote `estimated_lead_time_days` holds:
+     * `order_snapshot` (the quote captured when the order was sent) or
+     * `receipt_quote` (the link's quote at receipt, for an order placed
+     * before that was recorded). The yardstick is the same for every row;
+     * how faithfully a given row holds it is not.
+     */
+    estimated_lead_time_basis?: string;
     /** Met the date the operator confirmed; `null` when none was confirmed. */
     met_confirmed_date?: boolean | null;
     /** The date that verdict judged; `null` when the order confirmed none. */

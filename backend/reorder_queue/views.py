@@ -3792,8 +3792,8 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     "average_variance_days": round(data["avg_variance"], 1),
                     "total_deliveries": data["total_deliveries"],
                     "on_time_delivery_rate": round(on_time_rate, 1),
-                    # Both of those are against the standing quote, not against
-                    # the confirmed dates. Added, never renamed — ScanTTY decodes
+                    # Both of those are against the quoted lead time, not
+                    # against the confirmed dates. Added, never renamed — ScanTTY decodes
                     # this row by field name.
                     "variance_measured_against": LeadTimeLog.VARIANCE_YARDSTICK,
                 }
@@ -4674,8 +4674,8 @@ class PurchasingReportViewSet(viewsets.ViewSet):
                     "avg_variance": round(item["avg_variance"] or 0, 1),
                     "on_time_rate": round(on_time_rate, 1),
                     # ``avg_variance`` and ``on_time_rate`` are both measured
-                    # against the supplier link's standing quote, not against the
-                    # dates confirmed on the orders. Added, never renamed — see
+                    # against the quoted lead time, not against the dates
+                    # confirmed on the orders. Added, never renamed — see
                     # ``LeadTimeLog.VARIANCE_YARDSTICK``.
                     "variance_measured_against": LeadTimeLog.VARIANCE_YARDSTICK,
                 }
@@ -4856,7 +4856,7 @@ class PurchasingReportViewSet(viewsets.ViewSet):
             # branch of this endpoint uses — but the keys themselves name the
             # yardstick. A column called "on_time_rate" reads in a spreadsheet
             # as the share of AGREED dates the vendor hit; it is the share of
-            # deliveries inside the supplier link's standing quoted lead time,
+            # deliveries inside the quoted lead time,
             # so a buyer sorting on it would chase the wrong vendors. The JSON
             # keys of ``lead_time_analysis`` are untouched (ScanTTY decodes
             # those by name); only this export's columns are renamed. Pinned by

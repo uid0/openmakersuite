@@ -371,6 +371,12 @@ def test_every_send_path_stamps_the_whole_transition(send, staff):
     request_row.refresh_from_db()
     assert request_row.status == ReorderRequest.Status.ORDERED
     assert request_row.order_number == order.po_number
+    # And the vendor's promise as of THIS send, frozen onto the line: it is what
+    # ``receiving.create_lead_time_log`` grades the delivery against, and a send
+    # path that skips it hands that grading back to a column the operator can
+    # edit afterwards. ``draft_order`` quotes 5.
+    line = order.items.get()
+    assert line.quoted_lead_time_days == 5
 
 
 # ── The same shape on the reorder-request actions ───────────────────────────

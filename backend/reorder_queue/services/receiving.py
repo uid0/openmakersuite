@@ -315,6 +315,14 @@ def close_linked_reorder_request(po_item, delivery_date, *, item=None):
 def create_lead_time_log(po_item, delivery_date):
     """Create a LeadTimeLog entry when a PO item is fully received.
 
+    The row this writes IS the vendor's punctuality record, and it grades the
+    delivery against the lead time that vendor quoted WHEN THE ORDER WAS SENT —
+    ``po_item.quoted_lead_time_days``, frozen there by
+    :func:`reorder_queue.services.purchase_orders.mark_sent` — so editing the
+    supplier link afterwards cannot move a judgement already made. See the
+    comment on the estimate below for what a missing snapshot means and why it
+    is not backfilled.
+
     No-op if the PO was never sent or if the item has no item_supplier
     (e.g. asset-only lines).
     """
@@ -326,6 +334,18 @@ def create_lead_time_log(po_item, delivery_date):
     order_date = purchase_order.sent_at
     actual_delivery_date = delivery_date.date() if hasattr(delivery_date, "date") else delivery_date
 
+    # THE PROMISE THIS DELIVERY IS GRADED AGAINST, and it is the one the vendor
+    # made when the order went out: ``mark_sent`` froze the link's quote onto
+    # the line as ``quoted_lead_time_days`` (oms-ltsnap). This used to read
+    # ``po_item.item_supplier.average_lead_time`` HERE, at receipt, because no
+    # order-time copy existed — and that column is live. An operator edits it,
+    # and ``inventory.tasks.update_average_lead_times`` rewrites it every run
+    # from the last six months of receipts, so the yardstick moved on its own.
+    # A vendor that quoted 10, shipped on day 8 and had its quote revised to 2
+    # in the meantime was filed estimated 2, actual 8, variance +6, late — a
+    # kept promise recorded as broken, and the reverse edit laundered a late
+    # delivery into a punctual one.
+    #
     # A lead time of 0 days is a KNOWN lead time — a counter pickup from a local
     # supplier — and this used to be ``or 14``, which silently promised a
     # fortnight for a same-day vendor. That number is not cosmetic: it becomes
@@ -334,15 +354,31 @@ def create_lead_time_log(po_item, delivery_date):
     # their deliveries looked early. ``supplier_selection``'s performance term
     # reads that column to decide who to buy from (op-2rsp) — pinned end to end
     # by ``test_a_punctual_same_day_vendor_keeps_the_whole_performance_weight_and_wins``
-    # — so a wrong estimate here is a wrong purchase. ``average_lead_time`` is a
-    # non-null ``PositiveIntegerField``, so there is no absence left for a
-    # fallback to cover.
-    estimated_lead_time = po_item.item_supplier.average_lead_time
+    # — so a wrong estimate here is a wrong purchase. That is why the snapshot is
+    # tested for ``None`` and never for truthiness: a frozen 0 is a promise.
+    #
+    # ``None`` means the order was sent before the snapshot column existed. The
+    # promise it was actually given is not recorded anywhere — the link's quote
+    # has no history and the migration deliberately did not invent one, for the
+    # same reason ``0035_backfill_lead_time_calendar_days`` refused to rewrite
+    # ``estimated_lead_time_days``. So this falls back to the live quote, which
+    # is exactly what every such order was already going to be graded against,
+    # and the row RECORDS that it did: ``estimated_lead_time_basis`` separates a
+    # promise we hold from one we reconstructed at the wrong end. The set is
+    # bounded and closes on its own — only orders in flight at the deploy are in
+    # it, and every order sent after carries its own snapshot.
+    estimated_lead_time = po_item.quoted_lead_time_days
+    if estimated_lead_time is None:
+        estimated_lead_time = po_item.item_supplier.average_lead_time
+        estimate_basis = LeadTimeLog.ESTIMATE_FROM_RECEIPT_QUOTE
+    else:
+        estimate_basis = LeadTimeLog.ESTIMATE_FROM_ORDER_SNAPSHOT
+
     # CALENDAR days, so that both sides of ``variance_days`` are in one unit ON
-    # THIS ROW: ``estimated_lead_time_days`` is written from
-    # ``average_lead_time`` just above, and ``expected_delivery_date`` below is
-    # derived from it by ``published_delivery_date``. Measuring the actual in
-    # INCLUSIVE business days instead made the subtraction mix two units — a
+    # THIS ROW: ``estimated_lead_time_days`` is the quoted lead time resolved
+    # just above, and ``expected_delivery_date`` below is derived from it by
+    # ``published_delivery_date``. Measuring the actual in INCLUSIVE business
+    # days instead made the subtraction mix two units — a
     # vendor that promised today and delivered today scored actual 1 against
     # estimated 0, so every promise kept inside the working week was recorded as
     # a day late. Pinned by
@@ -363,18 +399,6 @@ def create_lead_time_log(po_item, delivery_date):
     # ``inventory.services.lead_times.published_delivery_date``, which is the ONE
     # derivation of a date from this quote; pinned by
     # ``test_published_delivery_date_is_the_yardstick.py``.
-    #
-    # REPORTED, NOT FIXED: the quote above is read at RECEIPT time, not at order
-    # time, because no order-time snapshot of it exists. So editing
-    # ``average_lead_time`` while an order is in flight retroactively changes how
-    # that completed order is judged. Link quotes 10; PO sent; the quote is
-    # edited down to 2 before the goods arrive; delivery lands on day 8, inside
-    # the quote that was in force when the order went out; the row records
-    # estimated 2, actual 8, variance +6, ``was_late`` True — a kept promise
-    # recorded as broken. The fix is to snapshot the lead time onto
-    # ``PurchaseOrderItem`` when the PO is sent, beside the ``unit_cost_ordered``
-    # snapshot that already exists for price; that is a SCHEMA change and outside
-    # what this branch authorised.
     actual_lead_time = max((actual_delivery_date - order_date.date()).days, 0)
 
     LeadTimeLog.objects.create(
@@ -385,6 +409,7 @@ def create_lead_time_log(po_item, delivery_date):
         or published_delivery_date(order_date, estimated_lead_time),
         actual_delivery_date=actual_delivery_date,
         estimated_lead_time_days=estimated_lead_time,
+        estimated_lead_time_basis=estimate_basis,
         actual_lead_time_days=actual_lead_time,
         quantity_ordered=po_item.quantity_ordered,
         quantity_received=po_item.quantity_received,

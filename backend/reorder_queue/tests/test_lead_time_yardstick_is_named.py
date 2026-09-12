@@ -1,7 +1,8 @@
 """Every surface that shows a lead-time lateness names what it is measured against.
 
-A :class:`~reorder_queue.models.LeadTimeLog` row holds TWO promises. The supplier
-link's standing quoted lead time is the one ``variance_days`` scores — see
+A :class:`~reorder_queue.models.LeadTimeLog` row holds TWO promises. The lead
+time the vendor quoted when the order was sent is the one ``variance_days``
+scores — see
 ``test_variance_scores_the_standing_quote_not_the_confirmed_date`` in
 ``test_lead_time_log_estimate.py``, which pins that and is deliberately not
 changed here. ``expected_delivery_date`` is the other: the date the operator
@@ -70,6 +71,10 @@ def _delivery(*, quoted, delivered_after, confirmed_after=None, supplier=None):
             average_lead_time=quoted,
             item=InventoryItemFactory(current_stock=0),
         ),
+        # The quote this order went out under, as ``mark_sent`` freezes it on
+        # every real send path (oms-ltsnap): these rows are ordinary deliveries,
+        # not ones placed before the snapshot existed.
+        quoted_lead_time_days=quoted,
         quantity_ordered=4,
         unit_cost_ordered=Decimal("2.00"),
         order_in_packages=4,
@@ -124,7 +129,7 @@ def test_a_log_with_no_confirmed_date_on_the_order_says_so():
     """``None``, not ``True`` — there is no agreed date to have met.
 
     ``create_lead_time_log`` fills this row's ``expected_delivery_date`` from
-    ``order_date + the standing quote`` when the order carries no confirmed date.
+    ``order_date + the quoted lead time`` when the order carries no confirmed date.
     Judging against that fallback would score the quote twice and report a date
     somebody agreed to when nobody did, so the answer comes off the purchase
     order and is ``None`` when it is empty.
@@ -248,6 +253,30 @@ def test_the_changelist_calls_the_quote_column_the_quote(client, admin_user):
     assert _changelist_cell(html, "quoted_lead_time_display") == str(log.estimated_lead_time_days)
     # And the cell that column's name has to line up with, on the same page.
     assert "7 days over quoted lead time" in _changelist_cell(html, "variance_display")
+
+
+def test_the_changelist_flags_a_row_graded_on_the_quote_read_at_receipt(client, admin_user):
+    """A quote that may have moved after the order went out says so on the page.
+
+    Every row written before ``PurchaseOrderItem.quoted_lead_time_days`` existed
+    was graded against the link's quote AT RECEIPT, and the promise those orders
+    were actually given is not recorded anywhere. The variance on such a row can
+    therefore be harsh or kind for a reason that has nothing to do with the
+    vendor, so the caveat sits in the quote's own cell rather than being left for
+    the reader to know. An ordinary row — the one above — carries the bare
+    number, so the note marks the exception and does not become wallpaper.
+    """
+    log = _delivery(quoted=37, confirmed_after=44, delivered_after=44)
+    LeadTimeLog.objects.filter(pk=log.pk).update(
+        estimated_lead_time_basis=LeadTimeLog.ESTIMATE_FROM_RECEIPT_QUOTE
+    )
+    client.force_login(admin_user)
+
+    response = client.get(reverse("admin:reorder_queue_leadtimelog_changelist"))
+
+    cell = _changelist_cell(response.content.decode(), "quoted_lead_time_display")
+    assert cell.startswith("37")
+    assert "predates the order-time snapshot" in cell
 
 
 def test_an_unsaved_row_confirms_nothing_rather_than_raising():
@@ -420,7 +449,7 @@ def test_the_reorders_analytics_payloads_name_the_yardstick(authenticated_client
     ``PurchaseOrderViewSet`` and serves ``OrderMetricsSerializer``.
 
     These three serve ``on_time_delivery_rate`` / ``late_delivery_rate`` /
-    ``average_variance_days``, all against the standing quote. They are the
+    ``average_variance_days``, all against the quoted lead time. They are the
     payloads ScanTTY renders as "On-time %" / "Late %" / "Avg var d" columns, so
     each carries the yardstick rather than leaving the reader to assume the
     rates count missed agreed dates.
@@ -465,7 +494,7 @@ def test_the_lead_time_csv_header_names_the_yardstick(authenticated_client):
     """The download a buyer opens in a spreadsheet, away from any of this context.
 
     "on_time_rate" as a column reads as the share of agreed dates the vendor hit.
-    It is not — it is the share of deliveries inside the standing quote — so the
+    It is not — it is the share of deliveries inside the quoted lead time — so the
     COLUMN NAME says which, rather than a human label doing it: this endpoint
     emits machine keys on every other ``?type=``, and one export answering in two
     header conventions would break whatever reads the others. The row VALUES are

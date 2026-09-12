@@ -992,7 +992,23 @@ class LeadTimeLogAdmin(admin.ModelAdmin):
         ordering="estimated_lead_time_days",
     )
     def quoted_lead_time_display(self, obj):
-        """The yardstick itself, under the name every other surface calls it."""
+        """The yardstick itself, under the name every other surface calls it.
+
+        A row graded against the link's quote AT RECEIPT rather than the one
+        captured when the order was sent says so here, beside the number it
+        casts doubt on. Those are the orders that were already with a supplier
+        when ``PurchaseOrderItem.quoted_lead_time_days`` landed: the promise
+        they were actually given is not recorded anywhere and was not invented,
+        so an operator reading a harsh variance on one can see that the
+        yardstick may have moved after the order went out. Every row written
+        since carries the quote it was sent under and shows the bare number.
+        """
+        if obj.estimated_lead_time_basis == LeadTimeLog.ESTIMATE_FROM_RECEIPT_QUOTE:
+            return format_html(
+                '{}<br><span style="color: gray;">quote at receipt — this order '
+                "predates the order-time snapshot</span>",
+                obj.estimated_lead_time_days,
+            )
         return obj.estimated_lead_time_days
 
     @admin.display(description="Confirmed date")
@@ -1024,7 +1040,7 @@ class LeadTimeLogAdmin(admin.ModelAdmin):
 
         The first line is the scored number and says the yardstick out loud —
         never a bare "N days late", because ``variance_days`` is measured
-        against the supplier link's standing quote and a row can carry +7 having
+        against the vendor's quoted lead time and a row can carry +7 having
         arrived on the day the operator agreed. The second line is that other
         promise, so the operator sees the vendor missed its advertised lead time
         AND kept the date on the order, which are different things to chase.

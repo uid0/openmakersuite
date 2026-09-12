@@ -68,6 +68,11 @@ def _po_item(*, average_lead_time, expected_delivery_date=None, sent_days_ago=3,
             average_lead_time=average_lead_time,
             item=item or InventoryItemFactory(current_stock=0),
         ),
+        # The quote this order went out under, frozen onto the line by
+        # ``mark_sent`` on every real send path (oms-ltsnap). Set here too, so
+        # these fixtures grade a delivery the way a live one is graded rather
+        # than through ``create_lead_time_log``'s pre-snapshot fallback.
+        quoted_lead_time_days=average_lead_time,
         quantity_ordered=4,
         unit_cost_ordered=Decimal("2.00"),
         order_in_packages=4,
@@ -85,6 +90,7 @@ def _po_item_for(item_supplier, *, sent_days_ago):
     return PurchaseOrderItem.objects.create(
         purchase_order=po,
         item_supplier=item_supplier,
+        quoted_lead_time_days=item_supplier.average_lead_time,
         quantity_ordered=4,
         unit_cost_ordered=Decimal("2.00"),
         order_in_packages=4,
@@ -274,7 +280,7 @@ def _confirmed_order_delivered_on_the_confirmed_day():
 
 
 def test_variance_scores_the_standing_quote_not_the_confirmed_date():
-    """DELIBERATE: the link's standing quote is the yardstick, not the PO's date.
+    """DELIBERATE: the vendor's quoted lead time is the yardstick, not the PO's date.
 
     A vendor quoting 3 days confirms 10 once it has the order, then delivers on
     day 10. The row therefore carries ``expected_delivery_date ==
@@ -286,7 +292,7 @@ def test_variance_scores_the_standing_quote_not_the_confirmed_date():
     Scoring the confirmed date instead would let that vendor quote three days,
     confirm ten, deliver ten, and win on BOTH axes — the lead-time term would
     pay it for a 3-day quote while the performance term found nothing to
-    discount. The performance term exists only to discount the standing quote by
+    discount. The performance term exists only to discount the quoted lead time by
     how often the vendor broke it, so it must measure against that same quote.
     """
     log = _confirmed_order_delivered_on_the_confirmed_day()

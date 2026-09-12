@@ -140,7 +140,7 @@ def _annotated_record(link):
 
     One rule, two implementations: a correlated subquery on the row and a
     grouped aggregate over the leftovers. They must agree, and the boundary is
-    where two spellings of "no later than the vendor's standing quote" would
+    where two spellings of "no later than the vendor's quoted lead time" would
     drift first.
     """
     row = ItemSupplier.objects.annotate(**delivery_record_annotations()).get(pk=link.pk)
@@ -715,7 +715,7 @@ def test_a_delivery_on_the_promised_day_counts_as_on_time():
     ``average_lead_time`` of 0, one layer down: a guard spelled
     ``if log.variance_days`` would read a delivery that landed exactly when
     quoted as having no variance recorded. The rule is ``<= 0``, measured
-    against the vendor's standing quote.
+    against the vendor's quoted lead time.
 
     Asserted on BOTH implementations of the rule — the row annotation every read
     path rides and the grouped-aggregate fallback — because the boundary is

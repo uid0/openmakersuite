@@ -50,8 +50,8 @@ export interface SupplierAgreement {
 export interface SupplierDetail extends Supplier {
   items?: ItemSupplier[];
   purchase_orders?: any[]; // PurchaseOrder type from reorder_queue
-  // Every variance and rate in this block is measured against the supplier
-  // link's standing quoted lead time, never against the delivery dates
+  // Every variance and rate in this block is measured against the lead time the
+  // supplier quoted when the order was sent, never against the delivery dates
   // confirmed on the orders — the keys say so themselves,
   // `variance_measured_against` repeats it machine-readably, and each row's
   // `met_confirmed_date` / `confirmed_delivery_date` carry that other promise.
@@ -73,6 +73,14 @@ export interface SupplierDetail extends Supplier {
       variance_days: number;
       /** Later than the QUOTE. Can be `true` on a row that hit the agreed date. */
       was_over_quoted_lead_time: boolean;
+      /**
+       * Which reading of the quote `estimated_lead_time_days` holds:
+       * `order_snapshot` (the quote captured when the order was sent) or
+       * `receipt_quote` (the link's quote at receipt, for an order placed
+       * before that was recorded). The yardstick is the same for every row;
+       * how faithfully a given row holds it is not.
+       */
+      estimated_lead_time_basis?: string;
       /** Met the operator's confirmed date; `null` when none was confirmed. */
       met_confirmed_date?: boolean | null;
       /** The date that verdict judged; `null` when the order confirmed none. */

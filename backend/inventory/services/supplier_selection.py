@@ -154,10 +154,10 @@ class DeliveryRecord:
     """One link's delivery history, as the two counts the score needs.
 
     ``total`` is how many :class:`~reorder_queue.models.LeadTimeLog` rows this
-    link has; ``on_time`` is how many of them arrived no later than the VENDOR'S
-    STANDING QUOTED LEAD TIME — ``ItemSupplier.average_lead_time``, the yardstick
-    because it is the promise the lead-time term scores — and not the order's
-    separately confirmed ``expected_delivery_date`` (``variance_days <= 0``).
+    link has; ``on_time`` is how many of them arrived no later than the LEAD TIME
+    THE VENDOR QUOTED WHEN THAT ORDER WENT OUT — the yardstick because it is the
+    promise the lead-time term scores — and not the order's separately confirmed
+    ``expected_delivery_date`` (``variance_days <= 0``).
     Both are counts of ROWS, so
     ``total == 0`` means "nothing has ever been delivered through this link",
     which is an absence of evidence and not a bad record — see :attr:`factor`.
@@ -356,7 +356,7 @@ def _delivery_count(*, on_time_only: bool) -> Subquery:
     logs = LeadTimeLog.objects.filter(item_supplier=OuterRef("pk"))
     if on_time_only:
         # ``<= 0``, not ``< 0``: a variance of exactly zero is a delivery that
-        # landed on the day the vendor's standing quote promised — the best
+        # landed on the day the vendor's quote promised — the best
         # outcome this column can express, and one more known value a falsy
         # guard would have read as an absence. Early is as good as on time, not
         # better; see :attr:`DeliveryRecord.factor`.
@@ -413,18 +413,28 @@ def delivery_records_for(links: List[ItemSupplier]) -> Dict[int, DeliveryRecord]
 
     "Performance" is defined here, in one sentence: **the share of the
     deliveries recorded against THIS supplier link that arrived no later than
-    the VENDOR'S STANDING QUOTED LEAD TIME.**
+    the LEAD TIME THAT LINK QUOTED WHEN EACH ORDER WAS PLACED.**
     ``reorder_queue.models.LeadTimeLog`` is the record and ``variance_days``
     (``actual_lead_time_days - estimated_lead_time_days``, positive = late) is
     the column that says so, read as ``<= 0`` because a variance of exactly
     ``0`` is a delivery that landed on the quoted day.
 
-    The yardstick is the link's standing ``average_lead_time`` — NOT the order's
-    own ``expected_delivery_date``, even when an operator confirmed one — because
-    it is the same promise the lead-time term scores, and this term exists only
-    to discount that promise by how often the vendor broke it. Scoring the
-    discount against a per-order date would decouple the two terms and let a
-    vendor quote three days, confirm ten, deliver ten, and win on BOTH axes.
+    The yardstick is the link's own quote — NOT the order's
+    ``expected_delivery_date``, even when an operator confirmed one — because it
+    is the same promise the lead-time term scores, and this term exists only to
+    discount that promise by how often the vendor broke it. Scoring the discount
+    against a per-order date would decouple the two terms and let a vendor quote
+    three days, confirm ten, deliver ten, and win on BOTH axes.
+
+    Read AS OF THE ORDER, not as of now: ``create_lead_time_log`` writes each
+    row's ``estimated_lead_time_days`` from the quote
+    ``PurchaseOrderItem.quoted_lead_time_days`` froze when the order was sent,
+    so requoting the link changes what the NEXT order is judged against and
+    nothing that has already been delivered. It did not always — the estimate
+    used to be read at receipt — and the rows carrying that older reading say so
+    on ``LeadTimeLog.estimated_lead_time_basis``. They are counted here
+    unchanged: they are the record as it was made, and re-scoring them against
+    today's quote would be the very substitution the snapshot exists to stop.
 
     **Per LINK, not per supplier.** A supplier-wide rate over
     ``item_supplier__supplier`` is the broader sample, but it cannot be reached

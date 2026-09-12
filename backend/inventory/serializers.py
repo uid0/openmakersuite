@@ -361,8 +361,9 @@ class SupplierDetailSerializer(SupplierSerializer):
     def get_lead_time_analytics(self, obj):
         """Get lead time analytics for this supplier.
 
-        Every rate and variance here is measured against the supplier link's
-        standing quoted lead time, never against ``expected_delivery_date`` (see
+        Every rate and variance here is measured against the lead time the
+        supplier quoted when each order was sent, never against
+        ``expected_delivery_date`` (see
         ``LeadTimeLog``). That used to reach this payload — and
         ``frontend/src/pages/SupplierDetailPage.tsx``'s ``LeadTimeChart`` —
         unnamed, so a vendor that quotes 3, has the order confirmed at 10 and
@@ -382,10 +383,13 @@ class SupplierDetailSerializer(SupplierSerializer):
         Alongside them, keys derived from ``LeadTimeLog`` so this payload cannot
         name a different promise than the admin does:
         ``variance_measured_against`` states the yardstick once for the whole
-        block, and each row's ``met_confirmed_date`` plus
-        ``confirmed_delivery_date`` carry the other promise — the verdict and the
-        date an operator would chase the vendor with, both ``null`` when no date
-        was confirmed on the order. Pinned by
+        block, each row's ``met_confirmed_date`` plus ``confirmed_delivery_date``
+        carry the other promise — the verdict and the date an operator would
+        chase the vendor with, both ``null`` when no date was confirmed on the
+        order — and each row's ``estimated_lead_time_basis`` says whether the
+        quote it was graded against is the one captured when that order was sent
+        or the link's quote at receipt, which is all a row placed before the
+        snapshot existed can hold. Pinned by
         ``test_lead_time_yardstick_is_named.py``.
         """
         try:
@@ -457,6 +461,13 @@ class SupplierDetailSerializer(SupplierSerializer):
                         "actual_lead_time_days": log.actual_lead_time_days,
                         "variance_days": log.variance_days,
                         "was_over_quoted_lead_time": log.was_late,
+                        # WHICH reading of the quote the row above was graded
+                        # against, which also varies per row: the one captured
+                        # when the order was sent, or the link's quote at
+                        # receipt for an order placed before that was recorded.
+                        # The yardstick named once for the block is the same for
+                        # every row; how faithfully a given row holds it is not.
+                        "estimated_lead_time_basis": log.estimated_lead_time_basis,
                         # The other promise, which varies per row and which
                         # nothing here scores: the verdict AND the date it was
                         # judged against, both ``null`` where the order carries

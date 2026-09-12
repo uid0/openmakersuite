@@ -274,15 +274,24 @@ class TestASuppliedFieldIsNeverSilentlyDROPPED:
         assert refusal_for(response, "quantity_per_package") == [UNSUPPORTED_TERM]
         assert not ItemSupplier.objects.filter(item__sku=KIT_SKU).exists()
 
-    def test_the_refusal_points_at_the_endpoint_that_does_accept_the_field(self):
+    def test_the_refusal_points_at_the_endpoint_that_does_accept_the_field(
+        self, authenticated_client, supplier, component
+    ):
         """A refusal is only actionable if it says where the field DOES go.
 
         ``package_cost``, ``quantity_per_package``, the dimensions and the notes
         are all real columns; ``/api/inventory/item-suppliers/`` writes and
-        validates every one of them. Pinned as a string so a reword that drops
-        the destination fails rather than quietly leaving an operator stuck.
+        validates every one of them. The response must name that destination so
+        a reword cannot quietly leave an operator stuck.
         """
-        assert "/api/inventory/item-suppliers/" in UNSUPPORTED_TERM
+        client, _ = authenticated_client
+
+        response = post_kit(
+            client, component, supplier=supplier.pk, supplier_sku="S", package_cost="12.00"
+        )
+
+        message = response.data["error"]["details"]["supplier_terms"]["package_cost"][0]
+        assert "/api/inventory/item-suppliers/" in message
 
     def test_any_other_supplier_column_is_refused_the_same_way(
         self, authenticated_client, supplier, component

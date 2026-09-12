@@ -111,8 +111,21 @@ const UniversalScannerPage: React.FC = () => {
         switch (result.action) {
           case 'inventory_reorder': {
             if (!result.target_id) return { outcome: 'error', message: 'Missing item id.' };
-            await reorderAPI.createRequest({ item: result.target_id, quantity: 1 });
-            return { outcome: 'success', message: 'Reorder request created.' };
+            const { data } = await reorderAPI.createRequest({
+              item: result.target_id,
+              quantity: 1,
+            });
+            // The server files at most one PENDING anonymous request per item,
+            // so "created" is not a safe thing to print on the strength of the
+            // call having resolved. Say which of the two happened: an operator
+            // told a row was created when none was has been told something
+            // false, and the history line is the only record they get.
+            return data?.already_requested
+              ? {
+                  outcome: 'success',
+                  message: 'Already requested — this item has an open reorder request.',
+                }
+              : { outcome: 'success', message: 'Reorder request created.' };
           }
           case 'asset_checkin': {
             if (!result.target_id) return { outcome: 'error', message: 'Missing asset id.' };

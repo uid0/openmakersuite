@@ -79,6 +79,7 @@ from .serializers import (
     WebHookCreateSerializer,
     WebHookSerializer,
     WebHookTestResultSerializer,
+    duplicate_response,
     send_request_field,
 )
 from .webhook_audit import diff_audited_fields as diff_webhook_audited_fields
@@ -353,6 +354,18 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
     request_notes, priority) and the create response is also serialized
     with that limited shape so no admin metadata (cost, invoice,
     supplier URLs) ever leaks to an anonymous caller.
+
+    ``create`` has THREE outcomes and every caller can tell them apart:
+
+    * **filed** — 201, the new request, ``already_requested: false``.
+    * **already recorded** — 200, the pending request this duplicates,
+      ``already_requested: true`` and a ``detail`` saying the need is on file.
+      No row was created (see :class:`ReorderRequestCreateSerializer`).
+    * **could not tell** — the usual 4xx/5xx error envelope, unchanged.
+
+    Nothing collapses the middle one into either neighbour: it is not an error,
+    and it is not a silent success that leaves the member unsure whether to
+    scan again.
     """
 
     # Only JWT, no session auth needed
@@ -432,6 +445,11 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
 
         A scan raised by someone who could approve it is approved on the
         spot (:meth:`_auto_approve_if_approver`).
+
+        An anonymous submission for an item that already has a PENDING
+        request files nothing and reports the existing one — see the class
+        docstring for the three outcomes and
+        :meth:`ReorderRequestCreateSerializer.create` for the rule itself.
         """
         user = request.user
         if user.is_authenticated:
@@ -456,6 +474,26 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
         headers = self.get_success_headers(serializer.data)
+
+        if serializer.already_requested:
+            # The scan duplicated a request that is still pending, so no row
+            # was added (see ``ReorderRequestCreateSerializer.create``). This
+            # is the outcome the member must NOT read as a failure: 200 with
+            # the pending request and wording that says the need is recorded.
+            # Not 201 (nothing was created), not 4xx (nothing went wrong), and
+            # never a silent success that hides which of the two happened.
+            #
+            # No admin notification fires: nothing new arrived in the queue,
+            # and a second "New Reorder Request" for a row admins already have
+            # is exactly the duplicate this endpoint just refused to file.
+            # ``duplicate_response`` owns the shape — including which fields
+            # are deliberately withheld because the blocking row may be someone
+            # else's, and what ScanTTY has to read to report this correctly.
+            return Response(
+                duplicate_response(serializer.instance),
+                status=status.HTTP_200_OK,
+                headers=headers,
+            )
 
         self._auto_approve_if_approver(user, serializer.instance)
 
@@ -491,7 +529,13 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
             # Don't fail the request if notification creation fails
             pass
 
-        return Response(output_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+        # Carried on the created response too, always present and always
+        # False here, so a client reads ONE field to tell "filed" from
+        # "already recorded" instead of having to notice 201 vs 200 — a
+        # distinction anything checking `response.ok` flattens.
+        payload = dict(output_serializer.data)
+        payload["already_requested"] = False
+        return Response(payload, status=status.HTTP_201_CREATED, headers=headers)
 
     @action(detail=False, methods=["get"])
     def pending(self, request):

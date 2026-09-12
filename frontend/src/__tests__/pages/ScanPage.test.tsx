@@ -579,7 +579,7 @@ describe('ScanPage', () => {
     // Reaching /thanks proves the journey is driven entirely by the
     // QR-encoded :itemId — the camera-free, code-entry-by-URL path.
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/thanks');
+      expect(mockNavigate).toHaveBeenCalledWith('/thanks', { state: { alreadyRequested: false } });
     });
   });
 
@@ -642,7 +642,33 @@ describe('ScanPage', () => {
     await anonymousScanOf(packCountedItem);
 
     expect(localStorage.getItem('token')).toBeNull();
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/thanks'));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/thanks', { state: { alreadyRequested: false } }));
+    expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(1);
+  });
+
+  // --- Filed, or already recorded ------------------------------------------
+  // The server files at most one PENDING anonymous request per item, so a
+  // resolved POST is no longer proof a row was created. The page reads the
+  // FLAG, not the status code: `response.ok` and a bare `await` both flatten
+  // 200 and 201 into "worked", and telling a member their request was
+  // submitted when none was is the false message this distinction prevents.
+
+  test('a duplicate scan sends the member on as ALREADY RECORDED, not as filed', async () => {
+    (api.reorderAPI.createRequest as jest.Mock).mockResolvedValue({
+      data: { id: 1, already_requested: true, detail: 'already recorded' },
+    });
+
+    await anonymousScanOf(packCountedItem);
+
+    // Still a redirect, not a failure notice: their need IS on file and
+    // there is nothing for them to do about it.
+    await waitFor(() =>
+      expect(mockNavigate).toHaveBeenCalledWith('/thanks', {
+        state: { alreadyRequested: true },
+      })
+    );
+    expect(screen.queryByTestId('auto-submit-failed')).toBeNull();
+    // And no second POST: one scan, one attempt.
     expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(1);
   });
 
@@ -775,7 +801,7 @@ describe('ScanPage', () => {
     expect(notice).toHaveTextContent('Test Widget');
     expect(notice).toHaveTextContent(/nothing has been ordered/i);
     expect(notice).toHaveTextContent(/reload this page|member of staff/i);
-    expect(mockNavigate).not.toHaveBeenCalledWith('/thanks');
+    expect(mockNavigate).not.toHaveBeenCalledWith('/thanks', expect.anything());
   });
 
   test('a retry inside the bound still files the request', async () => {
@@ -787,7 +813,7 @@ describe('ScanPage', () => {
 
     await anonymousScanOf({ ...mockItem, has_pending_reorder: false });
 
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/thanks'), {
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/thanks', { state: { alreadyRequested: false } }), {
       timeout: 3000,
     });
     expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(2);
@@ -795,11 +821,17 @@ describe('ScanPage', () => {
   });
 
   // --- A retry asks whether the first attempt landed ----------------------
-  // `/reorders/requests/` is not idempotent, so a POST whose row committed but
-  // whose response was lost looks exactly like a failure here. Re-reading the
-  // item before re-POSTing NARROWS that duplicate window; it does not close it
-  // (a commit landing after the re-read still files twice — closing it needs
-  // idempotency at the public endpoint, routed separately).
+  // A POST whose row committed but whose response was lost looks exactly like a
+  // failure here. Re-reading the item before re-POSTing NARROWED that duplicate
+  // window; the server closes it — while a request for the item is PENDING the
+  // public create endpoint files no second row and answers `already_requested`.
+  // The re-read still earns its place: it is what stops the member being told
+  // "nothing has been ordered" when something was.
+  //
+  // These cases end on /thanks worded as ALREADY RECORDED, not as filed. The
+  // re-read establishes that a request for the item is pending; it cannot
+  // establish that this scan is what filed it, and "already recorded" is the
+  // statement that is true either way.
 
   const anonymousScanWhere = async (
     getItem: (id: string) => Promise<{ data: Record<string, unknown> }>
@@ -824,9 +856,9 @@ describe('ScanPage', () => {
       return { data: reads === 1 ? unfiled : filed };
     });
 
-    // The member's scan DID result in a filed request, so they end where a
-    // successful submit ends — not on a notice telling them nothing was ordered.
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/thanks'), {
+    // The member's need IS on file, so they end where a successful submit ends —
+    // not on a notice telling them nothing was ordered.
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/thanks', { state: { alreadyRequested: true } }), {
       timeout: 3000,
     });
     expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(1);
@@ -850,7 +882,7 @@ describe('ScanPage', () => {
       return { data: reads >= 4 ? filed : unfiled };
     });
 
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/thanks'), {
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/thanks', { state: { alreadyRequested: true } }), {
       timeout: 3000,
     });
     expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(3);
@@ -993,7 +1025,7 @@ describe('ScanPage', () => {
     expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByText('scan widget A'));
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/thanks'));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/thanks', { state: { alreadyRequested: false } }));
     expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(2);
 
     // The first loop stays abandoned: releasing its POST must not restart it,

@@ -125,14 +125,15 @@ already have.
 one changes what such a visitor can *do* rather than what they are told, which
 was reserved to the captain.
 
-### The duplicate window the retry opens, narrowed but NOT closed
+### The duplicate window the retry opened, now closed on the public create path
 
-A bounded retry on a non-idempotent endpoint can file twice. `POST
-/reorders/requests/` has no uniqueness or pending-request check
-(`ReorderRequestCreateSerializer`), so a first attempt whose row committed but
-whose response was lost — a dropped mobile connection, a proxy answering 502
-after the write — looks to the page exactly like a failure, and the retry files
-a second pending request for the same item.
+A bounded retry on a non-idempotent endpoint could file twice: a first attempt
+whose row committed but whose response was lost looked to the page exactly like
+a failure, and the retry filed a second pending request for the same item. The
+public create path now enforces one pending anonymous request per item. The
+authoritative rule, including its deliberately anonymous-only scope and its
+three response outcomes, lives on `ReorderRequestCreateSerializer` and
+`ReorderRequestViewSet.create`.
 
 What this branch does about it: **a retry re-reads the item first**
 (`inventoryAPI.getItem`) and, if `has_pending_reorder` has flipped true, stops
@@ -154,17 +155,12 @@ not what they can DO: no new control, no new endpoint, no permission change. If
 that re-read itself fails the notice is still shown — an unverifiable outcome
 must be stated, never swallowed.
 
-**This narrows the window; it does not close it.** A server commit that lands
-*after* the re-read and before the retry still files twice. Closing it needs
-idempotency at the public create endpoint — an idempotency key, or a
-pending-request check in the create path — which changes behaviour for every
-caller of that endpoint, ScanTTY included. That is a contract change, is routed
-separately, and is deliberately **not** taken in this branch. Three tests pin
-what was taken: a retry that finds the reorder pending files exactly one POST
-and lands the member in the filed state; a re-read that itself fails still
-retries to the same bound of three; and a final attempt whose pre-notice
-re-read reports the reorder pending reaches the filed state with no failure
-notice rendered.
+The server-side rule closes the remaining commit-after-re-read window: the next
+anonymous POST returns the existing pending request rather than inserting
+another row. The response distinguishes `already_requested` from a newly filed
+request so the member is told that the need is already recorded. The client
+re-read remains useful containment and preserves a truthful terminal state when
+an attempt's response cannot be observed.
 
 ## Anonymous submission is the primary path, and is not narrowed
 
@@ -205,12 +201,20 @@ task with a pointer comment at the line.
 ## Cross-project
 
 ScanTTY was checked against its REAL remote default branch (`uid0/scantty` main
-at `de380e1f`), not a local checkout. **No contract change**: `reorder_display`
-gained two keys additively and ScanTTY does not read that block; it decodes
-`reorder_qty` from `check_material_stock` into `MaterialStockAlert.ReorderQty`
-but never renders or files with it, so correcting that value is safe there. Its
-own reorder form has the operator type the quantity, prefilled from the
-supplier's pack size, so it already shows what it files.
+at `de380e1f`), not a local checkout. The reorder-quantity change made no
+contract change: `reorder_display` gained two keys additively and ScanTTY does
+not read that block; it decodes `reorder_qty` from `check_material_stock` into
+`MaterialStockAlert.ReorderQty` but never renders or files with it, so correcting
+that value is safe there. Its own reorder form has the operator type the
+quantity, prefilled from the supplier's pack size, so it already shows what it
+files.
+
+The later anonymous-deduplication change does alter the create response
+contract. ScanTTY safely ignores the additive `already_requested` field, but
+until it reads that marker it reports every successful response as “created,”
+including a 200 response where the server filed no row. The authoritative wire
+shape and compatibility note live on `duplicate_response` in
+`backend/reorder_queue/serializers.py`.
 
 ## Evidence
 

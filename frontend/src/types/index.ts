@@ -1071,13 +1071,22 @@ export interface LowStockAlert {
   material_id: string;
   item_id: string;
   name: string;
+  /**
+   * `current` and `minimum` are a COMPARABLE pair, both counted in `unit` —
+   * the unit the material is counted in, which is what this surface is about.
+   * For a pack-counting item that is whole packs ("2/10 case"), not the base
+   * count against a pack threshold, which rendered an uncomparable "24/10".
+   */
   current: number;
   minimum: number;
+  /** The noun `current` and `minimum` are both counted in (server `count_unit`). */
+  unit: string;
   /**
    * BASE units — the server's `base_reorder_quantity`, not the raw
    * `reorder_quantity` column — because `MaintenanceDashboard` POSTs it
-   * verbatim as a `ReorderRequest.quantity`. See `check_material_stock`'s
-   * docstring, which owns the contract.
+   * verbatim as a `ReorderRequest.quantity`. Deliberately NOT in `unit`: it is
+   * ordered, not counted. See `check_material_stock`'s docstring, which owns
+   * the contract.
    */
   reorder_qty: number;
 }

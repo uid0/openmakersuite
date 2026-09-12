@@ -6353,16 +6353,27 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
         """
         Return low-stock alerts for materials on this maintenance item.
 
-        Emits one alert per MaintenanceMaterial that is linked to an InventoryItem
-        whose current_stock is below its minimum_stock threshold.
+        Emits one alert per MaintenanceMaterial linked to an InventoryItem whose
+        count is below its minimum, both read in the unit the material is
+        COUNTED in. That is the unit this surface is about: it is shown to a
+        technician about to walk to a shelf, and the question is whether there is
+        enough *there*. ``count_at_level`` is the count in that unit and
+        ``minimum_stock`` is already a threshold in it (``services.packaging``
+        documents that reinterpretation for the pack-counting ``count_mode``s),
+        so ``current`` and ``minimum`` below are a comparable pair, with ``unit``
+        naming what they are counted in. ``_apply_reconciliation_row`` reads the
+        same pair the same way, and reports its trigger in the unit it judged.
 
-        ``reorder_qty`` is BASE units — the unit a ``ReorderRequest.quantity``
+        ``reorder_qty`` is the one number here that is NOT in that unit, because
+        it is not a count: it is BASE units — the unit a ``ReorderRequest.quantity``
         is stored in — because the caller FILES it: the maintenance dashboard's
         "Create reorder requests & continue" POSTs this number straight through.
         It is therefore ``base_reorder_quantity``, the one derivation every
         other filing path uses, and not the raw ``reorder_quantity`` column,
         which for a pack-counting item is a count of PACKS and filed a 12th of
-        the intended order (``test_reorder_filing.py``).
+        the intended order (``test_reorder_filing.py``). Ordering is by the case
+        and counting is by the item; both are right, and each number here says
+        which it is.
 
         Note what that changes for an ``each`` material too, because
         ``base_reorder_quantity`` carries the shortage clause
@@ -6374,10 +6385,10 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
         """
         item = self.get_object()
         alerts = []
-        # ``count_level`` is joined because ``base_reorder_quantity`` reads it
-        # (via ``counts_in_packs`` and ``count_at_level``) for every alerted
-        # material; the raw column it replaced touched no relation, so without
-        # the join each low-stock pack-counting material costs a query.
+        # ``count_level`` is joined because both ``count_at_level`` and
+        # ``base_reorder_quantity`` read it (via ``counts_in_packs``) for every
+        # material; the raw column they replaced touched no relation, so without
+        # the join each pack-counting material costs a query.
         materials = item.materials.select_related(
             "inventory_item", "inventory_item__count_level"
         ).all()
@@ -6388,24 +6399,49 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
             # Retired items are phased out — never emit a low-stock alert.
             if inv.is_retired:
                 continue
-            # PRE-EXISTING and deliberately untouched here: this compares
-            # ``current_stock`` (base units) against ``minimum_stock``, which
-            # for the pack-counting count_modes is a threshold in count_level
-            # units — so a pack-counted material below its case minimum can be
-            # dropped, and the ``current``/``minimum`` pair below is mixed for
-            # the same reason. ``InventoryItem.needs_reorder`` is the mode-aware
-            # form, but swapping to it is not a drop-in: it also suppresses kits
-            # and legacy ``use_case_based_reorder`` items this predicate alerts
-            # on today. Routed as its own task; do not re-derive it here.
-            if inv.current_stock >= inv.minimum_stock:
+            # Compared at the granularity the material is COUNTED in (op-es7c).
+            # ``minimum_stock`` is a threshold in that unit, so only the stock
+            # side was ever mixed: the raw ``current_stock >= minimum_stock``
+            # this replaced read ``24 >= 10`` for a material holding 24 bottles
+            # — 2 cases — against a 10-CASE minimum, and dropped it. For an
+            # ``each`` material (every material that has not opted into a
+            # pack-counting ``count_mode``) ``count_at_level`` IS
+            # ``current_stock``, so this is byte-for-byte the previous
+            # comparison.
+            #
+            # ADDITIVE BY CONSTRUCTION, which is the property this surface has
+            # to keep: ``count_at_level(inv) <= inv.current_stock`` for every
+            # shape — a pack holds at least one base unit — while the threshold
+            # is unchanged, so every material the raw comparison alerted on
+            # still alerts. Nothing is judged on a narrower rule than before.
+            #
+            # That is also why this is NOT ``inv.needs_reorder``, which looks
+            # like the mode-aware form and is not a drop-in: it short-circuits
+            # ``is_kit`` and, for a legacy ``use_case_based_reorder`` material
+            # with a KNOWN case size and no chain of its own, compares cases to
+            # ``minimum_cases`` — 3 cases against a 1-case minimum reads fine
+            # while the base-unit floor it is also configured with (30 against
+            # 50) reads low. Both shapes alert here today, and swapping would
+            # have deleted those alerts silently. ``low_stock_q`` still applies
+            # that base-unit comparison to exactly that shape.
+            # ``test_maintenance_stock_check.py`` pins the superset per shape.
+            counted = count_at_level(inv)
+            if counted >= inv.minimum_stock:
                 continue
             alerts.append(
                 {
                     "material_id": str(material.id),
                     "item_id": str(inv.id),
                     "name": inv.name,
-                    "current": inv.current_stock,
+                    # The two operands of the comparison above, in one unit, so
+                    # a screen cannot render "24/10" under a "below minimum
+                    # stock" banner again. Deliberately not
+                    # ``reorder_threshold``: for a legacy case-based material it
+                    # names ``minimum_cases`` ("1 case"), which is not the rule
+                    # applied here and would print "30/1" beside the banner.
+                    "current": counted,
                     "minimum": inv.minimum_stock,
+                    "unit": count_unit(inv),
                     "reorder_qty": base_reorder_quantity(inv),
                 }
             )

@@ -94,6 +94,7 @@ describe('MaintenanceDashboard low-stock flow', () => {
             name: 'Air Filter',
             current: 1,
             minimum: 5,
+            unit: 'unit',
             reorder_qty: 10,
           },
         ],
@@ -108,11 +109,46 @@ describe('MaintenanceDashboard low-stock flow', () => {
 
     const banner = await screen.findByTestId('low-stock-banner');
     expect(banner).toBeInTheDocument();
-    expect(screen.getByTestId('low-stock-alert')).toHaveTextContent('Low stock: Air Filter: 1/5');
+    expect(screen.getByTestId('low-stock-alert')).toHaveTextContent(
+      'Low stock: Air Filter: 1/5 units'
+    );
     expect(
       screen.getByRole('button', { name: /create reorder requests.*continue/i })
     ).toBeInTheDocument();
     expect(mockWorkOrderAPI.generateWorkOrder).not.toHaveBeenCalled();
+  });
+
+  test('renders a pack-counted alert as one comparable pair in its own unit', async () => {
+    // The server sends `current`/`minimum` in the unit the material is COUNTED
+    // in, so a pack-counted material reads "2/10 cases" — two numbers a reader
+    // can compare under a "below minimum stock" banner. It used to pair 24
+    // bottles against a 10-case minimum and render "24/10".
+    const item = buildItem();
+    mockWorkOrderAPI.getDueThisWeek.mockResolvedValue({ data: [item] } as any);
+    mockWorkOrderAPI.checkMaterialStock.mockResolvedValue({
+      data: {
+        low_stock_alerts: [
+          {
+            material_id: 'mat-2',
+            item_id: 'inv-2',
+            name: 'Widget',
+            current: 2,
+            minimum: 10,
+            unit: 'case',
+            reorder_qty: 96,
+          },
+        ],
+      },
+    } as any);
+
+    renderDashboard();
+    await waitFor(() => expect(mockWorkOrderAPI.getDueThisWeek).toHaveBeenCalled());
+
+    const [generateBtn] = await screen.findAllByRole('button', { name: /generate work order/i });
+    await userEvent.click(generateBtn);
+
+    const alert = await screen.findByTestId('low-stock-alert');
+    expect(alert).toHaveTextContent('Low stock: Widget: 2/10 cases');
   });
 
   test('reorder CTA creates reorder requests and then generates work order', async () => {
@@ -127,6 +163,7 @@ describe('MaintenanceDashboard low-stock flow', () => {
             name: 'Air Filter',
             current: 1,
             minimum: 5,
+            unit: 'unit',
             reorder_qty: 10,
           },
         ],

@@ -1492,7 +1492,11 @@ def scan(start: Path | None = None) -> Report:
         for column, seed, refresh in derive_values(package / ROUTING_MODULE)
     )
     order_shape = derive_order_shape(models_path, anchors[0].model_name, anchors[0].related_name)
-    report = Report(anchors=anchors, order=order_shape, scanned=[rel_to_base(backend)])
+    # These are logical source trees, not deployment paths.  The Docker test
+    # mounts the contents of ``backend/`` at ``/app``; reporting that mount
+    # basename as ``app`` makes a complete backend sweep look like it skipped
+    # the backend altogether.
+    report = Report(anchors=anchors, order=order_shape, scanned=["backend"])
 
     functions: dict[str, dict] = {}
     for path in _walk(backend, ".py"):
@@ -1529,7 +1533,7 @@ def scan(start: Path | None = None) -> Report:
         # see the tree must not read as one that cleared it.
         report.unscanned.append("frontend/src (not present in this checkout)")
     else:
-        report.scanned.append(rel_to_base(frontend))
+        report.scanned.append("frontend/src")
         for path in _walk(frontend, ".ts", ".tsx"):
             rel = rel_to_base(path)
             try:

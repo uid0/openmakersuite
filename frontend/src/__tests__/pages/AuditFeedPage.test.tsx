@@ -123,7 +123,7 @@ describe('AuditFeedPage', () => {
     // asked `toBeInTheDocument()` passed for as long as the row never
     // opened at all (#1052). Every assertion below is `toBeVisible`,
     // which is the thing the reviewer is actually promised.
-    const metadata = screen.getByText(/device_mac/);
+    const metadata = await screen.findByText(/device_mac/);
     expect(metadata).not.toBeVisible();
 
     fireEvent.click(row);
@@ -157,7 +157,7 @@ describe('AuditFeedPage', () => {
     renderPage();
 
     const bravoRow = await screen.findByTestId('audit-row-1');
-    const charlie = screen.getByText(/charlie/);
+    const charlie = await screen.findByText(/charlie/);
     expect(charlie).not.toBeVisible();
 
     fireEvent.click(bravoRow);

@@ -761,6 +761,40 @@ def assert_deletable(purchase_order):
     )
 
 
+#: What an operator refused with ``line_voided`` can actually DO.
+#:
+#: The refusal used to say "Restore or remove that line". **Nothing in this
+#: codebase restores a voided line**: ``is_voided`` is only ever written ``True``
+#: (:func:`~reorder_queue.services.purchase_orders.void_line_item` and the
+#: PO-level void beside it), and the one writable door onto a line,
+#: ``PurchaseOrderViewSet.update_item``, reads a closed list of request keys that
+#: does not include it — so a ``PATCH`` cannot un-void one either, and
+#: ``void_item`` only goes the one way. Naming an action the operator cannot take
+#: is worse than naming none: it sends them looking for a button nobody built.
+#:
+#: Deletion is the action that exists, and it is available EVERY time this
+#: refusal fires rather than merely usually. The caller has already passed
+#: :func:`assert_addable`, so the order is in
+#: ``PurchaseOrder.PRE_SUPPLIER_STATUSES``, and :func:`assert_deletable` gates
+#: ``DELETE .../items/<id>/`` on that same frozenset. The remedy named here
+#: therefore cannot be refused by the endpoint it points at, and the two guards
+#: cannot drift apart without the shared set moving under both.
+#:
+#: **"Then order it again" is unconditional for the same kind of reason.**
+#: ``void_line_item`` also marks an inventory line's ``ItemSupplier``
+#: discontinued, which would refuse the re-order — but an operator whose link is
+#: struck off never reaches this message: both ways of naming an item pre-empt it
+#: with ``discontinued`` (:func:`resolve_item_supplier` on an explicit
+#: ``item_supplier``, :func:`lookup_candidates` on a scanned identifier). So a
+#: ``line_voided`` refusal proves the link is still live, and this remedy cannot
+#: hand the operator a second wall one step along.
+#:
+#: One constant shared by both line shapes, because a remedy that is true on the
+#: inventory branch and stale on the asset branch beside it is how the original
+#: claim survived as long as it did.
+VOIDED_LINE_REMEDY = "Delete that line first, then order it again."
+
+
 def resolve_item_supplier(purchase_order, item_supplier_id):
     """Load an explicitly named ``ItemSupplier`` and prove this supplier carries it.
 
@@ -992,8 +1026,8 @@ def _grow_existing_line(
     if existing.is_voided:
         raise LineEntryError(
             f"{item_supplier.item.name} is already on "
-            f"{purchase_order.po_number or 'this order'} as a voided line. "
-            "Restore or remove that line before ordering it again.",
+            f"{purchase_order.po_number or 'this order'} as a voided line, and a "
+            f"voided line cannot be un-voided. {VOIDED_LINE_REMEDY}",
             "line_voided",
         )
 
@@ -1199,8 +1233,8 @@ def _grow_existing_asset_line(
     if existing.is_voided:
         raise LineEntryError(
             f"{asset.name} is already on "
-            f"{purchase_order.po_number or 'this order'} as a voided line. "
-            "Restore or remove that line before ordering it again.",
+            f"{purchase_order.po_number or 'this order'} as a voided line, and a "
+            f"voided line cannot be un-voided. {VOIDED_LINE_REMEDY}",
             "line_voided",
         )
 

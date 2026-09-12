@@ -68,14 +68,15 @@ Three properties this has to hold, all of them tested rather than asserted:
 
 from __future__ import annotations
 
+import functools
+import inspect
 import threading
+import types
 from contextlib import contextmanager
-from pathlib import Path
 
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
-from . import models
 from .models import PurchaseOrder, PurchaseOrderItem
 
 #: Per-thread routing state. ``pending`` is ``None`` outside a batch (immediate
@@ -87,30 +88,82 @@ _state = threading.local()
 #: check read the same column.
 _PARENT_FIELD = "purchase_order"
 
-_settlement_fields_cache: frozenset[str] | None = None
+#: The member :attr:`PurchaseOrderItem.is_settled` — the settlement definition
+#: — is reached from. Named once, and the same seed
+#: :mod:`reorder_queue.settlement_sites` starts its own derivation from.
+_SEED = "is_settled"
 
 
+def _member_code(name: str) -> types.CodeType | None:
+    """The compiled body of a class member, or ``None`` if it has no body.
+
+    ``getattr_static`` deliberately, not ``getattr``: reading a property off
+    the CLASS would evaluate nothing useful, and reading a descriptor could run
+    code. This wants the object as declared.
+    """
+    attr = inspect.getattr_static(PurchaseOrderItem, name, None)
+    if isinstance(attr, property):
+        attr = attr.fget
+    elif isinstance(attr, functools.cached_property):
+        attr = attr.func
+    elif isinstance(attr, (classmethod, staticmethod)):
+        attr = attr.__func__
+    return attr.__code__ if isinstance(attr, types.FunctionType) else None
+
+
+def _names_touched(code: types.CodeType) -> set[str]:
+    """Every name a compiled body refers to, comprehensions and lambdas included."""
+    names = set(code.co_names)
+    for const in code.co_consts:
+        if isinstance(const, types.CodeType):
+            names |= _names_touched(const)
+    return names
+
+
+@functools.cache
 def settlement_fields() -> frozenset[str]:
     """The columns that decide settlement, read off the model's own definition.
 
-    Derived, never typed out here. :func:`reorder_queue.settlement_sites.derive_anchor`
-    walks ``PurchaseOrderItem.is_settled`` transitively to the concrete fields,
-    which is the same closure the guard enforces the rest of the tree against —
-    so a field added to the definition joins the dirty check on its own. A tuple
-    written into this module would be a hand-maintained FIELD list one layer
-    below the hand-maintained METHOD list this module exists to delete.
+    Derived, never typed out here, and derived from the IMPORTED CLASS rather
+    than from source. Start at :data:`_SEED`, follow the names each member's
+    compiled body touches, and stop at the ones that are concrete fields: that
+    closure is the settlement definition, so a field added to the definition
+    joins the dirty check on its own. A tuple written into this module would be
+    a hand-maintained FIELD list one layer below the hand-maintained METHOD
+    list this module exists to delete.
 
-    Read once, lazily: the walk parses ``models.py``, and doing that at import
-    time would put a file read in every process start for a question only a line
-    save asks.
+    :func:`reorder_queue.settlement_sites.derive_anchor` computes the SAME
+    closure by parsing ``models.py``, and that is where it belongs — it is a
+    static guard, run by CI over a checkout. It has no business on the ORM
+    write path, which is where this used to call it: a ``pre_save`` receiver
+    that reads and AST-parses a source file makes every line save depend on
+    ``models.py`` being present, readable and parseable by the running
+    interpreter, and turns any of those failing into a failed database write
+    rather than a failed build. Nothing on this path needs the source; the
+    class is already imported.
+
+    The two derivations are independent and must agree — that is asserted in
+    ``reorder_queue/tests/test_settlement_sites.py``, so neither can drift from
+    the definition without the build saying so.
     """
-    global _settlement_fields_cache
-    if _settlement_fields_cache is None:
-        from .settlement_sites import derive_anchor
-
-        models_path = Path(models.__file__)
-        _settlement_fields_cache = derive_anchor(models_path, models_path.name).all_fields
-    return _settlement_fields_cache
+    columns = {f.name for f in PurchaseOrderItem._meta.concrete_fields}
+    found: set[str] = set()
+    seen: set[str] = set()
+    pending = [_SEED]
+    while pending:
+        member = pending.pop()
+        if member in seen:
+            continue
+        seen.add(member)
+        code = _member_code(member)
+        if code is None:
+            continue
+        for name in _names_touched(code):
+            if name in columns:
+                found.add(name)
+            elif name not in seen:
+                pending.append(name)
+    return frozenset(found)
 
 
 def _refreshing() -> bool:

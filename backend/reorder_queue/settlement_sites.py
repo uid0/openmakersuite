@@ -45,30 +45,25 @@ write arm is a name match, but in the safe direction: it *requires* a call to
 ``refresh_receipt_status``, so writing ``my_own_refresh()`` instead does not
 satisfy it.
 
-The write arm has now been blind FIVE separate times, and the list is here
-because each time the previous description implied a completeness it did not
-have:
+The write arm has been wrong about its own reach repeatedly, and the record of
+that is kept as DATA in :data:`WRITE_ARM_SURPRISES` rather than counted out in
+prose here. It is kept because each time, the previous description implied a
+completeness it did not have — and because the count itself went the same way:
+several places in this repository each stated how much the arm could not see,
+by hand, and no two of those numbers agreed with each other or with the length
+of any list in the report. Every number about these lists is now ``len()`` of
+the list it describes, so there is nothing left to keep in step.
 
-1. it knew only attribute assignment and ``create``/``update`` keywords;
-2. a Django ``ModelAdmin`` writes through a ``ModelForm``, naming no settlement
-   field at all;
-3. a DELETE changes the answer while writing no field whatsoever;
-4. its caller graph matched BARE function names, so an unrelated function of the
-   same name elsewhere in the tree could discharge a real writer's obligation —
-   the guard certifying the very thing it was built to catch;
-5. a FAST DELETE fires no ``post_delete`` at all, so the model-level routing
-   that covers ordinary deletes does not cover those.
-
-(2) and (3) are no longer this file's problem: model-level writes are routed by
-:mod:`reorder_queue.settlement_signals`, on the line's own save and delete
-signals, so the admin arm that used to enumerate ``save_model`` /
+The admin surprises are no longer this file's problem: model-level writes are
+routed by :mod:`reorder_queue.settlement_signals`, on the line's own save and
+delete signals, so the admin arm that used to enumerate ``save_model`` /
 ``save_formset`` / ``delete_model`` / ``delete_queryset`` has been RETIRED
-rather than extended. (4) is fixed at the graph — a call now resolves to targets
-in its own module, or across modules only through a name the calling module
-actually imports, and an unresolvable call buys no discharge at all.
+rather than extended. The caller-graph ones are fixed at the graph — see
+``resolve`` in :func:`_write_arm`, where a call resolves only where the
+RECEIVER names the thing being called.
 
-(5) cannot be closed here at all — a signal nobody sends is invisible to a
-scanner and to a receiver alike — so it is NAMED instead, in
+The FAST DELETE cannot be closed here at all — a signal nobody sends is
+invisible to a scanner and to a receiver alike — so it is NAMED instead, in
 :data:`WRITE_SHAPES_UNSEEN` and in what :func:`main` prints.
 
 What that leaves this arm is the writes NO SIGNAL FIRES FOR: queryset-level
@@ -99,6 +94,7 @@ says so.
 from __future__ import annotations
 
 import ast
+import os
 import re
 import sys
 from dataclasses import dataclass, field
@@ -134,8 +130,34 @@ INDEPENDENT_ARG_CALLS = frozenset({"aggregate", "annotate", "update"})
 #: Call names that persist a field value passed as a keyword.
 WRITE_CALLS = frozenset({"create", "update", "get_or_create", "update_or_create", "bulk_create"})
 
+#: Every time the write arm turned out not to reach what its own description
+#: claimed. Data, not prose: :func:`main` derives the count it reports from
+#: ``len()`` of this, so the record cannot say one number while the list says
+#: another — which is exactly what happened, in three places at once, and is
+#: why this is a tuple.
+#:
+#: Two different failures are recorded together on purpose, because the arm was
+#: equally wrong both ways: a write SHAPE it could not see, and a discharge it
+#: granted without establishing it. The second is the worse one — a shape it
+#: cannot see is at least a hole it can name.
+WRITE_ARM_SURPRISES = (
+    "SHAPE: it knew only attribute assignment and create()/update() keywords",
+    "SHAPE: a Django ModelAdmin writes through a ModelForm, naming no settlement field",
+    "SHAPE: a DELETE changes the answer while writing no field whatsoever",
+    "DISCHARGE: its caller graph matched BARE function names, so an unrelated "
+    "function of the same name elsewhere in the TREE could discharge a real "
+    "writer's obligation — the guard certifying the very thing it was built to "
+    "catch",
+    "SHAPE: a FAST DELETE fires no post_delete at all, so the model-level "
+    "routing that covers ordinary deletes does not cover those",
+    "DISCHARGE: narrowed to the module, the caller graph still matched on the "
+    "NAME alone — any receiver's method call resolved to a same-named "
+    "definition in the module, so a method call on an unrelated object "
+    "discharged a writer nothing called. The hole above, one scope tighter",
+)
+
 #: The write shapes this scan can actually see. Stated so the arm is never read
-#: as exhaustive — it has been surprised five times, and each surprise shipped.
+#: as exhaustive — see :data:`WRITE_ARM_SURPRISES` for what it has missed.
 WRITE_SHAPES_SEEN = (
     "assignment to a settlement field on a line (obj.quantity_received = ...)",
     "create()/update()/get_or_create()/update_or_create()/bulk_create() with a "
@@ -168,7 +190,40 @@ WRITE_SHAPES_UNSEEN = (
     "AST-based Python one and must not be read as its equal",
 )
 
-_SKIP_DIR_PARTS = ("__pycache__", "node_modules", ".venv", "staticfiles", "media")
+#: Directory NAMES that never hold first-party source. Vendored dependencies and
+#: build output, not code anyone here writes — judging them says nothing about
+#: this repository and, because an unreadable file FAILS the run, a third-party
+#: module the running interpreter cannot parse would fail it on someone else's
+#: syntax.
+_SKIP_DIR_PARTS = frozenset(
+    {
+        "__pycache__",
+        "node_modules",
+        "site-packages",
+        "staticfiles",
+        "media",
+        ".git",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        ".nox",
+        ".eggs",
+    }
+)
+
+#: What marks a directory as a Python ENVIRONMENT rather than source: the file
+#: :mod:`venv` writes at the root of every one it creates. Derived rather than
+#: listed on purpose — ``.venv`` was the only name the list carried, and a
+#: developer whose environment is ``venv/``, ``env/``, ``.venv-3.11/`` or
+#: anything else had the whole of ``site-packages`` swept as if it were this
+#: repository's code. Nothing here has to guess the name.
+_VENV_MARKER = "pyvenv.cfg"
+
+
+def _skip_dir(path: Path) -> bool:
+    """Whether the sweep should not descend into ``path``."""
+    return path.name in _SKIP_DIR_PARTS or (path / _VENV_MARKER).is_file()
 
 
 def _is_test_path(rel: str) -> bool:
@@ -449,23 +504,34 @@ def derive_anchor(models_path: Path, rel_models_path: str) -> Anchor:
 # --------------------------------------------------------------------------
 
 
-def _receiver_root(func: ast.expr) -> str | None:
-    """What a call was made ON, reduced to the name at the root of the chain.
+def _receiver_path(func: ast.expr) -> tuple[str, ...] | None:
+    """What a call was made ON, as the chain of plain names it reduces to.
 
-    ``None`` for a bare ``name(...)``; ``"services"`` for
-    ``services.apply_line_quantity(...)``; ``"line"`` for ``line.close_short()``;
-    the empty string when the chain does not start at a name at all. That one
-    distinction is the whole of the caller graph's soundness: a root the calling
-    module IMPORTS can be another module, while a root that is a local variable
-    cannot, and treating the second as the first is what let an unrelated
-    same-named function discharge a real writer's obligation.
+    ``None`` for a bare ``name(...)``; ``("services",)`` for
+    ``services.apply_line_quantity(...)``; ``("self",)`` for
+    ``self.close_short()``; ``("mod", "helpers")`` for
+    ``mod.helpers.apply(...)``; and the EMPTY tuple when the chain does not
+    reduce to plain names at all (``get_queryset().close_short()``,
+    ``self.lines[0].close_short()``) — a receiver no syntax can identify.
+
+    The whole soundness of the caller graph rests here. A receiver is what
+    decides which definition a call actually reaches: ``self.f()`` reaches this
+    class's ``f``, ``mod.f()`` reaches the imported module's, and
+    ``some_local.f()`` reaches something this scan cannot name. Keeping the
+    FULL chain rather than only its root is what stops ``Outer.Inner.f()``
+    being read as ``Outer.f()``.
     """
     if not isinstance(func, ast.Attribute):
         return None
+    parts: list[str] = []
     node = func.value
-    while isinstance(node, (ast.Attribute, ast.Call, ast.Subscript)):
-        node = node.func if isinstance(node, ast.Call) else node.value
-    return node.id if isinstance(node, ast.Name) else ""
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return ()
+    parts.append(node.id)
+    return tuple(reversed(parts))
 
 
 class _PyScanner:
@@ -479,31 +545,158 @@ class _PyScanner:
         self.lookup_re = re.compile(r"^(%s)(__.+)?$" % "|".join(sorted(anchor.all_fields)))
         self.findings: list[Finding] = []
         self.sites: list[tuple[str, int, str, str]] = []
-        #: Names this module binds through an import, which is how a call to
-        #: another module is told apart from a method call on a local.
-        self.imported: set[str] = self._imported_names()
+        #: Dotted names of every class this module declares, so a receiver that
+        #: names one — ``PurchaseOrderItem.close_short()`` — can be told apart
+        #: from a receiver that merely holds an object.
+        self.classes: frozenset[str] = self._class_dotted()
+        self.imports, self.shadows, self.definitions = self._scope_bindings()
         #: function qualname -> {"writes": bool, "refreshes": bool, "calls": set,
         #: "line": int}
         self.functions: dict[str, dict] = {}
 
     # -- helpers ---------------------------------------------------------
 
-    def _imported_names(self) -> set[str]:
-        """Every name this module binds through an import statement.
+    def _import_binding(self, node: ast.Import | ast.ImportFrom, alias: ast.alias):
+        module_parts = Path(self.rel).with_suffix("").parts
+        if module_parts and module_parts[0] == "backend":
+            module_parts = module_parts[1:]
+        package = list(module_parts[:-1])
+        if isinstance(node, ast.Import):
+            binding = alias.asname or alias.name.split(".")[0]
+            module = alias.name if alias.asname else alias.name.split(".")[0]
+            return binding, (module, None)
+        parent = package[: len(package) - max(node.level - 1, 0)] if node.level else []
+        module = ".".join(parent + ((node.module or "").split(".") if node.module else []))
+        return alias.asname or alias.name, (module, alias.name)
 
-        ``import x.y`` binds ``x``; ``from a import b as c`` binds ``c``. Used
-        only to answer "could this receiver be another module?" — see
-        :func:`_receiver_root`.
+    @staticmethod
+    def _scope_nodes(scope: ast.AST):
+        stack = (
+            list(scope.body)
+            if isinstance(scope, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef))
+            else []
+        )
+        while stack:
+            node = stack.pop()
+            yield node
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                stack.extend(node.decorator_list)
+                stack.extend(node.args.defaults)
+                stack.extend(default for default in node.args.kw_defaults if default is not None)
+                continue
+            if isinstance(node, ast.ClassDef):
+                stack.extend(node.decorator_list)
+                stack.extend(node.bases)
+                stack.extend(keyword.value for keyword in node.keywords)
+                continue
+            if isinstance(node, ast.Lambda):
+                stack.extend(node.args.defaults)
+                stack.extend(default for default in node.args.kw_defaults if default is not None)
+                continue
+            stack.extend(ast.iter_child_nodes(node))
+
+    @staticmethod
+    def _target_names(target: ast.AST) -> set[str]:
+        return {node.id for node in ast.walk(target) if isinstance(node, ast.Name)}
+
+    def _bindings_in(self, scope: ast.AST):
+        imports: dict[str, set[tuple[str, str | None]]] = {}
+        shadows: set[str] = set()
+        definitions: set[str] = set()
+        if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            args = scope.args
+            shadows.update(arg.arg for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs))
+            if args.vararg:
+                shadows.add(args.vararg.arg)
+            if args.kwarg:
+                shadows.add(args.kwarg.arg)
+        for node in self._scope_nodes(scope):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    name, binding = self._import_binding(node, alias)
+                    imports.setdefault(name, set()).add(binding)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                shadows.add(node.name)
+                definitions.add(node.name)
+            elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
+                    shadows.update(self._target_names(target))
+            elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+                shadows.update(self._target_names(node.target))
+            elif isinstance(node, ast.withitem) and node.optional_vars:
+                shadows.update(self._target_names(node.optional_vars))
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                shadows.add(node.name)
+            elif isinstance(node, (ast.Global, ast.Nonlocal)):
+                shadows.update(node.names)
+        return imports, shadows, definitions
+
+    def _scope_bindings(self):
+        imports: dict[str, dict[str, set[tuple[str, str | None]]]] = {}
+        shadows: dict[str, set[str]] = {}
+        definitions: dict[str, set[str]] = {}
+        imports[""], shadows[""], definitions[""] = self._bindings_in(self.tree)
+        for dotted, node in self._qualified_functions(self.tree):
+            imports[dotted], shadows[dotted], definitions[dotted] = self._bindings_in(node)
+        return imports, shadows, definitions
+
+    def _visible_imports(self, dotted: str):
+        visible: dict[str, tuple[str, str | None] | None] = {}
+        scopes = self._scopes(dotted)
+        names = set().union(*(set(self.imports[scope]) | self.shadows[scope] for scope in scopes))
+        for name in names:
+            candidates = set().union(*(self.imports[scope].get(name, set()) for scope in scopes))
+            shadowed = any(name in self.shadows[scope] for scope in scopes)
+            visible[name] = (
+                next(iter(candidates)) if len(candidates) == 1 and not shadowed else None
+            )
+        return visible
+
+    def _class_dotted(self) -> frozenset[str]:
+        """Every class in the module, named the way functions in it are named.
+
+        Same qualification scheme as :meth:`_qualified_functions`, so a
+        function's dotted name can be split against this set to say which of
+        its enclosing scopes are CLASS bodies — which is what decides whether a
+        bare name inside it can see a sibling at all.
         """
-        names: set[str] = set()
-        for node in ast.walk(self.tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    names.add(alias.asname or alias.name.split(".")[0])
-            elif isinstance(node, ast.ImportFrom):
-                for alias in node.names:
-                    names.add(alias.asname or alias.name)
-        return names
+        found: set[str] = set()
+
+        def walk(node: ast.AST, prefix: str) -> None:
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, ast.ClassDef):
+                    found.add(f"{prefix}{child.name}")
+                    walk(child, f"{prefix}{child.name}.")
+                elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    walk(child, f"{prefix}{child.name}.")
+                else:
+                    walk(child, prefix)
+
+        walk(self.tree, "")
+        return frozenset(found)
+
+    def _scopes(self, dotted: str) -> tuple[str, ...]:
+        """The scopes a BARE name inside ``dotted`` could resolve in, inner first.
+
+        Its own body, then each enclosing FUNCTION, then the module (``""``).
+        Class bodies are deliberately absent: a method calling ``helper()``
+        does not reach a sibling method of that name, it reaches a module-level
+        function, and pretending otherwise invents a call edge.
+        """
+        parts = dotted.split(".")
+        scopes = [dotted]
+        for depth in range(len(parts) - 1, 0, -1):
+            prefix = ".".join(parts[:depth])
+            if prefix not in self.classes:
+                scopes.append(prefix)
+        scopes.append("")
+        return tuple(scopes)
+
+    def _owner_class(self, dotted: str) -> str | None:
+        """The class ``dotted`` is a method of, if it is one — for ``self.f()``."""
+        parent, _, _ = dotted.rpartition(".")
+        return parent if parent and parent in self.classes else None
 
     def _exempt(self, node: ast.AST) -> bool:
         line = getattr(node, "lineno", 0)
@@ -521,7 +714,7 @@ class _PyScanner:
         ORM keyword, or ORM lookup string. A site cannot avoid naming them."""
         found: set[str] = set()
         for node in nodes:
-            for sub in ast.walk(node):
+            for sub in self._scope_nodes(node):
                 if isinstance(sub, ast.Attribute) and sub.attr in self.a.all_fields:
                     found.add(sub.attr)
                 elif isinstance(sub, ast.Name) and sub.id in self.a.all_fields:
@@ -668,7 +861,7 @@ class _PyScanner:
             writes: list[str] = []
             refreshes = False
             calls: set[str] = set()
-            for sub in ast.walk(node):
+            for sub in self._scope_nodes(node):
                 if isinstance(sub, (ast.Assign, ast.AugAssign)):
                     targets = sub.targets if isinstance(sub, ast.Assign) else [sub.target]
                     for target in targets:
@@ -677,7 +870,7 @@ class _PyScanner:
                 elif isinstance(sub, ast.Call):
                     func = sub.func
                     name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
-                    calls.add((name, _receiver_root(func)))
+                    calls.add((name, _receiver_path(func)))
                     if name == REFRESH:
                         refreshes = True
                     if name in WRITE_CALLS and self._targets_lines(sub):
@@ -694,7 +887,17 @@ class _PyScanner:
                 "refreshes": refreshes,
                 "calls": calls,
                 "module": self.rel,
-                "imported": self.imported,
+                "imported": self._visible_imports(dotted),
+                "shadowed": set().union(
+                    *(
+                        self.shadows[scope] - self.definitions[scope]
+                        for scope in self._scopes(dotted)
+                    )
+                ),
+                "classes": self.classes,
+                "scopes": self._scopes(dotted),
+                "owner_class": self._owner_class(dotted),
+                "dotted": dotted,
                 "name": node.name,
                 "line": node.lineno,
             }
@@ -741,7 +944,32 @@ def _ts_units(line: str) -> list[str]:
     return [part for part in re.split(r"\$\{|\}|`", line) if part.strip()]
 
 
-_TS_DECL = re.compile(r"^\s*(?:readonly\s+)?[A-Za-z_][\w]*\??\s*:")
+#: A PROPERTY KEY: a name in the position where TypeScript declares or supplies
+#: a member — the start of a line, or just after ``{``, ``,``, ``;`` or ``(`` —
+#: followed by a colon. Anchored on that delimiter so a ternary's
+#: ``cond ? a : b`` is not mistaken for one.
+_TS_PROPERTY_KEY = re.compile(
+    r"(^|[{,;(])(\s*(?:readonly\s+)?(?:[A-Za-z_$][\w$]*|(['\"])[^'\"]*\3)\s*\??\s*:)"
+)
+
+
+def _ts_without_keys(unit: str) -> str:
+    """``unit`` with its property KEYS removed and their values left in place.
+
+    ``quantity_received: number;`` and ``{ quantity_received: qty }`` name the
+    API's shape; they do not judge it, so the key is dropped. What follows the
+    colon is not the shape — it is an expression like any other, and this used
+    to be thrown away with it.
+
+    Skipping the whole LINE on the strength of it starting with a key is how
+    ``ordered: line.quantity_ordered - line.quantity_received,`` — a variance
+    re-derived by hand, inside an object literal — went unjudged, while a
+    literal written along one line, ``{ quantity_received: a, quantity_ordered:
+    b }``, was judged as an expression naming two fields and wrongly flagged.
+    One rule replaces both: a key is a key wherever it sits, and a value is a
+    value wherever it sits.
+    """
+    return _TS_PROPERTY_KEY.sub(r"\1 ", unit)
 
 
 def _scan_ts(anchor: Anchor, rel: str, source: str) -> tuple[list[Finding], list[tuple]]:
@@ -760,12 +988,8 @@ def _scan_ts(anchor: Anchor, rel: str, source: str) -> tuple[list[Finding], list
         if not word.search(line):
             continue
         sites.append((rel, number, ",".join(sorted(set(word.findall(line)))), raw.strip()[:130]))
-        # ``quantity_received: number;`` and ``{ quantity_received: qty }`` name
-        # the API's shape; they do not judge it.
-        if _TS_DECL.match(line):
-            continue
         for unit in _ts_units(line):
-            found = set(word.findall(unit))
+            found = set(word.findall(_ts_without_keys(unit)))
             entangled = found & anchor.entangled
             if entangled:
                 findings.append(
@@ -812,13 +1036,22 @@ def _roots(start: Path | None = None) -> tuple[Path, Path, Path | None]:
     return backend.parent, backend, frontend if frontend.is_dir() else None
 
 
-def _walk(root: Path, *suffixes: str):
-    for path in sorted(root.rglob("*")):
-        if not path.is_file() or path.suffix not in suffixes:
-            continue
-        if any(part in _SKIP_DIR_PARTS for part in path.parts):
-            continue
-        yield path
+def _walk(root: Path, *suffixes: str) -> list[Path]:
+    """Every source file under ``root``, skipped directories PRUNED rather than filtered.
+
+    Pruning, not filtering, and only BELOW ``root``. The filter this replaces
+    tested every component of the absolute path, so a checkout that merely
+    happened to live under a directory called ``media`` — or under any
+    virtualenv, which is where a ``pip install -e .`` checkout normally does
+    live — matched on an ancestor nobody chose and yielded NOTHING, and a sweep
+    of no files reports as a sweep that found no site.
+    """
+    found: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        here = Path(dirpath)
+        dirnames[:] = [name for name in dirnames if not _skip_dir(here / name)]
+        found.extend(here / name for name in filenames if Path(name).suffix in suffixes)
+    return sorted(found)
 
 
 def _why_unreadable(exc: Exception) -> str:
@@ -925,37 +1158,106 @@ def _write_arm(anchor: Anchor, functions: dict[str, dict]) -> list[Finding]:
     exactly what it is.
 
     """
-    by_name: dict[str, list[str]] = {}
-    by_module_and_name: dict[tuple[str, str], list[str]] = {}
+    by_module_and_dotted: dict[tuple[str, str], list[str]] = {}
     for qual, info in functions.items():
-        by_name.setdefault(info["name"], []).append(qual)
-        by_module_and_name.setdefault((info["module"], info["name"]), []).append(qual)
+        by_module_and_dotted.setdefault((info["module"], info["dotted"]), []).append(qual)
 
-    def resolve(caller: str, call: tuple[str, str | None]) -> list[str]:
+    modules = {info["module"] for info in functions.values()}
+
+    def imported_module(dotted: str) -> str | None:
+        path = dotted.replace(".", "/")
+        suffixes = (f"/{path}.py", f"/{path}/__init__.py")
+        hits = [module for module in modules if (f"/{module}").endswith(suffixes)]
+        return hits[0] if len(hits) == 1 else None
+
+    def resolve(caller: str, call: tuple[str, tuple[str, ...] | None]) -> list[str]:
         """The definitions a call could actually reach — never merely same-named.
 
-        A bare name matched across the whole tree is how the arm came to
-        certify the thing it exists to catch: an uncalled writer named
+        A name matched without regard to what the call was made ON is how the
+        arm came to certify the thing it exists to catch. It happened twice, at
+        two scopes. First across the tree: an uncalled writer named
         ``close_short`` was discharged by an unrelated module calling the
-        MODEL's ``close_short()`` and refreshing. So resolution goes:
+        MODEL's ``close_short()``. Then, once that was narrowed to the module,
+        WITHIN one: any ``anything.close_short()`` in the module still resolved
+        to the module's own ``close_short`` definition, so a method call on an
+        object with nothing to do with it discharged the writer just the same.
+        A name shared with the receiver's method is a coincidence of naming,
+        and a guard may not spend a coincidence to discharge an obligation.
 
-        1. a definition in the caller's OWN module wins outright;
-        2. otherwise, only if the calling module could name it — a bare
-           ``f(...)`` whose name it imports, or ``mod.f(...)`` whose root it
-           imports;
-        3. otherwise nothing, and the obligation stays where it is. Failing
-           CLOSED can ask for a refresh a real caller already makes; failing
-           open hands a settlement writer a clean bill of health.
+        So the RECEIVER decides, and a call resolves only where the receiver
+        actually names the thing being called:
+
+        1. a bare ``f(...)`` — the caller's own lexical scope chain, its
+           enclosing functions and then the module, exactly as Python looks a
+           name up; class bodies are not in that chain, so a method does not
+           reach a sibling method this way;
+        2. ``self.f(...)`` / ``cls.f(...)`` — the class the caller is a method
+           of, and only that class;
+        3. ``Cls.f(...)`` where ``Cls`` is a class this module DECLARES;
+        4. a receiver whose root the module IMPORTS — the cross-module case
+           round 4 left in place;
+        5. anything else — a local, a parameter, a return value, a subscript —
+           resolves to NOTHING, and the obligation stays where it is.
+
+        Failing CLOSED at (5) can ask for a refresh a real caller already
+        makes; failing open hands a settlement writer a clean bill of health.
         """
-        name, root = call
+        name, receiver = call
         info = functions[caller]
-        same_module = by_module_and_name.get((info["module"], name), ())
-        if same_module:
-            return [target for target in same_module if target != caller]
-        reachable = root in info["imported"] if root else name in info["imported"]
-        if not reachable:
+        module = info["module"]
+
+        def declared(dotted: str) -> list[str]:
+            return [t for t in by_module_and_dotted.get((module, dotted), ()) if t != caller]
+
+        def imported(
+            binding: str, receiver_tail: tuple[str, ...], *, is_receiver: bool = False
+        ) -> list[str]:
+            import_info = info["imported"].get(binding)
+            if import_info is None:
+                return []
+            base, symbol = import_info
+            if is_receiver:
+                parts = [base]
+                if symbol is not None:
+                    parts.append(symbol)
+                parts.extend(receiver_tail)
+                target_name = name
+            else:
+                if symbol is None:
+                    return []
+                parts = [base]
+                target_name = symbol
+            target_module = imported_module(".".join(part for part in parts if part))
+            if target_module is None:
+                return []
+            return [
+                target
+                for target in by_module_and_dotted.get((target_module, target_name), ())
+                if target != caller
+            ]
+
+        if receiver is None:
+            if name in info["shadowed"]:
+                return []
+            for scope in info["scopes"]:
+                hit = declared(f"{scope}.{name}" if scope else name)
+                if hit:
+                    return hit
+            return imported(name, ())
+
+        if not receiver:
+            # The chain does not reduce to names at all; nothing to resolve.
             return []
-        return [target for target in by_name.get(name, ()) if target != caller]
+
+        if receiver in (("self",), ("cls",)):
+            owner = info["owner_class"]
+            return declared(f"{owner}.{name}") if owner else []
+
+        dotted_receiver = ".".join(receiver)
+        if dotted_receiver in info["classes"]:
+            return declared(f"{dotted_receiver}.{name}")
+
+        return imported(receiver[0], receiver[1:], is_receiver=True)
 
     callers: dict[str, set[str]] = {qual: set() for qual in functions}
     for qual, info in functions.items():
@@ -981,7 +1283,7 @@ def _write_arm(anchor: Anchor, functions: dict[str, dict]) -> list[Finding]:
 
     obligations: dict[str, str] = {}
     for qual, info in functions.items():
-        called_names = {name for name, _root in info["calls"]}
+        called_names = {name for name, _receiver in info["calls"]}
         if info["writes"]:
             obligations[qual] = ", ".join(sorted(set(info["writes"])))
         for method in sorted(anchor.mutating_methods):
@@ -1018,6 +1320,15 @@ def _write_arm(anchor: Anchor, functions: dict[str, dict]) -> list[Finding]:
     return findings
 
 
+def _surprise_tally() -> str:
+    """``WRITE_ARM_SURPRISES`` broken down by kind, counted off the tuple itself."""
+    counts: dict[str, int] = {}
+    for surprise in WRITE_ARM_SURPRISES:
+        kind, _, _ = surprise.partition(":")
+        counts[kind] = counts.get(kind, 0) + 1
+    return ", ".join(f"{count} {kind.lower()}" for kind, count in sorted(counts.items()))
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv or sys.argv[1:]
     report = scan()
@@ -1042,15 +1353,25 @@ def main(argv: list[str] | None = None) -> int:
         print(f"NOT scanned: {path} ({reason})")
     print()
 
-    # The edges travel with the report. This arm has been blind to a write
-    # SHAPE three times over; a clean run means "none of the shapes below the
-    # first heading bypassed the derivation", never "there is nothing left".
-    print("Write shapes this scan CAN see:")
+    # The edges travel with the report. A clean run means "none of the shapes
+    # under the first heading bypassed the derivation", never "there is nothing
+    # left". Every count below is len() of the list it introduces: this report
+    # exists to state the guard's own limits honestly, and it once stated them
+    # by hand, in numbers that disagreed with each other and with the lists.
+    print(f"Write shapes this scan CAN see ({len(WRITE_SHAPES_SEEN)}):")
     for shape in WRITE_SHAPES_SEEN:
         print(f"  + {shape}")
-    print("Write shapes it CANNOT see — holes, not absences of sites:")
+    print(
+        f"Write shapes it CANNOT see ({len(WRITE_SHAPES_UNSEEN)}) — "
+        f"holes, not absences of sites:"
+    )
     for shape in WRITE_SHAPES_UNSEEN:
         print(f"  - {shape}")
+    print(
+        f"The write arm has been wrong about its own reach "
+        f"{len(WRITE_ARM_SURPRISES)} times ({_surprise_tally()}); "
+        f"see WRITE_ARM_SURPRISES."
+    )
     print()
 
     if "--sites" in argv:

@@ -1184,7 +1184,14 @@ off the API on the frontend. Anything that can settle a line must reach
 **Where the refresh actually lives.** Saving or deleting a LINE re-derives its
 order on its own — `reorder_queue/settlement_signals.py` hangs off
 `PurchaseOrderItem`'s `post_save` / `post_delete`, and `pre_save` captures the
-order a line is LEAVING so a reparent re-derives both ends. No admin hook owns
+order a line is LEAVING so a reparent re-derives both ends.
+
+The settlement closure is therefore derived TWICE, and neither copy is typed
+out: `settlement_signals.settlement_fields()` follows `is_settled` through the
+imported class at runtime (no source read — this is a write path), and
+`settlement_sites.derive_anchor` follows the same seed through `models.py` for
+the static guard. A test asserts the two agree, so widening `is_settled` must
+leave both able to follow it. No admin hook owns
 that re-derivation any more — the admin still opens `settlement_batch()` so a
 formset save asks once, and `ReceiptStatusFilter` still *reads* settlement
 through `with_receipt_state()`, but neither decides it. A hook used to: the
@@ -1239,8 +1246,10 @@ order re-derives NOTHING, so editing a note leaves an operator's chosen status
 alone; and a refresh cannot re-enter its own signal.
 
 Do not read a clean run as "there is nothing left". The scan prints the write
-shapes it can and cannot see on every run; that list is the honest boundary and
-it has grown twice already.
+shapes it can and cannot see on every run, each heading carrying the count of
+the list under it; that printed list is the honest boundary. Read it off a run
+rather than from here — a count restated in prose is a count that drifts, and
+this paragraph used to claim one that matched nothing in the code.
 
 **A file it could not read is not a file it cleared.** The scan exits non-zero
 for a module it cannot parse or decode, not just for a site that bypasses the

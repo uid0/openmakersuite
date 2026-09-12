@@ -38,7 +38,10 @@ VENDOR_SENTINELS = {
     "UNIT_COST": "313.37",
     "PACKAGE_COST": "3133.70",
     "PRICE_HISTORY_COST": "271.71",
-    "LEAD_TIME": 4173,
+    # Long enough not to occur accidentally inside a random UUID rendered by
+    # an otherwise-clean response.  The old four-digit value (4173) made this
+    # behavioral probe flaky on UUID-bearing list endpoints.
+    "LEAD_TIME": 41739,
     "ACCOUNT_NUMBER": "ZZQQ-ACCT-99001",
     "SUPPLIER_WEBSITE": "https://zzqq-vendor-identity.example.com/portal",
     "AGREEMENT_NAME": "ZZQQ-AGREEMENT-2026-NONPROFIT-PRICING",

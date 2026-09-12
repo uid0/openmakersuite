@@ -35,12 +35,7 @@ from inventory.services.packaging import (
     reorder_display,
     resolve_base_quantity,
 )
-from inventory.services.pricing import (
-    PriceRollup,
-    explain,
-    package_price_of,
-    unit_price_of,
-)
+from inventory.services.pricing import PriceRollup, explain, package_price_of, unit_price_of
 from inventory.services.supplier_selection import (
     NO_SUPPLIERS,
     item_suppliers_prefetch,
@@ -3546,14 +3541,9 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def pending_orders(self, request):
         """Get all orders that are expecting deliveries."""
+        # The worksheet and receiving actions share the same status gate.
         pending_orders = (
-            PurchaseOrder.objects.filter(
-                status__in=[
-                    PurchaseOrder.Status.SENT,
-                    PurchaseOrder.Status.CONFIRMED,
-                    PurchaseOrder.Status.PARTIALLY_RECEIVED,
-                ]
-            )
+            PurchaseOrder.objects.filter(status__in=PurchaseOrder.RECEIVABLE_STATUSES)
             .select_related("supplier")
             .prefetch_related("items__item_supplier__item")
         )

@@ -540,7 +540,9 @@ describe('InventoryItemFormPage — supplier relationships', { timeout: 30000 },
     await waitFor(() => expect(screen.getByText(/Bolt Depot —/)).toBeInTheDocument());
     expect(mockNavigate).not.toHaveBeenCalled();
 
-    create();
+    // The button now reads 'Save Changes': the item exists, so the retry
+    // updates it rather than creating a second one.
+    save();
 
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/inventory/items/new-id'));
     // One item, not two: the retry updates the item the first save created,
@@ -560,6 +562,36 @@ describe('InventoryItemFormPage — supplier relationships', { timeout: 30000 },
     boltPosts.forEach((request) =>
       expect(JSON.parse(request.data as string)).toMatchObject({ item: 'new-id', supplier: 2 })
     );
+  });
+
+  it('stops promising a create once the partially-failed save has made the item', async () => {
+    mock.onPost('/inventory/items/').reply(201, { ...baseItem, id: 'new-id' });
+    mock.onPatch('/inventory/items/new-id/').reply(200, { ...baseItem, id: 'new-id' });
+    mock.onPost('/inventory/item-suppliers/').reply(500, {});
+    renderCreate();
+
+    await waitFor(() => expect(screen.getByTestId('page-hero-title')).toBeInTheDocument());
+    fireEvent.change(screen.getAllByLabelText(/^Name/i)[0], { target: { value: 'Hex bolt' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Supplier' }));
+    await chooseSupplier('Acme Fasteners');
+    fireEvent.change(screen.getByLabelText(/Supplier SKU/), { target: { value: 'A-NEW' } });
+    create();
+
+    // The item landed and the supplier row did not, so the operator is still
+    // on the form — but the item now exists and the next press PATCHes it.
+    await waitFor(() => expect(screen.getByText(/Acme Fasteners —/)).toBeInTheDocument());
+    expect(itemWrites('post')).toHaveLength(1);
+    expect(mockNavigate).not.toHaveBeenCalled();
+
+    // The button must say what it will do. Left reading 'Create Item', it
+    // tells the operator they are making something that already exists.
+    expect(screen.queryByRole('button', { name: /create item/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /save changes/i })).toBeInTheDocument();
+    expect(screen.getByTestId('page-hero-title')).toHaveTextContent('Edit item');
+
+    save();
+    await waitFor(() => expect(itemWrites('patch')).toHaveLength(1));
+    expect(itemWrites('patch')[0].url).toBe('/inventory/items/new-id/');
   });
 
   it('refuses a supplier swap before sending it, and names the way out', async () => {

@@ -188,7 +188,7 @@ const AssetScanPage: React.FC = () => {
           setSubmitting(true);
           await assetsAPI.disableAsset(asset.id);
           await loadAsset(); // Reload to get updated data
-          setActionSuccess('Asset disabled (record hidden; machine still runs)');
+          setActionSuccess('Asset disabled successfully');
           setTimeout(() => setActionSuccess(null), 3000);
         } catch (err: any) {
           showError(extractErrorMessage(err, 'Failed to disable asset'));

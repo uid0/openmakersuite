@@ -375,7 +375,7 @@ class TestDefaultListSupplierQueryBudget:
     """Regression guard for the primary-supplier compat-field N+1 (issue #882)."""
 
     def test_supplier_compat_fields_do_not_add_a_query_per_row(self, api_client):
-        """The seven flat primary-supplier compat fields are served from the list
+        """The flat primary-supplier compat fields are served from the list
         viewset's ``item_suppliers`` prefetch, not a per-row query.
 
         Before the prefetch-friendly ``primary_item_supplier`` (and the matching

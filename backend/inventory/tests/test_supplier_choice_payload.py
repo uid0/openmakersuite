@@ -371,7 +371,12 @@ def test_the_kit_endpoints_carry_the_choice_too(api):
 
 
 def test_every_legacy_flat_field_is_still_served(api):
-    """ScanTTY's detail screen reads all seven; removing one breaks it."""
+    """ScanTTY's detail screen reads these; removing one breaks it.
+
+    The assertions below are the list — there is no count of them here or
+    anywhere else to keep in step. This is the check the
+    ``InventoryItemSerializer`` compat-field comment points at.
+    """
     item = _item("Compat")
     _link(item, "Acme", unit_cost="3.50", lead=9)
 

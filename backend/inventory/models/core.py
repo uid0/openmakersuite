@@ -896,9 +896,9 @@ class InventoryItem(OwnableModel):
         :attr:`primary_item_supplier` is this with everything but the row thrown
         away. The memo lives HERE rather than there so that a caller who needs
         the reason — why this link, what else was on offer, whether the scoring
-        knew a price for it — pays nothing extra for asking: reading the seven
-        flat compat properties and reading the reason beside them is one
-        resolution, not two. Returns a
+        knew a price for it — pays nothing extra for asking: reading the flat
+        compat properties and reading the reason beside them is one resolution,
+        not two. Returns a
         :class:`~inventory.services.supplier_selection.SupplierChoice`, which is
         falsey when there is no supplier to buy from.
         """
@@ -931,18 +931,17 @@ class InventoryItem(OwnableModel):
         both "no suppliers at all" and "every supplier link is dead". A caller
         that has to explain that to an operator should ask
         :func:`~inventory.services.supplier_selection.select_supplier` instead
-        and read the reason; the seven flat compat properties below cannot, so
-        they simply go ``None`` as they already do for an item with no
-        suppliers.
+        and read the reason; the flat compat properties below cannot, so they simply
+        go ``None`` as they already do for an item with no suppliers.
 
         The result rides an ``item_suppliers`` prefetch when the caller set one
         up (the list/detail/reorder read paths all do, through
         :func:`~inventory.services.supplier_selection.item_suppliers_prefetch`,
         which also carries the delivery-record annotations the score reads), so
-        serialising the seven flat compat fields across a page costs ZERO extra
-        queries instead of an N+1. It is memoised per instance through
-        :attr:`supplier_choice` so reading all seven flats touches the database
-        at most once.
+        serialising the flat compat fields across a page costs ZERO extra queries
+        instead of an N+1. It is memoised per instance through
+        :attr:`supplier_choice` so reading every one of them touches the
+        database at most once.
         """
         return self.supplier_choice.item_supplier
 

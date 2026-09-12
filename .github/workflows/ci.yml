@@ -71,7 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up Python 3.13
+      - name: Set up Python
         uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.14"
@@ -139,7 +139,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up Python 3.13
+      - name: Set up Python
         uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.14"
@@ -275,7 +275,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up Node.js 24
+      - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -300,7 +300,7 @@ jobs:
       # python3 against a tree targeting 3.14, and every module using newer
       # syntax was one the scan could not read. It now fails rather than
       # skipping those in silence, so give it the version they are written for.
-      - name: Set up Python 3.14
+      - name: Set up Python
         uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.14"
@@ -327,7 +327,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up Node.js 24
+      - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -515,7 +515,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up Python 3.14
+      - name: Set up Python
         uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.14"
@@ -560,7 +560,7 @@ jobs:
           echo "::endgroup::"
           exit 1
 
-      - name: Set up Node.js 24
+      - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -713,7 +713,7 @@ jobs:
         with:
           fetch-depth: 0 # Fetch all history for gitleaks
 
-      - name: Set up Python 3.13
+      - name: Set up Python
         uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.14"

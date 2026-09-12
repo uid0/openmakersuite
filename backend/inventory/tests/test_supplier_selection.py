@@ -14,7 +14,7 @@ The service (``inventory.services.supplier_selection``) and the thin
 * tell "this item has no suppliers" apart from "every supplier is dead", because
   those are different facts an operator acts on differently;
 * cost ZERO extra queries when ``item_suppliers`` is prefetched (killing the
-  per-row N+1 behind the seven flat compat fields), and one query otherwise;
+  per-row N+1 behind the flat compat fields), and one query otherwise;
 * resolve a whole page in a single query via the batch helper — and in NO query
   when the page already carries an ``item_suppliers`` prefetch.
 """
@@ -178,7 +178,7 @@ def test_reading_all_flat_fields_is_one_query_unprefetched_and_cached():
     _link(item, "A", is_primary=True, unit_cost="2.50", quantity_per_package=6)
     fresh = InventoryItem.objects.get(pk=item.pk)
     with CaptureQueriesContext(connection) as ctx:
-        # All seven flat compat reads + the derived ones share one cached load.
+        # Every flat compat read + the derived ones share one cached load.
         _ = (
             fresh.supplier,
             fresh.primary_supplier,

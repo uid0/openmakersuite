@@ -524,7 +524,11 @@ class TestDeploymentArtifactsAC36:
             for line in helm_source.splitlines()
             if not line.lstrip().startswith("{{")
         )
-        helm = yaml.safe_load(helm_yaml)
+        helm = next(
+            document
+            for document in yaml.safe_load_all(helm_yaml)
+            if document["kind"] == "StatefulSet"
+        )
         container = helm["spec"]["template"]["spec"]["containers"][0]
         expected = next(
             entry["value"]

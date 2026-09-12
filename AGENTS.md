@@ -249,6 +249,11 @@ only "case size unknown" for every one of them. They earn their keep by stopping
 keeping each unknown's CAUSE available to the surface that will word it — filed
 as separate follow-up. No flag moves between them.
 
+The module also owns validation for hand-rolled pack-size writers through
+`clean_pack_size`; its docstring owns the refusal contract and the treatment of
+existing `RECORDED_ZERO` rows. The derived writer set and its deliberate
+exclusions live in `inventory/tests/test_pack_size_write_guard.py`.
+
 `inventory/tests/test_pack_size_single_owner.py` is the build gate: it walks
 every non-test module under `backend/` with the AST and pins the exact set of
 direct reads of the column. A new one anywhere fails until it goes through the
@@ -914,7 +919,6 @@ lost-update window on `stored_pricing`, are in
 under "Still open, filed not fixed".
 
 Two consequences worth keeping in mind when touching this path:
-
 - **A derived column is added to `update_fields`.** `QuerySet.update_or_create`
   restricts `update_fields` to its own `defaults` keys, so without that a
   `package_cost` the model derives is computed and then dropped on the floor.

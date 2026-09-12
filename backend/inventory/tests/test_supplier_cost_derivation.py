@@ -405,6 +405,11 @@ class TestInvariantEveryWriteSiteObeysTheSameRule:
         to ``None`` as "the operator cleared this price" — so the shape that means
         "absent" would have read as "clear". Pinned against the real method so the
         two cannot drift apart.
+
+        The pack size is passed as ``None`` because that is what
+        ``_process_pack_size`` answers for a ``data`` dict carrying no pack size,
+        and the point of calling the real method is that the arguments are the
+        real ones.
         """
         from inventory.views import InventoryItemViewSet
 
@@ -418,7 +423,7 @@ class TestInvariantEveryWriteSiteObeysTheSameRule:
             {"supplier_sku": "SKU-EDITED"},
             (None, LOSSY_UNIT_COST),
             7,
-            LOSSY_PACK_SIZE,
+            None,
         )
 
         link.refresh_from_db()
@@ -647,10 +652,12 @@ class TestInvariantClearingAPriceIsObservable:
         stored. At a pack size of 1 the shape cannot be created through any write
         site — the derivation always fills the twin — so it is built here with a
         queryset UPDATE that bypasses ``save()``, which is how such a legacy row
-        (symptom 4's end state) reaches disk. It is NOT legacy-only in general: at
-        ``quantity_per_package`` 0 a supported endpoint produces it, because the
-        hand-rolled item-create path never runs the field's ``MinValueValidator``
-        — see the parametrised test below.
+        (symptom 4's end state) reaches disk. ``quantity_per_package`` 0 used to be
+        the other way in, because the hand-rolled item-create path never ran the
+        field's ``MinValueValidator``; it no longer is
+        (``inventory.services.pack_size.clean_pack_size``), so the shape is now a
+        legacy population plus whatever a queryset ``UPDATE`` writes — which is
+        what the parametrised test below covers, and why it still has to.
 
         ``test_clearing_the_case_price_clears_both`` above is the control for the
         other half: clearing the case price on a link that has both still clears
@@ -818,6 +825,94 @@ class TestInvariantClearingAPriceIsObservable:
         else:
             assert stored_pair(link) == (None, None, pack)
             assert history_rows(link) == before + [("updated", None, None, pack)]
+
+
+class TestInvariantASuppliedCostDerivesItsTwinOnlyWhereThePackSizeDivides:
+    """The NAMED CHECK for what the rest of the cleared-cost bullets' neighbours do.
+
+    ``derive_costs`` states its rule as a list of bullets, and two of them — the
+    cleared-cost pair — say IN WORDS that they hold at every pack size and on
+    every link shape, pinned by
+    ``test_an_emptied_cost_box_means_the_same_thing_at_every_pack_size`` above.
+    Their neighbours said nothing, and beside two explicit unconditional claims
+    silence reads as agreement. It is not: every bullet that performs ARITHMETIC
+    sits BELOW the divide-by-zero guard and does not run at all below pack 1,
+    where the supplied pair is stored as supplied and the twin keeps whatever it
+    held.
+
+    This is the check that fact is stated by, so the bullets can name a
+    condition once and point here instead of each carrying a prose clause that
+    would drift from the code the moment the guard moves. Each row is one bullet
+    at a pack size that divides and the same bullet at pack 0:
+
+    * a supplied CASE price governs — the unit price re-derives, or does not;
+    * a supplied UNIT price governs — the case price re-derives, or does not;
+    * a cleared case price beaten by a MOVED unit price — the typed figure is
+      kept either way (that half IS unconditional), but the case price it
+      re-derives above the guard simply stays cleared below it.
+
+    Only the stored pair is asserted: which of these files a
+    :class:`PriceHistory` row is the subject of
+    ``TestInvariantASaveWithNoPriceIntentFilesNoHistory`` below, and repeating it
+    here would be a second copy of that contract.
+
+    Pack 0 is not reachable through a supported write path any more —
+    ``inventory.services.pack_size.clean_pack_size`` refuses it, and
+    ``test_pack_size_write_guard`` is that guard's check — so the stored row is
+    built with a queryset ``UPDATE``, exactly as the rows already on disk got
+    there. That is why this stays live rather than becoming moot: the guard stops
+    new members of the state, it does not rewrite the existing ones, and the
+    bullets still have to be true of the links those writes reach.
+
+    The remaining arithmetic bullet, "only the pack size moved", has no
+    reachable sub-1 arm left to check: moving a pack size TO 0 is what
+    ``clean_pack_size`` refuses, and moving one AWAY from 0 divides and is
+    covered by ``test_correcting_a_recorded_zero_through_the_validated_endpoint_works``
+    in that file.
+    """
+
+    @pytest.mark.parametrize(
+        "pack,patch,expected",
+        [
+            (LOSSY_PACK_SIZE, {"package_cost": "12.00"}, (Decimal("4.00"), Decimal("12.00"))),
+            (0, {"package_cost": "12.00"}, (Decimal("1.00"), Decimal("12.00"))),
+            (LOSSY_PACK_SIZE, {"unit_cost": "2.00"}, (Decimal("2.00"), Decimal("6.00"))),
+            (0, {"unit_cost": "2.00"}, (Decimal("2.00"), Decimal("5.00"))),
+            (
+                LOSSY_PACK_SIZE,
+                {"package_cost": None, "unit_cost": "2.00"},
+                (Decimal("2.00"), Decimal("6.00")),
+            ),
+            (0, {"package_cost": None, "unit_cost": "2.00"}, (Decimal("2.00"), None)),
+        ],
+        ids=[
+            "case-price-governs-divides",
+            "case-price-governs-no-divide",
+            "unit-price-governs-divides",
+            "unit-price-governs-no-divide",
+            "cleared-case-beaten-by-typed-unit-divides",
+            "cleared-case-beaten-by-typed-unit-no-divide",
+        ],
+    )
+    def test_a_supplied_cost_moves_its_twin_only_where_the_pack_size_divides(
+        self, item, supplier, authenticated_client, pack, patch, expected
+    ):
+        link = make_link(item, supplier)
+        ItemSupplier.objects.filter(pk=link.pk).update(
+            unit_cost=Decimal("1.00"), package_cost=Decimal("5.00"), quantity_per_package=pack
+        )
+        link.refresh_from_db()
+        assert stored_pair(link) == (Decimal("1.00"), Decimal("5.00"), pack)
+
+        client, _ = authenticated_client
+        response = client.patch(
+            reverse("itemsupplier-detail", args=[link.pk]),
+            patch,
+            format="json",
+        )
+
+        assert response.status_code == 200, response.data
+        assert stored_pair(link) == (*expected, pack)
 
 
 class TestInvariantASaveWithNoPriceIntentFilesNoHistory:

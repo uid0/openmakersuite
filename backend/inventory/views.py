@@ -125,6 +125,7 @@ from .serializers import (
     WorkOrderToolSerializer,
     WorkOrderValidationSerializer,
 )
+from .services.pack_size import clean_pack_size
 from .services.packaging import (
     base_reorder_quantity,
     count_at_level,
@@ -1720,9 +1721,9 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
 
         cost_data = self._process_cost_data(data)
         lead_time = self._process_lead_time_value(data.get("average_lead_time"))
-        quantity = self._process_quantity_value(data.get("quantity_per_package"))
+        pack_size = self._process_pack_size(data)
 
-        self._create_supplier_relationship(item, supplier, data, cost_data, lead_time, quantity)
+        self._create_supplier_relationship(item, supplier, data, cost_data, lead_time, pack_size)
 
     def _validate_supplier(self, supplier_id):
         """Validate and return supplier or None if invalid."""
@@ -1765,37 +1766,43 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         except (ValueError, TypeError):
             return ItemSupplier._meta.get_field("average_lead_time").default
 
-    def _process_quantity_value(self, quantity):
-        """Process and validate quantity per package value."""
-        try:
-            return (
-                int(quantity)
-                if quantity not in (None, "", "null")
-                else ItemSupplier._meta.get_field("quantity_per_package").default
-            )
-        except (ValueError, TypeError):
-            return ItemSupplier._meta.get_field("quantity_per_package").default
+    def _process_pack_size(self, data):
+        """The pack size this request RECORDS, or ``None`` to leave the column alone.
 
-    def _carries_pack_size(self, data):
-        """Whether the request actually carried a usable pack size.
+        One reading of the key, replacing the pair ``_process_quantity_value`` /
+        ``_carries_pack_size`` that read it under two different rules — the first
+        answering with the field default ``1`` for an absent key and an
+        unparseable one alike, the second re-reading the raw request to decide
+        whether to send the key at all. Two readings is why the VALUE went
+        unchecked: neither one was the place a pack size about to be written
+        passed through. Now there is exactly one, and everything this path writes
+        goes through it.
 
-        ``_process_quantity_value`` cannot answer this: it returns the field
-        default ``1`` for an absent key and for an unparseable one alike, so a
-        caller gating on its result would still write a pack size nobody
-        supplied. The two costs omit on unparseable input because
-        ``_safe_decimal_conversion`` returns ``None``; this asks the raw request
-        so the pack size can be held to the same terms.
+        Absent, blank and unparseable all return ``None`` and the key is omitted,
+        unchanged: an omission takes the column's own default ``1`` on a create
+        and leaves a recorded pack size alone on an update, where fabricating
+        ``1`` would reset a recorded 3 and re-derive the unit price at the wrong
+        pack size. Malformed input is deliberately still an omission rather than
+        a refusal — that is the same terms the two costs keep through
+        ``_safe_decimal_conversion``, and it is a separate question from the one
+        being answered here.
+
+        A pack size the request DID carry goes through
+        :func:`~inventory.services.pack_size.clean_pack_size`, which runs the
+        column's own declared validators. So this path can no longer write the
+        ``0`` that ``/item-suppliers/`` and the admin have always refused, and it
+        refuses it in the same words.
         """
         quantity = data.get("quantity_per_package")
         if quantity in (None, "", "null"):
-            return False
+            return None
         try:
-            int(quantity)
+            quantity = int(quantity)
         except (ValueError, TypeError):
-            return False
-        return True
+            return None
+        return clean_pack_size(quantity)
 
-    def _create_supplier_relationship(self, item, supplier, data, cost_data, lead_time, quantity):
+    def _create_supplier_relationship(self, item, supplier, data, cost_data, lead_time, pack_size):
         """Create or update the ItemSupplier relationship.
 
         A cost the request did not carry is OMITTED rather than sent as ``None``.
@@ -1809,13 +1816,25 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         writer.
 
         ``quantity_per_package`` is omitted on the same terms, for an absent key
-        and a malformed one alike — hence ``_carries_pack_size`` rather than a
-        test on the processed value, which is the field default ``1`` in both
-        cases. A create takes that ``1`` from the column either way; what the
-        omission removes is the latent fabrication that would, on a reachable
-        update, reset a recorded pack size of 3 back to 1 and re-derive the unit
-        price at the wrong pack size. That is the same fabrication removed from
-        ``KitSerializer._apply_supplier_terms``.
+        and a malformed one alike — hence ``_process_pack_size`` answering
+        ``None``, rather than a test on a processed value that is the field
+        default ``1`` in both cases. A create takes that ``1`` from the column
+        either way, so — this site creating only, per above — the omission
+        changes no figure here today. It keeps the site off the fabrication that
+        IS reachable where the same ``update_or_create`` meets an existing link:
+        sending an unasked ``1`` resets a recorded pack size of 3 and re-derives
+        the unit price at the wrong pack size, which is what
+        ``KitSerializer._apply_supplier_terms`` did on every kit edit until that
+        default was removed there.
+
+        A pack size that IS sent has already been through the column's declared
+        validators by the time it reaches here, so this site no longer creates
+        the ``quantity_per_package`` 0 row that ``pack_size`` calls
+        ``RECORDED_ZERO`` — the shape at which cost derivation cannot run at all,
+        leaving a link holding a unit price with no case price and no way to
+        derive one. The refusal rolls the whole request back: ``create()`` calls
+        this inside its ``transaction.atomic()``, so a refused pack size leaves
+        no half-made item behind either.
         """
         package_cost_value, unit_cost_value = cost_data
 
@@ -1827,8 +1846,8 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             "unit_upc": data.get("unit_upc", ""),
             "is_primary": True,
         }
-        if self._carries_pack_size(data):
-            defaults["quantity_per_package"] = quantity
+        if pack_size is not None:
+            defaults["quantity_per_package"] = pack_size
         if package_cost_value is not None:
             defaults["package_cost"] = package_cost_value
         if unit_cost_value is not None:

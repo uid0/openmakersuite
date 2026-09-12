@@ -167,6 +167,37 @@ describe('SupplierDetailPage', () => {
     });
   });
 
+  it.each([
+    [null, null, 'Not recorded'],
+    [7, 'default', '7 days (planning default)'],
+    [7, 'unknown', '7 days (provenance unknown)'],
+  ])('renders item lead time %s with provenance %s', async (days, provenance, expected) => {
+    (api.inventoryAPI.getSupplier as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockSupplier,
+        items: [
+          {
+            ...mockSupplier.items[0],
+            average_lead_time: days,
+            average_lead_time_provenance: provenance,
+          },
+        ],
+      },
+    });
+
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <SupplierDetailPage />
+        </MemoryRouter>
+      </MantineProvider>
+    );
+
+    fireEvent.click(await screen.findByRole('tab', { name: /items/i }));
+
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+  });
+
   it('displays lead time analytics tab', async () => {
     render(
       <MantineProvider>

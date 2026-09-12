@@ -4,21 +4,8 @@ import {
   leadTimeText,
 } from '../../utils/leadTime';
 
-const supplierValueSurfaces = [
-  'supplier relationship editor',
-  'item detail supplier table',
-  'supplier detail item table',
-  'scan chosen supplier',
-  'scan supplier detail',
-  'scan order summary',
-  'admin dashboard reorder row',
-  'purchase order line',
-  'item metrics strip',
-  'serialized forecast',
-];
-
-describe.each(supplierValueSurfaces)('%s lead time', () => {
-  test('never presents an absence or default as a bare number', () => {
+describe('lead-time formatting', () => {
+  test('distinguishes absence, planning defaults, and unknown provenance', () => {
     expect(leadTimeText(null, null)).toBe(LEAD_TIME_NOT_RECORDED);
     expect(leadTimeText(7, 'default')).toBe('7 days (planning default)');
     expect(leadTimeText(7, 'unknown')).toBe('7 days (provenance unknown)');

@@ -1474,6 +1474,95 @@ class KitComponentSerializer(serializers.ModelSerializer):
         return value
 
 
+#: What a key that is not part of the kit terms block is told. The kit form is
+#: a NARROW surface onto ``ItemSupplier`` — it offers a supplier, a part number
+#: and a price — and this sentence has to leave the operator somewhere to go,
+#: because most of the keys that land here (``package_cost``,
+#: ``quantity_per_package``, ``notes``, the dimensions) are real columns that the
+#: generic endpoint does accept and validate.
+UNSUPPORTED_TERM = (
+    "This field is not part of a kit's supplier terms. Set it on the supplier "
+    "link through /api/inventory/item-suppliers/."
+)
+
+
+class KitSupplierTermsSerializer(serializers.ModelSerializer):
+    """The ``supplier_terms`` block of a kit write, validated (op-kit-terms).
+
+    Replaces a pass-through ``DictField``, and the change is the whole fix: an
+    untyped dict handed the ORM whatever the caller sent, so a non-numeric
+    ``supplier`` id, a ``average_lead_time`` of ``"soon"``, a cost past the
+    column's ``max_digits`` and a ``supplier_sku`` past its ``max_length`` each
+    reached the database driver and came back as a **500**, with the kit row
+    already committed — nothing in that response an operator can act on, and a
+    half-written kit left behind. Running the block through a serializer moves
+    every one of those to a ``400`` raised during ``is_valid()``, which is
+    BEFORE the kit is created, so a refused write leaves no rows at all.
+
+    **A ``ModelSerializer`` on purpose, declaring no bounds of its own.** Every
+    field here is built from the ``ItemSupplier`` column it writes, so this
+    refuses exactly what ``/api/inventory/item-suppliers/`` and the admin have
+    always refused, in the same words — the same reasoning
+    :func:`inventory.services.pack_size.clean_pack_size` records for the write
+    face it adds. A literal bound restated here would be a second copy of the
+    field's own rule, free to drift. The one consequence worth naming is
+    ``supplier``: as a real ``PrimaryKeyRelatedField`` it now resolves the row,
+    so a supplier id that names nothing is a 400 rather than a foreign-key
+    violation raised at COMMIT.
+
+    **Every field is optional, and an omitted one stays out of
+    ``validated_data``.** That is load-bearing rather than lax:
+    :meth:`KitSerializer._apply_supplier_terms` sends a PARTIAL ``defaults``, and
+    ``derive_costs`` decides what an omitted cost means by comparing against the
+    stored row. A serializer default here would put a key the operator never
+    typed into that dict, which is exactly the ``setdefault`` that used to reset
+    a recorded pack size to 1 on every kit save. Model-level defaults
+    (``average_lead_time``, and the pack size this does not offer) are left to
+    the model, where a create still takes them and an update still leaves the
+    stored value alone.
+    """
+
+    class Meta:
+        model = ItemSupplier
+        fields = ["supplier", "supplier_sku", "supplier_url", "unit_cost", "average_lead_time"]
+        extra_kwargs = {
+            # ``supplier_sku`` is the only one the model declares as mandatory
+            # and non-blank. The kit form has always let it be omitted or
+            # cleared, and this block exists to stop 500s and silent drops, not
+            # to start refusing saves that work today.
+            "supplier_sku": {"required": False, "allow_blank": True},
+            "supplier_url": {"required": False},
+            "unit_cost": {"required": False},
+            "average_lead_time": {"required": False},
+        }
+
+    def to_internal_value(self, data):
+        """Refuse a key this block does not write, instead of dropping it.
+
+        The ``defaults`` dict was already filtered to a fixed key set, so a
+        ``package_cost`` or ``quantity_per_package`` in the terms was discarded
+        and the caller still got a ``201`` — told their input was accepted when
+        it was not. DRF's own default is the same silence: unknown keys are
+        ignored. Naming them is the refusal.
+
+        The unsupported keys are reported TOGETHER with whatever else failed
+        validation, so an operator who sent both a stray key and a bad cost is
+        not refused twice for one payload.
+        """
+        unsupported = {}
+        if isinstance(data, dict):
+            unsupported = {key: [UNSUPPORTED_TERM] for key in sorted(set(data) - set(self.fields))}
+        try:
+            validated = super().to_internal_value(data)
+        except serializers.ValidationError as exc:
+            if unsupported and isinstance(exc.detail, dict):
+                raise serializers.ValidationError({**unsupported, **exc.detail}) from exc
+            raise
+        if unsupported:
+            raise serializers.ValidationError(unsupported)
+        return validated
+
+
 class KitSerializer(InventoryItemSerializer):
     """A kit SKU and its bill of materials (op-8n0).
 
@@ -1486,7 +1575,10 @@ class KitSerializer(InventoryItemSerializer):
 
     components = KitComponentSerializer(source="kit_components", many=True, required=False)
     component_count = serializers.SerializerMethodField()
-    supplier_terms = serializers.DictField(write_only=True, required=False)
+    # Validated rather than passed through — see :class:`KitSupplierTermsSerializer`.
+    # Nested here (not checked inside ``create``/``update``) so a bad terms block
+    # is refused during ``is_valid()``, before the kit row is written.
+    supplier_terms = KitSupplierTermsSerializer(write_only=True, required=False)
 
     class Meta(InventoryItemSerializer.Meta):
         fields = InventoryItemSerializer.Meta.fields + [
@@ -1607,36 +1699,40 @@ class KitSerializer(InventoryItemSerializer):
         kit" a single request; the generic ``/item-suppliers/`` endpoint still
         works for editing them afterwards.
 
-        ``quantity_per_package`` is NOT defaulted here. It used to be
-        ``defaults.setdefault("quantity_per_package", 1)``, a value the operator
-        never supplied: the kit form offers no pack-size box, so every kit save
-        reset a recorded pack size of 3 back to 1, and the unit price then
-        re-derived from the untouched case price at the wrong pack size. A create
-        still takes 1 from the model field's own default; an update now leaves a
-        recorded pack size alone.
+        **Takes only already-validated terms.** ``supplier_terms`` is a nested
+        :class:`KitSupplierTermsSerializer`, so by the time this runs the
+        supplier row is resolved, every value has passed the column's own
+        validators, and any key this block does not write has already been
+        REFUSED by name. Nothing is filtered out here any more: a key that
+        reached ``validated_data`` is a key this writes, which is why the
+        function no longer needs a literal list of the ones it accepts.
 
-        The keys this does send remain a PARTIAL ``defaults``, and that is now
+        ``quantity_per_package`` is still not written, and now says so. It used
+        to be ``defaults.setdefault("quantity_per_package", 1)``, a value the
+        operator never supplied: the kit form offers no pack-size box, so every
+        kit save reset a recorded pack size of 3 back to 1, and the unit price
+        then re-derived from the untouched case price at the wrong pack size.
+        Removing the setdefault stopped the reset but left a posted pack size
+        silently discarded; it is now refused with ``UNSUPPORTED_TERM``, which
+        points at the endpoint that does validate it. A create still takes 1
+        from the model field's own default; an update still leaves a recorded
+        pack size alone. ``inventory/tests/test_pack_size_write_guard.py`` pins
+        that this path cannot reach the column.
+
+        The keys this does send remain a PARTIAL ``defaults``, and that is
         safe: :func:`inventory.services.suppliers.derive_costs`, called from
         ``ItemSupplier.save()``, decides what a partial write means by comparing
         against the stored row, so an omitted cost is left alone rather than
-        re-derived from its twin.
+        re-derived from its twin. The nested serializer keeps it partial by
+        declaring no defaults of its own.
         """
         if not terms:
             return
-        supplier_id = terms.get("supplier")
-        if supplier_id is None:
-            raise serializers.ValidationError(
-                {"supplier_terms": {"supplier": "This field is required."}}
-            )
-        defaults = {
-            key: terms[key]
-            for key in ("supplier_sku", "supplier_url", "unit_cost", "average_lead_time")
-            if key in terms
-        }
+        defaults = {key: value for key, value in terms.items() if key != "supplier"}
         defaults["is_primary"] = True
         ItemSupplier.objects.update_or_create(
             item=instance,
-            supplier_id=supplier_id,
+            supplier=terms["supplier"],
             defaults=defaults,
         )
 

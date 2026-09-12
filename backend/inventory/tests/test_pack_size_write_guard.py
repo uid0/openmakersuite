@@ -15,8 +15,9 @@ path                                    validators                  pack size
 Django admin form / inline               ``ModelForm.full_clean()``  refused
 ``/inventory/items/`` POST               **none — hand-rolled        WAS STORED
                                          ``update_or_create``**
-``/inventory/kits/`` POST + PATCH        **none — hand-rolled**      cannot be
-                                                                     supplied
+``/inventory/kits/`` POST + PATCH        the terms block is         refused as
+                                         serializer-validated       unsupported
+                                         (op-kit-terms)
 ======================================  ==========================  ===========
 
 Two of those five are hand-rolled writers that run no model validation at all,
@@ -33,16 +34,22 @@ They differ in what they let a caller reach:
   sees a submitted value. The raw read exists precisely because the validated
   field is not on that serializer, which is why the bound has to be run by the
   writer.
-* ``KitSerializer._apply_supplier_terms`` writes through an untyped
-  ``DictField`` with no validation either, but its ``defaults`` are filtered to
-  a fixed key set that does NOT include the pack size, so no caller can reach
+* ``KitSerializer._apply_supplier_terms`` wrote through an untyped
+  ``DictField`` with no validation either, but its ``defaults`` were filtered to
+  a fixed key set that did NOT include the pack size, so no caller could reach
   the column through it. **Deliberate exclusion**, pinned below by
-  :meth:`TestTheKitPathCannotReachTheColumnAtAll.test_kit_terms_cannot_set_a_pack_size`
-  so the exclusion fails the build if that key set ever widens. Its other
-  validation gaps (an unvalidated ``unit_cost``, the ``DictField`` 500s) are a
-  separate defect, already filed in
-  ``docs/oms-supplier-cost-write-path-record.md`` under "Still open, filed not
-  fixed", and are not touched here.
+  :class:`TestTheKitPathCannotReachTheColumnAtAll` so the exclusion fails the
+  build if that key set ever widens.
+
+  The separate defect that note filed — the unvalidated ``DictField``, its 500s
+  and its silently dropped keys — has since been fixed by op-kit-terms, which
+  chose to REFUSE an unsupported key rather than start accepting it. That
+  choice keeps this exclusion exactly as it was: the kit terms still cannot
+  reach ``quantity_per_package``, so the guard still does not need extending to
+  this writer. The pinning tests below were rewritten to match the new answer
+  (400 rather than a dropped key) and now assert the stronger condition — that
+  a VALID pack size is refused too, which only a path that does not accept the
+  field can do.
 
 Paths that save an EXISTING row without re-supplying a pack size —
 ``ItemSupplierViewSet.mark_discontinued``,
@@ -68,6 +75,7 @@ import pytest
 
 from inventory.admin import ItemSupplierAdmin
 from inventory.models import InventoryItem, ItemSupplier
+from inventory.serializers import UNSUPPORTED_TERM
 from inventory.services.pack_size import PACK_SIZE_RECORDED_ZERO, pack_size_of
 from inventory.tests.factories import (
     InventoryItemFactory,
@@ -104,6 +112,31 @@ def post_item(client, supplier, **extra):
     }
     payload.update(extra)
     return client.post(reverse("inventoryitem-list"), payload, format="json")
+
+
+def post_kit(client, supplier, **terms):
+    """POST the real kit-create endpoint, with ``terms`` as its supplier block.
+
+    The kit path's counterpart to :func:`post_item`. The two differ in more than
+    the URL: the item path reads its supplier keys off ``request.data`` at the
+    TOP level, while the kit path takes them nested under ``supplier_terms``,
+    which is why a pack size reaches one writer and not the other.
+    """
+    component = InventoryItemFactory(image=None, is_kit=False, is_serialized=False)
+    supplier_terms = {"supplier": supplier.pk, "supplier_sku": "KIT-SKU", "unit_cost": "3.00"}
+    supplier_terms.update(terms)
+    return client.post(
+        reverse("kit-list"),
+        {
+            "name": "Ink Kit",
+            "sku": "KIT-INK",
+            "description": "Four cartridges",
+            "reorder_quantity": 1,
+            "components": [{"component": component.pk, "quantity": 1}],
+            "supplier_terms": supplier_terms,
+        },
+        format="json",
+    )
 
 
 class TestTheItemCreatePathRefusesAPackSizeBelowOne:
@@ -270,38 +303,76 @@ class TestWhatTheGuardDoesNotChange:
 class TestTheKitPathCannotReachTheColumnAtAll:
     """The OTHER hand-rolled writer, excluded because the column is out of reach.
 
-    ``_apply_supplier_terms`` builds its ``defaults`` from a fixed key set —
-    ``supplier_sku``, ``supplier_url``, ``unit_cost``, ``average_lead_time`` —
-    so a ``quantity_per_package`` in the terms dict is dropped before the write.
-    This pins that: if the key set ever widens to include the pack size, this
-    fails and the guard has to be extended to that writer too.
+    **The exclusion still holds, and is now enforced rather than incidental.**
+    When this class was written, ``_apply_supplier_terms`` filtered its
+    ``defaults`` to a fixed key set that omitted the pack size, so a
+    ``quantity_per_package`` in the terms dict was DROPPED before the write and
+    the caller got a cheerful 201. op-kit-terms closed that silent drop the
+    other way open to it — by REFUSING the key instead of accepting it (see
+    ``inventory/tests/test_kit_supplier_terms_input.py`` for the reasoning) — so
+    the same payloads now come back 400 with no row written at all.
+
+    What this class proves is therefore unchanged in substance and stronger in
+    method: **no kit write can put a value in ``quantity_per_package``.** It
+    used to prove it by showing a posted 0 did not land; it now proves it by
+    showing the key is not accepted, which is what makes
+    :meth:`test_kit_terms_cannot_set_a_valid_pack_size_either` the real pin. A
+    posted 0 alone would no longer be enough: if the key set widened AND carried
+    :func:`~inventory.services.pack_size.clean_pack_size` with it, a 0 would be
+    refused for a different reason and a 0-only test would still pass while the
+    exclusion was gone. A VALID pack size can only be refused by a path that
+    does not accept the field, so that is the assertion that fails if the key
+    set ever widens — and the guard would then have to be extended to this
+    writer, exactly as before.
     """
 
     def test_kit_terms_cannot_set_a_pack_size(self, authenticated_client, supplier):
+        """A pack size of 0 through the kit terms: refused, and nothing written."""
         client, _ = authenticated_client
-        component = InventoryItemFactory(image=None, is_kit=False, is_serialized=False)
 
-        response = client.post(
-            reverse("kit-list"),
-            {
-                "name": "Ink Kit",
-                "sku": "KIT-INK",
-                "description": "Four cartridges",
-                "reorder_quantity": 1,
-                "components": [{"component": component.pk, "quantity": 1}],
-                "supplier_terms": {
-                    "supplier": supplier.pk,
-                    "supplier_sku": "KIT-SKU",
-                    "unit_cost": "3.00",
-                    "quantity_per_package": 0,
-                },
-            },
-            format="json",
-        )
+        response = post_kit(client, supplier, quantity_per_package=0)
+
+        assert response.status_code == 400, response.data
+        assert response.data["error"]["details"]["supplier_terms"]["quantity_per_package"] == [
+            UNSUPPORTED_TERM
+        ]
+        assert not ItemSupplier.objects.filter(item__sku="KIT-INK").exists()
+
+    def test_kit_terms_cannot_set_a_valid_pack_size_either(self, authenticated_client, supplier):
+        """THE PIN. A pack size of 4 is a perfectly legal value for the column.
+
+        The only thing that can refuse it is a writer that does not accept the
+        field at all, so this fails the build the moment the kit terms widen to
+        include the pack size — whether or not the widening carries
+        :func:`~inventory.services.pack_size.clean_pack_size`. That is the
+        condition the previous version of this test was reaching for and could
+        only approximate by posting a value the bound itself rejects.
+        """
+        client, _ = authenticated_client
+
+        response = post_kit(client, supplier, quantity_per_package=4)
+
+        assert response.status_code == 400, response.data
+        assert response.data["error"]["details"]["supplier_terms"]["quantity_per_package"] == [
+            UNSUPPORTED_TERM
+        ]
+        assert not ItemSupplier.objects.filter(item__sku="KIT-INK").exists()
+
+    def test_a_kit_created_without_a_pack_size_still_takes_the_model_default(
+        self, authenticated_client, supplier
+    ):
+        """The column is out of reach, not unwritable: a create still gets 1.
+
+        Pinned beside the refusals so "cannot be supplied" is not read as
+        "cannot be set" — the model field's own default still applies, which is
+        why a refused key costs the kit path nothing it had.
+        """
+        client, _ = authenticated_client
+
+        response = post_kit(client, supplier)
 
         assert response.status_code == 201, response.data
-        link = ItemSupplier.objects.get(item_id=response.data["id"])
-        assert link.quantity_per_package == 1
+        assert ItemSupplier.objects.get(item_id=response.data["id"]).quantity_per_package == 1
 
 
 class TestRowsAlreadyOnDiskAreLeftAlone:

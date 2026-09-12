@@ -134,29 +134,26 @@ def test_the_crawl_actually_gets_answers_rather_than_errors():
 
     assert statuses[200] >= 50, f"only {statuses[200]} routes answered 200: {statuses}"
 
-    # THE ONE KNOWN EXCEPTION CLASS, named rather than tolerated silently.
+    # NO ROUTE MAY RAISE. This used to allow exactly one class.
     #
-    # A `@action` method whose signature omits `format=None` raises
+    # An `@action` whose signature omits `format=None` raised
     # ``TypeError: ...() got an unexpected keyword argument 'format'`` when
     # reached through DRF's format-suffix route (``items/low_stock.json``).
-    # PRE-EXISTING and unrelated to vendor exposure — it predates this branch,
-    # it is a 500 rather than a disclosure, and every one of these routes has a
-    # suffix-less twin that this crawl DOES fetch and search, so nothing goes
-    # uncovered by it. Reported, not fixed: it is outside this branch's scope
-    # cap, and a blanket signature change across dozens of actions is its own
-    # piece of work.
+    # That was tolerated here as a named, pre-existing 500 rather than a
+    # disclosure. It is FIXED now — ``config.routers.ApiRouter`` stops
+    # generating the suffix routes, because nothing called them (see that
+    # module's docstring for the evidence and
+    # ``config.tests.test_format_suffix_routes`` for the guard).
     #
-    # Asserted as an exact set rather than ignored, so a NEW failure mode — one
-    # that might be an exception thrown while serialising vendor data — still
-    # fails here instead of being absorbed by a permissive allowance.
+    # So the allowance is gone rather than left standing as a tolerance no
+    # longer earned: the crawl must raise NOTHING. An exception thrown while
+    # serialising vendor data fails here, and so does a re-introduction of the
+    # format-suffix TypeError.
     exceptions = {status for status in statuses if isinstance(status, str)}
-    assert exceptions <= {
-        "EXC:TypeError"
-    }, f"a new exception class appeared while crawling: {exceptions - {'EXC:TypeError'}}"
-    erroring = [entry[0] for entry in transcript if entry[3] == "EXC:TypeError"]
-    assert all(path.endswith(".json") for path in erroring), (
-        "the format-suffix TypeError has spread to a route without a suffix, which "
-        f"is a different bug: {[p for p in erroring if not p.endswith('.json')]}"
+    assert exceptions == set(), (
+        f"the crawl raised instead of answering on {len(exceptions)} route class(es): "
+        f"{sorted(exceptions)}. Routes: "
+        f"{sorted({entry[0] for entry in transcript if isinstance(entry[3], str)})[:10]}"
     )
 
 

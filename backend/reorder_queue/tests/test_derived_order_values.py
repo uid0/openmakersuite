@@ -58,11 +58,10 @@ VALUE_FIELD_PAIRS = [
     (value, field) for value in DERIVED_ORDER_VALUES for field in sorted(value.inputs)
 ]
 
+
 class TestNonStoredDerivedValues:
     @pytest.mark.django_db
-    def test_a_line_save_is_fresh_when_the_same_order_is_serialized_again(
-        self, supplier, operator
-    ):
+    def test_a_line_save_is_fresh_when_the_same_order_is_serialized_again(self, supplier, operator):
         purchase_order = make_po(supplier, operator)
         line = add_line(purchase_order, make_item("Cached save", supplier), quantity=4)
         assert PurchaseOrderSerializer(purchase_order).data["total_quantity"] == 4

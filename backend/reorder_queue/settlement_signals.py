@@ -187,6 +187,7 @@ def _invalidate_parent_snapshot(instance: PurchaseOrderItem) -> None:
     parent.__dict__.pop("_line_item_totals", None)
     getattr(parent, "_prefetched_objects_cache", {}).pop("items", None)
 
+
 def _member_code(name: str) -> types.CodeType | None:
     """The compiled body of a class member, or ``None`` if it has no body.
 

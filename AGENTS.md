@@ -1152,8 +1152,7 @@ display inconsistency on staff's list, and `void_item` carrying no status gate.
 
 ### Order-level values computed from the lines
 
-There is more than one, and treating settlement as the only one is what let
-`estimated_total` go stale. **A value stored on `PurchaseOrder` and computed
+There is more than one. **A value stored on `PurchaseOrder` and computed
 from its lines is declared in `settlement_signals.DERIVED_ORDER_VALUES`** —
 today `status` and `estimated_total` — as three facts and no more: the column
 it is stored in, the `PurchaseOrderItem` member its derivation is read off (its
@@ -1181,9 +1180,8 @@ Calling `refresh_receipt_status` does not discharge an obligation to
 `recalculate_estimated_total`, and the guard says so.
 
 "Is receiving finished with this line?" is defined once, on
-`PurchaseOrderItem.is_settled`, and nowhere else. Six defects had come from
-code answering it with a predicate of its own — the last one from another app
-entirely — so `backend/reorder_queue/settlement_sites.py` derives the whole set
+`PurchaseOrderItem.is_settled`, and nowhere else.
+`backend/reorder_queue/settlement_sites.py` derives the whole set
 of sites from the declared seeds (it walks each with `ast` to the model fields,
 then sweeps `backend/` and `frontend/src`) and fails when one bypasses it. The
 same is now true of a line's cost, `PurchaseOrderItem.estimated_cost`: multiply
@@ -1236,16 +1234,10 @@ contrast, is subtracted by nobody, so without the delete signal the order
 reports money for a line that no longer exists.
 
 Every route that changes what a line costs re-rolls the total now, including
-the Django admin's change form and inline formset. Those were open until
-`oms-derived-totals-beyond-settlement`, on the reasoning that the signal only
-compared fields inside the *settlement* closure — which was the defect, not a
-constraint: the closure is now taken per value, so the cost closure
+the Django admin's change form and inline formset. The closure is taken per
+value, so the cost closure
 (`quantity_ordered`, `unit_cost_ordered`) is compared for the money exactly as
 the settlement closure is for the status.
-
-When you state a rule like "a line's cost left the order" in a docstring, read
-it back against every route that satisfies its antecedent. The reparent gap was
-found that way, and so was the reprice.
 
 **What the signals do NOT cover, and why the guard still has a job:**
 querysets fire no per-object save signal. `PurchaseOrderItem.objects.filter(...)

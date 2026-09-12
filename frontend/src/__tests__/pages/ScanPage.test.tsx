@@ -157,6 +157,7 @@ describe('ScanPage', () => {
         minimum_cases: 1,
         reorder_cases: 2,
         current_cases: null,
+        case_size_state: 'not_recorded',
         needs_reorder: true,
       },
     });
@@ -168,14 +169,51 @@ describe('ScanPage', () => {
 
     // The page still renders — the item name proves it did not blank.
     await screen.findByText('Test Widget');
-    // "unknown", NOT the older "case size not recorded". That wording was a
-    // specific claim the payload does not support: a null `current_cases` also
-    // covers an item whose link DID record a pack size — of 0 — where the fix
-    // is to correct that row, not to add a supplier. "Unknown" is what the
-    // derivation actually establishes. Do not restore the old sentence.
-    expect(screen.getByText(/case size unknown/i)).toBeInTheDocument();
-    expect(screen.queryByText(/not recorded/i)).toBeNull();
+    // THIS ASSERTION USED TO RUN THE OTHER WAY (op-2t4e). It required the vague
+    // "case size unknown" and BANNED "not recorded", because a null
+    // `current_cases` then covered two situations the payload could not tell
+    // apart, making the specific sentence an unsupported claim. `case_size_state`
+    // supports it now. The scanner is a member, and the sentence is still one
+    // they can act on: it names the thing to go and get recorded.
+    expect(screen.getByText(/case size not recorded/i)).toBeInTheDocument();
     expect(screen.queryByText(/50\.0 cases/)).toBeNull();
+  });
+
+  // The op-2t4e pair. Both payloads send `current_cases: null`; the page must
+  // not tell a member with a missing fact the same thing as a member with a
+  // wrong one.
+  test('words a case size recorded as 0 differently from one never recorded', async () => {
+    localStorage.setItem('token', 'test-token');
+
+    const wordingFor = async (case_size_state: string) => {
+      (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+        data: {
+          ...mockItem,
+          use_case_based_reorder: true,
+          minimum_cases: 1,
+          reorder_cases: 2,
+          current_cases: null,
+          case_size_state,
+          needs_reorder: true,
+        },
+      });
+      (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+        data: { results: [] },
+      });
+      const { unmount } = await renderWithRouter();
+      await screen.findByText('Test Widget');
+      const cell = screen.getByTestId('scan-current-cases');
+      const wording = `${cell.textContent} ${cell.getAttribute('title') ?? ''}`;
+      unmount();
+      return wording;
+    };
+
+    const neverRecorded = await wordingFor('not_recorded');
+    const recordedZero = await wordingFor('recorded_zero');
+
+    expect(neverRecorded).not.toBe(recordedZero);
+    expect(neverRecorded).toMatch(/add a supplier relationship/i);
+    expect(recordedZero).toMatch(/correct "Quantity per Package"/i);
   });
 
   // The DISAGREEING side, which is also the DEFAULT configuration (minimum_stock

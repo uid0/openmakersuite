@@ -182,6 +182,7 @@ describe('InventoryItemDetailPage', () => {
         minimum_cases: 1,
         reorder_cases: 2,
         current_cases: null,
+        case_size_state: 'not_recorded',
         needs_reorder: true,
       },
     });
@@ -192,13 +193,56 @@ describe('InventoryItemDetailPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Test Item')).toBeInTheDocument();
     });
-    // "unknown", NOT the older "case size not recorded". That wording was a
-    // specific claim the payload does not support: a null `current_cases` also
-    // covers an item whose link DID record a pack size — of 0 — where the fix
-    // is to correct that row, not to add a supplier. "Unknown" is what the
-    // derivation actually establishes. Do not restore the old sentence.
-    expect(screen.getByText(/case size unknown/i)).toBeInTheDocument();
-    expect(screen.queryByText(/not recorded/i)).toBeNull();
+    // THIS ASSERTION USED TO RUN THE OTHER WAY (op-2t4e). It required the vague
+    // "case size unknown" and BANNED "not recorded", because at the time a null
+    // `current_cases` covered two situations and the payload carried nothing to
+    // tell them apart — so the specific sentence would have been a claim the
+    // response did not support. The response now supports it: `case_size_state`
+    // says which unknown this is. The ban is lifted for the state that earns it
+    // and for no other; the sibling test below pins the other one.
+    expect(screen.getByText(/case size not recorded/i)).toBeInTheDocument();
+    // And the remedy is VISIBLE on the screen the operator fixes it from, not
+    // parked in a tooltip nobody hovers.
+    expect(screen.getByTestId('item-case-size-remedy')).toHaveTextContent(
+      /add a supplier relationship/i
+    );
+  });
+
+  // The op-2t4e pair, which is the whole point: both items send
+  // `current_cases: null` and the page must NOT say the same thing about them.
+  // One operator has to record a case size, the other has to correct one, and a
+  // screen that words them alike sends both to the wrong screen half the time.
+  it('words a case size recorded as 0 differently from one never recorded', async () => {
+    const render = async (case_size_state: string) => {
+      (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+        data: {
+          ...mockItem,
+          use_case_based_reorder: true,
+          minimum_cases: 1,
+          reorder_cases: 2,
+          current_cases: null,
+          case_size_state,
+          needs_reorder: true,
+        },
+      });
+      const { unmount } = renderPage();
+      await waitFor(() => {
+        expect(screen.getByText('Test Item')).toBeInTheDocument();
+      });
+      const cell = screen.getByTestId('item-current-cases');
+      const remedy = screen.getByTestId('item-case-size-remedy');
+      const wording = `${cell.textContent} ${remedy.textContent}`;
+      unmount();
+      return wording;
+    };
+
+    const neverRecorded = await render('not_recorded');
+    const recordedZero = await render('recorded_zero');
+
+    expect(neverRecorded).not.toBe(recordedZero);
+    // And each names ITS OWN action rather than merely differing.
+    expect(neverRecorded).toMatch(/add a supplier relationship/i);
+    expect(recordedZero).toMatch(/correct "Quantity per Package"/i);
   });
 
   // The DISAGREEING side, which is also the DEFAULT configuration: minimum_stock
@@ -272,6 +316,27 @@ describe('InventoryItemDetailPage', () => {
     expect(screen.getByText('Low Stock')).toBeInTheDocument();
     expect(screen.getByTestId('item-minimum-stock')).toHaveTextContent('3 units');
     expect(screen.getByTestId('item-reorder-quantity')).toHaveTextContent('40 units');
+  });
+
+  it('shows no case-size remedy when the case size is known', async () => {
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockItem,
+        use_case_based_reorder: true,
+        minimum_cases: 1,
+        reorder_cases: 2,
+        current_cases: 2.5,
+        case_size_state: 'known',
+      },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('item-current-cases')).toHaveTextContent('2.5 cases');
+    expect(screen.queryByTestId('item-case-size-remedy')).toBeNull();
   });
 
   it('keeps naming cases when the case size IS known', async () => {

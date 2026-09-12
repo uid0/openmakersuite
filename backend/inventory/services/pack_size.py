@@ -15,15 +15,23 @@ their own ``quantity_per_package or 1``. They could disagree on one item, and
 three of them turned "nobody recorded a pack size" into the confident number 1.
 
 **Three states, kept distinct.** The whole point of this module is that a caller
-CAN tell them apart. They are an INTERNAL distinction today — no surface
-renders :attr:`PackSize.state`, and the web pages say only "case size unknown"
-for all of them — and they earn their keep anyway for two reasons: they stop
-:func:`order_pack_size` collapsing "no supplier" with "no orderable supplier",
-which is the collapse that over-flagged one population and under-flagged another
-on a previous attempt, and they keep each unknown's CAUSE available to the
-surface that will eventually word it. Wording each cause for an operator is
-filed as separate follow-up work; do not read the operator actions below as
-something a screen says today.
+CAN tell them apart. They stop :func:`order_pack_size` collapsing "no supplier"
+with "no orderable supplier", which is the collapse that over-flagged one
+population and under-flagged another on a previous attempt — and they keep each
+unknown's CAUSE available to the surface that words it.
+
+**The states now REACH a screen** (op-2t4e). They were internal when this module
+was written, and this docstring used to say so: every web page said "case size
+unknown" for all of them, so an operator could not tell whether they were
+supplying a missing fact or correcting a wrong one. :attr:`PackSize.state` is
+serialized on both payloads that carry a case size —
+``InventoryItemSerializer.case_size_state`` beside ``current_cases`` (the SHELF
+question) and ``InventoryMetricsSerializer.case_size_state`` beside
+``case_size`` (the ORDER question) — and ``frontend/src/utils/caseSize.ts``
+words each one. The STATE is what crosses the wire, never a rendered sentence:
+what to say about ``recorded_zero`` is a client's decision, and the terminal
+client words it differently from the web. So the operator actions below are now
+load-bearing; a new state here owes a wording there.
 
 * :data:`PACK_SIZE_KNOWN` — a link records a usable pack size. The number is
   real; use it.
@@ -273,6 +281,31 @@ def shelf_pack_size(item) -> PackSize:
     return pack_size_of(_first_link(item))
 
 
+def pack_size_for_choice(choice) -> PackSize:
+    """The order question's answer, given a :class:`SupplierChoice` already made.
+
+    The ONE place the supplier derivation's ``reason`` is mapped onto a pack-size
+    state, so "no supplier rows at all" and "rows, but none we can buy from" stay
+    apart without a second reader deciding which is which.
+    :func:`order_pack_size` resolves the choice itself and hands it here; a
+    caller that has ALREADY resolved one — ``item_metrics`` batches the whole
+    page through ``select_suppliers_for`` — passes its row straight in rather
+    than paying for the resolution twice.
+
+    Takes the choice rather than the item on purpose: an item-shaped signature
+    would invite exactly the second resolution this exists to avoid, and would
+    make the batched caller's query budget depend on how this function chose to
+    answer.
+    """
+    from inventory.services.supplier_selection import NONE_ORDERABLE
+
+    if choice.item_supplier is not None:
+        return pack_size_of(choice.item_supplier)
+    if choice.reason == NONE_ORDERABLE:
+        return NO_ORDERABLE_LINK
+    return NOT_RECORDED
+
+
 def order_pack_size(item) -> PackSize:
     """Units in the box THE NEXT ORDER SHIPS IN — the link we would buy through.
 
@@ -300,8 +333,6 @@ def order_pack_size(item) -> PackSize:
     if link is not None:
         return pack_size_of(link)
 
-    from inventory.services.supplier_selection import NONE_ORDERABLE, select_supplier
+    from inventory.services.supplier_selection import select_supplier
 
-    if select_supplier(item).reason == NONE_ORDERABLE:
-        return NO_ORDERABLE_LINK
-    return NOT_RECORDED
+    return pack_size_for_choice(select_supplier(item))

@@ -12,6 +12,7 @@ import React from 'react';
 
 import { InventoryCostTrend, InventoryItemMetrics } from '../../types';
 import { VENDOR_WITHHELD_TEXT, vendorDataWithheld } from '../../utils/vendorVisibility';
+import { caseSizeUnknownNote } from '../../utils/caseSize';
 
 interface InventoryMetricsRowProps {
   sku: string;
@@ -77,8 +78,18 @@ const InventoryMetricsRow: React.FC<InventoryMetricsRowProps> = ({ sku, metrics 
   const vendorWithheld = vendorDataWithheld(metrics);
 
   const costLabel = metrics.is_case_based ? 'Cost/case' : 'Cost';
+  // "Cost per case" of WHAT? When the case size is unknown this tooltip used to
+  // trail off, leaving the operator to guess whether a case size had never been
+  // recorded, had been recorded as a box holding nothing, or existed only on
+  // vendors we can no longer buy from (op-2t4e). The server now says which, so
+  // the tooltip names the remedy instead of going quiet.
+  const caseSizeNote = metrics.is_case_based
+    ? caseSizeUnknownNote(metrics.case_size_state)
+    : null;
   const costTooltipBase = metrics.is_case_based
-    ? `Cost per case${metrics.case_size ? ` of ${metrics.case_size}` : ''}`
+    ? `Cost per case${metrics.case_size ? ` of ${metrics.case_size}` : ''}${
+        caseSizeNote ? ` — ${caseSizeNote}` : ''
+      }`
     : 'Cost per unit';
   const trend = metrics.cost_trend;
   const trendArrow = vendorWithheld || !trend ? '' : TREND_ARROW[trend];

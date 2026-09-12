@@ -7,7 +7,7 @@ import { MantineProvider } from '@mantine/core';
 import { render, screen } from '@testing-library/react';
 
 import InventoryMetricsRow from '../../components/inventory/InventoryMetricsRow';
-import { InventoryItemMetrics } from '../../types';
+import { CaseSizeState, InventoryItemMetrics } from '../../types';
 
 const buildMetrics = (overrides: Partial<InventoryItemMetrics> = {}): InventoryItemMetrics => ({
   current_stock: 10,
@@ -23,6 +23,7 @@ const buildMetrics = (overrides: Partial<InventoryItemMetrics> = {}): InventoryI
   last_po_unit_cost: '4.0000',
   is_case_based: false,
   case_size: null,
+  case_size_state: 'not_recorded',
   supplier_scored_without_price: false,
   supplier_scored_without_history: false,
   ...overrides,
@@ -73,6 +74,42 @@ describe('InventoryMetricsRow', () => {
     const cost = screen.getByTestId('metric-cost');
     expect(cost).toHaveTextContent('Cost/case');
     expect(cost).toHaveTextContent('$24.00');
+  });
+
+  // op-2t4e. "Cost per case" of WHAT? With no case size the tooltip simply
+  // stopped, identically for an item nobody had recorded one for and an item
+  // whose supplier row records a box holding nothing. The state now says which,
+  // and the tooltip carries the remedy for each.
+  it('says WHICH unknown when a case-based item has no case size', () => {
+    const tooltipFor = (case_size_state: CaseSizeState) => {
+      const { unmount } = renderRow(
+        buildMetrics({ is_case_based: true, case_size: null, case_size_state }),
+      );
+      const tooltip = screen.getByTestId('metric-cost').getAttribute('title') ?? '';
+      unmount();
+      return tooltip;
+    };
+
+    const neverRecorded = tooltipFor('not_recorded');
+    const recordedZero = tooltipFor('recorded_zero');
+    const noneOrderable = tooltipFor('no_orderable_link');
+
+    expect(new Set([neverRecorded, recordedZero, noneOrderable]).size).toBe(3);
+    expect(neverRecorded).toMatch(/add a supplier relationship/i);
+    expect(recordedZero).toMatch(/correct "Quantity per Package"/i);
+    // The third state reaches THIS payload only: the item payload asks the
+    // shelf question, where a dead vendor's recorded pack size still counts.
+    expect(noneOrderable).toMatch(/reactivate a supplier relationship/i);
+  });
+
+  it('adds no case-size remedy when the case size is known', () => {
+    renderRow(
+      buildMetrics({ is_case_based: true, case_size: 12, case_size_state: 'known' }),
+    );
+
+    const tooltip = screen.getByTestId('metric-cost').getAttribute('title') ?? '';
+    expect(tooltip).toContain('Cost per case of 12');
+    expect(tooltip).not.toMatch(/supplier relationship/i);
   });
 
   it('renders em-dashes for missing lead time and cost, and no arrow without history', () => {

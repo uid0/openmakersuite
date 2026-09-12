@@ -827,6 +827,8 @@ same reason the server drops the keys.
 withheld because `current_stock` is public beside it. `quantity_per_package` /
 `case_size` are NOT: a pack size is a shelf fact, which is the call op-c1ke
 already made for `current_cases`, and anonymous reorder sizing depends on it.
+The complete field-level contract, including companion state keys, is owned by
+[`docs/API_PERMISSION_MATRIX.md`](docs/API_PERMISSION_MATRIX.md).
 An ambiguous field falls closed — `ReorderRequest.order_number` is
 operator-typed free text that holds the vendor's reference as often as not,
 while `PurchaseOrder.po_number` is ours, with `supplier_order_number` beside it

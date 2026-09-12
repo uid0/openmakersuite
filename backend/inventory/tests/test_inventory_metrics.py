@@ -42,6 +42,11 @@ CONTRACT_FIELDS = {
     "last_po_unit_cost",
     "is_case_based",
     "case_size",
+    # WHICH unknown a null ``case_size`` is (op-2t4e): no supplier rows, an
+    # orderable row recording a box that holds nothing, or rows that all name
+    # vendors we cannot buy from. Three facts wanting three different actions,
+    # which base sent as one silence.
+    "case_size_state",
     # Why Cost / Lead may be blank or unbacked. The supplier scoring neither
     # rewards nor punishes a missing price or an empty delivery record
     # (op-2rsp), so a supplier can win carrying one — and a blank Cost cell
@@ -68,6 +73,10 @@ PUBLIC_CONTRACT_FIELDS = {
     "reorder_point",
     "is_case_based",
     "case_size",
+    # Public for the reason ``case_size`` is, and one more: it is the CAUSE of
+    # that key, and publishing the absence while withholding its cause would
+    # rebuild the conflation for the anonymous scan flow. It names no vendor.
+    "case_size_state",
     "vendor_data_withheld",
 }
 

@@ -13,6 +13,7 @@ import { formatDateOnly } from '../utils/dates';
 import { promptInput, showError } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 import { reorderFiling, reorderQuantityLabel } from '../utils/packaging';
+import { caseSizeUnknownLabel, caseSizeUnknownNote } from '../utils/caseSize';
 import {
   alternativeSupplierNamesText,
   chosenSupplierName,
@@ -653,9 +654,17 @@ const ScanPage: React.FC = () => {
               <>
                 <div className="info-item">
                   <span className="label">Current Cases:</span>
-                  <span className={`value ${item.needs_reorder ? 'low-stock' : ''}`}>
+                  {/* WHICH unknown, not just "unknown" (op-2t4e): supplying a
+                      case size nobody recorded and correcting one recorded
+                      wrong are different jobs, and this page said one sentence
+                      for both. */}
+                  <span
+                    className={`value ${item.needs_reorder ? 'low-stock' : ''}`}
+                    title={caseSizeUnknownNote(item.case_size_state) ?? undefined}
+                    data-testid="scan-current-cases"
+                  >
                     {item.current_cases === null
-                      ? '— (case size unknown)'
+                      ? caseSizeUnknownLabel(item.case_size_state)
                       : `${item.current_cases.toFixed(1)} cases`}
                   </span>
                 </div>

@@ -19,7 +19,7 @@ The ``payload`` dict shape is the pinned contract consumed by
 from django.db.models import Q, Sum
 
 from inventory.models import MaintenanceMaterial, WorkOrder, WorkOrderMaterialUsage
-from inventory.services.pack_size import pack_size_of
+from inventory.services.pack_size import pack_size_for_choice
 from inventory.services.pricing import package_price_of, unit_price_of
 from inventory.services.supplier_selection import select_suppliers_for
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
@@ -315,7 +315,7 @@ def compute_item_metrics_batch(items):
         lead_time_days = supplier.average_lead_time if supplier else None
         # ``case_size`` — units per case from that same link, read through the
         # ONE pack-size derivation (op-c1ke) rather than off the column. Fed the
-        # row ``select_suppliers_for`` already resolved, so the query budget
+        # CHOICE ``select_suppliers_for`` already resolved, so the query budget
         # above is unchanged. It was already ``None`` for an item with no
         # orderable supplier; it is now ``None`` for a link recording
         # ``quantity_per_package`` of 0 as well, because a box holding no units
@@ -323,7 +323,17 @@ def compute_item_metrics_batch(items):
         # contract — the field is ``*int`` and null-tolerant there and nothing
         # reads the value — but this is a cross-project VALUE change and is
         # named as one in the PR.
-        case_size = pack_size_of(supplier).units
+        #
+        # ``pack_size_for_choice`` rather than ``pack_size_of``, because this is
+        # the ORDER question and it has three ways to come back empty, not two:
+        # the choice's own ``reason`` separates "this item has no supplier rows"
+        # from "it has rows and every one is dead". Both send ``case_size:
+        # null`` — no number moves — and ``case_size_state`` below is what tells
+        # them apart, so the operator gets "add a vendor" or "revive one" rather
+        # than one sentence covering both (op-2t4e). The reason is read off the
+        # row already in hand, never by asking the supplier derivation again.
+        pack = pack_size_for_choice(choice)
+        case_size = pack.units
 
         committed = quantity_committed.get(item.id, 0.0)
         # Cost shown on the row: the case cost for case-based items (what you
@@ -344,6 +354,10 @@ def compute_item_metrics_batch(items):
             "last_po_unit_cost": last_po_unit_cost.get(item.id),
             "is_case_based": item.use_case_based_reorder,
             "case_size": case_size,
+            # WHICH of the four pack-size states produced that number, or its
+            # absence. The API's job is to say which case it is; how it is
+            # worded belongs to each client, so no display text is sent.
+            "case_size_state": pack.state,
             # Why the cost or the speed above may be missing or unbacked. Both
             # describe the CHOICE, not the item: the scoring picked this
             # supplier while knowing no price for it, or while it had never

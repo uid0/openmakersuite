@@ -896,6 +896,24 @@ class InventoryItemSerializer(VendorGatedSerializerMixin, serializers.ModelSeria
     # nil-checked ``*float64``.
     current_cases = serializers.FloatField(read_only=True, allow_null=True)
 
+    # WHY ``current_cases`` is null, when it is (op-2t4e). A null there has more
+    # than one cause and the causes point an operator at opposite actions —
+    # "nobody recorded a case size" wants one supplied, "a link records a box
+    # holding no units" wants one corrected — and until this key existed the web
+    # said "case size unknown" for both. ADDITIVE: no existing key changes name,
+    # type or value, and Go's ``encoding/json`` drops keys a struct does not
+    # declare, so ScanTTY keeps working untouched until its own change lands.
+    # Probed against its real structs at remote main ``08f0d0d7``, not assumed;
+    # see the PR's cross-project note.
+    #
+    # NOT vendor-gated, and deliberately: it names no vendor and no price, and
+    # it is the CAUSE of ``current_cases``, which this repo already publishes to
+    # anonymous callers because a pack size describes the SHELF rather than the
+    # vendor (op-c1ke, upheld by op-anonymous-read-posture). Withholding the
+    # cause while publishing the effect would rebuild this very conflation for
+    # the anonymous scan flow, which is the surface that most needs telling.
+    case_size_state = serializers.CharField(read_only=True)
+
     # Hazmat writable fields. These moved off InventoryItem onto the 1:1
     # InventorySafetyProfile (#885), so they are declared explicitly here (they
     # are no longer model fields). On read they resolve through the item's
@@ -998,6 +1016,7 @@ class InventoryItemSerializer(VendorGatedSerializerMixin, serializers.ModelSeria
             "minimum_cases",
             "reorder_cases",
             "current_cases",
+            "case_size_state",
             "reorder_instruction",
             # Unit of measure / packaging matrix (op-hzji). Additive and opt-in:
             # an item that sets none of these counts individual base units
@@ -1959,6 +1978,14 @@ class InventoryMetricsSerializer(VendorGatedSerializerMixin, serializers.Seriali
     )
     is_case_based = serializers.BooleanField()
     case_size = serializers.IntegerField(allow_null=True)  # units per case (quantity_per_package)
+    # WHY ``case_size`` is null, when it is (op-2t4e). Three unknowns reach this
+    # key — no supplier rows at all, an orderable row recording a box that holds
+    # nothing, and rows that all name vendors we cannot buy from — and they want
+    # three different things done. ``no_orderable_link`` is the member only this
+    # payload can answer: ``InventoryItemSerializer.case_size_state`` asks the
+    # SHELF question, where a dead vendor's recorded pack size still describes
+    # the box. Additive, and the state only — never a rendered sentence.
+    case_size_state = serializers.CharField()
     # Why the Cost / Lead above may be blank or unbacked (op-2rsp). The scoring
     # neither rewards nor punishes a missing price or an empty delivery record,
     # so a supplier can win WITH one — and an operator reading a blank Cost cell
@@ -1985,6 +2012,12 @@ class InventoryMetricsSerializer(VendorGatedSerializerMixin, serializers.Seriali
     #: ``current_cases`` / ``on_hand_display`` / ``reorder_display`` keys already
     #: depend on it. It also re-derives nothing: both costs are withheld, so
     #: ``package_cost / case_size`` has no left-hand side.
+    #:
+    #: ``case_size_state`` stays for the same reason and one more: it is the
+    #: CAUSE of a key already published here, and publishing an absence while
+    #: withholding why it is absent is the conflation op-2t4e exists to close,
+    #: rebuilt for anonymous callers. It names no vendor and no price —
+    #: ``no_orderable_link`` says the field is unbuyable, not who is in it.
     #:
     #: THE SCANTTY CONTRACT IS UNCHANGED BY THIS. No key is renamed or removed;
     #: they are withheld from callers with no session, and ScanTTY sends a

@@ -50,6 +50,7 @@ import {
   reorderQuantityLabel,
   reorderThresholdLabel,
 } from '../utils/packaging';
+import { caseSizeUnknownLabel, caseSizeUnknownNote } from '../utils/caseSize';
 import { LEAD_TIME_NOT_RECORDED, formatLeadTimeDays } from '../utils/leadTime';
 import { VENDOR_WITHHELD_TEXT, vendorDataWithheld } from '../utils/vendorVisibility';
 
@@ -901,14 +902,32 @@ const InventoryItemDetailPage: React.FC = () => {
                     </Group>
                   )}
                   {item.use_case_based_reorder && (
-                    <Group justify="space-between">
-                      <Text size="sm">Current Cases:</Text>
-                      <Text size="sm" fw={600}>
-                        {item.current_cases === null
-                          ? '— (case size unknown)'
-                          : `${item.current_cases.toFixed(1)} cases`}
-                      </Text>
-                    </Group>
+                    <>
+                      <Group justify="space-between">
+                        <Text size="sm">Current Cases:</Text>
+                        {/* A null case count has more than one cause, and the
+                            causes want opposite things done (op-2t4e). The
+                            value names WHICH unknown; the remedy goes BELOW,
+                            visible, because this is the screen the operator
+                            fixes it from and an action hidden in a tooltip is
+                            an action most of them never see. */}
+                        <Text
+                          size="sm"
+                          fw={600}
+                          title={caseSizeUnknownNote(item.case_size_state) ?? undefined}
+                          data-testid="item-current-cases"
+                        >
+                          {item.current_cases === null
+                            ? caseSizeUnknownLabel(item.case_size_state)
+                            : `${item.current_cases.toFixed(1)} cases`}
+                        </Text>
+                      </Group>
+                      {caseSizeUnknownNote(item.case_size_state) && (
+                        <Text size="xs" c="dimmed" data-testid="item-case-size-remedy">
+                          {caseSizeUnknownNote(item.case_size_state)}
+                        </Text>
+                      )}
+                    </>
                   )}
                   <Group justify="space-between">
                     <Text size="sm">Minimum Stock:</Text>

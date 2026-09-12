@@ -784,3 +784,37 @@ class TestTheGuardCoversEveryValue:
         report = settlement_sites.scan(start=package / "settlement_sites.py")
 
         assert any("closed_short_at" in finding.detail for finding in report.findings)
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            """def calculate(order):
+    return sum(line.estimated_cost for line in order.items.all())
+
+def store(order):
+    total = calculate(order)
+    order.actual_total = total
+    order.save(update_fields=[\"actual_total\"])
+""",
+            """from reorder_queue.models import PurchaseOrder
+
+def store(order_id, total):
+    PurchaseOrder.objects.filter(pk=order_id).update(actual_total=total)
+""",
+        ],
+        ids=["helper-indirection", "queryset-update"],
+    )
+    def test_an_undeclared_numeric_order_value_fails_the_guard(self, tmp_path, source):
+        package = tmp_path / "backend" / "reorder_queue"
+        package.mkdir(parents=True)
+        real_package = pathlib.Path(settlement_sites.__file__).resolve().parent
+        for name in ("models.py", settlement_sites.ROUTING_MODULE):
+            (package / name).write_text((real_package / name).read_text())
+        (package / "undeclared_total.py").write_text(source)
+
+        report = settlement_sites.scan(start=package / "settlement_sites.py")
+
+        assert any(
+            finding.arm == "value" and "PurchaseOrder.actual_total" in finding.detail
+            for finding in report.findings
+        )

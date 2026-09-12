@@ -22,10 +22,10 @@ So there are TWO derivations here, and the second one is the point:
   ``PurchaseOrderItem`` member its derivation is read off, and the function
   that re-derives it — and :func:`derive_anchor` turns each into an
   :class:`Anchor` by walking that seed through ``models.py``. Then
-  :func:`_value_arm` derives the same set INDEPENDENTLY, from the tree: any
-  function assigning a ``PurchaseOrder`` column while reading the order's
-  lines. A column the tree computes and the declaration does not claim FAILS
-  the run. That is what stops the next ``estimated_total``.
+  :func:`_value_arm` derives the candidate set INDEPENDENTLY from the order
+  model's stored numeric fields, then finds assignment and ORM writes to those
+  fields throughout the tree. A written numeric column the declaration does
+  not claim FAILS the run. That is what stops the next ``estimated_total``.
 * **The sites.** Per value, as before. :func:`scan` reads every ``.py`` in
   ``backend/`` and every ``.ts``/``.tsx`` in ``frontend/src`` and reports the
   sites that touch that value's fields.
@@ -164,7 +164,9 @@ PREDICATE_CALLS = frozenset(
 INDEPENDENT_ARG_CALLS = frozenset({"aggregate", "annotate", "update"})
 
 #: Call names that persist a field value passed as a keyword.
-WRITE_CALLS = frozenset({"create", "update", "get_or_create", "update_or_create", "bulk_create"})
+WRITE_CALLS = frozenset(
+    {"create", "update", "get_or_create", "update_or_create", "bulk_create", "bulk_update"}
+)
 
 #: Every time the write arm turned out not to reach what its own description
 #: claimed. Data, not prose: :func:`main` derives the count it reports from
@@ -205,32 +207,19 @@ WRITE_SHAPES_SEEN = (
     "a model-level save or delete of a line, wherever it comes from — NOT by this "
     "scan, but by reorder_queue.settlement_signals, which is why the admin arm "
     "this file used to carry was retired rather than extended",
-    "an ORDER column assigned by a function that also reads the order's lines — "
-    "the value arm, which asks whether the value is DECLARED at all rather than "
-    "whether a site went through it",
+    "assignment and ORM queryset writes to stored numeric ORDER columns — the "
+    "value arm, which asks whether each candidate total is DECLARED at all",
 )
 
 #: What it cannot see. These are holes, not absences of sites — "found nothing"
 #: and "could not tell" are different facts and this list is which is which.
 WRITE_SHAPES_UNSEEN = (
     "raw SQL, and anything reaching the database outside the ORM",
-    "bulk_update(), and queryset writers not named above — querysets fire no "
-    "per-object save signal either, so neither half of the routing sees them",
     "a FAST DELETE: a collector that can drop rows with one _raw_delete sends no "
     "post_delete, and _raw_delete called directly never does, so the model-level "
     "routing that covers ordinary deletes does not cover those",
     "a write through a serializer or form outside the paths named above",
     "input fields pulled into locals by values_list() and compared later",
-    "an ORDER column written by queryset — update()/create() keywords on the "
-    "order rather than an attribute assignment — or written in one function "
-    "from a line total computed in another: the value arm sees neither, so a "
-    "new order-level total taking either shape is declared by nobody and "
-    "caught by nothing",
-    "an ORDER column whose NAME the line model also carries (notes, "
-    "work_order, owning_group, the void stamps): an assignment names an "
-    "attribute, not a model, and the value arm stands down rather than guess "
-    "which model a variable holds — so a new order-level total sharing a name "
-    "with a line column is not judged",
     "arithmetic on order-level aggregate PROPERTIES rather than on the line fields "
     "— which is how the pending_orders site hid, found by reading not by this",
     "a call this scan cannot resolve to a definition: it buys no discharge, so the "
@@ -378,13 +367,9 @@ class OrderShape:
     model_name: str
     #: Its concrete columns. A value that is not one of these is not STORED.
     columns: frozenset[str]
-    #: Columns of the ORDER whose names the LINE also carries — ``notes``,
-    #: ``work_order``, ``owning_group``, the void stamps. An assignment names
-    #: the attribute and not the model, so ``x.notes = ...`` inside a function
-    #: that also touches lines is as likely to be a LINE's note as an order's.
-    #: The value arm cannot tell them apart and does not guess: it judges the
-    #: columns only the ORDER has, and this is what it is standing down on.
-    ambiguous_columns: frozenset[str]
+    #: Stored numeric columns are the candidate order-level totals. Derived
+    #: from the model declarations rather than a hand-maintained name list.
+    numeric_columns: frozenset[str]
     #: The order's own members that are computed from the lines, transitively.
     #: A function reading one of these is reading the lines, at one remove.
     line_derived_members: frozenset[str]
@@ -393,12 +378,6 @@ class OrderShape:
     related_name: str
     #: The line model's class name.
     line_model: str
-
-    @property
-    def judgeable_columns(self) -> frozenset[str]:
-        """Order columns an assignment can be attributed to the ORDER by name."""
-        return self.columns - self.ambiguous_columns
-
 
 @dataclass
 class Finding:
@@ -587,12 +566,16 @@ def derive_order_shape(models_path: Path, line_model: str, related_name: str) ->
     )
 
     columns: set[str] = set()
+    numeric_columns: set[str] = set()
     members: dict[str, ast.AST] = {}
     for stmt in order_cls.body:
         if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
             target = stmt.targets[0]
-            if isinstance(target, ast.Name) and _field_decl_name(stmt.value) is not None:
+            declaration = _field_decl_name(stmt.value)
+            if isinstance(target, ast.Name) and declaration is not None:
                 columns.add(target.id)
+                if _is_numeric_field(declaration):
+                    numeric_columns.add(target.id)
         elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
             members[stmt.name] = stmt
 
@@ -621,15 +604,6 @@ def derive_order_shape(models_path: Path, line_model: str, related_name: str) ->
                 derived.add(name)
                 changed = True
 
-    line_columns = {
-        stmt.targets[0].id
-        for stmt in line_cls.body
-        if isinstance(stmt, ast.Assign)
-        and len(stmt.targets) == 1
-        and isinstance(stmt.targets[0], ast.Name)
-        and _field_decl_name(stmt.value) is not None
-    }
-
     aggregate_outputs: set[str] = set()
     aggregate = members.get("_line_item_totals")
     if aggregate is not None:
@@ -644,7 +618,7 @@ def derive_order_shape(models_path: Path, line_model: str, related_name: str) ->
     return OrderShape(
         model_name=order_cls.name,
         columns=frozenset(columns),
-        ambiguous_columns=frozenset(columns & line_columns),
+        numeric_columns=frozenset(numeric_columns),
         line_derived_members=frozenset(derived),
         line_aggregate_outputs=frozenset(aggregate_outputs),
         related_name=related_name,
@@ -1097,6 +1071,48 @@ class _PyScanner:
                 named.add(sub.attr)
         return not any(name[:1].isupper() for name in named)
 
+    def _targets_orders(self, call: ast.Call) -> bool:
+        receiver = call.func.value if isinstance(call.func, ast.Attribute) else None
+        if receiver is None:
+            return False
+        named = {
+            sub.id if isinstance(sub, ast.Name) else sub.attr
+            for sub in ast.walk(receiver)
+            if isinstance(sub, (ast.Name, ast.Attribute))
+        }
+        if self.order.model_name in named:
+            return True
+        return not any(name[:1].isupper() for name in named)
+
+    @staticmethod
+    def _bulk_update_fields(call: ast.Call) -> set[str]:
+        values = []
+        if len(call.args) > 1:
+            values.append(call.args[1])
+        values.extend(keyword.value for keyword in call.keywords if keyword.arg == "fields")
+        return {
+            node.value
+            for value in values
+            for node in ast.walk(value)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        }
+
+    @classmethod
+    def _orm_written_fields(cls, call: ast.Call, name: str) -> set[str]:
+        fields = {keyword.arg for keyword in call.keywords if keyword.arg is not None}
+        for keyword in call.keywords:
+            if keyword.arg not in {"defaults", "create_defaults"}:
+                continue
+            if isinstance(keyword.value, ast.Dict):
+                fields.update(
+                    key.value
+                    for key in keyword.value.keys
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str)
+                )
+        if name == "bulk_update":
+            fields |= cls._bulk_update_fields(call)
+        return fields
+
     def _flag(self, node: ast.AST, detail: str) -> None:
         line = getattr(node, "lineno", 0)
         self.findings.append(
@@ -1234,25 +1250,16 @@ class _PyScanner:
             writes: dict[str, list[str]] = {anchor.column: [] for anchor in self.anchors}
             refreshed: set[str] = set()
             calls: set[str] = set()
-            #: Order columns this function assigns, and whether it reads the
-            #: order's lines — the two halves the value arm needs to say "this
-            #: function computes an order-level value FROM the lines".
+            #: Stored numeric order columns this function writes. Their model
+            #: declarations define the value arm's candidate total set.
             order_writes: dict[str, int] = {}
-            reads_lines = False
             for sub in self._scope_nodes(node):
-                if isinstance(sub, ast.Attribute):
-                    if sub.attr == self.order.related_name or (
-                        sub.attr in self.order.line_derived_members
-                    ):
-                        reads_lines = True
-                elif isinstance(sub, ast.Name) and sub.id == self.order.line_model:
-                    reads_lines = True
                 if isinstance(sub, (ast.Assign, ast.AugAssign)):
                     targets = sub.targets if isinstance(sub, ast.Assign) else [sub.target]
                     for target in targets:
                         if not isinstance(target, ast.Attribute):
                             continue
-                        if target.attr in self.order.judgeable_columns:
+                        if target.attr in self.order.numeric_columns:
                             order_writes.setdefault(target.attr, sub.lineno)
                         for anchor in self.anchors:
                             if target.attr in anchor.all_fields:
@@ -1262,6 +1269,15 @@ class _PyScanner:
                     name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
                     calls.add((name, _receiver_path(func)))
                     refreshed.add(name)
+                    if name == self.order.model_name:
+                        for column in self._orm_written_fields(sub, name) & (
+                            self.order.numeric_columns
+                        ):
+                            order_writes.setdefault(column, sub.lineno)
+                    if name in WRITE_CALLS and self._targets_orders(sub):
+                        named_fields = self._orm_written_fields(sub, name)
+                        for column in named_fields & self.order.numeric_columns:
+                            order_writes.setdefault(column, sub.lineno)
                     if name in WRITE_CALLS and self._targets_lines(sub):
                         for anchor in self.anchors:
                             settling = (
@@ -1272,11 +1288,13 @@ class _PyScanner:
                             for kw in sub.keywords:
                                 if kw.arg in settling:
                                     writes[anchor.column].append(f"{kw.arg} ({name}())")
+                            if name == "bulk_update":
+                                for field in self._bulk_update_fields(sub) & settling:
+                                    writes[anchor.column].append(f"{field} (bulk_update())")
             self.functions[qual] = {
                 "writes": writes,
                 "refreshed": refreshed,
                 "order_writes": order_writes,
-                "reads_lines": reads_lines,
                 "calls": calls,
                 "module": self.rel,
                 "imported": self._visible_imports(dotted),
@@ -1792,34 +1810,20 @@ def _value_arm(
     value. Adding the second one by hand and stopping would have left the third
     to be found the same way, by an operator reading a wrong number.
 
-    So the set is derived from the tree, not from
-    :data:`~reorder_queue.settlement_signals.DERIVED_ORDER_VALUES`: a function
-    that assigns a column of the ORDER while reading the order's LINES is
-    computing an order-level value from the lines, whatever it is called and
-    wherever it lives. If the column it writes is not one an anchor claims,
-    this fails the build. The next ``estimated_total`` therefore cannot be
-    added quietly — it arrives already routed, or it arrives red.
+    The candidate set is every stored numeric column declared on the order
+    model. That is the model's own answer to "total": it includes
+    ``estimated_total`` and ``actual_total`` without hand-listing either, while
+    excluding workflow state, dates, notes and stamps. Any assignment or ORM
+    writer naming one of those columns must name a value already declared in
+    :data:`~reorder_queue.settlement_signals.DERIVED_ORDER_VALUES`. The source
+    of the right-hand side is irrelevant, so moving the calculation through a
+    helper cannot hide the write.
 
-    Both halves are required together, and that is what keeps it precise:
-    plenty of code in this repository assigns a ``status`` or a ``notes`` on
-    something that is not a purchase order, and none of it reads purchase-order
-    lines while doing so.
-
-    What it does NOT see, and these are holes rather than absences:
-    ``update()``/``create()`` keywords on the order (an aggregate written by
-    queryset rather than by attribute), a column written in one function from a
-    line total computed in another, a column whose NAME the line model also
-    carries (:attr:`OrderShape.ambiguous_columns` — ``x.notes = ...`` names an
-    attribute, not a model, and guessing which model from the variable's name
-    is the kind of guess this file exists to replace), and anything reaching
-    the database outside the ORM. The write arm above has the same shape of
-    blindness, for the same reason, and both are printed with the rest.
+    What it does NOT see is anything reaching the database outside the ORM.
     """
     declared = {anchor.column for anchor in anchors}
     findings: list[Finding] = []
     for qual, info in sorted(functions.items()):
-        if not info["reads_lines"]:
-            continue
         for column, line in sorted(info["order_writes"].items()):
             if column in declared:
                 continue
@@ -1829,8 +1833,8 @@ def _value_arm(
                     path,
                     line,
                     "value",
-                    f"{name}() computes {order.model_name}.{column} from the order's lines, "
-                    f"and no entry in {ROUTING_MODULE.removesuffix('.py')}."
+                    f"{name}() writes candidate total {order.model_name}.{column}, and no "
+                    f"entry in {ROUTING_MODULE.removesuffix('.py')}."
                     f"{ROUTING_DECLARATION} claims it — so nothing re-derives it when a "
                     f"line moves, and nothing here can tell you when it has gone stale",
                     "",
@@ -1875,9 +1879,9 @@ def main(argv: list[str] | None = None) -> int:
         print("    derivation members: " + ", ".join(sorted(anchor.members)))
         print("    mutating methods:   " + (", ".join(sorted(anchor.mutating_methods)) or "none"))
     print(
-        f"\nThat set is itself derived: any function assigning a "
-        f"{report.order.model_name} column while reading the order's lines and NOT "
-        f"declared above fails this run — see _value_arm."
+        f"\nThat set is itself guarded: any assignment or ORM write to a stored numeric "
+        f"{report.order.model_name} column not declared above fails this run — see "
+        "_value_arm."
     )
     print(
         "\nNon-stored line-derived aggregate outputs (cached per order instance; "

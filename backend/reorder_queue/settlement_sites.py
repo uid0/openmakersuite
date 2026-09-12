@@ -389,6 +389,7 @@ class OrderShape:
     #: The order's own members that are computed from the lines, transitively.
     #: A function reading one of these is reading the lines, at one remove.
     line_derived_members: frozenset[str]
+    line_aggregate_outputs: frozenset[str]
     #: How the order reaches its lines.
     related_name: str
     #: The line model's class name.
@@ -605,7 +606,14 @@ def derive_order_shape(models_path: Path, line_model: str, related_name: str) ->
             for sub in ast.walk(node)
         )
 
-    derived = {name for name, node in members.items() if reads(node, {related_name})}
+    def queries_line_model(node: ast.AST) -> bool:
+        return any(isinstance(sub, ast.Name) and sub.id == line_model for sub in ast.walk(node))
+
+    derived = {
+        name
+        for name, node in members.items()
+        if reads(node, {related_name}) or queries_line_model(node)
+    }
     changed = True
     while changed:
         changed = False
@@ -623,11 +631,23 @@ def derive_order_shape(models_path: Path, line_model: str, related_name: str) ->
         and _field_decl_name(stmt.value) is not None
     }
 
+    aggregate_outputs: set[str] = set()
+    aggregate = members.get("_line_item_totals")
+    if aggregate is not None:
+        for node in ast.walk(aggregate):
+            if isinstance(node, ast.Return) and isinstance(node.value, ast.Dict):
+                aggregate_outputs.update(
+                    key.value
+                    for key in node.value.keys
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str)
+                )
+
     return OrderShape(
         model_name=order_cls.name,
         columns=frozenset(columns),
         ambiguous_columns=frozenset(columns & line_columns),
         line_derived_members=frozenset(derived),
+        line_aggregate_outputs=frozenset(aggregate_outputs),
         related_name=related_name,
         line_model=line_model,
     )
@@ -1831,6 +1851,14 @@ def main(argv: list[str] | None = None) -> int:
         f"\nThat set is itself derived: any function assigning a "
         f"{report.order.model_name} column while reading the order's lines and NOT "
         f"declared above fails this run — see _value_arm."
+    )
+    print(
+        "\nNon-stored line-derived aggregate outputs (computed fresh on every read): "
+        + ", ".join(sorted(report.order.line_aggregate_outputs))
+    )
+    print(
+        "Non-stored line-derived model members (computed fresh on every read): "
+        + ", ".join(sorted(report.order.line_derived_members))
     )
     print()
     print("Scanned: " + ", ".join(report.scanned))

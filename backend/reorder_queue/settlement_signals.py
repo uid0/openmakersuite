@@ -179,35 +179,6 @@ DERIVED_ORDER_VALUES = (
     ),
 )
 
-@dataclass(frozen=True)
-class NonStoredDerivedOrderValue:
-    name: str
-    cache_backed: bool
-
-
-NON_STORED_DERIVED_ORDER_VALUES = (
-    NonStoredDerivedOrderValue("outstanding_items", False),
-    NonStoredDerivedOrderValue("total_items", True),
-    NonStoredDerivedOrderValue("total_quantity", True),
-    NonStoredDerivedOrderValue("total_received_quantity", True),
-    NonStoredDerivedOrderValue("effective_estimated_total", True),
-    NonStoredDerivedOrderValue("payment_schedule", True),
-    NonStoredDerivedOrderValue("has_active_items", True),
-    NonStoredDerivedOrderValue("has_received_anything", True),
-    NonStoredDerivedOrderValue("is_fully_received", True),
-    NonStoredDerivedOrderValue("is_settled", True),
-    NonStoredDerivedOrderValue("outstanding_line_count", True),
-    NonStoredDerivedOrderValue("variance_line_count", True),
-    NonStoredDerivedOrderValue("has_receipt_variance", True),
-)
-
-
-def _invalidate_line_item_totals(instance: PurchaseOrderItem) -> None:
-    parent = instance._state.fields_cache.get(_PARENT_FIELD)
-    if parent is not None:
-        parent.__dict__.pop("_line_item_totals", None)
-
-
 def _member_code(name: str) -> types.CodeType | None:
     """The compiled body of a class member, or ``None`` if it has no body.
 
@@ -486,7 +457,6 @@ def _rederive_after_line_save(sender, instance, **kwargs):
     ``updated_at`` — whenever anyone edited a note, and would rewrite money on
     every receipt.
     """
-    _invalidate_line_item_totals(instance)
     moved = getattr(instance, "_derived_moved", DERIVED_ORDER_VALUES)
     if not moved:
         return
@@ -545,5 +515,4 @@ def _rederive_after_line_delete(sender, instance, **kwargs):
     anywhere. Both re-roll from :func:`_rederive_after_line_save`, on the same
     rule and for the same reason.
     """
-    _invalidate_line_item_totals(instance)
     _mark({instance.purchase_order_id}, DERIVED_ORDER_VALUES)

@@ -18,7 +18,6 @@ from django.db import IntegrityError, models, transaction
 from django.db.models import Case, F, Q, Value, When
 from django.db.models.functions import Greatest
 from django.utils import timezone
-from django.utils.functional import cached_property
 
 from config.observability_redaction import redact
 from inventory.models import InventoryItem, ItemSupplier, Supplier, TargetField, TypedTargetModel
@@ -465,19 +464,17 @@ class PurchaseOrder(models.Model):
     def __str__(self) -> str:
         return f"PO #{self.po_number} - {self.supplier.name} ({self.status})"
 
-    @cached_property
+    @property
     def _line_item_totals(self) -> dict:
         """Compute all PO-level line-item aggregates in a single pass (#883).
 
         The list serializer, ``pending_orders``, and the admin changelist read
         several of the calculated fields below; deriving them together here (and
-        caching per instance) collapses what were 5-6 separate loops over the
-        prefetched line items into one. Values are identical to the standalone
-        properties they back, including the voided-line exclusion.
-
-        Cached per instance: the receive/void workflows read these aggregates
-        only AFTER their line-item mutations (never before), so a stale
-        pre-mutation read cannot occur — matching prior behaviour.
+        deriving them together collapses what were 5-6 separate loops into one.
+        Values are identical to the standalone properties they back, including
+        the voided-line exclusion. The line queryset is deliberately fresh so
+        an order instance already read or prefetched before a line write cannot
+        continue serving the old aggregate.
         """
         active_count = 0
         total_quantity = 0
@@ -485,7 +482,7 @@ class PurchaseOrder(models.Model):
         voided_estimated_total = Decimal("0.00")
         all_fully_received = True
         variance_count = 0
-        items = list(self.items.all())
+        items = list(PurchaseOrderItem.objects.filter(purchase_order_id=self.pk))
         for item in items:
             # total_received_quantity counts every line, voided or not.
             if item.quantity_received is not None:
@@ -533,7 +530,7 @@ class PurchaseOrder(models.Model):
         :func:`outstanding_of` applied to this order's lines — see it for why
         there is only one of these.
         """
-        return outstanding_of(self.items.all())
+        return outstanding_of(PurchaseOrderItem.objects.filter(purchase_order_id=self.pk))
 
     @property
     def total_items(self) -> int:

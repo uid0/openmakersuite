@@ -333,37 +333,6 @@ unbuyable item's wait is NOT distinguishable from a live one's. Do not write
 anywhere that it is; adding the column and a reader is filed as follow-up
 `oms-demand-forecast-lead-basis`.
 
-### What an unrecorded supplier lead time MEANS (op-lead-time-default)
-
-`ItemSupplier.average_lead_time` is `PositiveIntegerField(default=7)` and NOT
-NULL, so "nobody recorded one" has **no representation in storage**. Two
-surfaces each invented their own answer before this was decided once: the
-purchase-order form rendered `average_lead_time || 7` and the item form's
-relationship editor seeded a new row as `0`.
-
-The column's own comment in `inventory/models/core.py` and
-`frontend/src/utils/leadTime.ts` carry the reading — read those, not a copy
-here. The two rules everything else follows from:
-
-* **`0` is a RECORDED answer** (counter-pickup, same day), never a placeholder.
-  No reader may guard this column with truthiness.
-  `supplier_selection._lead_time_factor` explains what that guard cost: the
-  fastest possible vendor graded as the slowest.
-* **`7` is the planning default and belongs to the MODEL.** Every write path
-  takes it by OMITTING the key — `KitSupplierTermsSerializer`,
-  `InventoryItemViewSet._process_lead_time_value`, `relationshipPayload` — so
-  there is one definition. Do not restate the number as a frontend constant to
-  seed a form with; an editor with no figure sends no key.
-
-A stored `7` still cannot be told from a quoted `7`. That is a schema-level
-absence, is reserved to the captain, and is open as `oms-lead-time-nullable` —
-`_lead_time_factor`'s docstring has been reporting it since the scoring branch.
-
-Two truthiness guards on this column remain, both computing a DATE rather than
-a display, both open: `InventoryItem.get_expected_delivery_date` (already filed
-by the alert-suppression class) and `purchase_orders._update_reorder_requests`,
-where a same-day supplier yields no `estimated_delivery` at all.
-
 ### A lead-time lateness must name the promise it scores
 
 `LeadTimeLog` carries TWO promises and only one is scored. `variance_days`,

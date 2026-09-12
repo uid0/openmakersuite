@@ -474,10 +474,6 @@ class PurchaseOrder(models.Model):
         caching per instance) collapses what were 5-6 separate loops over the
         prefetched line items into one. Values are identical to the standalone
         properties they back, including the voided-line exclusion.
-
-        Cached per instance: the receive/void workflows read these aggregates
-        only AFTER their line-item mutations (never before), so a stale
-        pre-mutation read cannot occur — matching prior behaviour.
         """
         active_count = 0
         total_quantity = 0

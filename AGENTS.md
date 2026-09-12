@@ -1150,107 +1150,27 @@ status × line-population rather than enumerating cases in prose.
 Two related questions are known and filed separately: the `VOIDED`-order
 display inconsistency on staff's list, and `void_item` carrying no status gate.
 
-### Purchase-order line settlement
+### Order-level values computed from the lines
 
-"Is receiving finished with this line?" is defined once, on
-`PurchaseOrderItem.is_settled`, and nowhere else. Six defects had come from
-code answering it with a predicate of its own — the last one from another app
-entirely — so `backend/reorder_queue/settlement_sites.py` derives the whole set
-of sites from that property (it walks it with `ast` to the model fields, then
-sweeps `backend/` and `frontend/src`) and fails when one bypasses it. Run it for
-the report, `--sites` for every reader:
+`backend/reorder_queue/settlement_signals.py` owns the declaration and runtime
+routing for every value stored on `PurchaseOrder` and computed from its lines.
+Its module docstring is the authoritative contract; read it before adding a
+derived value or changing a line-level input.
+
+`backend/reorder_queue/settlement_sites.py` owns the matching static guard and
+its documented limits. It rejects undeclared order-level values, independent
+reimplementations of a declared derivation, and bulk writers that do not reach
+that value's named refresh. Run it for the report, or add `--sites` to list
+readers:
 
 ```
 python3 backend/reorder_queue/settlement_sites.py
 ```
 
-It runs as `reorder_queue/tests/test_settlement_sites.py` in Backend Tests and
-as a step in Frontend Lint, so a frontend-only PR is covered too. If it flags
-your change, route the site through the derivation rather than widening the
-guard: `PurchaseOrderItem.receipt_state` / `is_settled` in Python,
-`PurchaseOrderItem.q_settled()` / `objects.outstanding()` /
-`objects.with_receipt_state()` in the ORM, and `receipt_state` / `is_settled`
-off the API on the frontend. Anything that can settle a line must reach
-`services.refresh_receipt_status` before it returns.
-
-**Where the refresh actually lives.** Saving or deleting a LINE re-derives its
-order on its own — `reorder_queue/settlement_signals.py` hangs off
-`PurchaseOrderItem`'s `post_save` / `post_delete`, and `pre_save` captures the
-order a line is LEAVING so a reparent re-derives both ends.
-
-The settlement closure is therefore derived TWICE, and neither copy is typed
-out: `settlement_signals.settlement_fields()` follows `is_settled` through the
-imported class at runtime (no source read — this is a write path), and
-`settlement_sites.derive_anchor` follows the same seed through `models.py` for
-the static guard. A test asserts the two agree, so widening `is_settled` must
-leave both able to follow it. No admin hook owns
-that re-derivation any more — the admin still opens `settlement_batch()` so a
-formset save asks once, and `ReceiptStatusFilter` still *reads* settlement
-through `with_receipt_state()`, but neither decides it. A hook used to: the
-change form, then the inline formset, then row delete, then bulk delete, then
-reparenting, each closed by adding another method name to a list, which is the
-mistake this section exists to stop.
-
-**The delete signal carries a second, non-settlement obligation.** A line
-DELETE also re-rolls `PurchaseOrder.estimated_total`, which is a STORED sum
-frozen from the line costs — voided lines stay in it (`effective_estimated_total`
-subtracts them at read time), but a deleted line is subtracted by nobody, so
-without this the order reports money for a line that no longer exists. It rides
-`post_delete` rather than living in the delete endpoint because the Django
-admin's row / inline / bulk deletes are three more routes that remove a line,
-and they were already overstating the total before that endpoint existed.
-
-The rule is "a line's cost LEFT the order", so it covers the admin change
-form's REPARENT too — moving a line to another order removes its cost from the
-one it left exactly as a delete does, and leaves the one it joined
-understating. That case re-rolls both orders from the post_save receiver.
-
-Ordinary line SAVES stay excluded, and the boundary is narrower than it sounds:
-the API's own `add_line_item` / `update_item` re-roll on their own path, but the
-admin does NOT — neither `save_model` nor `save_formset` calls
-`recalculate_estimated_total` — so an admin quantity edit, reprice or inline add
-still leaves the stored total stale. It is left open deliberately, because the
-signal only compares fields inside the settlement closure and
-`unit_cost_ordered` is not one of them, so closing half of it would mean an
-invariant documented as held and not held. `oms-derived-totals-beyond-settlement`
-(order-level figures computed from lines that only some line-writing paths
-re-derive) is STILL NEEDED for the rest; removal is covered, editing is not.
-
-When you state a rule like this one in a docstring, read it back against every
-route that satisfies its antecedent — the reparent gap was a stated rule the
-code did not honour, and it is the worked instance to build that issue on.
-
-**What the signal does NOT cover, and why the guard still has a job:**
-querysets fire no per-object save signal. `PurchaseOrderItem.objects.filter(...)
-.update(...)` and `bulk_update` write settlement columns with nothing hearing
-about it, so those paths must call `services.refresh_receipt_status` themselves
-— `services.purchase_orders.void_po` is the live example. Ordinary
-`queryset.delete()` IS covered (it fans `post_delete` out per row), but a FAST
-DELETE is not: a collector that can drop rows with one `_raw_delete` sends no
-signal, and `_raw_delete` called directly never does.
-
-Three properties the routing holds, all pinned by tests rather than asserted:
-receiving a twenty-line order re-derives the order ONCE (`settlement_batch()`
-coalesces inside the caller's unit of work, never on `transaction.on_commit` —
-endpoints serialize `purchase_order.status` into the response and ScanTTY reads
-it); a save that moved no settlement field and did not move the line to another
-order re-derives NOTHING, so editing a note leaves an operator's chosen status
-alone; and a refresh cannot re-enter its own signal.
-
-Do not read a clean run as "there is nothing left". The scan prints the write
-shapes it can and cannot see on every run, each heading carrying the count of
-the list under it; that printed list is the honest boundary. Read it off a run
-rather than from here — a count restated in prose is a count that drifts, and
-this paragraph used to claim one that matched nothing in the code.
-
-**A file it could not read is not a file it cleared.** The scan exits non-zero
-for a module it cannot parse or decode, not just for a site that bypasses the
-derivation, and names each one under `NOT scanned`. It used to `continue` past
-them, so a run in which N modules failed to parse still printed `Scanned:
-backend, frontend/src` and a clean verdict — which is why Frontend Lint now sets
-up Python 3.14 before running it. Run the scan under the version the backend
-targets; a partial sweep says so in its summary rather than passing for a whole
-one.
+The scan runs in Backend Tests and Frontend Lint. Route a finding through the
+declared model derivation or named refresh; do not widen the guard. Behavioral
+coverage lives in `reorder_queue/tests/test_derived_order_values.py`, and the
+guard's contract is pinned by `reorder_queue/tests/test_settlement_sites.py`.
 
 **A custom `QuerySet` method can become a `Manager` method by accident.**
 `BaseManager._get_queryset_methods` copies every public queryset method onto the

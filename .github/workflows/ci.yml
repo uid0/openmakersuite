@@ -305,17 +305,19 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Check no site bypasses the settlement derivation
+      - name: Check no site bypasses an order-level derivation
         run: |
-          # The web UI can decide whether a purchase-order line is settled
-          # client-side just as easily as the backend can, and a frontend-only
-          # PR skips Backend Tests entirely — where this same check runs as
-          # reorder_queue/tests/test_settlement_sites.py. Running it here too is
-          # what stops the guard having a hole exactly the size of "only
-          # touched the frontend".
+          # The web UI can decide whether a purchase-order line is settled —
+          # or what it costs — client-side just as easily as the backend can,
+          # and a frontend-only PR skips Backend Tests entirely, where this
+          # same check runs as reorder_queue/tests/test_settlement_sites.py.
+          # Running it here too is what stops the guard having a hole exactly
+          # the size of "only touched the frontend".
           #
-          # Exits non-zero for a site that bypasses the derivation AND for a
-          # file it could not read: see backend/reorder_queue/settlement_sites.py.
+          # Exits non-zero for a site that bypasses one of the derivations, for
+          # an order-level value computed from the lines that nothing declares,
+          # and for a file it could not read: see
+          # backend/reorder_queue/settlement_sites.py.
           python3 backend/reorder_queue/settlement_sites.py
 
   frontend-tests:

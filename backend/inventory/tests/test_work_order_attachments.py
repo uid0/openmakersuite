@@ -37,12 +37,6 @@ pytestmark = pytest.mark.django_db
 LIST_URL = "/api/inventory/work-order-attachments/"
 
 
-@pytest.fixture(autouse=True)
-def _isolated_media(settings, tmp_path):
-    """Keep uploaded test files out of the tracked backend/media tree."""
-    settings.MEDIA_ROOT = str(tmp_path)
-
-
 def _user(username, **flags):
     return User.objects.create_user(
         username=f"{username}_{get_random_string(6)}",

@@ -1260,43 +1260,6 @@ does. Enforced across every model in the repo — the check derives the withheld
 set from `QuerySet` and `Manager` rather than naming `delete`, so a second
 queryset class in any app is already covered.
 
-### Does a purchase-order line COUNT? one rule (oms-voided-line-priced-but-not-counted)
-
-`PurchaseOrderItem.objects.standing()` is the ONE answer to "may a derived value
-count this line?", with `PurchaseOrderItem.stands` as its in-memory twin. The
-rule, in one sentence: **a struck-off line is not evidence — nothing derived from
-purchase history may count a voided line, whether what is derived is a price, a
-trend, a quantity or a cadence.**
-
-**Not the settlement question above, and the two are easy to conflate.**
-`is_settled` / `outstanding()` ask whether RECEIVING is finished with a line. A
-line received in full is settled and still STANDS — it is exactly the purchase
-these values want to count. `outstanding()` does already exclude voided lines, by
-way of `q_settled`, so a site asking the settlement question does not need this
-one as well; a site asking anything else does.
-
-**It exists because the two answers had drifted inside ONE response.** The
-quantity metrics on the item endpoint excluded voided lines from the start; the
-money beside them — `last_po_unit_cost`, `cost_trend`, and
-`line_entry.default_unit_cost` — read the whole history. So one payload treated
-the same struck-off line as real and as not-real at once, and `default_unit_cost`
-is a price that flows onward: an item whose newest line had been voided was
-quoted at that line's cost on a scan-to-add, and `add_line_item` wrote it. The
-rule is stated on the queryset rather than per field so the next derived value
-inherits it instead of choosing again.
-
-**The guard is `reorder_queue/tests/test_voided_line_counting.py`**. Its
-parametrized behavioral registry asserts the CLASS — a voided line changes no
-derived value, and an item whose only line is voided reads exactly like one never
-bought. A new purchase-history derivation joins `DERIVATIONS` with the callable
-that reads its observable value, so both scenarios exercise it alongside the
-existing price, trend, quantity and cadence derivations.
-
-**Showing a voided line is a different question from counting it**, and it is
-open: the behavioral test records that `purchase_history` currently displays the
-line, but what an item's history should DISPLAY for a struck-off line is
-`oms-voided-line-in-purchase-history`, not this rule.
-
 ### Which stock-changing actions owe an audit row (op-scan-audit)
 
 `PurchaseOrderAuditEvent` is the purchase-order trail. The question it answers

@@ -223,9 +223,7 @@ def test_purchase_history_keeps_a_voided_line_visible(authenticated_client):
     item = _item(link_unit_cost=LINK_COST)
     line = _voided_line(item)
 
-    response = client.get(
-        reverse("inventoryitem-purchase-history", kwargs={"pk": str(item.id)})
-    )
+    response = client.get(reverse("inventoryitem-purchase-history", kwargs={"pk": str(item.id)}))
 
     assert response.status_code == status.HTTP_200_OK
     assert response.json()["order_costs"] == [

@@ -278,7 +278,6 @@ const AssetScanPage: React.FC = () => {
         for (let i = 0; i < problemPhotos.length; i += 1) {
           setUploadProgress(`Uploading photo ${i + 1} of ${problemPhotos.length}...`);
           try {
-            // eslint-disable-next-line no-await-in-loop
             await assetProblemsAPI.uploadPhoto(problemId, problemPhotos[i]);
           } catch (uploadErr) {
             // Photo failed but the problem was created — surface but don't roll back.

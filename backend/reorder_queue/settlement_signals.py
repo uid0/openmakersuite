@@ -104,6 +104,7 @@ import types
 from contextlib import contextmanager
 from dataclasses import dataclass
 
+from django.db import transaction
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
@@ -308,10 +309,14 @@ def _run(pending) -> None:
         return
     _state.refreshing = True
     try:
-        for purchase_order in PurchaseOrder.objects.filter(pk__in=sorted(every_order)):
-            for value in DERIVED_ORDER_VALUES:
-                if purchase_order.pk in owed[value.column]:
-                    value.rederive(purchase_order)
+        with transaction.atomic():
+            purchase_orders = PurchaseOrder.objects.select_for_update().filter(
+                pk__in=sorted(every_order)
+            )
+            for purchase_order in purchase_orders.order_by("pk"):
+                for value in DERIVED_ORDER_VALUES:
+                    if purchase_order.pk in owed[value.column]:
+                        value.rederive(purchase_order)
     finally:
         _state.refreshing = False
 

@@ -33,10 +33,14 @@ exercises per value.
 import importlib
 import json
 import pathlib
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib import admin
-from django.db import models
+from django.db import close_old_connections, connection, models, transaction
 from django.forms.models import model_to_dict
 from django.test import Client, RequestFactory
 from django.urls import reverse
@@ -586,6 +590,53 @@ class TestTheMoneyAnOperatorReads:
         assert purchase_order.effective_estimated_total == Decimal("20.00")
         assert kept.pk  # the kept line is what the effective total is left holding
 
+    @pytest.mark.django_db(transaction=True)
+    def test_concurrent_line_edits_leave_the_complete_committed_total(self, supplier, operator):
+        if not connection.features.has_select_for_update:
+            pytest.skip("requires row-level select_for_update locking")
+
+        purchase_order = make_po(supplier, operator)
+        first = add_line(
+            purchase_order, make_item("Concurrent first", supplier), 1, Decimal("10.0000")
+        )
+        second = add_line(
+            purchase_order, make_item("Concurrent second", supplier), 1, Decimal("20.0000")
+        )
+        second_started = threading.Event()
+        original_calculate = PurchaseOrder.calculate_estimated_total
+
+        def synchronized_calculate(order):
+            if threading.current_thread().name.startswith("writer-a"):
+                assert second_started.wait(timeout=5)
+                time.sleep(0.2)
+            return original_calculate(order)
+
+        def edit(line_pk, cost, thread_name, started=None):
+            threading.current_thread().name = thread_name
+            close_old_connections()
+            try:
+                with transaction.atomic():
+                    line = PurchaseOrderItem.objects.get(pk=line_pk)
+                    line.unit_cost_ordered = cost
+                    if started is not None:
+                        started.set()
+                    line.save(update_fields=["unit_cost_ordered"])
+            finally:
+                close_old_connections()
+
+        with patch.object(
+            PurchaseOrder, "calculate_estimated_total", synchronized_calculate
+        ), ThreadPoolExecutor(max_workers=2) as pool:
+            first_write = pool.submit(edit, first.pk, Decimal("30.0000"), "writer-a")
+            second_write = pool.submit(
+                edit, second.pk, Decimal("40.0000"), "writer-b", second_started
+            )
+            first_write.result(timeout=10)
+            second_write.result(timeout=10)
+
+        purchase_order.refresh_from_db()
+        assert purchase_order.estimated_total == Decimal("70.00")
+
 
 # ---------------------------------------------------------------------------
 # the guard
@@ -606,16 +657,18 @@ class TestTheGuardCoversEveryValue:
         return settlement_sites.scan()
 
     def test_the_guard_derives_the_same_values_the_routing_declares(self, sweep):
-        """Neither can move without the other.
+        """Two independent derivations of the model's closure cannot drift.
 
-        Read off the routing module's source by the guard, so a value routed
-        and not guarded — or guarded and not routed — cannot exist.
+        The routing walks the imported class at runtime while the guard parses
+        ``models.py``. Their agreement is observable evidence that neither
+        derivation has silently stopped following the model.
         """
         assert {(anchor.column, anchor.seed, anchor.refresh) for anchor in sweep.anchors} == {
             (value.column, value.seed, value.refresh) for value in DERIVED_ORDER_VALUES
         }
 
     def test_the_guard_derives_each_values_input_fields_from_the_model(self, sweep):
+        """The independent runtime and parsed model closures agree per value."""
         for anchor in sweep.anchors:
             value = next(v for v in DERIVED_ORDER_VALUES if v.column == anchor.column)
             assert anchor.all_fields == value.inputs, anchor.column
@@ -690,7 +743,7 @@ class TestTheGuardCoversEveryValue:
             for field in value.inputs:
                 assert field in printed
 
-    def test_a_price_is_read_as_a_measure_and_not_as_an_event(self, sweep):
+    def test_a_price_read_passes_the_guard_as_a_measure(self, tmp_path):
         """``unit_cost_ordered`` is a quantity, so reading it alone is fair.
 
         The split used to be "is the declared column an ``IntegerField``?",
@@ -699,17 +752,35 @@ class TestTheGuardCoversEveryValue:
         appears. Every read of a line's price in the repository would have been
         a finding, and the guard would have been turned off rather than fixed.
         """
-        cost = next(a for a in sweep.anchors if "unit_cost_ordered" in a.all_fields)
-        assert "unit_cost_ordered" in cost.quantities
-        assert cost.entangled == frozenset()
+        package = tmp_path / "backend" / "reorder_queue"
+        package.mkdir(parents=True)
+        real_package = pathlib.Path(settlement_sites.__file__).resolve().parent
+        for name in ("models.py", settlement_sites.ROUTING_MODULE):
+            (package / name).write_text((real_package / name).read_text())
+        (package / "price_reader.py").write_text(
+            "def display_price(line):\n    return line.unit_cost_ordered\n"
+        )
 
-    def test_the_settlement_definition_still_reads_its_markers_as_markers(self, sweep):
+        report = settlement_sites.scan(start=package / "settlement_sites.py")
+
+        assert report.findings == []
+
+    def test_a_bare_settlement_marker_read_fails_the_guard(self, tmp_path):
         """Widening the numeric test did not widen settlement's answer.
 
         The two stamps only mean anything against each other, and that is what
         makes reading either one alone already wrong. A change made for the
         money must not have quietly bought settlement out of that.
         """
-        status = next(a for a in sweep.anchors if a.column == "status")
-        assert status.entangled == frozenset({"closed_short_at", "reopened_at"})
-        assert status.quantities == frozenset({"quantity_ordered", "quantity_received"})
+        package = tmp_path / "backend" / "reorder_queue"
+        package.mkdir(parents=True)
+        real_package = pathlib.Path(settlement_sites.__file__).resolve().parent
+        for name in ("models.py", settlement_sites.ROUTING_MODULE):
+            (package / name).write_text((real_package / name).read_text())
+        (package / "marker_reader.py").write_text(
+            "def was_closed_short(line):\n    return bool(line.closed_short_at)\n"
+        )
+
+        report = settlement_sites.scan(start=package / "settlement_sites.py")
+
+        assert any("closed_short_at" in finding.detail for finding in report.findings)

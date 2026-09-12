@@ -1398,20 +1398,3 @@ Keep this file for knowledge useful to almost every future agent session in this
 Do not repeat what the codebase already shows; point to the authoritative file or command instead.
 Prefer rewriting or pruning existing entries over appending new ones.
 When updating this file, preserve this bar for all agents and keep entries concise.
-
-**The test for a sentence here: a claim either states exactly what a NAMED
-CHECK proves, or it is a pointer to where the answer lives.** Anything else is a
-copy, and this repo has paid for copies repeatedly — a supplier entry that grew
-from 5 lines to 65 restating the code, one rule spelled in three places, a
-serializer comment counting a key set it had stopped matching, a CI document
-describing a pipeline that had moved on. Concretely:
-
-- Do not restate a docstring, a field list, a job list or a call-site
-  inventory. Name the module, the tuple or the test and stop. A hand-maintained
-  inventory is wrong the moment the thing it lists changes.
-- Do not write a count beside a list. The list is the count.
-- If a sentence would have to be edited when the code changes, it belongs beside
-  that code, not here.
-- Correcting the wording of a claim that keeps going stale is not the fix;
-  changing its FORM to a pointer is. If the same sentence has needed correcting
-  twice, that is the signal.

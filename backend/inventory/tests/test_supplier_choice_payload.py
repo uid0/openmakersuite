@@ -32,12 +32,7 @@ from inventory.services.supplier_selection import (
     NONE_ORDERABLE,
     select_supplier,
 )
-from reorder_queue.models import (
-    LeadTimeLog,
-    PurchaseOrder,
-    PurchaseOrderItem,
-    ReorderRequest,
-)
+from reorder_queue.models import LeadTimeLog, PurchaseOrder, PurchaseOrderItem, ReorderRequest
 
 pytestmark = pytest.mark.django_db
 

@@ -282,15 +282,18 @@ def checkout(tmp_path):
     """A checkout-shaped tree on disk that :func:`scan` can be pointed at.
 
     The scan walks real files, so the only honest way to test what it does with
-    a file it cannot read is to hand it one. ``models.py`` is the real one
-    because the anchor is derived from it — a stub would be a second definition
-    of settlement, which is the thing this whole module exists to prevent.
+    a file it cannot read is to hand it one. ``models.py`` and
+    ``settlement_signals.py`` are the real ones because the anchors are derived
+    from them — the model supplies each value's field closure and the routing
+    module supplies the value SET — and a stub would be a second definition of
+    the thing this whole module exists to keep single.
     """
     backend = tmp_path / "backend"
     package = backend / "reorder_queue"
     package.mkdir(parents=True)
-    real_models = Path(settlement_sites.__file__).resolve().parent / "models.py"
-    (package / "models.py").write_text(real_models.read_text())
+    real_package = Path(settlement_sites.__file__).resolve().parent
+    for name in ("models.py", settlement_sites.ROUTING_MODULE):
+        (package / name).write_text((real_package / name).read_text())
     (tmp_path / "frontend" / "src").mkdir(parents=True)
     return tmp_path
 
@@ -1359,10 +1362,10 @@ class TestTheWriteArmDischargesOnlyAlongRealCallEdges:
     def _findings(self, sweep, modules):
         functions = {}
         for rel, source in modules:
-            scanner = settlement_sites._PyScanner(sweep.anchor, rel, source)
+            scanner = settlement_sites._PyScanner(sweep.anchors, sweep.order, rel, source)
             scanner.run()
             functions.update(scanner.functions)
-        return settlement_sites._write_arm(sweep.anchor, functions)
+        return settlement_sites._write_arm(sweep.anchors, functions)
 
     def test_a_writer_nothing_calls_is_flagged(self, sweep):
         findings = self._findings(sweep, [("appa/service.py", self.WRITER)])
@@ -1841,7 +1844,7 @@ class TestTheFrontendArmJudgesValuesAndNotKeys:
     """
 
     def _findings(self, sweep, line):
-        findings, _sites = settlement_sites._scan_ts(sweep.anchor, "frontend/src/x.ts", line)
+        findings, _sites = settlement_sites._scan_ts(sweep.anchors, "frontend/src/x.ts", line)
         return findings
 
     def test_a_value_that_re_derives_a_variance_is_flagged_inside_an_object_literal(self, sweep):
@@ -1960,13 +1963,25 @@ class TestTheSweepDoesNotWalkVendoredSource:
         home = tmp_path / "media"
         package = home / "backend" / "reorder_queue"
         package.mkdir(parents=True)
-        real_models = Path(settlement_sites.__file__).resolve().parent / "models.py"
-        (package / "models.py").write_text(real_models.read_text())
+        real_package = Path(settlement_sites.__file__).resolve().parent
+        for name in ("models.py", settlement_sites.ROUTING_MODULE):
+            (package / name).write_text((real_package / name).read_text())
         (home / "frontend" / "src").mkdir(parents=True)
 
         report = settlement_sites.scan(start=package / "settlement_sites.py")
 
         assert report.sites, "the sweep read nothing and would have reported it clean"
+
+
+def _values_named(finding):
+    """The order-level value a write finding is about, read off its own text.
+
+    A write finding says ``<fn>() can change <column> (...)``, so the column is
+    the word after "can change". Parsed rather than matched against a list, so
+    a third value's findings are distinguished here without an edit.
+    """
+    _, _, rest = finding.detail.partition("can change ")
+    return {rest.split(" ", 1)[0]} if rest else set()
 
 
 class TestTheScannerSeesAnUpdateItCannotResolve:
@@ -1981,9 +1996,11 @@ class TestTheScannerSeesAnUpdateItCannotResolve:
     """
 
     def _findings(self, sweep, source):
-        scanner = settlement_sites._PyScanner(sweep.anchor, "someapp/service.py", source)
+        scanner = settlement_sites._PyScanner(
+            sweep.anchors, sweep.order, "someapp/service.py", source
+        )
         scanner.run()
-        return scanner.findings + settlement_sites._write_arm(sweep.anchor, scanner.functions)
+        return scanner.findings + settlement_sites._write_arm(sweep.anchors, scanner.functions)
 
     def test_an_update_on_an_opaque_local_queryset_is_a_settlement_write(self, sweep):
         findings = self._findings(
@@ -1993,15 +2010,43 @@ def settle_them(qs):
     qs.update(quantity_ordered=5, quantity_received=5)
 """,
         )
-        assert [f.arm for f in findings] == ["write"]
-        assert "settle_them" in findings[0].detail
+        assert {f.arm for f in findings} == {"write"}
+        assert all("settle_them" in f.detail for f in findings)
+        # ONE per value it can move, not one overall. ``quantity_ordered`` is an
+        # input to the money as well as to the settlement, so this writer owes
+        # two different re-derivations and is told about both — a single
+        # finding here would mean whichever value was reported first stood in
+        # for the other, and the other would be fixed by nobody.
+        assert {value for f in findings for value in _values_named(f)} == {
+            "status",
+            "estimated_total",
+        }
 
-    def test_it_is_clean_once_that_writer_re_derives_the_order(self, sweep):
+    def test_re_deriving_one_value_does_not_discharge_the_other(self, sweep):
+        """The settlement refresh does not buy a repricer out of the money.
+
+        The discharge failure this arm has already had twice, at the level of
+        VALUES rather than of names: a writer that moves both and refreshes one
+        is half done, and a guard that accepted it would certify exactly the
+        defect it exists to catch.
+        """
         findings = self._findings(
             sweep,
             """
 def settle_them(qs, purchase_order):
     qs.update(quantity_ordered=5, quantity_received=5)
+    refresh_receipt_status(purchase_order)
+""",
+        )
+        assert {value for f in findings for value in _values_named(f)} == {"estimated_total"}
+
+    def test_it_is_clean_once_that_writer_re_derives_every_value_it_moves(self, sweep):
+        findings = self._findings(
+            sweep,
+            """
+def settle_them(qs, purchase_order):
+    qs.update(quantity_ordered=5, quantity_received=5)
+    recalculate_estimated_total(purchase_order)
     refresh_receipt_status(purchase_order)
 """,
         )
@@ -2418,17 +2463,26 @@ class TestOnlyASettlementChangeReDerivesTheOrder:
         assert destination.status == PurchaseOrder.Status.PARTIALLY_RECEIVED, "the order it joined"
 
     def test_the_dirty_check_reads_the_same_fields_the_guard_derives(self, sweep):
-        """One definition, two independent derivations of it, held to agree.
+        """One definition per value, two independent derivations of it, held to agree.
 
-        The signal decides "did settlement move?" by following
-        ``PurchaseOrderItem.is_settled`` through the IMPORTED CLASS; the guard
-        follows the same seed through the SOURCE. A field list typed into
-        either would be the hand-maintained list this whole change exists to
-        delete, one layer down — and either derivation drifting from the other
-        means one of them has stopped describing the definition.
+        The signal decides "did this value move?" by following the value's seed
+        through the IMPORTED CLASS; the guard follows the same seed through the
+        SOURCE. A field list typed into either would be the hand-maintained
+        list this whole change exists to delete, one layer down — and either
+        derivation drifting from the other means one of them has stopped
+        describing the definition.
+
+        Asserted for EVERY declared value, not for settlement alone: a second
+        value whose two closures disagreed would be the same defect wearing a
+        different name, and a test that checked only the first would let it in.
         """
-        assert settlement_signals.settlement_fields() == sweep.anchor.all_fields
-        assert settlement_signals.settlement_fields(), "the dirty check checks nothing"
+        anchors = {anchor.seed: anchor for anchor in sweep.anchors}
+        assert set(anchors) == {
+            value.seed for value in settlement_signals.DERIVED_ORDER_VALUES
+        }, "the guard and the routing disagree about which values exist"
+        for value in settlement_signals.DERIVED_ORDER_VALUES:
+            assert value.inputs == anchors[value.seed].all_fields, value.column
+            assert value.inputs, f"{value.column}'s dirty check checks nothing"
 
     def test_the_dirty_check_never_reads_a_source_file(self, monkeypatch):
         """A line save must not depend on ``models.py`` being on disk.
@@ -2444,11 +2498,18 @@ class TestOnlyASettlementChangeReDerivesTheOrder:
         def refuse(self, *args, **kwargs):
             raise AssertionError(f"the write path read source: {self}")
 
-        settlement_signals.settlement_fields.cache_clear()
+        settlement_signals.line_inputs.cache_clear()
+        settlement_signals._watched_columns.cache_clear()
         monkeypatch.setattr(Path, "read_text", refuse)
         monkeypatch.setattr(Path, "open", refuse)
         try:
-            assert settlement_signals.settlement_fields()
+            # Every value's closure, not settlement's alone: the write path
+            # takes the UNION on every save, so one value reading source would
+            # put a source read back on every line write.
+            assert settlement_signals._watched_columns()
+            for value in settlement_signals.DERIVED_ORDER_VALUES:
+                assert value.inputs, value.column
         finally:
             monkeypatch.undo()
-            settlement_signals.settlement_fields.cache_clear()
+            settlement_signals.line_inputs.cache_clear()
+            settlement_signals._watched_columns.cache_clear()

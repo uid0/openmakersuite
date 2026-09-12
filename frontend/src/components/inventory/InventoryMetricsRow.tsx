@@ -11,6 +11,7 @@ import { Group, Paper, Stack, Text } from '@mantine/core';
 import React from 'react';
 
 import { InventoryCostTrend, InventoryItemMetrics } from '../../types';
+import { leadTimeText } from '../../utils/leadTime';
 import { VENDOR_WITHHELD_TEXT, vendorDataWithheld } from '../../utils/vendorVisibility';
 
 interface InventoryMetricsRowProps {
@@ -107,7 +108,9 @@ const InventoryMetricsRow: React.FC<InventoryMetricsRowProps> = ({ sku, metrics 
   ) : metrics.lead_time_days == null ? (
     '—'
   ) : (
-    `${metrics.lead_time_days}d`
+    metrics.lead_time_provenance === 'recorded'
+      ? `${metrics.lead_time_days}d`
+      : leadTimeText(metrics.lead_time_days, metrics.lead_time_provenance)
   );
 
   const costTooltip = vendorWithheld

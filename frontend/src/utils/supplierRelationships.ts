@@ -225,7 +225,9 @@ export const relationshipPayload = (
   // `_sync_primary_supplier` both leave the key out — so a create takes the
   // default and an update leaves a stored quote alone. Sending `0` instead,
   // which this row used to seed, recorded same-day pickup.
-  ...(relationship.average_lead_time === null
+  ...(relationship.average_lead_time === null ||
+  relationship.average_lead_time_provenance === 'default' ||
+  relationship.average_lead_time_provenance === 'unknown'
     ? {}
     : { average_lead_time: relationship.average_lead_time }),
   is_primary: relationship.is_primary,
@@ -259,6 +261,7 @@ export const relationshipChanged = (
     // is told the truth — a recorded lead time cannot be un-recorded while the
     // column is NOT NULL (`oms-lead-time-nullable`).
     relationship.average_lead_time !== saved.average_lead_time ||
+    relationship.average_lead_time_provenance !== saved.average_lead_time_provenance ||
     relationship.is_primary !== saved.is_primary
   );
 };

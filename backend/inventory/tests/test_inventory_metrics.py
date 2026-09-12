@@ -37,6 +37,7 @@ CONTRACT_FIELDS = {
     "quantity_in_transit",
     "reorder_point",
     "lead_time_days",
+    "lead_time_provenance",
     "unit_cost",
     "cost_trend",
     "last_po_unit_cost",
@@ -284,6 +285,7 @@ class TestMetricsEndpointContract:
 
         assert data["reorder_point"] == 9  # RP == reorder_quantity
         assert data["lead_time_days"] == 14  # Lead == average_lead_time
+        assert data["lead_time_provenance"] == "default"
 
 
 class TestSupplierChoiceGaps:

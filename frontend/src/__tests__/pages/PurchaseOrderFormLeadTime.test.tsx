@@ -66,6 +66,12 @@ const supplier = {
   assets: [] as api.ReorderDataAsset[],
   estimated_total: '2.50',
   avg_lead_time: 5,
+  avg_lead_time_provenance: undefined as
+    | 'default'
+    | 'recorded'
+    | 'unknown'
+    | null
+    | undefined,
 };
 
 const inventoryItem = {
@@ -155,6 +161,18 @@ describe('the line the server put on the pad', () => {
     await addBySearch(itemSupplierRow({ average_lead_time: 7 }));
 
     expect(screen.getByTestId('po-line-lead-time-1')).toHaveTextContent('3 days');
+  });
+});
+
+describe('the supplier aggregate', () => {
+  test('marks an average that includes a planning default', async () => {
+    supplier.avg_lead_time_provenance = 'default';
+    await addBySearch(
+      itemSupplierRow({ average_lead_time: 7, average_lead_time_provenance: 'default' })
+    );
+
+    expect(screen.getByText('5 days (includes planning default)')).toBeInTheDocument();
+    delete supplier.avg_lead_time_provenance;
   });
 });
 

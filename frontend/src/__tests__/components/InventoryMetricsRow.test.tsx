@@ -18,6 +18,7 @@ const buildMetrics = (overrides: Partial<InventoryItemMetrics> = {}): InventoryI
   quantity_in_transit: 3,
   reorder_point: 5,
   lead_time_days: 14,
+  lead_time_provenance: 'recorded',
   unit_cost: '5.00',
   cost_trend: 'up',
   last_po_unit_cost: '4.0000',
@@ -83,6 +84,12 @@ describe('InventoryMetricsRow', () => {
     expect(screen.getByTestId('metric-lead')).toHaveTextContent('—');
     expect(screen.getByTestId('metric-cost')).toHaveTextContent('—');
     expect(screen.queryByTestId('cost-trend-no_history')).not.toBeInTheDocument();
+  });
+
+  it('marks a model-provided lead time as a planning default', () => {
+    renderRow(buildMetrics({ lead_time_days: 7, lead_time_provenance: 'default' }));
+
+    expect(screen.getByTestId('metric-lead')).toHaveTextContent('7 days (planning default)');
   });
 
   it('formats fractional committed/available quantities to two decimals', () => {
@@ -153,6 +160,7 @@ describe('InventoryMetricsRow', () => {
       };
       for (const key of [
         'lead_time_days',
+        'lead_time_provenance',
         'unit_cost',
         'cost_trend',
         'last_po_unit_cost',

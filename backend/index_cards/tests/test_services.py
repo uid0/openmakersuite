@@ -223,6 +223,7 @@ class LongestLeadTimeTests(TestCase):
             supplier_sku=f"{name}-sku",
             unit_cost=1,
             average_lead_time=lead,
+            average_lead_time_provenance=flags.get("provenance", "recorded"),
             is_active=flags.get("is_active", True),
             is_discontinued=flags.get("is_discontinued", False),
         )
@@ -231,7 +232,8 @@ class LongestLeadTimeTests(TestCase):
         item = InventoryItem.objects.prefetch_related("item_suppliers__supplier").get(
             pk=self.item.pk
         )
-        return self.renderer._get_longest_lead_time(item)
+        link = self.renderer._get_longest_lead_time(item)
+        return link.average_lead_time if link else None
 
     def test_ignores_a_discontinued_suppliers_longer_lead_time(self) -> None:
         self._link("Live", 10)
@@ -268,6 +270,16 @@ class LongestLeadTimeTests(TestCase):
         self._link("Counter", 0)
 
         self.assertEqual(self._longest(), 0)
+
+    def test_maximum_keeps_the_winning_links_provenance(self) -> None:
+        self._link("Fast", 3)
+        self._link("Defaulted slow", 21, provenance="default")
+        item = InventoryItem.objects.prefetch_related("item_suppliers__supplier").get(
+            pk=self.item.pk
+        )
+        self.renderer.include_vendor_data = True
+
+        self.assertIn("Max Lead: 21 days (planning default)", self.renderer._stock_info_lines(item))
 
 
 class SameDayLeadTimeOnTheCardTests(TestCase):
@@ -307,6 +319,7 @@ class SameDayLeadTimeOnTheCardTests(TestCase):
             supplier_sku="CNT-1",
             unit_cost=1,
             average_lead_time=0,
+            average_lead_time_provenance="recorded",
         )
 
         self.assertIn("Avg Lead: 0 days", self._lines())

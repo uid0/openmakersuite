@@ -1045,6 +1045,7 @@ export interface SerializedForecastRow {
   days_until_stockout: number | null;
   projected_stockout_date: string | null;
   lead_time_days: number | null;
+  lead_time_provenance?: import('../types').LeadTimeProvenance | null;
   // Whether `reorder_point` includes a lead-time component at all (op-c1ke).
   // `false` — only for an item carrying no supplier link — means the number
   // below is the safety stock ALONE, a lower bound rather than the classic
@@ -2023,6 +2024,7 @@ export interface ReorderDataSupplier {
   unpriced_item_count?: number;
   estimated_total_is_partial?: boolean;
   avg_lead_time: number;
+  avg_lead_time_provenance?: import('../types').LeadTimeProvenance | null;
 }
 
 export interface ReorderDataResponse {

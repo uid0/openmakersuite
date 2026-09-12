@@ -519,6 +519,7 @@ export interface InventoryItemMetrics {
    */
   vendor_data_withheld?: boolean;
   lead_time_days?: number | null; // Lead
+  lead_time_provenance?: LeadTimeProvenance | null;
   unit_cost?: string | null; // Cost — per-item, or per-case when case-based
   cost_trend?: InventoryCostTrend;
   last_po_unit_cost?: string | null;

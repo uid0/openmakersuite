@@ -34,7 +34,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph
 
-from inventory.models import InventoryItem
+from inventory.models import InventoryItem, ItemSupplier
 
 logger = logging.getLogger(__name__)
 
@@ -865,12 +865,20 @@ class IndexCardRenderer:
             info_lines.append(f"Avg Lead: {lead}")
 
         longest_lead_time = self._get_longest_lead_time(item)
-        if longest_lead_time is not None and longest_lead_time != item.average_lead_time:
-            info_lines.append(f"Max Lead: {self._pluralize(longest_lead_time, 'day')}")
+        if (
+            longest_lead_time is not None
+            and longest_lead_time.average_lead_time != item.average_lead_time
+        ):
+            lead = self._pluralize(longest_lead_time.average_lead_time, "day")
+            if longest_lead_time.average_lead_time_provenance == "default":
+                lead += " (planning default)"
+            elif longest_lead_time.average_lead_time_provenance != "recorded":
+                lead += " (provenance unknown)"
+            info_lines.append(f"Max Lead: {lead}")
 
         return info_lines
 
-    def _get_longest_lead_time(self, item: InventoryItem) -> int | None:
+    def _get_longest_lead_time(self, item: InventoryItem) -> ItemSupplier | None:
         """Longest lead time across the suppliers this item can still be BOUGHT from.
 
         The card is printed and stuck on a shelf, where "Max Lead: 30 days"
@@ -884,13 +892,13 @@ class IndexCardRenderer:
         if not hasattr(item, "item_suppliers"):
             return None
 
-        lead_times = [
-            link.average_lead_time
+        links = [
+            link
             for link in item.item_suppliers.all()
             if link.average_lead_time is not None and link.is_active and not link.is_discontinued
         ]
 
-        return max(lead_times) if lead_times else None
+        return max(links, key=lambda link: link.average_lead_time) if links else None
 
     def _pluralize(self, count: int, word: str) -> str:
         """Return properly pluralized string based on count."""

@@ -336,8 +336,9 @@ anywhere that it is; adding the column and a reader is filed as follow-up
 ### What an unrecorded supplier lead time MEANS (op-lead-time-default)
 
 `ItemSupplier.average_lead_time` is `PositiveIntegerField(default=7)` and NOT
-NULL, so "nobody recorded one" has **no representation in storage**. Two
-surfaces each invented their own answer before this was decided once: the
+NULL. `average_lead_time_provenance` records whether that number is the planning
+default, was recorded, or predates provenance tracking. Two surfaces each
+invented their own answer before this was decided once: the
 purchase-order form rendered `average_lead_time || 7` and the item form's
 relationship editor seeded a new row as `0`.
 
@@ -355,9 +356,10 @@ here. The two rules everything else follows from:
   there is one definition. Do not restate the number as a frontend constant to
   seed a form with; an editor with no figure sends no key.
 
-A stored `7` still cannot be told from a quoted `7`. That is a schema-level
-absence, is reserved to the captain, and is open as `oms-lead-time-nullable` —
-`_lead_time_factor`'s docstring has been reporting it since the scoring branch.
+Existing rows backfill as `unknown`; no reader may relabel one as default or
+recorded. New omitted values are `default`, and every write that changes the
+number marks it `recorded`. Displays carry the marker through supplier-derived
+values and aggregates, wording defaults and unknown provenance explicitly.
 
 Two truthiness guards on this column remain, both computing a DATE rather than
 a display, both open: `InventoryItem.get_expected_delivery_date` (already filed

@@ -1965,6 +1965,9 @@ class InventoryMetricsSerializer(VendorGatedSerializerMixin, serializers.Seriali
     quantity_in_transit = serializers.IntegerField()  # QIT — partially-received (⊆ QOO)
     reorder_point = serializers.IntegerField()  # RP — reorder_quantity
     lead_time_days = serializers.IntegerField(allow_null=True)  # Lead — average_lead_time
+    lead_time_provenance = serializers.ChoiceField(
+        choices=ItemSupplier.LeadTimeProvenance.choices, allow_null=True
+    )
     unit_cost = serializers.DecimalField(  # Cost — per-item, or per-case when case-based
         max_digits=10, decimal_places=2, allow_null=True
     )
@@ -2008,6 +2011,7 @@ class InventoryMetricsSerializer(VendorGatedSerializerMixin, serializers.Seriali
     #: Bearer token. See the branch's cross-project note.
     VENDOR_ONLY_FIELDS = (
         "lead_time_days",
+        "lead_time_provenance",
         "unit_cost",
         "cost_trend",
         "last_po_unit_cost",

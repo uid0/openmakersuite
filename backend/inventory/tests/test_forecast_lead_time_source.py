@@ -77,6 +77,7 @@ def _link(item, name, *, lead=7, unit_cost="1.00", **flags):
         unit_cost=Decimal(unit_cost),
         quantity_per_package=1,
         average_lead_time=lead,
+        average_lead_time_provenance=flags.get("provenance", "recorded"),
         is_primary=flags.get("is_primary", False),
         is_active=flags.get("is_active", True),
         is_discontinued=flags.get("is_discontinued", False),
@@ -448,3 +449,16 @@ def test_the_basis_reaches_the_serialized_forecast_endpoint(api):
     # The keys that were already there keep their shape.
     assert by_name["wire-dead"]["lead_time_days"] == 30.0
     assert by_name["wire-orphan"]["lead_time_days"] is None
+
+
+def test_the_default_provenance_reaches_the_serialized_forecast_endpoint(api):
+    now = timezone.now()
+    item = _serialized("wire-default", now=now)
+    _link(item, "WireDefault", lead=7, provenance="default")
+
+    response = api.get(FORECAST_URL)
+
+    assert response.status_code == 200, response.content
+    row = next(row for row in response.data if row["item_name"] == "wire-default")
+    assert row["lead_time_days"] == 7.0
+    assert row["lead_time_provenance"] == "default"

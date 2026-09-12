@@ -147,8 +147,26 @@ class LocationAdmin(admin.ModelAdmin):
             )
 
 
+class ItemSupplierAdminForm(ModelForm):
+    class Meta:
+        model = ItemSupplier
+        fields = "__all__"
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        if "average_lead_time" in self.changed_data:
+            instance.average_lead_time_provenance = (
+                ItemSupplier.LeadTimeProvenance.RECORDED
+            )
+        if commit:
+            instance.save()
+            self.save_m2m()
+        return instance
+
+
 class ItemSupplierInline(admin.TabularInline):
     model = ItemSupplier
+    form = ItemSupplierAdminForm
     extra = 1
     fields = [
         "supplier",
@@ -178,6 +196,7 @@ class ItemSupplierInline(admin.TabularInline):
         "package_dimensions_display",
         "package_volume_display",
         "unit_weight_display",
+        "average_lead_time_provenance",
     ]
 
     @admin.display(description="Package Dimensions")
@@ -214,6 +233,8 @@ class ItemSupplierInline(admin.TabularInline):
 class ItemSupplierAdmin(admin.ModelAdmin):
     """Admin interface for managing item-supplier relationships and pricing."""
 
+    form = ItemSupplierAdminForm
+
     list_display = [
         "item_link",
         "supplier",
@@ -232,6 +253,7 @@ class ItemSupplierAdmin(admin.ModelAdmin):
         "unit_cost",
         "created_at",
         "updated_at",
+        "average_lead_time_provenance",
         "api_link",
         "price_history_link",
         "package_dimensions_display",
@@ -281,7 +303,14 @@ class ItemSupplierAdmin(admin.ModelAdmin):
         ),
         (
             "Pricing Information",
-            {"fields": ("package_cost", "unit_cost", "average_lead_time")},
+            {
+                "fields": (
+                    "package_cost",
+                    "unit_cost",
+                    "average_lead_time",
+                    "average_lead_time_provenance",
+                )
+            },
         ),
         (
             "API & History",

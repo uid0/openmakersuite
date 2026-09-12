@@ -935,7 +935,14 @@ const PurchaseOrderFormPage: React.FC = () => {
                       </span>
                     </div>
                     <div className="stat">
-                      <span className="stat-value">{Math.round(supplier.avg_lead_time)} days</span>
+                      <span className="stat-value">
+                        {Math.round(supplier.avg_lead_time)} days
+                        {supplier.avg_lead_time_provenance === 'default'
+                          ? ' (includes planning default)'
+                          : supplier.avg_lead_time_provenance === 'unknown'
+                            ? ' (includes unknown provenance)'
+                            : ''}
+                      </span>
                       <span className="stat-label">avg lead time</span>
                     </div>
                   </div>

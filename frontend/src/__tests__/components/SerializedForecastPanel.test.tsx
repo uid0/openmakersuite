@@ -37,6 +37,7 @@ const buildRow = (overrides: Partial<SerializedForecastRow> = {}): SerializedFor
   days_until_stockout: 30,
   projected_stockout_date: '2026-08-01',
   lead_time_days: 7,
+  lead_time_provenance: 'recorded',
   lead_time_known: true,
   lead_time_basis: 'orderable_supplier',
   safety_stock: 2,
@@ -112,6 +113,16 @@ describe('SerializedForecastPanel', () => {
     expect(
       screen.queryByTestId('serialized-forecast-partial-rp-dead-vendor'),
     ).toBeNull();
+  });
+
+  it('marks a reorder point that uses the planning default', async () => {
+    mockReports.getSerializedForecast.mockResolvedValue({
+      data: [buildRow({ lead_time_provenance: 'default', reorder_point: 4 })],
+    } as never);
+
+    renderPanel();
+
+    expect(await screen.findByText('4 †')).toBeInTheDocument();
   });
 
   it('quotes a complete reorder point plainly', async () => {

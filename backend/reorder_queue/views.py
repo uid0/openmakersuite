@@ -1337,6 +1337,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         # (op-9m2v) — see the rollup read-out below.
                         "rollup": PriceRollup(),
                         "avg_lead_time": 0,
+                        "avg_lead_time_provenance": None,
                     }
 
                 # Calculate suggested quantity (base units, mode-aware — op-es7c)
@@ -1477,6 +1478,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                             "total_items": 0,
                             "rollup": PriceRollup(),
                             "avg_lead_time": 0,
+                            "avg_lead_time_provenance": None,
                         }
                     # A kit row is informational and never an action row, so it
                     # touches no total — but it is still a price on a screen,
@@ -1523,9 +1525,22 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
             # Calculate average lead time for supplier
             lead_times = [
-                item["lead_time_days"] for item in data["items"] if item["lead_time_days"]
+                item["lead_time_days"]
+                for item in data["items"]
+                if item["lead_time_days"] is not None
             ]
             data["avg_lead_time"] = sum(lead_times) / len(lead_times) if lead_times else 0
+            provenances = {
+                item["lead_time_provenance"]
+                for item in data["items"]
+                if item["lead_time_days"] is not None
+            }
+            if "unknown" in provenances:
+                data["avg_lead_time_provenance"] = "unknown"
+            elif "default" in provenances:
+                data["avg_lead_time_provenance"] = "default"
+            elif provenances:
+                data["avg_lead_time_provenance"] = "recorded"
             # The group's money, read off the rollup rather than accumulated
             # into the payload dict: ``estimated_total`` is the sum of the
             # lines this pad COULD price and ``unpriced_item_count`` is how
@@ -1588,6 +1603,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 "unpriced_item_count": 0,
                 "estimated_total_is_partial": False,
                 "avg_lead_time": 0,
+                "avg_lead_time_provenance": None,
             }
 
         # Convert to list and sort by estimated total (highest first)

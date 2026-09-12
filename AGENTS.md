@@ -886,9 +886,10 @@ supplier while the boxes hold another's figures — is filed, with the trace and
 with the reason the next attempt must not begin by seeding the supplier id, in
 [`docs/oms-supplier-cost-write-path-record.md`](docs/oms-supplier-cost-write-path-record.md)
 under "Still open, filed not fixed". That list also holds the lost-update window
-on `stored_pricing` and the `supplier_terms` `DictField` 500s. **Read it before
-touching the kit form**: "closed" below is about the derivation, not about every
-screen that reaches it.
+on `stored_pricing`; the former `supplier_terms` validation and silent-drop gaps
+are recorded there as closed by `op-kit-terms`. **Read it before touching the kit
+form**: "closed" below is about the derivation, not about every screen that
+reaches it.
 
 **One rule, in one place: `inventory.services.suppliers.derive_costs`, called
 from `ItemSupplier.save()`.** `unit_cost` and `package_cost` are derived from

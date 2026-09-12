@@ -424,17 +424,26 @@ exact fixture, and mutation-checked — deleting the coercion makes that link st
 
 Carried from the earlier record, verified still true, and deliberately NOT taken:
 
-- A non-numeric `supplier` id inside `supplier_terms` reaches the ORM and returns
-  500 rather than 400, because that field is a pass-through `DictField`. The same
-  holds for a malformed `average_lead_time` and for a cost overflowing the
-  column's `max_digits`. Out of scope here: it is an input-validation defect on
-  the same endpoint, not a price-derivation one, and this branch neither
-  introduces nor worsens it — `quantize_cost` returns an unquantizable value
-  untouched so Django's own field validation still raises.
-- `KitSerializer._apply_supplier_terms` accepts neither `package_cost` nor
+- ~~A non-numeric `supplier` id inside `supplier_terms` reaches the ORM and
+  returns 500 rather than 400, because that field is a pass-through `DictField`.
+  The same holds for a malformed `average_lead_time` and for a cost overflowing
+  the column's `max_digits`.~~ **CLOSED by op-kit-terms.** The measured set was
+  larger than the three named here — a `supplier_sku` past `max_length`, a
+  negative `average_lead_time` and a `supplier` id naming no row were 500s too,
+  the last of them only at COMMIT, because Django's foreign keys are
+  `DEFERRABLE INITIALLY DEFERRED`. All of them are now 400s in the
+  `config/api_errors.py` envelope, raised during `is_valid()` so a refused write
+  no longer leaves a committed kit behind.
+- ~~`KitSerializer._apply_supplier_terms` accepts neither `package_cost` nor
   `quantity_per_package`, so an API caller sending either has it silently
-  dropped. Not fixed: the kit form offers no box for either, so there is no
-  operator who can supply one, and adding the keys would be scope with no driver.
+  dropped.~~ **CLOSED by op-kit-terms, the other way round.** The keys were NOT
+  added: "no operator can supply one" is still true, and accepting
+  `quantity_per_package` would have reopened the hole PR #1061 closed while
+  accepting `package_cost` would have fed a new input into price derivation.
+  What changed is that the drop is no longer silent — an unsupported key is
+  refused by name and pointed at `/api/inventory/item-suppliers/`, which does
+  accept and validate it. The same refusal covers every other `ItemSupplier`
+  column the block does not write, not just the two named here.
 
 ### The kit form writes one vendor's terms onto another — AMPLIFIED BY THIS BRANCH
 

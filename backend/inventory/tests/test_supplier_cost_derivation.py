@@ -302,8 +302,9 @@ class TestInvariantAnAbsentValueIsNeverFabricated:
 class TestAStringCostIsANumberBeforeItIsMultiplied:
     """The defect base's ``setdefault("quantity_per_package", 1)`` was masking.
 
-    ``supplier_terms`` is a pass-through ``DictField``, so a cost can reach the
-    model as the STRING ``"5"``. Python's ``*`` on a string repeats it:
+    Before ``op-kit-terms``, ``supplier_terms`` was a pass-through ``DictField``,
+    so a cost could reach the model as the STRING ``"5"``. Python's ``*`` on a
+    string repeats it:
     ``"5" * 6 == "555555"``, which is a valid decimal, so a costless link at pack
     6 could store a fabricated case price of 555555.00 and file it to
     ``PriceHistory`` as a real supplier price.

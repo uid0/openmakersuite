@@ -545,36 +545,89 @@ class _PyScanner:
         self.lookup_re = re.compile(r"^(%s)(__.+)?$" % "|".join(sorted(anchor.all_fields)))
         self.findings: list[Finding] = []
         self.sites: list[tuple[str, int, str, str]] = []
-        self.imported: dict[str, tuple[str, str | None]] = self._imports()
         #: Dotted names of every class this module declares, so a receiver that
         #: names one — ``PurchaseOrderItem.close_short()`` — can be told apart
         #: from a receiver that merely holds an object.
         self.classes: frozenset[str] = self._class_dotted()
+        self.imports, self.shadows = self._scope_bindings()
         #: function qualname -> {"writes": bool, "refreshes": bool, "calls": set,
         #: "line": int}
         self.functions: dict[str, dict] = {}
 
     # -- helpers ---------------------------------------------------------
 
-    def _imports(self) -> dict[str, tuple[str, str | None]]:
-        """Imported binding -> (module, imported symbol or None)."""
-        bindings: dict[str, tuple[str, str | None]] = {}
+    def _import_binding(self, node: ast.Import | ast.ImportFrom, alias: ast.alias):
         module_parts = Path(self.rel).with_suffix("").parts
         if module_parts and module_parts[0] == "backend":
             module_parts = module_parts[1:]
         package = list(module_parts[:-1])
-        for node in ast.walk(self.tree):
-            if isinstance(node, ast.Import):
+        if isinstance(node, ast.Import):
+            binding = alias.asname or alias.name.split(".")[0]
+            module = alias.name if alias.asname else alias.name.split(".")[0]
+            return binding, (module, None)
+        parent = package[: len(package) - max(node.level - 1, 0)] if node.level else []
+        module = ".".join(parent + ((node.module or "").split(".") if node.module else []))
+        return alias.asname or alias.name, (module, alias.name)
+
+    @staticmethod
+    def _scope_nodes(scope: ast.AST):
+        stack = list(ast.iter_child_nodes(scope))
+        while stack:
+            node = stack.pop()
+            yield node
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                stack.extend(ast.iter_child_nodes(node))
+
+    @staticmethod
+    def _target_names(target: ast.AST) -> set[str]:
+        return {node.id for node in ast.walk(target) if isinstance(node, ast.Name)}
+
+    def _bindings_in(self, scope: ast.AST):
+        imports: dict[str, set[tuple[str, str | None]]] = {}
+        shadows: set[str] = set()
+        if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            args = scope.args
+            shadows.update(arg.arg for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs))
+            if args.vararg:
+                shadows.add(args.vararg.arg)
+            if args.kwarg:
+                shadows.add(args.kwarg.arg)
+        for node in self._scope_nodes(scope):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
                 for alias in node.names:
-                    binding = alias.asname or alias.name.split(".")[0]
-                    module = alias.name if alias.asname else alias.name.split(".")[0]
-                    bindings[binding] = (module, None)
-            elif isinstance(node, ast.ImportFrom):
-                parent = package[: len(package) - max(node.level - 1, 0)] if node.level else []
-                module = ".".join(parent + ((node.module or "").split(".") if node.module else []))
-                for alias in node.names:
-                    bindings[alias.asname or alias.name] = (module, alias.name)
-        return bindings
+                    name, binding = self._import_binding(node, alias)
+                    imports.setdefault(name, set()).add(binding)
+            elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
+                    shadows.update(self._target_names(target))
+            elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+                shadows.update(self._target_names(node.target))
+            elif isinstance(node, ast.withitem) and node.optional_vars:
+                shadows.update(self._target_names(node.optional_vars))
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                shadows.add(node.name)
+            elif isinstance(node, (ast.Global, ast.Nonlocal)):
+                shadows.update(node.names)
+        return imports, shadows
+
+    def _scope_bindings(self):
+        imports: dict[str, dict[str, set[tuple[str, str | None]]]] = {}
+        shadows: dict[str, set[str]] = {}
+        imports[""], shadows[""] = self._bindings_in(self.tree)
+        for dotted, node in self._qualified_functions(self.tree):
+            imports[dotted], shadows[dotted] = self._bindings_in(node)
+        return imports, shadows
+
+    def _visible_imports(self, dotted: str):
+        visible: dict[str, tuple[str, str | None] | None] = {}
+        scopes = self._scopes(dotted)
+        names = set().union(*(set(self.imports[scope]) | self.shadows[scope] for scope in scopes))
+        for name in names:
+            candidates = set().union(*(self.imports[scope].get(name, set()) for scope in scopes))
+            shadowed = any(name in self.shadows[scope] for scope in scopes)
+            visible[name] = next(iter(candidates)) if len(candidates) == 1 and not shadowed else None
+        return visible
 
     def _class_dotted(self) -> frozenset[str]:
         """Every class in the module, named the way functions in it are named.
@@ -637,7 +690,7 @@ class _PyScanner:
         ORM keyword, or ORM lookup string. A site cannot avoid naming them."""
         found: set[str] = set()
         for node in nodes:
-            for sub in ast.walk(node):
+            for sub in self._scope_nodes(node):
                 if isinstance(sub, ast.Attribute) and sub.attr in self.a.all_fields:
                     found.add(sub.attr)
                 elif isinstance(sub, ast.Name) and sub.id in self.a.all_fields:
@@ -810,7 +863,8 @@ class _PyScanner:
                 "refreshes": refreshes,
                 "calls": calls,
                 "module": self.rel,
-                "imported": self.imported,
+                "imported": self._visible_imports(dotted),
+                "shadowed": set().union(*(self.shadows[scope] for scope in self._scopes(dotted))),
                 "classes": self.classes,
                 "scopes": self._scopes(dotted),
                 "owner_class": self._owner_class(dotted),
@@ -1154,6 +1208,8 @@ def _write_arm(anchor: Anchor, functions: dict[str, dict]) -> list[Finding]:
             ]
 
         if receiver is None:
+            if name in info["shadowed"]:
+                return []
             for scope in info["scopes"]:
                 hit = declared(f"{scope}.{name}" if scope else name)
                 if hit:

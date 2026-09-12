@@ -1476,6 +1476,92 @@ class TestTheWriteArmDischargesOnlyAlongRealCallEdges:
         )
         assert [finding.path for finding in findings] == ["appa/service.py"]
 
+    def test_an_import_in_a_dead_nested_function_is_not_visible_to_its_sibling(self, sweep):
+        findings = self._findings(
+            sweep,
+            [
+                ("appa/service.py", self.WRITER),
+                (
+                    "appc/service.py",
+                    "from reorder_queue.services.receiving import refresh_receipt_status\n\n"
+                    "def dead():\n"
+                    "    from appa.service import close_short\n\n"
+                    "def settle(line, purchase_order):\n"
+                    "    close_short(line)\n"
+                    "    refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert [finding.path for finding in findings] == ["appa/service.py"]
+
+    def test_a_parameter_shadows_an_imported_function(self, sweep):
+        findings = self._findings(
+            sweep,
+            [
+                ("appa/service.py", self.WRITER),
+                (
+                    "appc/service.py",
+                    "from appa.service import close_short\n"
+                    "from reorder_queue.services.receiving import refresh_receipt_status\n\n"
+                    "def settle(close_short, line, purchase_order):\n"
+                    "    close_short(line)\n"
+                    "    refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert [finding.path for finding in findings] == ["appa/service.py"]
+
+    def test_a_parameter_shadows_a_same_module_function(self, sweep):
+        findings = self._findings(
+            sweep,
+            [
+                (
+                    "appa/service.py",
+                    self.WRITER
+                    + "\n\nfrom reorder_queue.services.receiving import refresh_receipt_status\n\n"
+                    "def settle(close_short, line, purchase_order):\n"
+                    "    close_short(line)\n"
+                    "    refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert [finding.path for finding in findings] == ["appa/service.py"]
+
+    def test_a_local_variable_shadows_an_imported_module(self, sweep):
+        findings = self._findings(
+            sweep,
+            [
+                ("appa/service.py", self.WRITER),
+                (
+                    "appc/service.py",
+                    "from appa import service\n"
+                    "from reorder_queue.services.receiving import refresh_receipt_status\n\n"
+                    "def settle(line, purchase_order, local):\n"
+                    "    service = local\n"
+                    "    service.close_short(line)\n"
+                    "    refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert [finding.path for finding in findings] == ["appa/service.py"]
+
+    def test_an_import_inside_the_caller_discharges_its_call(self, sweep):
+        findings = self._findings(
+            sweep,
+            [
+                ("appa/service.py", self.WRITER),
+                (
+                    "appc/service.py",
+                    "from reorder_queue.services.receiving import refresh_receipt_status\n\n"
+                    "def settle(line, purchase_order):\n"
+                    "    from appa.service import close_short\n"
+                    "    close_short(line)\n"
+                    "    refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert findings == []
+
     def test_a_caller_in_the_same_module_discharges_it(self, sweep):
         findings = self._findings(
             sweep,

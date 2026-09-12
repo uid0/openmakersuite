@@ -2,6 +2,8 @@
 Pytest configuration and fixtures for the entire test suite.
 """
 
+# ruff: noqa: E402
+
 from io import BytesIO
 
 from django.contrib.auth import get_user_model

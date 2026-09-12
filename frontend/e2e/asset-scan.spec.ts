@@ -240,26 +240,107 @@ test.describe('Asset QR Code Scanning', () => {
       // so the actual API call fires.
       await page.getByRole('button', { name: 'Delete' }).click();
 
-      // Wait for success message
-      await expect(page.getByText(/Asset disabled successfully/i)).toBeVisible({
-        timeout: 5000,
-      });
-
-      // Verify enable button is now visible
-      await expect(enableButton).toBeVisible({ timeout: 3000 });
+      // Assert the state change, not the toast copy: the control flipping to
+      // Enable is what proves the asset was actually disabled. An exact-text
+      // assertion on the notification breaks on any wording change and trains
+      // readers to update the expectation without checking the behaviour —
+      // which is how a real regression can land disguised as a copy edit.
+      await expect(enableButton).toBeVisible({ timeout: 5000 });
+      await expect(disableButton).not.toBeVisible();
     } else if (await enableButton.isVisible()) {
       // Asset is inactive, test enabling — handleEnable has no
       // confirmDelete prompt, so no modal step here.
       await enableButton.click({ force: true });
 
-      // Wait for success message
-      await expect(page.getByText(/Asset enabled successfully/i)).toBeVisible({
-        timeout: 5000,
+      // Same reasoning as above: the control flipping back is the behaviour.
+      await expect(disableButton).toBeVisible({ timeout: 5000 });
+      await expect(enableButton).not.toBeVisible();
+    }
+  });
+
+  // Locking is the one control that actually stops a machine (it creates a
+  // ForgeKey DeviceLockout, after which `is_authorized` denies every user).
+  // It had NO end-to-end coverage at all, which is how a Lock button that
+  // posted no body — and so was rejected with 400 on every single click —
+  // survived unnoticed. These tests exercise the real browser flow and assert
+  // the server-side outcome, so a Lock that silently fails cannot pass again.
+  test.describe('locking an asset', () => {
+    let lockAsset: any;
+
+    test.beforeAll(async () => {
+      if (!backendAvailable) return;
+      // Its own asset: locking mutates state other tests read.
+      lockAsset = await createTestAsset(
+        { name: 'Lockable Bandsaw', description: 'Asset under lockout test' },
+        adminToken,
+      );
+    });
+
+    test('supplying a reason locks the asset and records the reason', async ({ page }) => {
+      test.skip(!backendAvailable, 'Backend not available');
+
+      const reason = 'Blade guard missing - do not run until replaced';
+
+      await setAuthToken(page, adminToken);
+      await page.goto(`/scan/asset/${lockAsset.id}`);
+      await waitForAssetScanPage(page);
+
+      await page.getByRole('button', { name: /Lock Asset/i }).click({ force: true });
+
+      // The operator must supply the reason the server requires; the web used
+      // to send no body here, which the endpoint rejects with 400.
+      const reasonInput = page.getByLabel(/why is this machine being locked out/i);
+      await expect(reasonInput).toBeVisible({ timeout: 5000 });
+      await reasonInput.fill(reason);
+      await page.getByRole('button', { name: /^Submit$/ }).click();
+
+      // Behaviour, in the UI: the asset is now locked, so the control flips.
+      await expect(page.getByRole('button', { name: /Unlock Asset/i })).toBeVisible({
+        timeout: 10000,
       });
 
-      // Verify disable button is now visible
-      await expect(disableButton).toBeVisible({ timeout: 3000 });
-    }
+      // Behaviour, on the server: a lockout exists and carries the operator's
+      // reason verbatim. This is the assertion that a 400-ing Lock fails.
+      const response = await page.request.get(
+        `${API_BASE_URL}/inventory/assets/${lockAsset.id}/`,
+        { headers: { Authorization: `Bearer ${adminToken}` } },
+      );
+      expect(response.ok()).toBeTruthy();
+      const body = await response.json();
+      expect(body.is_locked).toBe(true);
+      expect(body.lockout_info).not.toBeNull();
+      expect(body.lockout_info.reason).toBe(reason);
+    });
+
+    test('cancelling the reason prompt does not lock the asset', async ({ page }) => {
+      test.skip(!backendAvailable, 'Backend not available');
+
+      const unlockedAsset = await createTestAsset(
+        { name: 'Untouched Drill Press', description: 'Lock prompt cancelled' },
+        adminToken,
+      );
+
+      await setAuthToken(page, adminToken);
+      await page.goto(`/scan/asset/${unlockedAsset.id}`);
+      await waitForAssetScanPage(page);
+
+      await page.getByRole('button', { name: /Lock Asset/i }).click({ force: true });
+      await expect(page.getByLabel(/why is this machine being locked out/i)).toBeVisible({
+        timeout: 5000,
+      });
+      await page.getByRole('button', { name: /^Cancel$/ }).click();
+
+      // Still lockable, and no lockout was created server-side.
+      await expect(page.getByRole('button', { name: /Lock Asset/i })).toBeVisible();
+
+      const response = await page.request.get(
+        `${API_BASE_URL}/inventory/assets/${unlockedAsset.id}/`,
+        { headers: { Authorization: `Bearer ${adminToken}` } },
+      );
+      const body = await response.json();
+      expect(body.is_locked).toBe(false);
+      expect(body.lockout_info).toBeNull();
+    });
   });
 
   test('displays asset operational requirements', async ({ page }) => {

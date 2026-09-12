@@ -56,7 +56,7 @@ The table above is every code the exception handler can produce: `_classify` res
 | 400  | `multiple_unavailable` | `POST /api/reorders/purchase-orders/{id}/items/`     | The identifier matches several items, unavailable for a mix of the two reasons above.           | Absent.   |
 | 400  | `no_match`      | `POST /api/reorders/purchase-orders/{id}/items/`            | The identifier matches nothing this supplier carries.                                           | Absent.   |
 | 400  | `empty_identifier` | `POST /api/reorders/purchase-orders/{id}/items/`         | The identifier was blank once trimmed, so there was nothing to resolve.                          | Absent.   |
-| 400  | `line_voided`   | `POST /api/reorders/purchase-orders/{id}/items/`            | The order already carries a VOIDED line for this target; a void is not silently resurrected.     | Absent.   |
+| 400  | `line_voided`   | `POST /api/reorders/purchase-orders/{id}/items/`            | The order already carries a VOIDED line for this target. Lines cannot be un-voided; delete the voided line, then order it again. | Absent.   |
 | 400  | `price_conflict` | `POST /api/reorders/purchase-orders/{id}/items/`           | Growing an existing asset/freeform line at a different `unit_cost` than it already carries.      | Absent.   |
 | 400  | `no_unit_cost`  | `POST /api/reorders/purchase-orders/{id}/items/`            | No price was supplied and none can be derived (asset and freeform lines have no price to fall back on). | Absent. |
 | 400  | `invalid_quantity` / `invalid_unit_cost` / `invalid_description` | `POST /api/reorders/purchase-orders/{id}/items/` | A supplied value is not a usable quantity, price, or description.               | Absent.   |

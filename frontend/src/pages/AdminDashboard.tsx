@@ -22,6 +22,7 @@ import '../styles/AdminDashboard.css';
 import { Asset, InventoryItem, ReorderRequest } from '../types';
 import { formatDateOnly, parseYmd } from '../utils/dates';
 import { promptInput, showError, showSuccess } from '../utils/dialogs';
+import { leadTimeText } from '../utils/leadTime';
 import {
   chosenSupplierName,
   supplierChoiceNote,
@@ -528,7 +529,10 @@ const AdminDashboard: React.FC = () => {
                     <td data-testid={`reorder-lead-time-${request.id}`}>
                       {chosenSupplierName(supplierChoice) === null
                         ? '—'
-                        : `${request.item_details.average_lead_time} days`}
+                        : leadTimeText(
+                            request.item_details.average_lead_time,
+                            request.item_details.average_lead_time_provenance
+                          )}
                     </td>
                     <td>
                       <div className="action-buttons">

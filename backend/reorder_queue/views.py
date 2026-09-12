@@ -1402,6 +1402,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         "package_cost": (None if not package_price else str(package_price.amount)),
                         "quantity_per_package": item_supplier.quantity_per_package,
                         "lead_time_days": item_supplier.average_lead_time,
+                        "lead_time_provenance": item_supplier.average_lead_time_provenance,
                         "supplier_sku": item_supplier.supplier_sku,
                         "supplier_url": item_supplier.supplier_url,
                         "is_primary": item_supplier.is_primary,

@@ -857,7 +857,12 @@ class IndexCardRenderer:
         # quoted a wait at all. ``None`` here means no orderable link, which IS
         # an absence and still prints nothing.
         if item.average_lead_time is not None:
-            info_lines.append(f"Avg Lead: {self._pluralize(item.average_lead_time, 'day')}")
+            lead = self._pluralize(item.average_lead_time, "day")
+            if item.average_lead_time_provenance == "default":
+                lead += " (planning default)"
+            elif item.average_lead_time_provenance != "recorded":
+                lead += " (provenance unknown)"
+            info_lines.append(f"Avg Lead: {lead}")
 
         longest_lead_time = self._get_longest_lead_time(item)
         if longest_lead_time is not None and longest_lead_time != item.average_lead_time:

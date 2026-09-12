@@ -160,9 +160,32 @@ describe('the line the server put on the pad', () => {
 
 describe('a supplier that really did quote a week', () => {
   test('still shows its own seven days', async () => {
-    await addBySearch(itemSupplierRow({ average_lead_time: 7 }));
+    await addBySearch(
+      itemSupplierRow({ average_lead_time: 7, average_lead_time_provenance: 'recorded' })
+    );
 
     expect(screen.getByTestId('po-line-lead-time-99')).toHaveTextContent('7 days');
+    expect(screen.getByTestId('po-line-lead-time-99')).not.toHaveTextContent('default');
+  });
+
+  test('marks the model-provided seven as a planning default', async () => {
+    await addBySearch(
+      itemSupplierRow({ average_lead_time: 7, average_lead_time_provenance: 'default' })
+    );
+
+    expect(screen.getByTestId('po-line-lead-time-99')).toHaveTextContent(
+      '7 days (planning default)'
+    );
+  });
+
+  test('does not guess the provenance of existing rows', async () => {
+    await addBySearch(
+      itemSupplierRow({ average_lead_time: 7, average_lead_time_provenance: 'unknown' })
+    );
+
+    expect(screen.getByTestId('po-line-lead-time-99')).toHaveTextContent(
+      '7 days (provenance unknown)'
+    );
   });
 
   test('and a one-day quote is not pluralised', async () => {

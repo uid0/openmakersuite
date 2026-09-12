@@ -1,3 +1,5 @@
+import { LeadTimeProvenance } from '../types';
+
 /**
  * What a supplier's lead time MEANS when nobody recorded one (op-lead-time-default).
  *
@@ -30,10 +32,9 @@
  *    instead. The number in that sentence is prose about the server's
  *    behaviour, not a second source of the default.
  *
- * What this canNOT say, deliberately: whether a stored `7` is the default
- * nobody touched or a seven the supplier actually quoted. The column has no
- * room for that distinction, and giving it one is a migration over supplier
- * data rather than a rendering choice — filed as `oms-lead-time-nullable`.
+ * `average_lead_time_provenance` distinguishes a planning default from a
+ * recorded figure. Rows predating that marker are `unknown`, which must never
+ * be presented as either known state.
  */
 
 /** How an unrecorded lead time reads. One wording, every surface. */
@@ -50,9 +51,25 @@ export const LEAD_TIME_DEFAULT_NOTE =
  * the caller: a table cell and a Mantine `<Text>` dim an absence differently,
  * and both should read the same words when they do.
  */
-export const formatLeadTimeDays = (days: number | null | undefined): string | null =>
-  typeof days === 'number' && Number.isFinite(days) ? `${days} day${days === 1 ? '' : 's'}` : null;
+export const formatLeadTimeDays = (
+  days: number | null | undefined,
+  provenance?: LeadTimeProvenance | null
+): string | null => {
+  if (typeof days !== 'number' || !Number.isFinite(days)) return null;
+  const value = `${days} day${days === 1 ? '' : 's'}`;
+  if (provenance === 'default') return `${value} (planning default)`;
+  if (provenance === 'unknown' || provenance == null) return `${value} (provenance unknown)`;
+  return value;
+};
 
 /** The same answer with the absence already worded, for a plain text node. */
-export const leadTimeText = (days: number | null | undefined): string =>
-  formatLeadTimeDays(days) ?? LEAD_TIME_NOT_RECORDED;
+export const leadTimeText = (
+  days: number | null | undefined,
+  provenance?: LeadTimeProvenance | null
+): string => formatLeadTimeDays(days, provenance) ?? LEAD_TIME_NOT_RECORDED;
+
+export const leadTimeProvenanceText = (provenance?: LeadTimeProvenance | null): string => {
+  if (provenance === 'default') return 'This stored value is the planning default.';
+  if (provenance === 'unknown') return 'This stored value predates lead-time provenance.';
+  return LEAD_TIME_DEFAULT_NOTE;
+};

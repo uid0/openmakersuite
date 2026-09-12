@@ -102,8 +102,12 @@ const recordedValue = (value: string | null | undefined, emphasis: SupplierCellE
 // The wording comes from `utils/leadTime.ts` so this page and the
 // purchase-order form cannot drift apart on what an unrecorded lead time reads
 // as — the two surfaces that each invented their own answer before it existed.
-const leadTimeValue = (days: number | null | undefined, emphasis: SupplierCellEmphasis) => {
-  const recorded = formatLeadTimeDays(days);
+const leadTimeValue = (
+  days: number | null | undefined,
+  provenance: import('../types').LeadTimeProvenance | null | undefined,
+  emphasis: SupplierCellEmphasis
+) => {
+  const recorded = formatLeadTimeDays(days, provenance);
   return recorded === null ? (
     <NotRecorded />
   ) : (
@@ -1162,7 +1166,11 @@ const InventoryItemDetailPage: React.FC = () => {
                                   {recordedValue(link.unit_upc, unitUpcEmphasis)}
                                 </Table.Td>
                                 <Table.Td data-testid={`supplier-lead-time-${link.id}`} data-emphasis={leadTimeEmphasis}>
-                                  {leadTimeValue(link.average_lead_time, leadTimeEmphasis)}
+                                  {leadTimeValue(
+                                    link.average_lead_time,
+                                    link.average_lead_time_provenance,
+                                    leadTimeEmphasis
+                                  )}
                                 </Table.Td>
                               </Table.Tr>
                             );

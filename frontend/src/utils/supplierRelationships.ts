@@ -203,6 +203,7 @@ export const relationshipFromSaved = (saved: ItemSupplier): SupplierRelationship
   package_cost: saved.package_cost,
   quantity_per_package: saved.quantity_per_package,
   average_lead_time: saved.average_lead_time,
+  average_lead_time_provenance: saved.average_lead_time_provenance,
   is_primary: saved.is_primary,
 });
 

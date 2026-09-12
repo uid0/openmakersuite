@@ -12,6 +12,7 @@ import { Checklist, InventoryItem, ItemSupplier } from '../types';
 import { formatDateOnly } from '../utils/dates';
 import { promptInput, showError } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
+import { leadTimeText } from '../utils/leadTime';
 import { reorderFiling, reorderQuantityLabel } from '../utils/packaging';
 import {
   alternativeSupplierNamesText,
@@ -730,7 +731,12 @@ const ScanPage: React.FC = () => {
 
                 <div className="info-item">
                   <span className="label">Their Lead Time:</span>
-                  <span className="value">{item.average_lead_time} days</span>
+                  <span className="value">
+                    {leadTimeText(
+                      item.average_lead_time,
+                      item.average_lead_time_provenance
+                    )}
+                  </span>
                 </div>
 
                 <div className="info-item">
@@ -838,7 +844,11 @@ const ScanPage: React.FC = () => {
                         <strong>Unit cost:</strong> {money(selectedSupplier.unit_cost)}
                       </div>
                       <div>
-                        <strong>Lead time:</strong> {selectedSupplier.average_lead_time} days
+                        <strong>Lead time:</strong>{' '}
+                        {leadTimeText(
+                          selectedSupplier.average_lead_time,
+                          selectedSupplier.average_lead_time_provenance
+                        )}
                       </div>
                       {selectedSupplier.package_dimensions_display !== 'No dimensions specified' && (
                         <div>

@@ -169,6 +169,7 @@ class ItemSupplierInline(admin.TabularInline):
         "package_cost",
         "unit_cost_display",
         "average_lead_time",
+        "average_lead_time_provenance",
         "is_primary",
         "is_active",
     ]

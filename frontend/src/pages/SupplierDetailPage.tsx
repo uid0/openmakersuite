@@ -23,6 +23,7 @@ import WorkspacePage from '../components/landing/WorkspacePage';
 import PriceTrendChart from '../components/PriceTrendChart';
 import { inventoryAPI } from '../services/api';
 import { ItemSupplier, SupplierDetail } from '../types';
+import { leadTimeText } from '../utils/leadTime';
 
 const SupplierDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -306,7 +307,12 @@ const SupplierDetailPage: React.FC = () => {
                         )}
                       </Table.Td>
                       <Table.Td>
-                        <Text>{itemSupplier.average_lead_time} days</Text>
+                        <Text>
+                          {leadTimeText(
+                            itemSupplier.average_lead_time,
+                            itemSupplier.average_lead_time_provenance
+                          )}
+                        </Text>
                       </Table.Td>
                       <Table.Td>
                         {itemSupplier.is_primary ? (

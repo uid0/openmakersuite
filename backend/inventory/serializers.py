@@ -275,6 +275,7 @@ class ItemSupplierSerializer(serializers.ModelSerializer):
             "unit_cost",
             "package_cost",
             "average_lead_time",
+            "average_lead_time_provenance",
             "is_primary",
             "is_active",
             "is_discontinued",
@@ -282,7 +283,17 @@ class ItemSupplierSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["created_at", "updated_at"]
+        read_only_fields = ["average_lead_time_provenance", "created_at", "updated_at"]
+
+    def create(self, validated_data):
+        if "average_lead_time" in validated_data:
+            validated_data["average_lead_time_provenance"] = ItemSupplier.LeadTimeProvenance.RECORDED
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if "average_lead_time" in validated_data:
+            validated_data["average_lead_time_provenance"] = ItemSupplier.LeadTimeProvenance.RECORDED
+        return super().update(instance, validated_data)
 
 
 class ItemSupplierDetailSerializer(ItemSupplierSerializer):
@@ -972,6 +983,7 @@ class InventoryItemSerializer(VendorGatedSerializerMixin, serializers.ModelSeria
         "unit_cost",
         "package_cost",
         "average_lead_time",
+        "average_lead_time_provenance",
         "suppliers",
         "supplier_choice",
         "total_value",
@@ -1020,6 +1032,7 @@ class InventoryItemSerializer(VendorGatedSerializerMixin, serializers.ModelSeria
             "package_cost",
             "quantity_per_package",
             "average_lead_time",
+            "average_lead_time_provenance",
             "qr_code",
             # Complete supplier array with all details
             "suppliers",
@@ -1725,6 +1738,10 @@ class KitSerializer(InventoryItemSerializer):
         if not terms:
             return
         defaults = {key: value for key, value in terms.items() if key != "supplier"}
+        if "average_lead_time" in defaults:
+            defaults["average_lead_time_provenance"] = (
+                ItemSupplier.LeadTimeProvenance.RECORDED
+            )
         defaults["is_primary"] = True
         ItemSupplier.objects.update_or_create(
             item=instance,

@@ -1842,6 +1842,11 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             "supplier_sku": data.get("supplier_sku") or item.sku or str(item.id),
             "supplier_url": data.get("supplier_url", ""),
             "average_lead_time": lead_time,
+            "average_lead_time_provenance": (
+                ItemSupplier.LeadTimeProvenance.RECORDED
+                if data.get("average_lead_time") not in (None, "", "null")
+                else ItemSupplier.LeadTimeProvenance.DEFAULT
+            ),
             "package_upc": data.get("package_upc", ""),
             "unit_upc": data.get("unit_upc", ""),
             "is_primary": True,

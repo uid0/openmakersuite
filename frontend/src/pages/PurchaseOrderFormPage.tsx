@@ -565,6 +565,7 @@ const PurchaseOrderFormPage: React.FC = () => {
         // order at all. A payload with no lead time is an absence and reads as
         // one. See `utils/leadTime.ts` for the whole reading of the column.
         lead_time_days: matchingItemSupplier.average_lead_time ?? null,
+        lead_time_provenance: matchingItemSupplier.average_lead_time_provenance,
         supplier_sku: matchingItemSupplier.supplier_sku || '',
         supplier_url: matchingItemSupplier.supplier_url || '',
         is_primary: matchingItemSupplier.is_primary || false,
@@ -1358,7 +1359,7 @@ const PurchaseOrderFormPage: React.FC = () => {
                             )}
                           </td>
                           <td className="col-lead" data-testid={`po-line-lead-time-${item.item_supplier_id}`}>
-                            {leadTimeText(item.lead_time_days)}
+                            {leadTimeText(item.lead_time_days, item.lead_time_provenance)}
                           </td>
                           <td className="col-shipment">
                             <input
@@ -1834,4 +1835,3 @@ const PurchaseOrderFormPage: React.FC = () => {
 };
 
 export default PurchaseOrderFormPage;
-

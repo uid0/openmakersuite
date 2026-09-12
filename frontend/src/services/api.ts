@@ -1954,6 +1954,7 @@ export interface ReorderDataItem {
    * owns the reading; never guard this with truthiness.
    */
   lead_time_days: number | null;
+  lead_time_provenance?: import('../types').LeadTimeProvenance | null;
   supplier_sku: string;
   supplier_url: string;
   is_primary: boolean;

@@ -158,7 +158,12 @@ def update_average_lead_times():
 
             if count > 0:
                 item_supplier.average_lead_time = total_days // count
-                item_supplier.save(update_fields=["average_lead_time"])
+                item_supplier.average_lead_time_provenance = (
+                    ItemSupplier.LeadTimeProvenance.RECORDED
+                )
+                item_supplier.save(
+                    update_fields=["average_lead_time", "average_lead_time_provenance"]
+                )
                 updated_count += 1
 
     return f"Updated lead times for {updated_count} items"

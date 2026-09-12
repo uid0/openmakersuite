@@ -980,6 +980,11 @@ class InventoryItem(OwnableModel):
         return link.average_lead_time if link else None
 
     @property
+    def average_lead_time_provenance(self) -> Optional[str]:
+        link = self.primary_item_supplier
+        return link.average_lead_time_provenance if link else None
+
+    @property
     def package_cost(self) -> Optional[Decimal]:
         """The package cost of the supplier we would BUY through, or ``None``.
 
@@ -1466,10 +1471,14 @@ class ItemSupplier(models.Model):
         blank=True,
         help_text="Total cost for one package from this supplier (what you actually pay)",
     )
-    # NOT NULL with a default, so every link carries a number and "nobody
-    # recorded one" has no representation here. Two consequences worth knowing
-    # before you read this column anywhere:
-    #
+
+    class LeadTimeProvenance(models.TextChoices):
+        DEFAULT = "default", "Planning default"
+        RECORDED = "recorded", "Recorded"
+        UNKNOWN = "unknown", "Unknown"
+
+    # NOT NULL with a default, so every link carries a number. Provenance records
+    # whether that number was supplied or came from the planning default.
     # * ``0`` is a RECORDED answer — a counter-pickup vendor — never a
     #   placeholder. Guarding it with truthiness grades the fastest possible
     #   supplier as the slowest; see ``supplier_selection._lead_time_factor``.
@@ -1480,11 +1489,13 @@ class ItemSupplier(models.Model):
     #   relationship editor through ``utils/supplierRelationships.ts``). The
     #   editor's help text quotes "7 days" as prose for the operator — change
     #   this default and `frontend/src/utils/leadTime.ts` has to say so too.
-    #
-    # That a stored 7 cannot be told from a quoted 7 is a schema-level absence
-    # and is deliberately still open (``oms-lead-time-nullable``).
     average_lead_time = models.PositiveIntegerField(
         default=7, help_text="Average lead time in days from this supplier"
+    )
+    average_lead_time_provenance = models.CharField(
+        max_length=10,
+        choices=LeadTimeProvenance.choices,
+        default=LeadTimeProvenance.DEFAULT,
     )
 
     # Preferences

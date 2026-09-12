@@ -7,7 +7,7 @@ import { MantineProvider } from '@mantine/core';
 import { render, screen } from '@testing-library/react';
 
 import InventoryMetricsRow from '../../components/inventory/InventoryMetricsRow';
-import { InventoryItemMetrics } from '../../types';
+import { CaseSizeState, InventoryItemMetrics } from '../../types';
 
 const buildMetrics = (overrides: Partial<InventoryItemMetrics> = {}): InventoryItemMetrics => ({
   current_stock: 10,
@@ -81,7 +81,7 @@ describe('InventoryMetricsRow', () => {
   // whose supplier row records a box holding nothing. The state now says which,
   // and the tooltip carries the remedy for each.
   it('says WHICH unknown when a case-based item has no case size', () => {
-    const tooltipFor = (case_size_state: string) => {
+    const tooltipFor = (case_size_state: CaseSizeState) => {
       const { unmount } = renderRow(
         buildMetrics({ is_case_based: true, case_size: null, case_size_state }),
       );

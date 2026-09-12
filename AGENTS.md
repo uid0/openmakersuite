@@ -457,20 +457,6 @@ was already `*int` and reads 0 as `null` now — a cross-project VALUE change,
 named as one. Round 5 shipped this null against untyped consumers and blanked
 two member-facing pages; that is why the consumer set is DERIVED, not recalled.
 
-**That null says WHICH unknown it is (op-2t4e).** `case_size_state` rides beside
-`current_cases` on the item payload (the SHELF question — `known` /
-`not_recorded` / `recorded_zero`) and beside `case_size` on the metrics payload
-(the ORDER question, which adds `no_orderable_link`). Before it, every web
-surface said "case size unknown" for all of them, so an operator could not tell
-whether they were supplying a fact nobody had recorded or correcting one
-recorded wrong — two different jobs behind one sentence. The STATE crosses the
-wire, never a rendered sentence: wording belongs to each client, and
-`frontend/src/utils/caseSize.ts` is the web's ONE reading of it (no surface
-words a state itself, and none re-derives one from supplier rows). Both keys are
-ADDITIVE and public; nothing that was already on the wire changed type or value,
-which is why no ScanTTY change was required. A new state in
-`inventory/services/pack_size.py` owes a wording in that util.
-
 **The MONEY half of the class is now CLOSED too** — `unit_cost or 0` in
 `reorder_queue/views.py`, `unit_cost or Decimal("0.00")` in
 `purchase_orders.create_purchase_order` and `line_entry.default_unit_cost`'s
@@ -839,11 +825,10 @@ same reason the server drops the keys.
 
 **Where the line was drawn, so it is not redrawn by accident.** `total_value` is
 withheld because `current_stock` is public beside it. `quantity_per_package` /
-`case_size` / `case_size_state` are NOT: a pack size is a shelf fact, which is
-the call op-c1ke already made for `current_cases`, and anonymous reorder sizing
-depends on it. The state follows the key it explains — publishing an absence
-while withholding its cause would rebuild op-2t4e's conflation for anonymous
-callers, and no state names a vendor or a price.
+`case_size` are NOT: a pack size is a shelf fact, which is the call op-c1ke
+already made for `current_cases`, and anonymous reorder sizing depends on it.
+The complete field-level contract, including companion state keys, is owned by
+[`docs/API_PERMISSION_MATRIX.md`](docs/API_PERMISSION_MATRIX.md).
 An ambiguous field falls closed — `ReorderRequest.order_number` is
 operator-typed free text that holds the vendor's reference as often as not,
 while `PurchaseOrder.po_number` is ours, with `supplier_order_number` beside it

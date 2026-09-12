@@ -8,11 +8,12 @@ PO status advance, lead-time logging) in one transactional service so the
 
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import TYPE_CHECKING, Iterable, NamedTuple, Optional, Sequence
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+
+from inventory.services.lead_times import published_delivery_date
 
 from ..models import DeliveryItem, LeadTimeLog, OrderDelivery, PurchaseOrder, ReorderRequest
 from ..settlement_signals import settlement_batch
@@ -340,7 +341,7 @@ def create_lead_time_log(po_item, delivery_date):
     # CALENDAR days, so that both sides of ``variance_days`` are in one unit ON
     # THIS ROW: ``estimated_lead_time_days`` is written from
     # ``average_lead_time`` just above, and ``expected_delivery_date`` below is
-    # derived from it with ``timedelta(days=...)``. Measuring the actual in
+    # derived from it by ``published_delivery_date``. Measuring the actual in
     # INCLUSIVE business days instead made the subtraction mix two units — a
     # vendor that promised today and delivered today scored actual 1 against
     # estimated 0, so every promise kept inside the working week was recorded as
@@ -350,18 +351,18 @@ def create_lead_time_log(po_item, delivery_date):
     # negative, pinned by
     # ``test_a_delivery_dated_before_the_order_clamps_to_zero``.
     #
-    # REPORTED, NOT FIXED: the date the operator is SHOWN is computed from the
-    # same column in the OTHER unit. ``purchase_orders.update_reorder_requests_from_po``
-    # sets ``ReorderRequest.estimated_delivery`` via
-    # ``purchase_orders.add_business_days``. Link quotes 5; PO sent Monday
-    # 2026-03-02; the operator is shown 2026-03-09 (five business days = seven
-    # calendar); the vendor delivers 2026-03-09, exactly the published date; this
-    # row records estimated 5, actual 7, variance +2, ``was_late`` True. So a
-    # delivery that hit the system's own published date is filed two days late
-    # and now discounts that vendor in ``supplier_selection``'s performance term.
-    # This PREDATES this branch — base scored the same delivery +1 through
-    # inclusive business days — and fixing it means moving ``estimated_delivery``
-    # onto calendar days, an operator-visible DATE change not authorised here.
+    # FIXED (was REPORTED here): the date the operator is SHOWN is now computed
+    # from the same column in the SAME unit.
+    # ``purchase_orders.update_reorder_requests_from_po`` used to count the quote
+    # in business days, so a link quoting 5 on a PO sent Monday 2026-03-02 showed
+    # the operator 2026-03-09 while this row expected 2026-03-07 — and the vendor
+    # that delivered on 2026-03-09, exactly the published date, was filed
+    # estimated 5, actual 7, variance +2, ``was_late`` True, discounting it in
+    # ``supplier_selection``'s performance term for keeping the promise it was
+    # given. Both ends now go through
+    # ``inventory.services.lead_times.published_delivery_date``, which is the ONE
+    # derivation of a date from this quote; pinned by
+    # ``test_published_delivery_date_is_the_yardstick.py``.
     #
     # REPORTED, NOT FIXED: the quote above is read at RECEIPT time, not at order
     # time, because no order-time snapshot of it exists. So editing
@@ -381,7 +382,7 @@ def create_lead_time_log(po_item, delivery_date):
         purchase_order=purchase_order,
         order_date=order_date,
         expected_delivery_date=purchase_order.expected_delivery_date
-        or (order_date.date() + timedelta(days=estimated_lead_time)),
+        or published_delivery_date(order_date, estimated_lead_time),
         actual_delivery_date=actual_delivery_date,
         estimated_lead_time_days=estimated_lead_time,
         actual_lead_time_days=actual_lead_time,

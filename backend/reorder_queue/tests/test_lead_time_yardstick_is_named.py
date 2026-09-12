@@ -556,23 +556,24 @@ def test_the_shown_delivery_date_prefers_the_confirmed_date_over_the_quote():
     assert request.estimated_delivery == confirmed
 
 
-def test_the_quote_fallback_counts_BUSINESS_days_not_calendar_days():
-    """And the doc must not call it plain addition, because it is not.
+def test_the_quote_fallback_counts_CALENDAR_days_like_the_thing_that_grades_it():
+    """The unit the promise is published in is the unit the delivery is graded in.
 
     With no confirmed date on the order the shown date comes from
-    ``add_business_days``, which skips weekends. A five-day quote sent on a
-    Monday shows the NEXT Monday, seven calendar days out — which is also why
-    ``create_lead_time_log``'s calendar-day variance can differ from the date the
-    operator was shown (see the standing REPORTED marker in
-    ``services/receiving.py``; this test pins the unit, not that discrepancy).
+    ``inventory.services.lead_times.published_delivery_date``, which counts the
+    quote in calendar days — the same count ``create_lead_time_log`` measures the
+    actual delivery with, so the operator's date and the vendor's score cannot
+    disagree. This used to run through an ``add_business_days`` helper that
+    skipped weekends: a five-day quote sent on a Monday showed the NEXT Monday,
+    and a vendor delivering on it was filed two days late. The lateness side of
+    that pair is pinned by
+    ``test_published_delivery_date_is_the_yardstick.py``; this test pins the unit.
     """
     from datetime import date, datetime
     from datetime import timezone as dt_timezone
 
-    from reorder_queue.services.purchase_orders import (
-        add_business_days,
-        update_reorder_requests_from_po,
-    )
+    from inventory.services.lead_times import published_delivery_date
+    from reorder_queue.services.purchase_orders import update_reorder_requests_from_po
 
     monday = datetime(2026, 3, 2, 12, 0, tzinfo=dt_timezone.utc)
     assert monday.date().weekday() == 0
@@ -602,7 +603,7 @@ def test_the_quote_fallback_counts_BUSINESS_days_not_calendar_days():
     update_reorder_requests_from_po(po)
 
     request.refresh_from_db()
-    # Five BUSINESS days, so the following Monday — not 2026-03-07.
-    assert request.estimated_delivery == date(2026, 3, 9)
-    assert request.estimated_delivery == add_business_days(monday.date(), 5)
-    assert request.estimated_delivery != monday.date() + timedelta(days=5)
+    # Five CALENDAR days, so the Saturday — not the following Monday.
+    assert request.estimated_delivery == date(2026, 3, 7)
+    assert request.estimated_delivery == published_delivery_date(monday.date(), 5)
+    assert request.estimated_delivery == monday.date() + timedelta(days=5)

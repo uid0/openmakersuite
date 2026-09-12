@@ -102,7 +102,9 @@ item.reorder_status                 # Status property: needs_order/pending/appro
 1. Admin approves request and marks as ordered
 2. Status changes to `ordered`
 3. Expected delivery calculated: the order's confirmed `expected_delivery_date`
-   if it has one, else `add_business_days(order_date, average_lead_time)`
+   if it has one, else `published_delivery_date(order_date, average_lead_time)` —
+   CALENDAR days, the same unit `LeadTimeLog` grades the delivery in
+   (`inventory/services/lead_times.py`)
 4. TV Dashboard shows "ORDERED - Expected in X days"
 
 ### Scenario 4: Item Delivered

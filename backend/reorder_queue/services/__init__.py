@@ -30,7 +30,6 @@ from .line_entry import (
 from .numbering import next_po_number
 from .purchase_orders import (
     SendRefused,
-    add_business_days,
     apply_line_quantity,
     confirm_order,
     create_purchase_order,
@@ -86,7 +85,6 @@ __all__ = [
     "approved_requests_prefetch",
     "get_approved_reorder_request",
     "SendRefused",
-    "add_business_days",
     "apply_line_quantity",
     "confirm_order",
     "create_purchase_order",

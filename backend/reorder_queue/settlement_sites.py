@@ -545,9 +545,7 @@ class _PyScanner:
         self.lookup_re = re.compile(r"^(%s)(__.+)?$" % "|".join(sorted(anchor.all_fields)))
         self.findings: list[Finding] = []
         self.sites: list[tuple[str, int, str, str]] = []
-        #: Names this module binds through an import, which is how a call to
-        #: another module is told apart from a method call on a local.
-        self.imported: set[str] = self._imported_names()
+        self.imported: dict[str, tuple[str, str | None]] = self._imports()
         #: Dotted names of every class this module declares, so a receiver that
         #: names one — ``PurchaseOrderItem.close_short()`` — can be told apart
         #: from a receiver that merely holds an object.
@@ -558,22 +556,25 @@ class _PyScanner:
 
     # -- helpers ---------------------------------------------------------
 
-    def _imported_names(self) -> set[str]:
-        """Every name this module binds through an import statement.
-
-        ``import x.y`` binds ``x``; ``from a import b as c`` binds ``c``. Used
-        only to answer "could this receiver be another module?" — see
-        :func:`_receiver_root`.
-        """
-        names: set[str] = set()
+    def _imports(self) -> dict[str, tuple[str, str | None]]:
+        """Imported binding -> (module, imported symbol or None)."""
+        bindings: dict[str, tuple[str, str | None]] = {}
+        module_parts = Path(self.rel).with_suffix("").parts
+        if module_parts and module_parts[0] == "backend":
+            module_parts = module_parts[1:]
+        package = list(module_parts[:-1])
         for node in ast.walk(self.tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    names.add(alias.asname or alias.name.split(".")[0])
+                    binding = alias.asname or alias.name.split(".")[0]
+                    module = alias.name if alias.asname else alias.name.split(".")[0]
+                    bindings[binding] = (module, None)
             elif isinstance(node, ast.ImportFrom):
+                parent = package[: len(package) - max(node.level - 1, 0)] if node.level else []
+                module = ".".join(parent + ((node.module or "").split(".") if node.module else []))
                 for alias in node.names:
-                    names.add(alias.asname or alias.name)
-        return names
+                    bindings[alias.asname or alias.name] = (module, alias.name)
+        return bindings
 
     def _class_dotted(self) -> frozenset[str]:
         """Every class in the module, named the way functions in it are named.
@@ -864,7 +865,9 @@ def _ts_units(line: str) -> list[str]:
 #: a member — the start of a line, or just after ``{``, ``,``, ``;`` or ``(`` —
 #: followed by a colon. Anchored on that delimiter so a ternary's
 #: ``cond ? a : b`` is not mistaken for one.
-_TS_PROPERTY_KEY = re.compile(r"(^|[{,;(])(\s*(?:readonly\s+)?[A-Za-z_$][\w$]*\s*\??\s*:)")
+_TS_PROPERTY_KEY = re.compile(
+    r"(^|[{,;(])(\s*(?:readonly\s+)?(?:[A-Za-z_$][\w$]*|(['\"])[^'\"]*\3)\s*\??\s*:)"
+)
 
 
 def _ts_without_keys(unit: str) -> str:
@@ -1072,11 +1075,17 @@ def _write_arm(anchor: Anchor, functions: dict[str, dict]) -> list[Finding]:
     exactly what it is.
 
     """
-    by_name: dict[str, list[str]] = {}
     by_module_and_dotted: dict[tuple[str, str], list[str]] = {}
     for qual, info in functions.items():
-        by_name.setdefault(info["name"], []).append(qual)
         by_module_and_dotted.setdefault((info["module"], info["dotted"]), []).append(qual)
+
+    modules = {info["module"] for info in functions.values()}
+
+    def imported_module(dotted: str) -> str | None:
+        path = dotted.replace(".", "/")
+        suffixes = (f"/{path}.py", f"/{path}/__init__.py")
+        hits = [module for module in modules if (f"/{module}").endswith(suffixes)]
+        return hits[0] if len(hits) == 1 else None
 
     def resolve(caller: str, call: tuple[str, tuple[str, ...] | None]) -> list[str]:
         """The definitions a call could actually reach — never merely same-named.
@@ -1117,15 +1126,39 @@ def _write_arm(anchor: Anchor, functions: dict[str, dict]) -> list[Finding]:
         def declared(dotted: str) -> list[str]:
             return [t for t in by_module_and_dotted.get((module, dotted), ()) if t != caller]
 
-        def across_modules() -> list[str]:
-            return [t for t in by_name.get(name, ()) if t != caller]
+        def imported(
+            binding: str, receiver_tail: tuple[str, ...], *, is_receiver: bool = False
+        ) -> list[str]:
+            import_info = info["imported"].get(binding)
+            if import_info is None:
+                return []
+            base, symbol = import_info
+            if is_receiver:
+                parts = [base]
+                if symbol is not None:
+                    parts.append(symbol)
+                parts.extend(receiver_tail)
+                target_name = name
+            else:
+                if symbol is None:
+                    return []
+                parts = [base]
+                target_name = symbol
+            target_module = imported_module(".".join(part for part in parts if part))
+            if target_module is None:
+                return []
+            return [
+                target
+                for target in by_module_and_dotted.get((target_module, target_name), ())
+                if target != caller
+            ]
 
         if receiver is None:
             for scope in info["scopes"]:
                 hit = declared(f"{scope}.{name}" if scope else name)
                 if hit:
                     return hit
-            return across_modules() if name in info["imported"] else []
+            return imported(name, ())
 
         if not receiver:
             # The chain does not reduce to names at all; nothing to resolve.
@@ -1139,7 +1172,7 @@ def _write_arm(anchor: Anchor, functions: dict[str, dict]) -> list[Finding]:
         if dotted_receiver in info["classes"]:
             return declared(f"{dotted_receiver}.{name}")
 
-        return across_modules() if receiver[0] in info["imported"] else []
+        return imported(receiver[0], receiver[1:], is_receiver=True)
 
     callers: dict[str, set[str]] = {qual: set() for qual in functions}
     for qual, info in functions.items():

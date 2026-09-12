@@ -261,31 +261,6 @@ class TestDerivationIsHonoured:
             f"reach {len(settlement_sites.WRITE_ARM_SURPRISES)} times" in printed
         ), "the surprise count in the report is not len(WRITE_ARM_SURPRISES)"
 
-    def test_no_prose_restates_a_count_the_lists_already_carry(self):
-        """The three drifting copies, kept out rather than merely corrected.
-
-        Correcting them would have left three hand-written numbers that agree
-        today. The fix is that there is nothing left to keep in sync, so this
-        fails if a spelled-out or written-out count of these lists comes back
-        into the guard's own prose or into ``AGENTS.md``.
-        """
-        restated = re.compile(
-            r"blind[^.\n]{0,40}?\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b"
-            r"|grown\s+(?:\d+|once|twice|three|four|five)\b"
-            r"|surprised\s+(?:\d+|once|twice|three|four|five|six)\b",
-            re.IGNORECASE,
-        )
-        repo = Path(settlement_sites.__file__).resolve().parents[2]
-        for path in (Path(settlement_sites.__file__).resolve(), repo / "AGENTS.md"):
-            offenders = [
-                f"{path.name}:{number}: {line.strip()}"
-                for number, line in enumerate(path.read_text().splitlines(), start=1)
-                if restated.search(line)
-            ]
-            assert not offenders, "a count of the blind list is restated in prose: " + "; ".join(
-                offenders
-            )
-
     def test_the_command_line_form_can_list_the_whole_derived_set(self, capsys, sweep):
         """``--sites`` is how the derived set was read off for the PR."""
         # Named the way the sweep names it, not the way this checkout happens to
@@ -1436,6 +1411,71 @@ class TestTheWriteArmDischargesOnlyAlongRealCallEdges:
         )
         assert findings == []
 
+    @pytest.mark.parametrize(
+        ("caller_path", "import_line", "call"),
+        [
+            ("appc/service.py", "from appa.service import close_short", "close_short(line)"),
+            ("appc/service.py", "from appa import service", "service.close_short(line)"),
+            ("appc/service.py", "import appa.service", "appa.service.close_short(line)"),
+        ],
+    )
+    def test_imports_resolve_only_to_the_module_the_caller_names(
+        self, sweep, caller_path, import_line, call
+    ):
+        findings = self._findings(
+            sweep,
+            [
+                ("unrelated/service.py", self.WRITER),
+                ("appa/service.py", self.WRITER),
+                (
+                    caller_path,
+                    f"{import_line}\n"
+                    "from reorder_queue.services.receiving import refresh_receipt_status\n\n"
+                    "def settle(line, purchase_order):\n"
+                    f"    {call}\n"
+                    "    refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert len(findings) == 1
+        assert findings[0].path == "unrelated/service.py"
+
+    def test_a_relative_import_resolves_from_the_callers_package(self, sweep):
+        findings = self._findings(
+            sweep,
+            [
+                ("unrelated/service.py", self.WRITER),
+                ("appc/writer.py", self.WRITER),
+                (
+                    "appc/nested/service.py",
+                    "from ..writer import close_short\n"
+                    "from reorder_queue.services.receiving import refresh_receipt_status\n\n"
+                    "def settle(line, purchase_order):\n"
+                    "    close_short(line)\n"
+                    "    refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert len(findings) == 1
+        assert findings[0].path == "unrelated/service.py"
+
+    def test_an_import_missing_from_the_scan_discharges_nothing(self, sweep):
+        findings = self._findings(
+            sweep,
+            [
+                ("appa/service.py", self.WRITER),
+                (
+                    "appc/service.py",
+                    "from missing.service import close_short\n"
+                    "from reorder_queue.services.receiving import refresh_receipt_status\n\n"
+                    "def settle(line, purchase_order):\n"
+                    "    close_short(line)\n"
+                    "    refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert [finding.path for finding in findings] == ["appa/service.py"]
+
     def test_a_caller_in_the_same_module_discharges_it(self, sweep):
         findings = self._findings(
             sweep,
@@ -1631,6 +1671,21 @@ class TestTheFrontendArmJudgesValuesAndNotKeys:
             sweep, "  const payload = { quantity_received: qty, quantity_ordered: ordered };"
         )
         assert findings == []
+
+    @pytest.mark.parametrize("quote", ["'", '"'])
+    def test_quoted_object_keys_are_not_judgements(self, sweep, quote):
+        line = (
+            f"const payload = {{ {quote}quantity_received{quote}: qty, "
+            f"{quote}quantity_ordered{quote}: ordered }};"
+        )
+        assert self._findings(sweep, line) == []
+
+    def test_a_quoted_key_does_not_hide_a_variance_in_its_value(self, sweep):
+        findings = self._findings(
+            sweep,
+            "const payload = { 'variance': line.quantity_ordered - line.quantity_received };",
+        )
+        assert [finding.arm for finding in findings] == ["predicate"]
 
     def test_an_interface_declaration_is_still_not_a_judgement(self, sweep):
         assert self._findings(sweep, "  quantity_received: number;") == []

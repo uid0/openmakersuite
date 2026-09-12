@@ -620,9 +620,11 @@ class TestTheGuardCoversEveryValue:
             assert anchor.all_fields == value.inputs, anchor.column
             assert anchor.all_fields, f"{anchor.column} is derived from nothing"
 
-    def test_the_tree_bypasses_no_values_derivation(self, sweep):
+    def test_the_available_tree_bypasses_no_values_derivation(self, sweep):
         assert sweep.findings == []
-        assert sweep.swept_whole_tree
+        assert sweep.unreadable == []
+        assert "backend" in sweep.scanned
+        assert sweep.unscanned in ([], ["frontend/src (not present in this checkout)"])
 
     def test_the_report_names_every_value_and_its_re_derivation(self, capsys):
         assert settlement_sites.main([]) == 0

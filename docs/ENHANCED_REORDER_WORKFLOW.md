@@ -14,11 +14,11 @@ The reorder workflow has been significantly enhanced to prevent duplicate reques
 ### 2. **Expected Delivery Date Calculation**
 - **Automatic Calculation**: The date the operator confirmed on the purchase
   order wins; only when the order carries none is the supplier link's quoted
-  lead time used, counted in BUSINESS days from the send date. Those are two
-  different promises — see `LeadTimeLog` — and the fallback is not plain
-  addition. Both branches are pinned by
+  lead time used, counted in calendar days from the send date. Both the published
+  fallback date and supplier delivery scoring use that same unit. The precedence
+  and fallback are pinned by
   `test_the_shown_delivery_date_prefers_the_confirmed_date_over_the_quote` and
-  `test_the_quote_fallback_counts_BUSINESS_days_not_calendar_days` in
+  `test_the_quote_fallback_counts_CALENDAR_days_like_the_thing_that_grades_it` in
   `backend/reorder_queue/tests/test_lead_time_yardstick_is_named.py`.
 - **TV Dashboard Display**: Shows countdown ("Expected in 5 days", "Expected tomorrow", etc.)
 - **Visual Indicators**: Different colors and styling for different reorder statuses
@@ -102,9 +102,8 @@ item.reorder_status                 # Status property: needs_order/pending/appro
 1. Admin approves request and marks as ordered
 2. Status changes to `ordered`
 3. Expected delivery calculated: the order's confirmed `expected_delivery_date`
-   if it has one, else `published_delivery_date(order_date, average_lead_time)` —
-   CALENDAR days, the same unit `LeadTimeLog` grades the delivery in
-   (`inventory/services/lead_times.py`)
+   if it has one, else the calendar-day fallback described in
+   [Expected Delivery Date Calculation](#2-expected-delivery-date-calculation)
 4. TV Dashboard shows "ORDERED - Expected in X days"
 
 ### Scenario 4: Item Delivered

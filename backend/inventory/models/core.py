@@ -802,11 +802,7 @@ class InventoryItem(OwnableModel):
             ordered_request = (
                 self.reorder_requests.filter(status="ordered").order_by("-ordered_at").first()
             )
-        if (
-            ordered_request
-            and ordered_request.ordered_at
-            and self.average_lead_time is not None
-        ):
+        if ordered_request and ordered_request.ordered_at and self.average_lead_time is not None:
             # The SAME derivation the reorder queue publishes as
             # ``ReorderRequest.estimated_delivery`` — two screens answering one
             # question must not count the quote in two units. See

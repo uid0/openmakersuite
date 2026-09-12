@@ -476,7 +476,7 @@ def update_reorder_requests_from_po(purchase_order):
         estimated_delivery = None
         if purchase_order.expected_delivery_date:
             estimated_delivery = purchase_order.expected_delivery_date
-        elif po_item.item_supplier.average_lead_time:
+        else:
             # CALENDAR days, through the one derivation in
             # ``inventory.services.lead_times`` — see its module docstring. This
             # used to count the quote in BUSINESS days, so the date shown to the

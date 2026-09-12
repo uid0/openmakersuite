@@ -95,6 +95,23 @@ def test_a_delivery_on_the_published_date_is_recorded_on_time():
     assert log.was_early is False
 
 
+def test_a_zero_day_quote_publishes_and_scores_the_order_date():
+    po_item, request = _ordered_line(quote=0, primary=True)
+
+    assert request.estimated_delivery is not None
+    assert request.estimated_delivery == MONDAY.date()
+
+    item = po_item.item_supplier.item
+    item.refresh_from_db()
+    assert item.get_expected_delivery_date() == MONDAY.date()
+
+    create_lead_time_log(po_item, request.estimated_delivery)
+
+    log = LeadTimeLog.objects.get(purchase_order=po_item.purchase_order)
+    assert log.variance_days == 0
+    assert log.was_late is False
+
+
 def test_a_delivery_a_day_before_the_published_date_is_recorded_early():
     po_item, request = _ordered_line()
 

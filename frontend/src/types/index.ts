@@ -1072,10 +1072,8 @@ export interface LowStockAlert {
   item_id: string;
   name: string;
   /**
-   * `current` and `minimum` are a COMPARABLE pair, both counted in `unit` —
-   * the unit the material is counted in, which is what this surface is about.
-   * For a pack-counting item that is whole packs ("2/10 case"), not the base
-   * count against a pack threshold, which rendered an uncomparable "24/10".
+   * `current` and `minimum` are a comparable pair, both counted in `unit`.
+   * See `check_material_stock`'s docstring, which owns the wire contract.
    */
   current: number;
   minimum: number;

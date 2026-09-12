@@ -1,6 +1,6 @@
 from django.urls import include, path
 
-from rest_framework.routers import DefaultRouter
+from config.routers import ApiRouter
 
 from .views import (
     AccountViewSet,
@@ -9,7 +9,7 @@ from .views import (
     TrialBalanceView,
 )
 
-router = DefaultRouter()
+router = ApiRouter()
 router.register(r"accounts", AccountViewSet, basename="account")
 
 urlpatterns = [

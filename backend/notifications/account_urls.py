@@ -5,11 +5,11 @@ Mounted at ``/api/account/`` so the endpoints resolve to
 ``/api/account/devices/revoke-all/`` (the "this wasn't me" action).
 """
 
-from rest_framework.routers import DefaultRouter
+from config.routers import ApiRouter
 
 from .account_views import KnownDeviceViewSet
 
-router = DefaultRouter()
+router = ApiRouter()
 router.register(r"devices", KnownDeviceViewSet, basename="account-device")
 
 urlpatterns = router.urls

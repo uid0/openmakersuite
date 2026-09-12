@@ -47,6 +47,11 @@ The rest of this file applies to both agents.
   matching the existing constraints in `inventory/` and `reorder_queue/`.
 - Use `python manage.py startapp` to create new apps within your project
 - Keep models in `models.py` and register them in `admin.py` for admin interface
+- **Register viewsets on `config.routers.ApiRouter`, never `DefaultRouter`**:
+  `ApiRouter` disables DRF's `.<format>` route duplicates so routed actions do
+  not receive an unexpected `format=` keyword. The rationale and compatibility
+  boundary live in `config/routers.py`; `config/tests/test_format_suffix_routes.py`
+  guards the convention.
 - **A new DRF `@action` fails CI until the permission matrix is refreshed**: `config/tests/test_permission_matrix.py` introspects the live URL conf and fails when `backend/config/api_permission_matrix.yaml` drifts from it. [`docs/API_PERMISSION_MATRIX.md`](docs/API_PERMISSION_MATRIX.md) owns the regeneration command and the table row each endpoint needs.
 - Use Django's ORM instead of raw SQL queries
 - Avoid N+1 queries with `select_related` and `prefetch_related`:

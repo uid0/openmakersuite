@@ -1,6 +1,6 @@
 from django.urls import path
 
-from rest_framework.routers import DefaultRouter
+from config.routers import ApiRouter
 
 from .views import (
     ProjectStorageStintViewSet,
@@ -9,7 +9,7 @@ from .views import (
     StorageSlotViewSet,
 )
 
-router = DefaultRouter()
+router = ApiRouter()
 router.register(r"stints", ProjectStorageStintViewSet, basename="project-storage-stints")
 router.register(r"slots", StorageSlotViewSet, basename="project-storage-slots")
 router.register(r"assignments", StorageAssignmentViewSet, basename="project-storage-assignments")

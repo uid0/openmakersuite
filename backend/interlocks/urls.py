@@ -10,11 +10,11 @@ Registered at the router root so the viewset lives directly under
 * ``/api/interlocks/commands/{id}/report/``      Pi executor result ingest
 """
 
-from rest_framework.routers import DefaultRouter
+from config.routers import ApiRouter
 
 from .views import InterlockViewSet
 
-router = DefaultRouter()
+router = ApiRouter()
 router.register(r"", InterlockViewSet, basename="interlock")
 
 urlpatterns = router.urls

@@ -2,7 +2,7 @@
 
 from django.urls import include, path
 
-from rest_framework.routers import DefaultRouter
+from config.routers import ApiRouter
 
 from .views import (
     AssetWarrantyViewSet,
@@ -16,7 +16,7 @@ from .views import (
     asset_wo_status,
 )
 
-router = DefaultRouter()
+router = ApiRouter()
 router.register(r"work-orders", ThirdPartyWorkOrderViewSet, basename="third-party-work-order")
 router.register(
     r"asset-links",

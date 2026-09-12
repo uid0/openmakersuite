@@ -4,7 +4,7 @@ URL configuration for reorder queue app.
 
 from django.urls import include, path
 
-from rest_framework.routers import DefaultRouter
+from config.routers import ApiRouter
 
 from .views import (
     AnalyticsViewSet,
@@ -15,7 +15,7 @@ from .views import (
     WebHookViewSet,
 )
 
-router = DefaultRouter()
+router = ApiRouter()
 router.register(r"requests", ReorderRequestViewSet)
 router.register(r"purchase-orders", PurchaseOrderViewSet)
 router.register(r"receipts", OrderReceiptViewSet)

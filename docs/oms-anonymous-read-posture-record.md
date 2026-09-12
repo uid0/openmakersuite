@@ -155,12 +155,10 @@ Two floors keep a future green run honest:
 actually built and at least **50** routes answering **200**, so a change that
 quietly makes most routes unfillable fails rather than passes.
 
-**Reported and deliberately NOT fixed here:** an `@action` whose signature omits
-`format=None` raises `TypeError` (a 500) on its DRF format-suffix route —
-`items/low_stock.json` and about a dozen others. Pre-existing, unrelated to
-vendor exposure, discloses nothing, and every one has a suffix-less twin the
-crawl does fetch and search. It is pinned as an exact allowed set, not ignored,
-so a NEW exception class still fails.
+The previously tolerated DRF format-suffix exception is now closed. The crawl's
+contract is `exceptions == set()`: no route may raise. `config/routers.py` owns
+the suffix-routing decision and its rationale;
+`config/tests/test_format_suffix_routes.py` guards it.
 
 ## Vacuous checks, in three shapes
 

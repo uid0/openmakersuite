@@ -4,7 +4,7 @@ URL configuration for donations app.
 
 from django.urls import include, path
 
-from rest_framework.routers import DefaultRouter
+from config.routers import ApiRouter
 
 from .views import (
     DispositionViewSet,
@@ -16,7 +16,7 @@ from .views import (
     upload_signature,
 )
 
-router = DefaultRouter()
+router = ApiRouter()
 router.register(r"donations", DonationViewSet, basename="donation")
 router.register(r"donation-items", DonationItemViewSet, basename="donation-item")
 router.register(r"dispositions", DispositionViewSet, basename="disposition")

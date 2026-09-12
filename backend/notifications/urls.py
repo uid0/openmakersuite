@@ -4,11 +4,11 @@ URL configuration for notifications app.
 
 from django.urls import include, path
 
-from rest_framework.routers import DefaultRouter
+from config.routers import ApiRouter
 
 from .views import NotificationPreferenceView, NotificationViewSet
 
-router = DefaultRouter()
+router = ApiRouter()
 router.register(r"", NotificationViewSet, basename="notification")
 
 urlpatterns = [

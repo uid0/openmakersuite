@@ -4,7 +4,7 @@ URL configuration for membership and SIG management API.
 
 from django.urls import include, path
 
-from rest_framework.routers import DefaultRouter
+from config.routers import ApiRouter
 
 from .views import (
     InviteCodeViewSet,
@@ -20,7 +20,7 @@ from .views import (
     validate_registration_token,
 )
 
-router = DefaultRouter()
+router = ApiRouter()
 router.register(r"sigs", SIGViewSet, basename="sig")
 router.register(r"sigs/(?P<sig_pk>\d+)/members", SIGMemberViewSet, basename="sig-member")
 router.register(r"sig-admins", SIGAdminViewSet, basename="sig-admin")

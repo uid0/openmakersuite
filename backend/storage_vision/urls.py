@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from django.urls import include, path
 
-from rest_framework.routers import DefaultRouter
+from config.routers import ApiRouter
 
 from .views import (
     VisionAreaViewSet,
@@ -16,7 +16,7 @@ from .views import (
 
 app_name = "storage_vision"
 
-router = DefaultRouter()
+router = ApiRouter()
 router.register(r"areas", VisionAreaViewSet, basename="area")
 router.register(r"slots", VisionSlotViewSet, basename="slot")
 router.register(r"cameras", VisionCameraViewSet, basename="camera")

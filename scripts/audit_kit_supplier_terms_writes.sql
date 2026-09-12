@@ -55,30 +55,36 @@ GROUP BY i.id, i.sku, s.name, isup.quantity_per_package
 HAVING max(ph.quantity_per_package) > 1
 ORDER BY last_history_row DESC;
 
--- (3) THE FABRICATED PRICE ROWS — identifiable by the same trace.
+-- (3) CANDIDATE FABRICATED PRICE ROWS — review the trace.
 -- A reset pack size re-derived the case price and filed a PriceHistory row for
--- a price nobody quoted. Those rows read as history: they sit at pack size 1
--- with unit_cost = package_cost, immediately after a row at a larger pack size
--- on the same link.
+-- a price nobody quoted. Candidate rows sit at pack size 1 with unit_cost =
+-- package_cost, immediately after a row at a larger pack size on the same link.
+-- That trace cannot prove whether the change was deliberate, so every result
+-- needs operator review.
+WITH ordered_history AS (
+    SELECT
+        ph.*,
+        lag(ph.quantity_per_package) OVER (
+            PARTITION BY ph.item_supplier_id
+            ORDER BY ph.recorded_at, ph.id
+        ) AS previous_quantity_per_package
+    FROM inventory_pricehistory ph
+)
 SELECT
     i.sku            AS kit_sku,
     s.name           AS supplier,
-    ph.id            AS price_history_id,
+    ph.id            AS candidate_price_history_id,
     ph.recorded_at,
     ph.unit_cost,
     ph.package_cost,
     ph.quantity_per_package,
     ph.change_type
-FROM inventory_pricehistory ph
+FROM ordered_history ph
 JOIN inventory_itemsupplier isup ON isup.id = ph.item_supplier_id
 JOIN inventory_inventoryitem i ON i.id = isup.item_id AND i.is_kit
 JOIN inventory_supplier s ON s.id = isup.supplier_id
 WHERE ph.quantity_per_package = 1
   AND ph.unit_cost IS NOT NULL
   AND ph.unit_cost = ph.package_cost
-  AND EXISTS (
-      SELECT 1 FROM inventory_pricehistory earlier
-       WHERE earlier.item_supplier_id = ph.item_supplier_id
-         AND earlier.recorded_at < ph.recorded_at
-         AND earlier.quantity_per_package > 1)
+  AND ph.previous_quantity_per_package > 1
 ORDER BY ph.recorded_at DESC;

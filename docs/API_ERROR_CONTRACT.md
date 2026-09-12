@@ -48,6 +48,26 @@ The table above is every code the exception handler can produce: `_classify` res
 | ---- | --------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- | --------- |
 | 400  | `no_line_items` | `POST /api/reorders/purchase-orders/{id}/send_to_supplier/` | The order carries no line item to order, so it may not go to the supplier. Add one and retry.  | Absent.   |
 | 400  | `not_draft`     | `POST /api/reorders/purchase-orders/{id}/send_to_supplier/` | The order is not a draft; only a draft can be sent. The message names the order and its status. | Absent.   |
+| 400  | `not_draft`     | `POST /api/reorders/purchase-orders/{id}/items/`            | Lines may only be added while the order is a draft. The message names the order and its status. | Absent.   |
+| 400  | `not_found`     | `POST /api/reorders/purchase-orders/{id}/items/`            | The named `item_supplier` or `asset` does not exist.                                            | Absent.   |
+| 400  | `supplier_mismatch` | `POST /api/reorders/purchase-orders/{id}/items/`        | The row (or the asset's manufacturer) belongs to a different supplier than this order's.        | Absent.   |
+| 400  | `not_supplied`  | `POST /api/reorders/purchase-orders/{id}/items/`            | The identifier names an item this order's supplier does not supply at all.                      | Absent.   |
+| 400  | `discontinued`  | `POST /api/reorders/purchase-orders/{id}/items/`            | The supplier supplied the item once and no longer does.                                         | Absent.   |
+| 400  | `multiple_unavailable` | `POST /api/reorders/purchase-orders/{id}/items/`     | The identifier matches several items, unavailable for a mix of the two reasons above.           | Absent.   |
+| 400  | `no_match`      | `POST /api/reorders/purchase-orders/{id}/items/`            | The identifier matches nothing this supplier carries.                                           | Absent.   |
+| 400  | `empty_identifier` | `POST /api/reorders/purchase-orders/{id}/items/`         | The identifier was blank once trimmed, so there was nothing to resolve.                          | Absent.   |
+| 400  | `line_voided`   | `POST /api/reorders/purchase-orders/{id}/items/`            | The order already carries a VOIDED line for this target; a void is not silently resurrected.     | Absent.   |
+| 400  | `price_conflict` | `POST /api/reorders/purchase-orders/{id}/items/`           | Growing an existing asset/freeform line at a different `unit_cost` than it already carries.      | Absent.   |
+| 400  | `no_unit_cost`  | `POST /api/reorders/purchase-orders/{id}/items/`            | No price was supplied and none can be derived (asset and freeform lines have no price to fall back on). | Absent. |
+| 400  | `invalid_quantity` / `invalid_unit_cost` / `invalid_description` | `POST /api/reorders/purchase-orders/{id}/items/` | A supplied value is not a usable quantity, price, or description.               | Absent.   |
+| 400  | `work_order_conflict` / `owning_group_conflict` | `POST /api/reorders/purchase-orders/{id}/items/` | The existing line already carries a different work order / committee than the request names. | Absent. |
+| 400  | `work_order_not_found` / `group_not_found` | `POST /api/reorders/purchase-orders/{id}/items/` | The line-level `work_order` / `owning_group` id does not resolve.                  | Absent.   |
+| 409  | `ambiguous`     | `POST /api/reorders/purchase-orders/{id}/items/`            | The identifier matches several items this supplier carries; the server will not pick one.       | `{"candidates": [...]}` — the choice set, strongest match first, capped at 20. |
+| 400  | `not_draft`     | `DELETE /api/reorders/purchase-orders/{id}/items/{item_id}/` | The supplier holds a copy (or the order is closed); the message names void as the alternative.  | Absent.   |
+| 400  | `line_received` | `DELETE /api/reorders/purchase-orders/{id}/items/{item_id}/` | The line records a received quantity, so it is not destroyed. The message names the quantity.   | Absent.   |
+| 503  | `weather_not_configured` | `GET /api/screens/weather/current/`               | `OPENWEATHER_API_KEY` or the location settings are unset. Operator-fixable; the message says which. | Absent. |
+| 502  | `weather_upstream` | `GET /api/screens/weather/current/`                     | OpenWeather answered with a non-2xx.                                                            | Absent.   |
+| 502  | `weather_unreachable` | `GET /api/screens/weather/current/`                  | OpenWeather could not be reached at all.                                                        | Absent.   |
 
 The same "no line items" refusal on `PATCH /api/reorders/purchase-orders/{id}/` — where setting `status` to `sent`, or attaching a `sales_order_number` to a draft, also sends the order — is **raised** rather than composed, so it arrives under the generic `validation_failed` with that same sentence in `error.message`. A client must not key this refusal on the code alone.
 
@@ -73,8 +93,15 @@ raise TaskQueued(detail={"task_id": task.id})
 
 Existing endpoints that return their own ad-hoc shapes (e.g. `Response({"detail": "..."}, status=400)`) are unaffected — only **raised** exceptions hit the standardized handler. Migrations from ad-hoc shapes to the envelope are scoped per endpoint and tracked alongside the owning AC.
 
+Two ad-hoc shapes have existed here, and only one of them is a silent drift risk:
+
+- `Response({"error": "<prose>"})` — a bare sentence, no code. A client that only knows the envelope falls back to `error.message`, finds nothing, and shows whatever it has. Most unconverted endpoints are this one.
+- `Response({"error": "<prose>", "code": "<code>"})` — the envelope's own two fields, one level too shallow. This is the worse shape, because the endpoint HAS composed a branchable code and an operator-facing sentence and the client still cannot read either: `error` is a string where a client expects an object, so `error.code` and `error.message` both come back empty and the whole raw body ends up in front of the operator.
+
+No endpoint returns the second shape any more. The line endpoints and the kiosk weather proxy in the table above were its last users; the codes came across unchanged, so a client already branching on `not_draft` or `weather_not_configured` still finds it — one level in, at `error.code`.
+
 ## Tests
 
 `backend/config/tests/test_api_errors.py` mounts a throwaway router and exercises every code in the [Codes](#codes) table end-to-end through DRF's dispatch path (URL routing → permission check → throttle → action → exception handler). Adding a code to that table requires extending both the constants in `config.api_errors.ErrorCode` and a test in this file.
 
-An [endpoint-specific code](#endpoint-specific-codes) is pinned by the owning endpoint's own tests instead — `reorder_queue/tests/test_send_requires_lines.py` for the two above — and must be added to that table so a client can find it.
+An [endpoint-specific code](#endpoint-specific-codes) is pinned by the owning endpoint's own tests instead — `reorder_queue/tests/test_send_requires_lines.py` for the send codes, `reorder_queue/tests/test_po_line_error_envelope.py` for the line endpoints' wire shape, `screens/tests/test_weather.py` for the kiosk proxy — and must be added to that table so a client can find it.

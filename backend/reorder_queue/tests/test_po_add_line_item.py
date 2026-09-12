@@ -388,8 +388,8 @@ def test_adding_an_item_this_supplier_does_not_carry_is_rejected_by_identifier(
     response = add_line(staff_client, draft_po, {"identifier": "BD-M5"})
 
     assert response.status_code == 400
-    assert response.json()["code"] == "not_supplied"
-    assert "Acme Fasteners does not supply M5 carriage bolt" in response.json()["error"]
+    assert response.json()["error"]["code"] == "not_supplied"
+    assert "Acme Fasteners does not supply M5 carriage bolt" in response.json()["error"]["message"]
     assert not PurchaseOrderItem.objects.filter(purchase_order=draft_po).exists()
 
 
@@ -489,8 +489,8 @@ def test_a_rival_identifier_for_an_item_this_supplier_dropped_says_discontinued(
     response = add_line(staff_client, draft_po, {"identifier": "998877665544"})
 
     assert response.status_code == 400
-    assert response.json()["code"] == "discontinued"
-    assert "no longer supplies M3 hex bolt" in response.json()["error"]
+    assert response.json()["error"]["code"] == "discontinued"
+    assert "no longer supplies M3 hex bolt" in response.json()["error"]["message"]
     assert not PurchaseOrderItem.objects.filter(purchase_order=draft_po).exists()
 
 
@@ -510,8 +510,8 @@ def test_a_rival_identifier_for_an_item_this_supplier_never_carried_still_refuse
     response = add_line(staff_client, draft_po, {"identifier": "111122223333"})
 
     assert response.status_code == 400
-    assert response.json()["code"] == "not_supplied"
-    assert "Acme Fasteners does not supply M5 carriage bolt" in response.json()["error"]
+    assert response.json()["error"]["code"] == "not_supplied"
+    assert "Acme Fasteners does not supply M5 carriage bolt" in response.json()["error"]["message"]
     assert not PurchaseOrderItem.objects.filter(purchase_order=draft_po).exists()
 
 
@@ -536,9 +536,9 @@ def test_a_multi_match_not_supplied_refusal_counts_instead_of_naming_one(
 
     assert response.status_code == 400
     body = response.json()
-    assert body["code"] == "not_supplied"
-    assert "matches 25 items Acme Fasteners does not supply" in body["error"]
-    assert "gizmo 000 is one of them" in body["error"]
+    assert body["error"]["code"] == "not_supplied"
+    assert "matches 25 items Acme Fasteners does not supply" in body["error"]["message"]
+    assert "gizmo 000 is one of them" in body["error"]["message"]
     assert not PurchaseOrderItem.objects.filter(purchase_order=draft_po).exists()
 
 
@@ -557,8 +557,8 @@ def test_a_client_cannot_bypass_the_supplier_check_with_a_raw_item_supplier_id(
     response = add_line(staff_client, draft_po, {"item_supplier": foreign.pk})
 
     assert response.status_code == 400
-    assert response.json()["code"] == "supplier_mismatch"
-    error = response.json()["error"]
+    assert response.json()["error"]["code"] == "supplier_mismatch"
+    error = response.json()["error"]["message"]
     assert "Acme Fasteners does not supply M5 carriage bolt" in error
     assert "Bolt Depot" in error
     assert not PurchaseOrderItem.objects.filter(purchase_order=draft_po).exists()
@@ -572,16 +572,16 @@ def test_adding_a_discontinued_relationship_is_rejected(staff_client, draft_po, 
     response = add_line(staff_client, draft_po, {"item_supplier": bolt.pk})
 
     assert response.status_code == 400
-    assert response.json()["code"] == "discontinued"
-    assert "no longer supplies M3 hex bolt" in response.json()["error"]
+    assert response.json()["error"]["code"] == "discontinued"
+    assert "no longer supplies M3 hex bolt" in response.json()["error"]["message"]
 
 
 def test_an_identifier_matching_nothing_is_rejected(staff_client, draft_po, bolt):
     response = add_line(staff_client, draft_po, {"identifier": "not-a-thing"})
 
     assert response.status_code == 400
-    assert response.json()["code"] == "no_match"
-    assert "Acme Fasteners" in response.json()["error"]
+    assert response.json()["error"]["code"] == "no_match"
+    assert "Acme Fasteners" in response.json()["error"]["message"]
 
 
 def test_an_ambiguous_identifier_returns_the_choice_set_instead_of_guessing(
@@ -598,8 +598,11 @@ def test_an_ambiguous_identifier_returns_the_choice_set_instead_of_guessing(
 
     assert response.status_code == 409
     body = response.json()
-    assert body["code"] == "ambiguous"
-    assert {c["item_supplier"] for c in body["candidates"]} == {bolt.pk, sibling.pk}
+    assert body["error"]["code"] == "ambiguous"
+    assert {c["item_supplier"] for c in body["error"]["details"]["candidates"]} == {
+        bolt.pk,
+        sibling.pk,
+    }
     assert not PurchaseOrderItem.objects.filter(purchase_order=draft_po).exists()
 
 
@@ -642,8 +645,8 @@ def test_adding_to_a_non_draft_order_is_rejected(staff_client, draft_po, bolt, p
     response = add_line(staff_client, draft_po, {"identifier": "ACME-M3-100"})
 
     assert response.status_code == 400
-    assert response.json()["code"] == "not_draft"
-    assert PurchaseOrder.Status(po_status).label in response.json()["error"]
+    assert response.json()["error"]["code"] == "not_draft"
+    assert PurchaseOrder.Status(po_status).label in response.json()["error"]["message"]
     assert not PurchaseOrderItem.objects.filter(purchase_order=draft_po).exists()
 
 
@@ -654,7 +657,7 @@ def test_the_draft_guard_runs_before_the_lookup(staff_client, draft_po):
 
     response = add_line(staff_client, draft_po, {"identifier": "whatever"})
 
-    assert response.json()["code"] == "not_draft"
+    assert response.json()["error"]["code"] == "not_draft"
 
 
 # --------------------------------------------------------------------------
@@ -757,8 +760,8 @@ def test_re_adding_a_voided_line_is_refused_with_a_clear_message(
     response = add_line(staff_client, draft_po, {"item_supplier": bolt.pk})
 
     assert response.status_code == 400
-    assert response.json()["code"] == "line_voided"
-    assert "M3 hex bolt" in response.json()["error"]
+    assert response.json()["error"]["code"] == "line_voided"
+    assert "M3 hex bolt" in response.json()["error"]["message"]
     line.refresh_from_db()
     assert line.quantity_ordered == 4
     assert PurchaseOrderItem.objects.filter(purchase_order=draft_po).count() == 1
@@ -966,14 +969,14 @@ def test_a_work_order_clashing_with_the_lines_own_is_refused_and_changes_nothing
 
     assert response.status_code == 400
     body = response.json()
-    assert body["code"] == "work_order_conflict"
-    assert str(original) in body["error"]
-    assert str(other) in body["error"]
+    assert body["error"]["code"] == "work_order_conflict"
+    assert str(original) in body["error"]["message"]
+    assert str(other) in body["error"]["message"]
     # Only remedies that exist: (purchase_order, item_supplier) is unique, so
     # "put it on its own line for the other job" is not one of them.
-    assert "on its own line" not in body["error"]
-    assert "Clear this line's work order first" in body["error"]
-    assert "separate purchase order" in body["error"]
+    assert "on its own line" not in body["error"]["message"]
+    assert "Clear this line's work order first" in body["error"]["message"]
+    assert "separate purchase order" in body["error"]["message"]
 
     line = PurchaseOrderItem.objects.get(purchase_order=draft_po)
     assert line.work_order_id == original.id
@@ -999,12 +1002,12 @@ def test_a_committee_clashing_with_the_lines_own_is_refused_and_changes_nothing(
 
     assert response.status_code == 400
     body = response.json()
-    assert body["code"] == "owning_group_conflict"
-    assert "Woodshop" in body["error"]
-    assert "Metal shop" in body["error"]
-    assert "on its own line" not in body["error"]
-    assert "Clear this line's committee first" in body["error"]
-    assert "separate purchase order" in body["error"]
+    assert body["error"]["code"] == "owning_group_conflict"
+    assert "Woodshop" in body["error"]["message"]
+    assert "Metal shop" in body["error"]["message"]
+    assert "on its own line" not in body["error"]["message"]
+    assert "Clear this line's committee first" in body["error"]["message"]
+    assert "separate purchase order" in body["error"]["message"]
 
     line = PurchaseOrderItem.objects.get(purchase_order=draft_po)
     assert line.owning_group_id == original.pk
@@ -1146,8 +1149,10 @@ def test_a_multi_match_discontinued_refusal_counts_past_the_cap(staff_client, dr
     response = add_line(staff_client, draft_po, {"identifier": "relic"})
 
     assert response.status_code == 400
-    assert response.json()["code"] == "discontinued"
-    assert "matches 25 items Acme Fasteners no longer supplies" in response.json()["error"]
+    assert response.json()["error"]["code"] == "discontinued"
+    assert (
+        "matches 25 items Acme Fasteners no longer supplies" in response.json()["error"]["message"]
+    )
 
 
 def test_a_mixed_reason_refusal_does_not_name_one_incidental_item(staff_client, draft_po, supplier):
@@ -1181,8 +1186,8 @@ def test_a_mixed_reason_refusal_does_not_name_one_incidental_item(staff_client, 
     body = response.json()
     # A set spanning both reasons has no single true one, and `code` is what a
     # non-browser client branches on — `discontinued` would be a lie for 25/26.
-    assert body["code"] == "multiple_unavailable"
-    error = body["error"]
+    assert body["error"]["code"] == "multiple_unavailable"
+    error = body["error"]["message"]
     assert "widget 001 is one of them" in error
     assert "matches 26 items" in error
     assert "no longer supplies 1 of them" in error
@@ -1259,11 +1264,11 @@ def test_the_ambiguity_message_counts_matches_not_the_capped_list(staff_client, 
 
     assert response.status_code == 409
     body = response.json()
-    assert body["code"] == "ambiguous"
-    assert "matches 25 items" in body["error"]
+    assert body["error"]["code"] == "ambiguous"
+    assert "matches 25 items" in body["error"]["message"]
     # The operator is told the offered choice set is only part of the matches.
-    assert "The first 20" in body["error"]
-    assert len(body["candidates"]) == 20
+    assert "The first 20" in body["error"]["message"]
+    assert len(body["error"]["details"]["candidates"]) == 20
 
 
 # --------------------------------------------------------------------------

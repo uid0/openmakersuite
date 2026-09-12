@@ -2384,6 +2384,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         silently dropped or silently reassigned. See
         :func:`reorder_queue.services.line_entry.add_line_item`.
 
+        EVERY one of those refusals answers in the STANDARDIZED envelope
+        (``config.api_errors``) — the code above sits at ``error.code``, the
+        operator-facing sentence at ``error.message``, and ``ambiguous``'s
+        choice set at ``error.details.candidates``. See :meth:`_line_refusal`
+        for why, and ``send_to_supplier`` for the sibling that answers
+        ``not_draft`` the same way.
+
         Returns the created/updated line, what matched, and the **full**
         refreshed purchase order so the caller can patch its view in place
         (docs/REACTIVE_MUTATIONS.md).
@@ -2436,11 +2443,17 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     **shared,
                 )
         except services.LineEntryError as exc:
-            payload = {"error": exc.message, "code": exc.code}
+            # The STANDARDIZED envelope (``config.api_errors``), same as
+            # ``send_to_supplier`` and the delete mirror below — see
+            # :meth:`_line_refusal`. The choice set rides in ``error.details``
+            # because that is where the envelope puts machine-readable hints.
             if exc.code == "ambiguous":
-                payload["candidates"] = exc.candidates
-                return Response(payload, status=status.HTTP_409_CONFLICT)
-            return Response(payload, status=status.HTTP_400_BAD_REQUEST)
+                return self._line_refusal(
+                    exc,
+                    details={"candidates": exc.candidates},
+                    status_code=status.HTTP_409_CONFLICT,
+                )
+            return self._line_refusal(exc)
 
         record_audit_event(
             action=PurchaseOrderAuditEvent.Action.PO_LINE_ADD,
@@ -2495,6 +2508,34 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 ).data,
             },
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    def _line_refusal(self, exc, *, details=None, status_code=status.HTTP_400_BAD_REQUEST):
+        """One ``LineEntryError`` -> one STANDARDIZED envelope, for every line door.
+
+        ``config.api_errors`` is this project's error contract and every client
+        in front of the API already reads it: ScanTTY's ``parseError`` takes
+        ``error.code``/``error.message`` off the envelope, and the web app's
+        ``extractErrorMessage`` reads ``error.message`` before anything else.
+        The hand-built ``{"error": "<prose>", "code": "<code>"}`` these doors
+        used to write is not that shape, so the terminal fell through to
+        printing the WHOLE RAW BODY — the remedy sentence did reach the
+        operator, but as JSON, at the step where they most need to act on it.
+
+        ``code`` and ``message`` are the exception's own, unchanged: this makes
+        the reason legible, it does not reword the reason. The codes are also
+        unchanged, so a client already branching on ``not_draft`` or
+        ``price_conflict`` still finds it — one level in.
+
+        One helper rather than a per-door literal, because a second hand-built
+        copy is exactly how ``add_item`` and ``send_to_supplier`` came to answer
+        the SAME ``not_draft`` in two different shapes (#1054).
+        """
+        return error_response(
+            code=exc.code,
+            message=exc.message,
+            details=details,
+            status_code=status_code,
         )
 
     def _resolve_optional_work_order(self, work_order_id):
@@ -2899,27 +2940,21 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         try:
             services.assert_deletable(purchase_order)
         except services.LineEntryError as exc:
-            return Response(
-                {"error": exc.message, "code": exc.code},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return self._line_refusal(exc)
 
         # After the pre-send guard on purpose: an order the supplier already
         # holds gets told to void, which is the answer to the question it was
         # actually asked.
         if line_item.quantity_received > 0:
-            return Response(
-                {
-                    "error": (
-                        f"This line records {line_item.quantity_received} received, so it "
-                        f"cannot be deleted. A receipt on an order the supplier has not "
-                        f"been sent means the quantity was entered outside the ordinary "
-                        f"receiving flow — correct the received quantity to 0 first, then "
-                        f"delete the line."
-                    ),
-                    "code": "line_received",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+            return error_response(
+                code="line_received",
+                message=(
+                    f"This line records {line_item.quantity_received} received, so it "
+                    f"cannot be deleted. A receipt on an order the supplier has not "
+                    f"been sent means the quantity was entered outside the ordinary "
+                    f"receiving flow — correct the received quantity to 0 first, then "
+                    f"delete the line."
+                ),
             )
 
         # Recorded BEFORE the delete, and describing the line in full. The FK is

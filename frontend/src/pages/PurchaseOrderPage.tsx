@@ -37,7 +37,11 @@ import {
 } from '../utils/associations';
 import { formatDateOnly, formatYmd, utcYmd, ymdToUtcDateTime } from '../utils/dates';
 import { confirmAction, promptInput, showError, showSuccess } from '../utils/dialogs';
-import { extractErrorMessage } from '../utils/extractErrorMessage';
+import {
+  extractErrorCode,
+  extractErrorDetails,
+  extractErrorMessage,
+} from '../utils/extractErrorMessage';
 import {
   freightTermsLabel,
   paymentScheduleSummary,
@@ -1446,13 +1450,19 @@ const PurchaseOrderPage: React.FC = () => {
       // Shared by decision: a page-level toast, not a per-control slot.
       showSuccess(created ? `Added ${itemName}` : `Updated ${itemName}`);
     } catch (err: any) {
-      const data = err?.response?.data;
-      const message =
-        typeof data?.error === 'string'
-          ? data.error
-          : extractErrorMessage(err, 'Failed to add line item');
+      // The add endpoint refuses in the STANDARDIZED envelope
+      // (backend/config/api_errors.py): the operator-facing sentence at
+      // ``error.message`` and the branchable code at ``error.code``, with
+      // ambiguity's choice set under ``error.details.candidates``. Both
+      // readers tolerate the older flat body too, so this page renders a
+      // refusal the same way either side of the #330 conversion.
+      const message = extractErrorMessage(err, 'Failed to add line item');
+      const details = extractErrorDetails(err) ?? err?.response?.data;
+      const rawCandidates = (details as { candidates?: unknown } | undefined)?.candidates;
       const candidates =
-        data?.code === 'ambiguous' && Array.isArray(data.candidates) ? data.candidates : undefined;
+        extractErrorCode(err) === 'ambiguous' && Array.isArray(rawCandidates)
+          ? (rawCandidates as PurchaseOrderLineCandidate[])
+          : undefined;
       setAddLineFormState(source, { kind: 'refused', message, candidates });
     } finally {
       setAddingLine(false);

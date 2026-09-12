@@ -140,8 +140,8 @@ def test_an_asset_from_another_manufacturer_is_refused(staff_client, draft_po):
 
     assert response.status_code == 400
     body = response.json()
-    assert body["code"] == "supplier_mismatch"
-    assert "Rival Tooling" in body["error"]
+    assert body["error"]["code"] == "supplier_mismatch"
+    assert "Rival Tooling" in body["error"]["message"]
     assert not PurchaseOrderItem.objects.filter(purchase_order=draft_po).exists()
 
 
@@ -162,7 +162,7 @@ def test_an_unknown_asset_id_is_a_clean_refusal(staff_client, draft_po):
     )
 
     assert response.status_code == 400
-    assert response.json()["code"] == "not_found"
+    assert response.json()["error"]["code"] == "not_found"
 
 
 @pytest.mark.parametrize(
@@ -222,9 +222,9 @@ def test_re_adding_an_asset_at_a_different_price_is_refused(staff_client, draft_
 
     assert response.status_code == 400
     body = response.json()
-    assert body["code"] == "price_conflict"
-    assert "149" in body["error"]
-    assert "1.00" in body["error"]
+    assert body["error"]["code"] == "price_conflict"
+    assert "149" in body["error"]["message"]
+    assert "1.00" in body["error"]["message"]
 
     assert PurchaseOrderItem.objects.filter(purchase_order=draft_po).count() == 1
     line = PurchaseOrderItem.objects.get(purchase_order=draft_po)
@@ -243,7 +243,7 @@ def test_a_voided_asset_line_is_refused_rather_than_resurrected(staff_client, dr
     response = add_line(staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "10.00"})
 
     assert response.status_code == 400
-    assert response.json()["code"] == "line_voided"
+    assert response.json()["error"]["code"] == "line_voided"
 
 
 # --------------------------------------------------------------------------
@@ -316,7 +316,7 @@ def test_no_shape_may_be_added_to_a_sent_order(staff_client, draft_po, acme_asse
     response = add_line(staff_client, draft_po, payload)
 
     assert response.status_code == 400
-    assert response.json()["code"] == "not_draft"
+    assert response.json()["error"]["code"] == "not_draft"
     assert not PurchaseOrderItem.objects.filter(purchase_order=draft_po).exists()
 
 
@@ -573,7 +573,7 @@ def test_a_fat_fingered_asset_price_can_be_corrected_and_the_line_then_grown(
 
     refused = add_line(staff_client, draft_po, {"asset": str(acme_asset.id), "unit_cost": "149.00"})
     assert refused.status_code == 400
-    assert refused.json()["code"] == "price_conflict"
+    assert refused.json()["error"]["code"] == "price_conflict"
 
     line = only_line(draft_po)
     assert (

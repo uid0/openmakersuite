@@ -1,4 +1,8 @@
-import { extractErrorMessage } from '../../utils/extractErrorMessage';
+import {
+  extractErrorCode,
+  extractErrorDetails,
+  extractErrorMessage,
+} from '../../utils/extractErrorMessage';
 
 describe('utils/extractErrorMessage', () => {
   const fallback = 'Something went wrong';
@@ -135,5 +139,53 @@ describe('utils/extractErrorMessage', () => {
         fallback,
       ),
     ).toBe('Preferred envelope message');
+  });
+});
+
+describe('utils/extractErrorCode', () => {
+  const envelope = (error: unknown) => ({ response: { data: { error } } });
+
+  it('reads the code out of the standardized envelope', () => {
+    expect(extractErrorCode(envelope({ code: 'line_voided', message: 'x' }))).toBe('line_voided');
+  });
+
+  it('still reads the flat code an unconverted endpoint writes beside a string error', () => {
+    expect(
+      extractErrorCode({ response: { data: { error: 'Only sent orders can be confirmed', code: 'not_sent' } } }),
+    ).toBe('not_sent');
+  });
+
+  it('reports no code rather than inventing one', () => {
+    // A bare-prose refusal, a DRF field map, a network failure: none of these
+    // is a coded refusal, and a caller branching on the code must not be told
+    // one arrived.
+    expect(extractErrorCode({ response: { data: { error: 'no code here' } } })).toBeUndefined();
+    expect(extractErrorCode({ response: { data: { detail: 'Not found.' } } })).toBeUndefined();
+    expect(extractErrorCode(envelope({ code: '   ', message: 'x' }))).toBeUndefined();
+    expect(extractErrorCode(new Error('network fail'))).toBeUndefined();
+    expect(extractErrorCode(undefined)).toBeUndefined();
+  });
+});
+
+describe('utils/extractErrorDetails', () => {
+  it('returns the envelope hints a coded refusal carries', () => {
+    const candidates = [{ item_supplier: 7 }];
+    expect(
+      extractErrorDetails({
+        response: { data: { error: { code: 'ambiguous', message: 'x', details: { candidates } } } },
+      }),
+    ).toEqual({ candidates });
+  });
+
+  it('reports nothing for a refusal that carries no hints', () => {
+    expect(
+      extractErrorDetails({ response: { data: { error: { code: 'not_draft', message: 'x' } } } }),
+    ).toBeUndefined();
+    // A field-error LIST is not a hint map; callers key into it by name.
+    expect(
+      extractErrorDetails({ response: { data: { error: { code: 'x', message: 'y', details: ['a'] } } } }),
+    ).toBeUndefined();
+    expect(extractErrorDetails({ response: { data: { error: 'flat prose' } } })).toBeUndefined();
+    expect(extractErrorDetails(new Error('network fail'))).toBeUndefined();
   });
 });

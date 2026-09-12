@@ -43,9 +43,17 @@ describe('SharedWeatherBlock', () => {
   });
 
   it('shows "not configured" message when the backend reports it', async () => {
+    // The STANDARDIZED envelope the backend emits (backend/config/api_errors.py).
     api.get.mockRejectedValueOnce({
       isAxiosError: true,
-      response: { data: { code: 'weather_not_configured' } },
+      response: {
+        data: {
+          error: {
+            code: 'weather_not_configured',
+            message: 'OPENWEATHER_API_KEY is not configured',
+          },
+        },
+      },
     });
 
     render(<SharedWeatherBlock />);

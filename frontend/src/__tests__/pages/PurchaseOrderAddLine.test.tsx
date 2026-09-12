@@ -92,8 +92,19 @@ const candidate = (overrides: Record<string, unknown> = {}) => ({
 });
 
 /** An axios-shaped rejection, which is what the page branches on. */
-const apiError = (status: number, data: Record<string, unknown>) =>
-  Object.assign(new Error('request failed'), { response: { status, data } });
+/**
+ * A refusal on the wire, in the STANDARDIZED envelope the backend emits
+ * (backend/config/api_errors.py): the operator-facing sentence at
+ * ``error.message``, the branchable code at ``error.code``, and ambiguity's
+ * choice set under ``error.details.candidates``.
+ *
+ * Spelled out here rather than hidden behind a translator, because what this
+ * page has to keep rendering IS the shape — the add endpoint used to answer in
+ * a flat ``{error, code, candidates}`` of its own, which is what left ScanTTY
+ * printing raw JSON at the terminal that works the order.
+ */
+const refusal = (status: number, error: Record<string, unknown>) =>
+  Object.assign(new Error('request failed'), { response: { status, data: { error } } });
 
 const renderPage = () =>
   render(
@@ -173,9 +184,9 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
 
   test('an item the supplier does not carry is refused in words the operator can act on', async () => {
     (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValue(
-      apiError(400, {
+      refusal(400, {
         code: 'not_supplied',
-        error:
+        message:
           'Acme Fasteners does not supply M5 carriage bolt. Add Acme Fasteners as a supplier ' +
           'for that item, or order it on a purchase order for a supplier that carries it.',
       })
@@ -193,9 +204,9 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
 
   test('an unmatched identifier is reported rather than silently ignored', async () => {
     (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValue(
-      apiError(400, {
+      refusal(400, {
         code: 'no_match',
-        error: 'Nothing matching "wrench" is supplied by Acme Fasteners.',
+        message: 'Nothing matching "wrench" is supplied by Acme Fasteners.',
       })
     );
 
@@ -210,17 +221,19 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
 
   test('an ambiguous identifier offers the candidates instead of guessing', async () => {
     (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
-      apiError(409, {
+      refusal(409, {
         code: 'ambiguous',
-        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
-        candidates: [
-          candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
-          candidate({
-            item_supplier: 13,
-            item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
-            supplier_sku: 'ACME-M3-200',
-          }),
-        ],
+        message: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        details: {
+          candidates: [
+            candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
+            candidate({
+              item_supplier: 13,
+              item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
+              supplier_sku: 'ACME-M3-200',
+            }),
+          ],
+        },
       })
     );
 
@@ -272,17 +285,19 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
    */
   test('candidate buttons look like the page’s own submit control', async () => {
     (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
-      apiError(409, {
+      refusal(409, {
         code: 'ambiguous',
-        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
-        candidates: [
-          candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
-          candidate({
-            item_supplier: 13,
-            item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
-            supplier_sku: 'ACME-M3-200',
-          }),
-        ],
+        message: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        details: {
+          candidates: [
+            candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
+            candidate({
+              item_supplier: 13,
+              item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
+              supplier_sku: 'ACME-M3-200',
+            }),
+          ],
+        },
       })
     );
 
@@ -357,10 +372,12 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
 
   test('a refused add leaves the failed text selected so the next scan replaces it', async () => {
     (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValue(
-      apiError(409, {
+      refusal(409, {
         code: 'ambiguous',
-        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
-        candidates: [candidate(), candidate({ item_supplier: 13 })],
+        message: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        details: {
+          candidates: [candidate(), candidate({ item_supplier: 13 })],
+        },
       })
     );
 
@@ -405,16 +422,18 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
 
   test('picking a candidate puts focus back in the entry field for the next scan', async () => {
     (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
-      apiError(409, {
+      refusal(409, {
         code: 'ambiguous',
-        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
-        candidates: [
-          candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
-          candidate({
-            item_supplier: 13,
-            item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
-          }),
-        ],
+        message: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        details: {
+          candidates: [
+            candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
+            candidate({
+              item_supplier: 13,
+              item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
+            }),
+          ],
+        },
       })
     );
 
@@ -568,16 +587,18 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
    */
   test('an empty submit takes the pending choose-one set down with it', async () => {
     (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
-      apiError(409, {
+      refusal(409, {
         code: 'ambiguous',
-        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
-        candidates: [
-          candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
-          candidate({
-            item_supplier: 13,
-            item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
-          }),
-        ],
+        message: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        details: {
+          candidates: [
+            candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
+            candidate({
+              item_supplier: 13,
+              item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
+            }),
+          ],
+        },
       })
     );
 
@@ -611,16 +632,18 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
    */
   test('typing a new identifier takes the pending choose-one set with the prompt', async () => {
     (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
-      apiError(409, {
+      refusal(409, {
         code: 'ambiguous',
-        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
-        candidates: [
-          candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
-          candidate({
-            item_supplier: 13,
-            item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
-          }),
-        ],
+        message: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        details: {
+          candidates: [
+            candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
+            candidate({
+              item_supplier: 13,
+              item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
+            }),
+          ],
+        },
       })
     );
 
@@ -643,16 +666,18 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
 
   test('a refused custom line leaves the scan field’s choose-one set standing', async () => {
     (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValueOnce(
-      apiError(409, {
+      refusal(409, {
         code: 'ambiguous',
-        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
-        candidates: [
-          candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
-          candidate({
-            item_supplier: 13,
-            item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
-          }),
-        ],
+        message: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        details: {
+          candidates: [
+            candidate({ match_kind: 'partial_item_name', match_label: 'item name (partial)' }),
+            candidate({
+              item_supplier: 13,
+              item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
+            }),
+          ],
+        },
       })
     );
 
@@ -681,23 +706,25 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
     // provenance nothing on screen contains what the operator scanned — which
     // is the silent substitution the cross-vendor tier exists to rule out.
     (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValue(
-      apiError(409, {
+      refusal(409, {
         code: 'ambiguous',
-        error: '"BD-" matches 2 items Acme Fasteners supplies. Choose which one to add.',
-        candidates: [
-          candidate({
-            match_kind: 'other_supplier_listing',
-            match_label: "Bolt Depot's supplier SKU",
-            matched_value: 'BD-M3',
-          }),
-          candidate({
-            item_supplier: 13,
-            item: { id: 'item-2', name: 'M5 carriage bolt', sku: 'OMS-M5-CAR', is_kit: false },
-            match_kind: 'other_supplier_listing',
-            match_label: "Bolt Depot's supplier SKU",
-            matched_value: 'BD-M5',
-          }),
-        ],
+        message: '"BD-" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        details: {
+          candidates: [
+            candidate({
+              match_kind: 'other_supplier_listing',
+              match_label: "Bolt Depot's supplier SKU",
+              matched_value: 'BD-M3',
+            }),
+            candidate({
+              item_supplier: 13,
+              item: { id: 'item-2', name: 'M5 carriage bolt', sku: 'OMS-M5-CAR', is_kit: false },
+              match_kind: 'other_supplier_listing',
+              match_label: "Bolt Depot's supplier SKU",
+              matched_value: 'BD-M5',
+            }),
+          ],
+        },
       })
     );
 
@@ -719,24 +746,26 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
     // Adding it could only ever come back 400 `line_voided`, and the payload
     // already says so — the screen must not offer an action the server refuses.
     (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValue(
-      apiError(409, {
+      refusal(409, {
         code: 'ambiguous',
-        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
-        candidates: [
-          candidate({
-            already_on_order: {
-              line_item: 'line-1',
-              quantity_ordered: 4,
-              is_voided: true,
-              repeat_increment: null,
-              quantity_ordered_after: null,
-            },
-          }),
-          candidate({
-            item_supplier: 13,
-            item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
-          }),
-        ],
+        message: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        details: {
+          candidates: [
+            candidate({
+              already_on_order: {
+                line_item: 'line-1',
+                quantity_ordered: 4,
+                is_voided: true,
+                repeat_increment: null,
+                quantity_ordered_after: null,
+              },
+            }),
+            candidate({
+              item_supplier: 13,
+              item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
+            }),
+          ],
+        },
       })
     );
 
@@ -753,18 +782,20 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
 
   test('a candidate already on the order says so before it is picked', async () => {
     (api.purchaseOrderAPI.addLineItem as jest.Mock).mockRejectedValue(
-      apiError(409, {
+      refusal(409, {
         code: 'ambiguous',
-        error: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
-        candidates: [
-          candidate({
-            already_on_order: { line_item: 'line-1', quantity_ordered: 10, is_voided: false },
-          }),
-          candidate({
-            item_supplier: 13,
-            item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
-          }),
-        ],
+        message: '"M3 hex" matches 2 items Acme Fasteners supplies. Choose which one to add.',
+        details: {
+          candidates: [
+            candidate({
+              already_on_order: { line_item: 'line-1', quantity_ordered: 10, is_voided: false },
+            }),
+            candidate({
+              item_supplier: 13,
+              item: { id: 'item-2', name: 'M3 hex nut', sku: 'OMS-M3-NUT', is_kit: false },
+            }),
+          ],
+        },
       })
     );
 

@@ -59,4 +59,52 @@ export function extractErrorMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
+
+/**
+ * Pull the machine-readable error CODE off the same shapes.
+ *
+ * The companion to ``extractErrorMessage``: the message is what the operator
+ * reads, the code is what the UI branches on ("this refusal came with a
+ * choice set", "this one means the kiosk is unconfigured, not offline").
+ *
+ * Envelope first (``error.code``), then the flat ``code`` a handful of
+ * endpoints still write beside a bare-string ``error``. Both branches exist
+ * for the same reason the message helper's do — the #330 conversion is
+ * endpoint-by-endpoint, and a page must keep working either side of it.
+ *
+ * Returns ``undefined`` rather than a fallback string: "no code" is a real
+ * answer callers branch on, and inventing one would make an unconverted
+ * endpoint look like a coded refusal it never made.
+ */
+export function extractErrorCode(err: unknown): string | undefined {
+  const anyErr = err as any;
+  const data = anyErr?.response?.data ?? anyErr?.data ?? anyErr;
+  if (!data || typeof data !== 'object') {
+    return undefined;
+  }
+
+  const envelope = data.error;
+  if (envelope && typeof envelope === 'object' && typeof envelope.code === 'string') {
+    return envelope.code.trim() || undefined;
+  }
+
+  if (typeof data.code === 'string') {
+    return data.code.trim() || undefined;
+  }
+
+  return undefined;
+}
+
+/**
+ * The envelope's ``error.details`` payload — the machine-readable hints that
+ * ride alongside a coded refusal (the add-line endpoint's ambiguity candidate
+ * set, for one). Anything that is not an object is reported as absent.
+ */
+export function extractErrorDetails(err: unknown): Record<string, unknown> | undefined {
+  const anyErr = err as any;
+  const data = anyErr?.response?.data ?? anyErr?.data ?? anyErr;
+  const details = data && typeof data === 'object' ? data.error?.details : undefined;
+  return details && typeof details === 'object' && !Array.isArray(details) ? details : undefined;
+}
+
 export default extractErrorMessage;

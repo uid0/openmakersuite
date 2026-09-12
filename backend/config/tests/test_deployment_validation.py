@@ -9,6 +9,7 @@ fails CI before merge.
 import fnmatch
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import textwrap
@@ -461,48 +462,101 @@ class TestDeploymentArtifactsAC36:
         The user and database names themselves are correct everywhere
         (`makerspace` / `makerspace_inventory`); only the probes were wrong.
         """
-        probe_files = [
-            "docker-compose.yml",
-            "docker-compose.prod.yml",
-            ".github/workflows/ci.yml",
-            "diagnose.sh",
-            "scripts/diagnose.sh",
-            "deploy/COMPOSE_RUNBOOK.md",
-            "deploy/k8s/base/postgres-statefulset.yaml",
-            "deploy/helm/openmakersuite/templates/postgres.yaml",
-        ]
-        offenders = []
-        for rel in probe_files:
-            path = REPO_ROOT / rel
-            assert path.is_file(), f"missing file with a pg_isready probe: {rel}"
-            lines = path.read_text().splitlines()
-            for i, line in enumerate(lines, start=1):
-                if "pg_isready" not in line or line.lstrip().startswith("#"):
-                    continue
-                if line.strip() == "- pg_isready":
-                    # k8s/Helm exec-probe form: the flags are their own
-                    # list items on the following lines. Scan only those
-                    # items, so an unrelated later line carrying `-d`
-                    # cannot vouch for this probe.
-                    flags = []
-                    for nxt in lines[i:]:
-                        stripped = nxt.strip()
-                        if not stripped.startswith("- "):
-                            break
-                        flags.append(stripped[2:])
-                    ok = "-d" in flags
-                else:
-                    # Shell/one-liner form: `-d` must be on the same line.
-                    ok = bool(re.search(r"(^|\s)-d(\s|$)", line))
-                if not ok:
-                    offenders.append(f"{rel}:{i}: {line.strip()}")
+        def environment_map(entries):
+            if isinstance(entries, dict):
+                return entries
+            return dict(entry.split("=", 1) for entry in entries)
 
-        assert not offenders, (
-            "pg_isready probe(s) omit `-d`, so they ask postgres for a "
-            "database named after the user. The probe still exits 0 and the "
-            "check goes healthy, but every probe logs a FATAL into the "
-            "container log and CI's failure dump:\n  " + "\n  ".join(offenders)
+        def database_argument(command):
+            argv = shlex.split(command) if isinstance(command, str) else command
+            if "pg_isready" not in argv:
+                nested = next(part for part in argv if "pg_isready" in part)
+                return database_argument(nested)
+            pg_index = argv.index("pg_isready")
+            argv = argv[pg_index:]
+            database = argv[argv.index("-d") + 1]
+            assert database
+            return database
+
+        probes = []
+        for rel in ("docker-compose.yml", "docker-compose.prod.yml"):
+            model = yaml.safe_load((REPO_ROOT / rel).read_text())
+            service = model["services"]["db"]
+            expected = environment_map(service["environment"])["POSTGRES_DB"]
+            probes.append((rel, service["healthcheck"]["test"][1], expected))
+
+        workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text())
+        for job_name, job in workflow["jobs"].items():
+            postgres = (job.get("services") or {}).get("postgres")
+            if not postgres:
+                continue
+            options = shlex.split(postgres["options"])
+            command = options[options.index("--health-cmd") + 1]
+            probes.append(
+                (
+                    f".github/workflows/ci.yml:{job_name}",
+                    command,
+                    postgres["env"]["POSTGRES_DB"],
+                )
+            )
+
+        k8s = yaml.safe_load(
+            (REPO_ROOT / "deploy/k8s/base/postgres-statefulset.yaml").read_text()
         )
+        container = k8s["spec"]["template"]["spec"]["containers"][0]
+        expected = environment_map(
+            {entry["name"]: entry.get("value") for entry in container["env"]}
+        )["POSTGRES_DB"]
+        for probe_name in ("livenessProbe", "readinessProbe"):
+            probes.append(
+                (
+                    f"deploy/k8s/base/postgres-statefulset.yaml:{probe_name}",
+                    container[probe_name]["exec"]["command"],
+                    expected,
+                )
+            )
+
+        helm_source = (
+            REPO_ROOT / "deploy/helm/openmakersuite/templates/postgres.yaml"
+        ).read_text()
+        helm_yaml = "\n".join(
+            re.sub(r"{{.*?}}", "HELM_VALUE", line)
+            for line in helm_source.splitlines()
+            if not line.lstrip().startswith("{{")
+        )
+        helm = yaml.safe_load(helm_yaml)
+        container = helm["spec"]["template"]["spec"]["containers"][0]
+        expected = next(
+            entry["value"]
+            for entry in container["env"]
+            if entry["name"] == "POSTGRES_DB"
+        )
+        for probe_name in ("livenessProbe", "readinessProbe"):
+            probes.append(
+                (
+                    f"deploy/helm/openmakersuite/templates/postgres.yaml:{probe_name}",
+                    container[probe_name]["exec"]["command"],
+                    expected,
+                )
+            )
+
+        for rel in ("diagnose.sh", "scripts/diagnose.sh", "deploy/COMPOSE_RUNBOOK.md"):
+            lines = (REPO_ROOT / rel).read_text().splitlines()
+            for line_number, line in enumerate(lines, 1):
+                if "pg_isready" in line and not line.lstrip().startswith("#"):
+                    probes.append((f"{rel}:{line_number}", line, None))
+
+        assert probes
+        for source, command, expected in probes:
+            database = database_argument(command)
+            if expected is None:
+                assert "POSTGRES_DB" in database, f"{source} hard-codes {database!r}"
+                continue
+            if database == "$$POSTGRES_DB":
+                continue
+            assert database == expected, (
+                f"{source} probes {database!r}, expected {expected!r}"
+            )
 
     def test_helm_backend_uses_livez_readyz_probes(self):
         """AC-11/AC-12/AC-33: Helm chart defaults must match the k8s + compose

@@ -127,9 +127,8 @@ class TestAnonymousDuplicateRequests:
         assert second.status_code != status.HTTP_403_FORBIDDEN
 
     def test_the_duplicate_response_leaks_no_admin_metadata(self, api_client):
-        """The duplicate goes back through the limited create shape, like the
-        created one — a second scan must not become a read of a row an
-        anonymous caller could not otherwise see."""
+        """A second scan must not expose who filed the blocking request or
+        their free-text notes."""
         item = InventoryItemFactory()
         scan(api_client, item)
 
@@ -139,13 +138,13 @@ class TestAnonymousDuplicateRequests:
             "id",
             "item",
             "quantity",
-            "requested_by",
-            "request_notes",
             "priority",
             "status",
             "already_requested",
             "detail",
         }
+        assert "requested_by" not in second.data
+        assert "request_notes" not in second.data
 
     def test_a_pending_request_for_another_item_does_not_block(self, api_client):
         """Per ITEM. A pending request for a different item is a different

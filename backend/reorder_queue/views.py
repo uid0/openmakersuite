@@ -487,9 +487,16 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
             # and a second "New Reorder Request" for a row admins already have
             # is exactly the duplicate this endpoint just refused to file.
             existing = serializer.instance
-            payload = dict(ReorderRequestCreateSerializer(existing).data)
-            payload["already_requested"] = True
-            payload["detail"] = already_requested_detail(existing)
+            existing_data = ReorderRequestCreateSerializer(existing).data
+            payload = {
+                "id": existing_data["id"],
+                "item": existing_data["item"],
+                "quantity": existing_data["quantity"],
+                "priority": existing_data["priority"],
+                "status": existing_data["status"],
+                "already_requested": True,
+                "detail": already_requested_detail(existing),
+            }
             return Response(payload, status=status.HTTP_200_OK, headers=headers)
 
         self._auto_approve_if_approver(user, serializer.instance)

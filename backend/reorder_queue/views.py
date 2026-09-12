@@ -79,7 +79,7 @@ from .serializers import (
     WebHookCreateSerializer,
     WebHookSerializer,
     WebHookTestResultSerializer,
-    already_requested_detail,
+    duplicate_response,
     send_request_field,
 )
 from .webhook_audit import diff_audited_fields as diff_webhook_audited_fields
@@ -486,18 +486,14 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
             # No admin notification fires: nothing new arrived in the queue,
             # and a second "New Reorder Request" for a row admins already have
             # is exactly the duplicate this endpoint just refused to file.
-            existing = serializer.instance
-            existing_data = ReorderRequestCreateSerializer(existing).data
-            payload = {
-                "id": existing_data["id"],
-                "item": existing_data["item"],
-                "quantity": existing_data["quantity"],
-                "priority": existing_data["priority"],
-                "status": existing_data["status"],
-                "already_requested": True,
-                "detail": already_requested_detail(existing),
-            }
-            return Response(payload, status=status.HTTP_200_OK, headers=headers)
+            # ``duplicate_response`` owns the shape — including which fields
+            # are deliberately withheld because the blocking row may be someone
+            # else's, and what ScanTTY has to read to report this correctly.
+            return Response(
+                duplicate_response(serializer.instance),
+                status=status.HTTP_200_OK,
+                headers=headers,
+            )
 
         self._auto_approve_if_approver(user, serializer.instance)
 

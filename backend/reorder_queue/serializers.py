@@ -137,6 +137,70 @@ def already_requested_detail(existing) -> str:
     )
 
 
+#: What the duplicate response is allowed to carry from the BLOCKING request.
+#:
+#: An allow-list, not a subtraction, because the blocking row may belong to
+#: somebody else — see :func:`duplicate_response`.
+DUPLICATE_RESPONSE_FIELDS = ("id", "item", "quantity", "priority", "status")
+
+
+def duplicate_response(existing) -> dict:
+    """The body an anonymous scan gets when it duplicated a pending request.
+
+    THE OWNER OF THAT RESPONSE SHAPE. Built here rather than inline in the view
+    so the allow-list below and the reasoning for it live on one thing.
+
+    WHAT IT DELIBERATELY DOES NOT RETURN, and why. ``requested_by`` and
+    ``request_notes`` are on the create serializer and are NOT here. On the
+    201 those two are the caller's own submission echoed back; on this response
+    they would be somebody ELSE's, because any pending row blocks — including
+    one a named staff member filed. Returning them let an unauthenticated
+    caller who knows an item id read who else asked for that item and what they
+    wrote about it, which is a disclosure this endpoint introduced and had no
+    reason to make. An allow-list rather than a ``pop`` of the two: a field
+    added to the create serializer later must be chosen INTO this response, not
+    silently inherited by it.
+
+    Everything it does return is already anonymously readable for the same item
+    id the caller just supplied. ``GET /api/inventory/items/<id>/`` is
+    ``AllowAny`` and its ``active_reorder_request`` block already publishes the
+    blocking request's id, status, quantity and priority; ``detail`` names
+    ``item.name``, which that same payload serves. So this adds no anonymously
+    observable fact — it only saves the scanner a second request to learn it.
+
+    ⚠️ SEPARATE, PRE-EXISTING, NOT THIS RULE'S DOING: that
+    ``active_reorder_request`` block also serves ``requested_by`` and the
+    reviewer's username to anonymous callers — the same class of disclosure
+    closed here, still open one endpoint along
+    (``InventoryItemSerializer.get_active_reorder_request``). Recorded so the
+    next reader does not conclude from this function that the surface is clean.
+
+    CROSS-PROJECT: SCANTTY CONSUMES THIS ENDPOINT. ``uid0/scantty`` posts to
+    ``/api/reorders/requests/`` through ``omsapi.Client.CreateReorderRequest``
+    (``internal/omsapi/reorders.go``) and renders the outcome in
+    ``internal/tui/reorder_form.go``, whose ``reorderSubmittedMsg`` case prints
+    ``"reorder #%v created"`` on ANY non-4xx response. A client that does not
+    read ``already_requested`` therefore tells an operator a reorder was
+    CREATED when this response says none was — the false message the rule
+    exists to prevent, displaced one repository along. It must branch on the
+    marker; ``omsapi.ReorderRequest`` needs an ``AlreadyRequested bool`` tagged
+    ``already_requested,omitempty`` before it can.
+
+    VERIFIED SAFE at ``uid0/scantty`` main ``b4af7e76``, so nobody redoes the
+    work: ``omsapi.jsonDecoder`` (``internal/omsapi/client.go``) sets only
+    ``UseNumber()`` and never ``DisallowUnknownFields``, so the two added keys
+    are ignored by ``encoding/json`` and nothing fails to decode;
+    ``Client.Post`` errors only at ``>= 400``, so the 200 is not itself an
+    error path; and an AUTHENTICATED submit never reaches this function at all,
+    so a ScanTTY holding a token is unaffected.
+    """
+    existing_data = ReorderRequestCreateSerializer(existing).data
+    payload = {field: existing_data[field] for field in DUPLICATE_RESPONSE_FIELDS}
+    payload["already_requested"] = True
+    payload["detail"] = already_requested_detail(existing)
+    return payload
+
+
 class ReorderRequestCreateSerializer(serializers.ModelSerializer):
     """Simplified serializer for creating reorder requests (public-facing).
 

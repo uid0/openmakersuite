@@ -13,6 +13,7 @@ proving the URL a scanner actually hits obeys it, or that the member is told
 the right thing when it does.
 """
 
+import json
 import threading
 import time
 from unittest import mock
@@ -145,6 +146,31 @@ class TestAnonymousDuplicateRequests:
         }
         assert "requested_by" not in second.data
         assert "request_notes" not in second.data
+
+    def test_the_duplicate_never_exposes_a_named_requester(self, api_client):
+        """The case the narrowed shape exists for: the blocking row was filed
+        by somebody else, with their name and their notes on it.
+
+        Any pending row blocks, so an unauthenticated caller who knows an item
+        id reaches this response — and must not be able to read who else asked
+        for the item or what they wrote. Asserted on the VALUES, not only the
+        key set: a future field carrying the same text would slip past a key
+        check.
+        """
+        item = InventoryItemFactory(name="Shop rags")
+        ReorderRequestFactory(
+            item=item,
+            status=ReorderRequest.Status.PENDING,
+            requested_by="Dana Okafor (shop lead)",
+            request_notes="for the Tuesday powdercoat job, do not substitute",
+        )
+
+        response = scan(api_client, item)
+
+        assert response.status_code == status.HTTP_200_OK
+        body = json.dumps(response.data, default=str)
+        assert "Dana Okafor" not in body
+        assert "powdercoat" not in body
 
     def test_a_pending_request_for_another_item_does_not_block(self, api_client):
         """Per ITEM. A pending request for a different item is a different

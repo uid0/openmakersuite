@@ -29,7 +29,7 @@ mobile-first.
 | --- | --- | --- | --- |
 | Scan inventory item, auto-submit reorder | `/inventory/scan/:itemId`, `/scan/:itemId` (`ScanPage.tsx`) | public | Camera-denied → code-entry fallback (`/inventory/scan`); duplicate-tap guard; pending-reorder shown instead of new request; offline shows actionable error |
 | Scan fixture, request refill | `/inventory/scan/fixture/:fixtureId` (`FixtureScanPage.tsx`) | public | Same as above; preserves form state on retry |
-| Scan asset, see info or report problem | `/inventory/scan/asset/:assetId` (`AssetScanPage.tsx`) | public | Public read of asset info; problem report submits without login; member-mode fields appear only when `localStorage.token` present |
+| Scan asset, see info, report a problem, or control availability | `/inventory/scan/asset/:assetId` (`AssetScanPage.tsx`) | public; controls require login | Public read of asset info; problem report submits without login; member-mode fields appear only when `localStorage.token` is present; Lock prompts for the required operator reason and stops the machine, while Disable only hides the record and explicitly warns that the machine still runs |
 | Scan location, view problems / report problem | `/inventory/scan/location/:locationId` (`LocationScanPage.tsx`) | public | Code-entry fallback; problem-report duplicate guard; image-upload offline error |
 | Scan donation item, view info / pickup | `/inventory/scan/donation-item/:itemId` (`DonationItemScanPage.tsx`) | public | Public donation flow; tax-receipt lookup is a separate authenticated flow |
 | Scan MakerBox, lookup contents | `/facilities/maker-boxes/scan` (`MakerBoxScanPage.tsx`) | public | Camera-denied → code-entry fallback within page |
@@ -123,7 +123,7 @@ Staff manage assets, preventive maintenance, and work orders for facility safety
 | Journey | Entry route(s) | Auth | Key resilience expectations |
 | --- | --- | --- | --- |
 | Browse assets | `/assets`, `/inventory/assets` (`AssetsPage.tsx`) | staff | Table + grid views; loading + empty states |
-| View asset detail (incl. compliance + safety) | `/assets/:id` (`AssetDetailPage.tsx`) | staff | NFPA diamond + safety panels; problem-report modal |
+| View or control asset detail (incl. compliance + safety) | `/assets/:id` (`AssetDetailPage.tsx`) | staff | NFPA diamond + safety panels; problem-report modal; Lock is labelled as stopping the machine and prompts for the required operator reason before creating the lockout |
 | Create / edit asset | `/assets/new`, `/assets/:id/edit` (`AssetFormPage.tsx`) | staff | Photo upload offline error; safety-control validation |
 | Add / edit asset maintenance item | `/assets/:assetId/maintenance/new`, `/assets/:assetId/maintenance/:id/edit` (`MaintenanceItemFormPage.tsx`) | staff | Lockout/tagout + electrical fields gated by asset traits |
 | Asset utilization / TCO report | `/reports/assets` (`AssetReportPage.tsx`) | staff | Empty-state per tab; date-range loading |

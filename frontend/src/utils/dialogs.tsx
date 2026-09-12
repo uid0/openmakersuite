@@ -153,6 +153,11 @@ export function promptInput(
     modals.open({
       modalId,
       title,
+      centered: true,
+      // Workspace navigation intentionally sits above ordinary page content.
+      // Prompts must sit above that navigation so their title and fields do
+      // not render underneath the sticky header/sidebar.
+      zIndex: 1100,
       onClose: () => resolveOnce(null),
       children: (
         <PromptForm

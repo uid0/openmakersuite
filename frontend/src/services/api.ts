@@ -716,8 +716,13 @@ export const assetsAPI = {
   disableAsset: (id: string) =>
     api.post<Asset>(`/inventory/assets/${id}/disable/`),
 
-  lockAsset: (id: string) =>
-    api.post<Asset>(`/inventory/assets/${id}/lock/`),
+  // `reason` is REQUIRED by the server (inventory/views.py AssetViewSet.lock
+  // 400s on a missing/blank one) and it is stored verbatim on the
+  // DeviceLockout someone reads later, so it is a required argument here
+  // rather than an optional with a default: there is no stand-in string this
+  // client could invent that would be honest in that record.
+  lockAsset: (id: string, reason: string) =>
+    api.post<Asset>(`/inventory/assets/${id}/lock/`, { reason }),
 
   unlockAsset: (id: string) =>
     api.post<Asset>(`/inventory/assets/${id}/unlock/`),

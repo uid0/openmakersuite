@@ -2,6 +2,8 @@
  * Tests for AssetDetailPage component
  */
 import { MantineProvider } from '@mantine/core';
+import { ModalsProvider } from '@mantine/modals';
+import { Notifications, notifications } from '@mantine/notifications';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AxiosError } from 'axios';
@@ -1334,6 +1336,78 @@ describe('AssetDetailPage', () => {
       expect(
         screen.queryByRole('button', { name: /send to vendor/i }),
       ).not.toBeInTheDocument();
+    });
+  });
+
+  // Locking is the control that actually stops the machine (ForgeKey
+  // DeviceLockout -> is_authorized denies). The server requires a reason and
+  // keeps it on that record, so the page must collect one rather than post
+  // an empty body (which 400s) or invent a default.
+  describe('lock asset', () => {
+    // Mantine's notification store is module-global and the tests above call
+    // showError without ever mounting <Notifications />, so their notifications
+    // are still queued. <Notifications /> shows only `limit` (5) at a time, so
+    // without this the error asserted below sits in the queue unrendered.
+    beforeEach(() => {
+      notifications.clean();
+      notifications.cleanQueue();
+    });
+
+    const renderWithModals = () =>
+      render(
+        <MantineProvider>
+          <Notifications />
+          <ModalsProvider>
+            <MemoryRouter>
+              <AssetDetailPage />
+            </MemoryRouter>
+          </ModalsProvider>
+        </MantineProvider>,
+      );
+
+    const openLockPrompt = async () => {
+      renderWithModals();
+      const lockButton = await screen.findByRole('button', { name: /^lock asset/i });
+      fireEvent.click(lockButton);
+      return screen.findByLabelText(/why is this machine being locked out/i);
+    };
+
+    it('sends the operator reason to the lock endpoint', async () => {
+      mockAssetsAPI.lockAsset.mockResolvedValue({ data: mockAsset } as never);
+
+      const input = await openLockPrompt();
+      fireEvent.change(input, { target: { value: 'E-stop latched open' } });
+      fireEvent.click(await screen.findByRole('button', { name: /^submit$/i }));
+
+      await waitFor(() => {
+        expect(mockAssetsAPI.lockAsset).toHaveBeenCalledWith('test-id', 'E-stop latched open');
+      });
+    });
+
+    it('does not lock when the operator cancels the prompt', async () => {
+      await openLockPrompt();
+      fireEvent.click(await screen.findByRole('button', { name: /^cancel$/i }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole('button', { name: /^submit$/i })).not.toBeInTheDocument();
+      });
+      expect(mockAssetsAPI.lockAsset).not.toHaveBeenCalled();
+    });
+
+    it('refuses a blank reason instead of substituting one', async () => {
+      const input = await openLockPrompt();
+      fireEvent.change(input, { target: { value: '  ' } });
+      fireEvent.click(await screen.findByRole('button', { name: /^submit$/i }));
+
+      await screen.findByText(/lockout reason is required/i);
+      expect(mockAssetsAPI.lockAsset).not.toHaveBeenCalled();
+    });
+
+    it('labels the button with what locking actually does', async () => {
+      renderWithModals();
+      expect(
+        await screen.findByRole('button', { name: /lock asset \(stops the machine\)/i }),
+      ).toBeInTheDocument();
     });
   });
 });

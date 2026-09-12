@@ -138,21 +138,64 @@ describe('AssetScanPage — modal flows', () => {
     expect(api.assetsAPI.disableAsset).not.toHaveBeenCalled();
   });
 
-  test('lock asset: clicking Lock opens confirm modal and calls API on confirm', async () => {
+  test('lock asset: the prompt captures a reason and it reaches the API call', async () => {
     localStorage.setItem('token', 'fake-token');
     (api.assetsAPI.lockAsset as jest.Mock).mockResolvedValue({ data: mockAsset });
 
     renderPage();
 
-    const lockButton = await screen.findByRole('button', { name: /^lock asset$/i });
+    const lockButton = await screen.findByRole('button', { name: /^lock asset/i });
     fireEvent.click(lockButton);
 
-    const confirmBtn = await screen.findByRole('button', { name: /^delete$/i });
-    fireEvent.click(confirmBtn);
+    const input = await screen.findByLabelText(/why is this machine being locked out/i);
+    fireEvent.change(input, { target: { value: 'Blade guard missing' } });
+    fireEvent.click(await screen.findByRole('button', { name: /^submit$/i }));
 
     await waitFor(() => {
-      expect(api.assetsAPI.lockAsset).toHaveBeenCalledWith('asset-1');
+      expect(api.assetsAPI.lockAsset).toHaveBeenCalledWith('asset-1', 'Blade guard missing');
     });
+  });
+
+  test('lock asset: cancelling the reason prompt leaves the machine alone', async () => {
+    localStorage.setItem('token', 'fake-token');
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^lock asset/i }));
+    await screen.findByLabelText(/why is this machine being locked out/i);
+    fireEvent.click(await screen.findByRole('button', { name: /^cancel$/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /^submit$/i })).not.toBeInTheDocument();
+    });
+    expect(api.assetsAPI.lockAsset).not.toHaveBeenCalled();
+  });
+
+  test('lock asset: a blank reason is refused rather than defaulted', async () => {
+    localStorage.setItem('token', 'fake-token');
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^lock asset/i }));
+    const input = await screen.findByLabelText(/why is this machine being locked out/i);
+    fireEvent.change(input, { target: { value: '   ' } });
+    fireEvent.click(await screen.findByRole('button', { name: /^submit$/i }));
+
+    await screen.findByText(/lockout reason is required/i);
+    expect(api.assetsAPI.lockAsset).not.toHaveBeenCalled();
+  });
+
+  test('the two controls say which one actually stops the machine', async () => {
+    localStorage.setItem('token', 'fake-token');
+
+    renderPage();
+
+    // Lock is the ForgeKey lockout; Disable only flips is_active. An operator
+    // picking between them must be able to tell without clicking.
+    expect(await screen.findByRole('button', { name: /lock asset \(stops the machine\)/i }))
+      .toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /disable asset \(does not stop machine\)/i }))
+      .toBeInTheDocument();
   });
 
   test('unlock asset: locked asset shows Unlock button and confirm modal calls API on confirm', async () => {

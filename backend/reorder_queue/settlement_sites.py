@@ -26,6 +26,9 @@ So there are TWO derivations here, and the second one is the point:
   model's stored numeric fields, then finds assignment and ORM writes to those
   fields throughout the tree. A written numeric column the declaration does
   not claim FAILS the run. That is what stops the next ``estimated_total``.
+  It remains a syntactic guard, not a proof: ``setattr``, dynamic field names,
+  splatted writer keywords and dynamically built querysets do not expose enough
+  structure for it to judge and remain named limits of a green scan.
 * **The sites.** Per value, as before. :func:`scan` reads every ``.py`` in
   ``backend/`` and every ``.ts``/``.tsx`` in ``frontend/src`` and reports the
   sites that touch that value's fields.
@@ -145,10 +148,15 @@ ROUTING_MODULE = "settlement_signals.py"
 ROUTING_DECLARATION = "DERIVED_ORDER_VALUES"
 ROUTING_ENTRY_CLASS = "DerivedOrderValue"
 
+
+def _with_async_twins(names: set[str]) -> frozenset[str]:
+    return frozenset(names | {f"a{name}" for name in names if name[:1].islower()})
+
+
 #: Call names whose arguments are a query PREDICATE — where naming a field means
 #: asking a question about it rather than displaying or storing it. ``create``
 #: is deliberately absent: it stores, and is covered by the write arm instead.
-PREDICATE_CALLS = frozenset(
+PREDICATE_CALLS = _with_async_twins(
     {"filter", "exclude", "get", "Q", "update", "annotate", "aggregate", "When"}
 )
 
@@ -161,12 +169,13 @@ PREDICATE_CALLS = frozenset(
 #: argument of these is judged as its own expression, which still catches the
 #: real thing (``update(quantity_received=F("quantity_ordered"))`` names two
 #: settlement fields inside ONE keyword and is flagged).
-INDEPENDENT_ARG_CALLS = frozenset({"aggregate", "annotate", "update"})
+INDEPENDENT_ARG_CALLS = _with_async_twins({"aggregate", "annotate", "update"})
 
 #: Call names that persist a field value passed as a keyword.
-WRITE_CALLS = frozenset(
+SYNC_WRITE_CALLS = frozenset(
     {"create", "update", "get_or_create", "update_or_create", "bulk_create", "bulk_update"}
 )
+WRITE_CALLS = _with_async_twins(set(SYNC_WRITE_CALLS))
 
 #: Every time the write arm turned out not to reach what its own description
 #: claimed. Data, not prose: :func:`main` derives the count it reports from
@@ -215,6 +224,9 @@ WRITE_SHAPES_SEEN = (
 #: and "could not tell" are different facts and this list is which is which.
 WRITE_SHAPES_UNSEEN = (
     "raw SQL, and anything reaching the database outside the ORM",
+    "setattr(), a field name held in a variable, keywords splatted into an ORM "
+    "writer, and a dynamically built queryset — syntax that does not expose the "
+    "model field and receiver together cannot be proved by this reader",
     "a FAST DELETE: a collector that can drop rows with one _raw_delete sends no "
     "post_delete, and _raw_delete called directly never does, so the model-level "
     "routing that covers ordinary deletes does not cover those",
@@ -406,8 +418,9 @@ class Report:
     #: Trees it could not, and why. Never silently empty: a run that saw less
     #: than the whole tree has to say so rather than read as a clean sweep.
     unscanned: list[str] = field(default_factory=list)
-    #: Files that WERE there and could not be read, as ``(path, reason)``: a
-    #: decode failure, or source this interpreter cannot parse.
+    #: Source sites that could not be read completely, as ``(path, reason)``: a
+    #: decode failure, source this interpreter cannot parse, or a write whose
+    #: field list the syntactic reader cannot resolve.
     #:
     #: Deliberately separate from :attr:`unscanned`. A tree missing from the
     #: checkout is a known shape of run — the docker-compose job mounts
@@ -842,6 +855,7 @@ class _PyScanner:
         self.tree = ast.parse(source)
         self.lookup_re = re.compile(r"^(%s)(__.+)?$" % "|".join(sorted(self.all_fields)))
         self.findings: list[Finding] = []
+        self.unreadable: list[tuple[str, str]] = []
         self.sites: list[tuple[str, int, str, str]] = []
         #: Dotted names of every class this module declares, so a receiver that
         #: names one — ``PurchaseOrderItem.close_short()`` — can be told apart
@@ -1085,17 +1099,20 @@ class _PyScanner:
         return not any(name[:1].isupper() for name in named)
 
     @staticmethod
-    def _bulk_update_fields(call: ast.Call) -> set[str]:
-        values = []
+    def _bulk_update_fields(call: ast.Call) -> tuple[set[str], bool]:
+        values: list[ast.AST] = []
         if len(call.args) > 1:
             values.append(call.args[1])
         values.extend(keyword.value for keyword in call.keywords if keyword.arg == "fields")
+        resolved = bool(values) and all(
+            isinstance(value, (ast.List, ast.Tuple, ast.Set)) for value in values
+        )
         return {
             node.value
             for value in values
             for node in ast.walk(value)
             if isinstance(node, ast.Constant) and isinstance(node.value, str)
-        }
+        }, resolved
 
     @classmethod
     def _orm_written_fields(cls, call: ast.Call, name: str) -> set[str]:
@@ -1110,7 +1127,8 @@ class _PyScanner:
                     if isinstance(key, ast.Constant) and isinstance(key.value, str)
                 )
         if name == "bulk_update":
-            fields |= cls._bulk_update_fields(call)
+            bulk_fields, _resolved = cls._bulk_update_fields(call)
+            fields |= bulk_fields
         return fields
 
     def _flag(self, node: ast.AST, detail: str) -> None:
@@ -1267,6 +1285,11 @@ class _PyScanner:
                 elif isinstance(sub, ast.Call):
                     func = sub.func
                     name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+                    sync_name = (
+                        name[1:]
+                        if name.startswith("a") and name[1:] in SYNC_WRITE_CALLS
+                        else name
+                    )
                     calls.add((name, _receiver_path(func)))
                     refreshed.add(name)
                     if name == self.order.model_name:
@@ -1275,21 +1298,32 @@ class _PyScanner:
                         ):
                             order_writes.setdefault(column, sub.lineno)
                     if name in WRITE_CALLS and self._targets_orders(sub):
-                        named_fields = self._orm_written_fields(sub, name)
+                        named_fields = self._orm_written_fields(sub, sync_name)
                         for column in named_fields & self.order.numeric_columns:
                             order_writes.setdefault(column, sub.lineno)
+                        if sync_name == "bulk_update":
+                            _fields, resolved = self._bulk_update_fields(sub)
+                            if not resolved:
+                                self.unreadable.append(
+                                    (
+                                        self.rel,
+                                        f"line {sub.lineno}: order-targeted {name}() field list "
+                                        "cannot be resolved statically",
+                                    )
+                                )
                     if name in WRITE_CALLS and self._targets_lines(sub):
                         for anchor in self.anchors:
                             settling = (
                                 anchor.create_settling_fields
-                                if name in ("create", "bulk_create")
+                                if sync_name in ("create", "bulk_create")
                                 else anchor.all_fields
                             )
                             for kw in sub.keywords:
                                 if kw.arg in settling:
                                     writes[anchor.column].append(f"{kw.arg} ({name}())")
-                            if name == "bulk_update":
-                                for field in self._bulk_update_fields(sub) & settling:
+                            if sync_name == "bulk_update":
+                                bulk_fields, _resolved = self._bulk_update_fields(sub)
+                                for field in bulk_fields & settling:
                                     writes[anchor.column].append(f"{field} (bulk_update())")
             self.functions[qual] = {
                 "writes": writes,
@@ -1565,6 +1599,7 @@ def scan(start: Path | None = None) -> Report:
         report.sites.extend(scanner.sites)
         if _is_test_path(rel):
             continue
+        report.unreadable.extend(scanner.unreadable)
         report.findings.extend(scanner.findings)
         functions.update(scanner.functions)
 
@@ -1931,13 +1966,13 @@ def main(argv: list[str] | None = None) -> int:
         # Printed before the verdict, not after it, because it CHANGES the
         # verdict: none of these files was judged, so none of them was cleared.
         print(
-            f"{len(report.unreadable)} file(s) in a tree above could not be read, "
-            f"so they are NOT cleared:\n"
+            f"{len(report.unreadable)} source site(s) in a tree above could not be "
+            f"read completely, so they are NOT cleared:\n"
         )
         for path, reason in report.unreadable:
             print(f"  {path}\n      {reason}")
         print(
-            "\nA guard that cannot read a file has not cleared it, so this run "
+            "\nA guard that cannot read a source site has not cleared it, so this run "
             "FAILS rather than reporting a sweep it did not perform. If these are "
             "SyntaxErrors, the interpreter running this scan is older than the one "
             "the backend targets: run it under that version."

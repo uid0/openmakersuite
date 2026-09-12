@@ -19,6 +19,13 @@ Settings (env-driven; see settings.py):
 - OPENWEATHER_ZIP (US zip,country e.g. "75201,us"; used if no lat/lon)
 - OPENWEATHER_UNITS ("imperial" default, "metric" or "standard")
 - OPENWEATHER_CACHE_SECONDS (default 600 = 10 minutes)
+
+Refusals answer in the STANDARDIZED envelope (``config.api_errors``):
+``{"error": {"code": "weather_not_configured", "message": "..."}}``. The
+codes are unchanged — ``SharedWeatherBlock`` still branches on
+``weather_not_configured`` to draw the "not configured" panel — but they now
+sit where every other endpoint puts them, so a client that only knows the
+envelope reads this one too.
 """
 
 from __future__ import annotations
@@ -33,6 +40,8 @@ import requests
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+
+from config.api_errors import error_response
 
 logger = logging.getLogger(__name__)
 
@@ -111,17 +120,20 @@ def current_weather(request):
         payload = _fetch_current_weather()
     except RuntimeError as exc:
         # Configuration problem — operator-fixable, surface clearly.
-        return Response({"error": str(exc), "code": "weather_not_configured"}, status=503)
+        return error_response(code="weather_not_configured", message=str(exc), status_code=503)
     except requests.HTTPError as exc:
         logger.warning("OpenWeather HTTP error: %s", exc)
-        return Response(
-            {"error": "upstream weather provider returned an error", "code": "weather_upstream"},
-            status=502,
+        return error_response(
+            code="weather_upstream",
+            message="upstream weather provider returned an error",
+            status_code=502,
         )
     except requests.RequestException as exc:
         logger.warning("OpenWeather network error: %s", exc)
-        return Response(
-            {"error": "weather provider unreachable", "code": "weather_unreachable"}, status=502
+        return error_response(
+            code="weather_unreachable",
+            message="weather provider unreachable",
+            status_code=502,
         )
 
     cache.set(_CACHE_KEY, payload, timeout=cache_seconds)

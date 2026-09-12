@@ -12,10 +12,10 @@
  * is unavailable we fall back to an iframe-with-warning so screens
  * still produce visible output during the rollover window.
  */
-import axios from 'axios';
 import React, { useCallback, useEffect, useState } from 'react';
 
 import api from '../../services/api';
+import { extractErrorCode } from '../../utils/extractErrorMessage';
 
 interface SharedWeatherBlockProps {
   /** Legacy iframe URL. Used only as a last-resort fallback. */
@@ -59,12 +59,11 @@ const SharedWeatherBlock: React.FC<SharedWeatherBlockProps> = ({ weatherUrl }) =
       setData(resp.data);
       setError(null);
     } catch (err) {
-      // Backend already returns clean error envelopes; we just need
-      // *something* to differentiate "config missing" from "outage".
-      const code = axios.isAxiosError(err)
-        ? (err.response?.data as { code?: string } | undefined)?.code
-        : undefined;
-      setError(code || 'weather_error');
+      // The backend refuses in the STANDARDIZED envelope
+      // (backend/config/api_errors.py), so the code lives at ``error.code``;
+      // ``extractErrorCode`` reads that and the older flat ``code`` alike. We
+      // just need *something* to differentiate "config missing" from "outage".
+      setError(extractErrorCode(err) || 'weather_error');
       setData(null);
     }
   }, []);

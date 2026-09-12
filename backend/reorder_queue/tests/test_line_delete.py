@@ -192,9 +192,9 @@ def test_delete_is_refused_once_the_supplier_has_the_order(client):
     response = client.delete(_line_url(purchase_order, first))
 
     assert response.status_code == 400
-    assert response.data["code"] == "not_draft"
+    assert response.data["error"]["code"] == "not_draft"
     # A refusal is only legitimate when the operator can act on it.
-    assert "void" in response.data["error"].lower()
+    assert "void" in response.data["error"]["message"].lower()
     assert PurchaseOrderItem.objects.filter(pk=first.pk).exists()
 
 
@@ -237,7 +237,7 @@ def test_a_draft_cancelled_without_being_sent_is_not_told_the_supplier_has_it(cl
     response = client.delete(_line_url(purchase_order, first))
 
     assert response.status_code == 400
-    error = response.data["error"]
+    error = response.data["error"]["message"]
     assert "supplier already has" not in error
     # Still actionable: it says why, and what to do instead.
     assert "never went to the supplier" in error
@@ -262,7 +262,7 @@ def test_an_order_sent_by_the_admin_bulk_action_is_still_told_to_void(client):
     response = client.delete(_line_url(purchase_order, first))
 
     assert response.status_code == 400
-    error = response.data["error"]
+    error = response.data["error"]["message"]
     assert "the supplier already has this line" in error
     assert "void it instead" in error
     assert "never went to the supplier" not in error
@@ -281,7 +281,7 @@ def test_an_order_cancelled_after_being_sent_is_still_told_to_void(client):
     response = client.delete(_line_url(purchase_order, first))
 
     assert response.status_code == 400
-    error = response.data["error"]
+    error = response.data["error"]["message"]
     assert "the supplier already has this line" in error
     assert "void it instead" in error
 
@@ -300,8 +300,8 @@ def test_delete_refuses_a_line_that_records_a_receipt(client):
     response = client.delete(_line_url(purchase_order, first))
 
     assert response.status_code == 400, response.data
-    assert response.data["code"] == "line_received"
-    assert "3" in response.data["error"]
+    assert response.data["error"]["code"] == "line_received"
+    assert "3" in response.data["error"]["message"]
     assert PurchaseOrderItem.objects.filter(pk=first.pk).exists()
     purchase_order.refresh_from_db()
     assert purchase_order.estimated_total == Decimal("50.00")
@@ -318,7 +318,7 @@ def test_the_receipt_refusal_comes_second_to_the_pre_send_refusal(client):
     response = client.delete(_line_url(purchase_order, first))
 
     assert response.status_code == 400
-    assert response.data["code"] == "not_draft"
+    assert response.data["error"]["code"] == "not_draft"
 
 
 def test_every_non_pre_send_status_is_covered_by_the_parametrisation():

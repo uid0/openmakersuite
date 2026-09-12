@@ -24,6 +24,22 @@ def _clear_weather_cache():
     cache.delete("screens.weather.current.v1")
 
 
+def assert_envelope(resp, *, code, status_code):
+    """The kiosk's refusals answer in the STANDARDIZED envelope.
+
+    ``config.api_errors``' shape, the same one every other endpoint uses, so a
+    client that only knows ``error.code``/``error.message`` reads this one too.
+    Strict about the top level on purpose: a conversion that merely added the
+    envelope beside the old flat ``code`` would leave two shapes on the wire.
+    """
+    assert resp.status_code == status_code, resp.json()
+    body = resp.json()
+    assert set(body) == {"error"}, body
+    assert body["error"]["code"] == code, body
+    assert isinstance(body["error"]["message"], str) and body["error"]["message"].strip(), body
+    return body["error"]
+
+
 def _fake_openweather_payload():
     return {
         "name": "Carrollton",
@@ -38,8 +54,9 @@ def _fake_openweather_payload():
 def test_weather_returns_503_when_unconfigured(api_client, settings):
     settings.OPENWEATHER_API_KEY = ""
     resp = api_client.get(reverse("weather-current"))
-    assert resp.status_code == 503
-    assert resp.json()["code"] == "weather_not_configured"
+    envelope = assert_envelope(resp, code="weather_not_configured", status_code=503)
+    # The operator-fixable reason is preserved, not replaced by a generic one.
+    assert "OPENWEATHER_API_KEY" in envelope["message"]
 
 
 def test_weather_returns_payload_when_configured(api_client, settings):
@@ -101,8 +118,7 @@ def test_weather_returns_502_when_upstream_fails(api_client, settings):
 
         resp = api_client.get(reverse("weather-current"))
 
-    assert resp.status_code == 502
-    assert resp.json()["code"] == "weather_upstream"
+    assert_envelope(resp, code="weather_upstream", status_code=502)
 
 
 def test_weather_requires_location(api_client, settings):
@@ -112,5 +128,5 @@ def test_weather_requires_location(api_client, settings):
     settings.OPENWEATHER_ZIP = ""
 
     resp = api_client.get(reverse("weather-current"))
-    assert resp.status_code == 503
-    assert resp.json()["code"] == "weather_not_configured"
+    envelope = assert_envelope(resp, code="weather_not_configured", status_code=503)
+    assert "OPENWEATHER_LAT" in envelope["message"]

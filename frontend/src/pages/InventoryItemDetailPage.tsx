@@ -312,8 +312,9 @@ interface LogUsageModalProps {
 /**
  * Modal for recording stock consumption ("Use / Log Usage", op-27wa) with an
  * optional committee (SIG) charge. When a committee is selected and the item
- * has a unit cost the backend posts a charge to the ledger (Bead 1, #920);
- * with no unit cost the committee is recorded but nothing is charged. On
+ * has a positive unit cost the backend posts a charge to the ledger (Bead 1,
+ * #920); with no positive amount to post the committee is recorded but nothing
+ * is charged, and the server's `warning` says which case it was. On
  * success it reloads the parent item so stock + the usage-logs tab refresh.
  */
 const LogUsageModal: React.FC<LogUsageModalProps> = ({
@@ -377,7 +378,9 @@ const LogUsageModal: React.FC<LogUsageModalProps> = ({
         ...(packCounted ? { at_level: true } : {}),
       });
       if (data.warning) {
-        // Committee recorded but no unit cost → nothing posted. Non-error tone.
+        // Committee recorded but nothing to post. The server words WHY (no cost
+        // on file vs. a cost recorded as $0.00), so show it verbatim rather
+        // than restating it here. Non-error tone.
         notifications.showWarning('Committee recorded', data.warning);
       } else if (data.ledger_transaction && data.total_cost) {
         const committee = sigs.find((s) => s.id === data.charged_group)?.name ?? 'the committee';

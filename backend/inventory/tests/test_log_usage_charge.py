@@ -178,6 +178,38 @@ class TestLogUsageCommitteeCharge:
 
         assert "warning" in resp.data
         assert "no unit cost" in resp.data["warning"]
+        # A cost genuinely not on file is the only thing this wording may claim:
+        # a recorded 0.00 is a KNOWN price and gets its own sentence below.
+        assert "0.00" not in resp.data["warning"]
+
+    def test_committee_but_zero_unit_cost_says_the_cost_is_zero(self):
+        """Donated item priced 0.00: a KNOWN zero must not be called unknown.
+
+        Nothing posts either way (there is no positive amount to post), but the
+        operator is told the cost is recorded as zero rather than missing, so
+        they do not go hunting for a price that needs no finding.
+        """
+        client, _user = _staff_client()
+        group = Group.objects.create(name="Donated SIG")
+        item = InventoryItemFactory(current_stock=10, unit_cost=Decimal("0.00"))
+
+        resp = client.post(_url(item), {"quantity": 3, "charged_group": group.id}, format="json")
+
+        assert resp.status_code == status.HTTP_200_OK
+        log = UsageLog.objects.get(item=item)
+        assert log.charged_group_id == group.id
+        # Ledger behaviour is unchanged: the zero is snapshotted, nothing posts.
+        assert log.unit_cost == Decimal("0.00")
+        assert log.total_cost == Decimal("0.00")
+        assert log.ledger_transaction_id is None
+        assert Transaction.objects.count() == 0
+        assert EntryMeta.objects.filter(source_type=SourceType.SIG_CHARGE).count() == 0
+
+        warning = resp.data["warning"]
+        assert "$0.00" in warning
+        assert "nothing posted to the ledger" in warning
+        # The defect: "no unit cost" describes a known zero as unknown.
+        assert "no unit cost" not in warning
 
     def test_committee_charge_requires_permission(self):
         """A non-privileged (here anonymous) caller supplying a committee -> 403."""

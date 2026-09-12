@@ -1253,8 +1253,10 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         Charging a committee additionally requires the caller be staff or an
         admin of the item's owning group. With no ``charged_group`` the endpoint
         behaves exactly as before (unchanged behaviour and permissions). If a
-        committee is given but the item has no unit cost on file, the committee is
-        recorded but nothing is posted and a ``warning`` is returned.
+        committee is given but there is no positive amount to post — no unit cost
+        on file, a unit cost recorded as ``0.00``, or a non-positive quantity —
+        the committee is recorded, nothing is posted, and a ``warning`` naming
+        which of those it was is returned.
         """
         from django.contrib.auth.models import Group
 
@@ -1340,10 +1342,20 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                     usage_log.ledger_transaction = txn
                     usage_log.save(update_fields=["ledger_transaction"])
                 else:
-                    warning = (
-                        "committee recorded, but the item has no unit cost — "
-                        "nothing posted to the ledger"
-                    )
+                    # Say which of these it is. A donated item priced 0.00 has a
+                    # KNOWN cost of nothing; calling that "no unit cost on file"
+                    # sends the operator hunting for a price that needs no
+                    # finding (op-9m2v: None is "we do not know", 0.00 is a
+                    # price). Nothing posts in either case — wording only.
+                    if unit_cost is None:
+                        reason = "the item has no unit cost on file"
+                    elif unit_cost == 0:
+                        reason = "the item's unit cost is recorded as $0.00"
+                    else:
+                        # A priced item whose usage still totals nothing (a
+                        # quantity of zero or less). Not a cost question at all.
+                        reason = "this usage does not come to a positive charge"
+                    warning = f"committee recorded, but {reason} — nothing posted to the ledger"
 
         # ``context`` is not optional: ``UsageLogSerializer`` withholds the cost
         # snapshot from a caller it cannot prove is signed in, and FAILS CLOSED,

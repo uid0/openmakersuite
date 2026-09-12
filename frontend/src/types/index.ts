@@ -625,7 +625,9 @@ export interface LogUsageRequest {
 // Response from POST /inventory/items/{id}/log_usage/: the UsageLog plus the
 // accounting outcome. Money fields are decimal strings; all are nullable when
 // no committee was charged. `warning` is set when the committee was recorded
-// but the item has no unit cost, so nothing was posted to the ledger.
+// but there was no positive amount to post, and says which case it was: no unit
+// cost on file, a unit cost recorded as $0.00 (a donated item's cost is KNOWN,
+// not unknown), or a usage that comes to no charge. Display it verbatim.
 export interface LogUsageResponse extends UsageLog {
   charged_group: number | null;
   unit_cost: string | null;

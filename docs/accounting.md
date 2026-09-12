@@ -149,7 +149,7 @@ job is reopened.
   transaction instead of double-charging (enforced by `EntryMeta`'s partial-unique
   `(source_type, source_ref)`).
 
-### The no-cost warning
+### The no-charge warning
 
 `item.unit_cost` is derived from the supplier the item would actually be bought
 through — never an inactive or discontinued link — so it is `None` both for an
@@ -160,9 +160,10 @@ recorded" and a link that quotes `0.00` yields a real `Decimal("0.00")`.
 
 If a committee is given but the posting amount is not positive (`total_cost`
 null or `≤ 0`), the committee is still recorded on the `UsageLog` but **nothing
-is posted** to the ledger, and the response carries a `warning`:
-
-> committee recorded, but the item has no unit cost — nothing posted to the ledger
+is posted** to the ledger. The response carries a `warning` that distinguishes
+the reason: no unit cost on file, a known unit cost of `$0.00`, or usage that
+does not come to a positive charge. In particular, a donated item recorded at
+`$0.00` is described as a known zero rather than as a missing price.
 
 ### Permissions & backward compatibility
 
@@ -176,7 +177,7 @@ What the RESPONSE carries now depends on the reader: `UsageLogSerializer`
 withholds the `unit_cost` / `total_cost` snapshot from a caller with no session
 (the row says `vendor_data_withheld: true` instead), because a vendor's price is
 behind a login. The `UsageLog` row itself, the stock movement, the ledger entry
-and the `warning` above are unchanged, as is a signed-in caller's payload. The
+and the `warning` are unchanged, as is a signed-in caller's payload. The
 gate and its field lists are owned by
 [`API_PERMISSION_MATRIX.md`](API_PERMISSION_MATRIX.md).
 

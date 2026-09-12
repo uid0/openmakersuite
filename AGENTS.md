@@ -514,6 +514,36 @@ still open:
    is the population it would cover: nothing gates a frontend reader until it
    exists.
 
+**The maintenance low-stock predicate — CLOSED**
+(`oms-low-stock-predicate-mixes-units`). `check_material_stock` decided its
+warning with a raw `current_stock >= minimum_stock` and paired those same two
+numbers in its payload, so a pack-counted material read `24 >= 10` — 24 bottles
+against a 10-CASE minimum — and was dropped, while the screen rendered "24/10"
+under a "below minimum" banner. It now compares and reports `count_at_level`
+against the unchanged threshold with `count_unit` naming the pair; `reorder_qty`
+stays base units because it is FILED, not counted. Which unit a surface is about
+is the question, and both answers are right: a COUNTING surface (what is on the
+shelf) reads `count_at_level`/`count_unit`, a FILING one `base_reorder_quantity`.
+
+⚠️ **`InventoryItem.needs_reorder` is NOT a drop-in for a surface that already
+alerts** — this is the trap that made the first attempt an error-severity
+regression. It short-circuits `is_kit` and `is_retired`, and for a legacy
+`use_case_based_reorder` item with a KNOWN case size it compares cases to
+`minimum_cases`, so 3 cases against a 1-case minimum reads fine while the
+50-unit base floor the same item carries reads low. Swapping a raw base-unit
+comparison for it therefore DELETES alerts. Convert the one mixed operand
+instead — `count_at_level(item) <= item.current_stock` always, so converting is
+additive by construction — and hold the change to that:
+`test_maintenance_stock_check.py::TestLowStockAlertsAreUnitCorrect` pins the
+alerted set as a superset of the raw comparison's, per item shape.
+
+**Still open, same class: low-stock surfaces that hand-roll the SQL predicate**
+instead of `packaging.low_stock_q()`, so they mix units exactly as the above did
+— `dashboard/views.py` (three `current_stock__lte=F("minimum_stock")` filters:
+both widget counts and `get_low_stock_data`) and `inventory/views.py` (the list
+view's `low_stock=true`/`false` pair, and the `low_stock_count` aggregate). Grep
+the expression; do not trust that count.
+
 ### What a price costs, and whether we know: one derivation (op-9m2v)
 
 `inventory.services.pricing` is the ONE answer to "what does one unit, or one

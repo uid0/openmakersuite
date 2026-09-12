@@ -680,6 +680,7 @@ def refresh_receipt_status(purchase_order) -> str:
     # through it, and a stale read here is exactly how an order finishes
     # receiving and stays displayed as partially received.
     purchase_order.__dict__.pop("_line_item_totals", None)
+    getattr(purchase_order, "_prefetched_objects_cache", {}).pop("items", None)
 
     if not purchase_order.has_received_anything:
         return purchase_order.status

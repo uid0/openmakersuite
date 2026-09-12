@@ -429,6 +429,8 @@ def recalculate_estimated_total(purchase_order):
     the viewset prefetches ``items``, so the cached relation still holds the
     pre-edit quantities after a line is updated.
     """
+    purchase_order.__dict__.pop("_line_item_totals", None)
+    getattr(purchase_order, "_prefetched_objects_cache", {}).pop("items", None)
     total = sum(
         (
             line.estimated_cost

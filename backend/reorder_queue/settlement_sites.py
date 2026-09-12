@@ -376,8 +376,7 @@ class OrderShape:
 
     #: The order model's class name.
     model_name: str
-    #: Its concrete columns. A value that is not one of these is not STORED,
-    #: and a value that is not stored cannot go stale.
+    #: Its concrete columns. A value that is not one of these is not STORED.
     columns: frozenset[str]
     #: Columns of the ORDER whose names the LINE also carries — ``notes``,
     #: ``work_order``, ``owning_group``, the void stamps. An assignment names
@@ -1853,11 +1852,12 @@ def main(argv: list[str] | None = None) -> int:
         f"declared above fails this run — see _value_arm."
     )
     print(
-        "\nNon-stored line-derived aggregate outputs (computed fresh on every read): "
+        "\nNon-stored line-derived aggregate outputs (cached per order instance; "
+        "invalidated when that instance participates in a line write): "
         + ", ".join(sorted(report.order.line_aggregate_outputs))
     )
     print(
-        "Non-stored line-derived model members (computed fresh on every read): "
+        "Non-stored line-derived model members (same instance-lifetime boundary): "
         + ", ".join(sorted(report.order.line_derived_members))
     )
     print()

@@ -48,6 +48,7 @@ from inventory.models import ItemSupplier
 from inventory.tests.factories import InventoryItemFactory, SupplierFactory
 from reorder_queue import settlement_sites
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
+from reorder_queue.serializers import PurchaseOrderSerializer
 from reorder_queue.settlement_signals import DERIVED_ORDER_VALUES, settlement_batch
 
 #: Every ``(value, input field)`` pair the model declares, so one case exists
@@ -59,33 +60,50 @@ VALUE_FIELD_PAIRS = [
 
 class TestNonStoredDerivedValues:
     @pytest.mark.django_db
-    def test_a_line_save_is_visible_to_an_already_read_separate_order_instance(
+    def test_a_line_save_is_fresh_when_the_same_order_is_serialized_again(
         self, supplier, operator
     ):
         purchase_order = make_po(supplier, operator)
         line = add_line(purchase_order, make_item("Cached save", supplier), quantity=4)
-        reader = PurchaseOrder.objects.prefetch_related("items").get(pk=purchase_order.pk)
-        assert reader.total_quantity == 4
+        assert PurchaseOrderSerializer(purchase_order).data["total_quantity"] == 4
 
         line.quantity_ordered = 7
         line.save(update_fields=["quantity_ordered"])
 
-        assert reader.total_quantity == 7
-        assert reader.outstanding_line_count == 1
+        refreshed = PurchaseOrderSerializer(purchase_order).data
+        assert refreshed["total_quantity"] == 7
+        assert refreshed["outstanding_line_count"] == 1
 
     @pytest.mark.django_db
-    def test_a_line_delete_is_visible_to_an_already_read_prefetched_order(
+    def test_a_line_delete_is_fresh_when_the_same_order_is_serialized_again(
         self, supplier, operator
     ):
         purchase_order = make_po(supplier, operator)
         line = add_line(purchase_order, make_item("Cached delete", supplier), quantity=4)
-        reader = PurchaseOrder.objects.prefetch_related("items").get(pk=purchase_order.pk)
-        assert reader.total_items == 1
+        assert PurchaseOrderSerializer(purchase_order).data["total_items"] == 1
 
         line.delete()
 
-        assert reader.total_items == 0
-        assert reader.total_quantity == 0
+        refreshed = PurchaseOrderSerializer(purchase_order).data
+        assert refreshed["total_items"] == 0
+        assert refreshed["total_quantity"] == 0
+
+    @pytest.mark.django_db
+    def test_prefetched_list_rollups_use_no_per_order_queries(
+        self, supplier, operator, django_assert_num_queries
+    ):
+        for index in range(2):
+            purchase_order = make_po(supplier, operator)
+            add_line(purchase_order, make_item(f"Prefetched {index}", supplier), quantity=4)
+
+        with django_assert_num_queries(2):
+            orders = list(PurchaseOrder.objects.prefetch_related("items"))
+            for purchase_order in orders:
+                assert purchase_order.total_items == 1
+                assert purchase_order.total_quantity == 4
+                assert purchase_order.total_received_quantity == 0
+                assert purchase_order.outstanding_line_count == 1
+                assert purchase_order.variance_line_count == 0
 
 
 def pair_id(pair):

@@ -179,6 +179,14 @@ DERIVED_ORDER_VALUES = (
     ),
 )
 
+
+def _invalidate_parent_snapshot(instance: PurchaseOrderItem) -> None:
+    parent = instance._state.fields_cache.get(_PARENT_FIELD)
+    if parent is None:
+        return
+    parent.__dict__.pop("_line_item_totals", None)
+    getattr(parent, "_prefetched_objects_cache", {}).pop("items", None)
+
 def _member_code(name: str) -> types.CodeType | None:
     """The compiled body of a class member, or ``None`` if it has no body.
 
@@ -457,6 +465,7 @@ def _rederive_after_line_save(sender, instance, **kwargs):
     ``updated_at`` — whenever anyone edited a note, and would rewrite money on
     every receipt.
     """
+    _invalidate_parent_snapshot(instance)
     moved = getattr(instance, "_derived_moved", DERIVED_ORDER_VALUES)
     if not moved:
         return
@@ -515,4 +524,5 @@ def _rederive_after_line_delete(sender, instance, **kwargs):
     anywhere. Both re-roll from :func:`_rederive_after_line_save`, on the same
     rule and for the same reason.
     """
+    _invalidate_parent_snapshot(instance)
     _mark({instance.purchase_order_id}, DERIVED_ORDER_VALUES)

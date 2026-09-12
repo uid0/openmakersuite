@@ -178,7 +178,13 @@ describe('SerializedComponentsPanel', () => {
     fireEvent.click(screen.getByTestId('serialized-scan-receive-open'));
 
     expect(await screen.findByTestId('serialized-scan-receive-modal')).toBeInTheDocument();
-    expect(screen.getByTestId('scan-receive-serial')).toBeInTheDocument();
+    // The modal ROOT mounts a frame before its body does — Mantine's Modal
+    // renders through <Transition>, which commits the content on a
+    // requestAnimationFrame. Querying the input synchronously off the root's
+    // arrival is a race that only loses when a loaded machine stretches that
+    // frame, which is the same defect that made AuditFeedPage fail at random
+    // on unrelated branches. Await the input itself.
+    expect(await screen.findByTestId('scan-receive-serial')).toBeInTheDocument();
   });
 
   it('shows an enable-tracking CTA (not a dead panel) when the item is not serialized', async () => {

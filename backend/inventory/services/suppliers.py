@@ -123,6 +123,28 @@ def derive_costs(*, unit_cost, package_cost, quantity_per_package, stored=None):
       about price; holding the unit price instead would silently multiply a
       recorded case price the supplier never re-quoted.
 
+    **Every bullet above that RE-DERIVES a twin is PACK-CONDITIONAL; the two
+    cleared-cost bullets are not.** Deriving one column from the other needs a
+    pack size to multiply or divide by, so every such bullet — create and update
+    alike — sits BELOW the divide-by-zero guard and does not run at all at a pack
+    size under 1: there the supplied pair is stored as supplied and the untouched
+    twin keeps whatever it held. The condition is named once, here, rather than
+    claused onto each arithmetic bullet, because that would be six prose copies
+    of a boundary the code below already draws. It is named AT ALL because two
+    bullets state in words that they hold at every pack size, and beside an
+    explicit claim a neighbour's silence reads as agreement — which is how "the
+    case price re-derives" came to be read as unconditional. What each bullet is
+    actually true of is pinned by
+    ``test_a_supplied_cost_moves_its_twin_only_where_the_pack_size_divides`` in
+    ``inventory/tests/test_supplier_cost_derivation.py``, which runs them at a
+    pack size that divides and at 0 — read it rather than trusting this
+    paragraph.
+
+    That reading is not moot now that no supported write path CREATES a pack
+    size under 1 (:func:`inventory.services.pack_size.clean_pack_size` refuses
+    it): the rows recorded before that guard still reach here, and a queryset
+    ``UPDATE`` still reaches the column past every validator.
+
     BOTH cleared-cost cases are decided TOGETHER, in one block above the
     divide-by-zero guard, because they are one question — what an emptied box
     means — and splitting them is how a case gets missed. That is not a
@@ -166,7 +188,12 @@ def derive_costs(*, unit_cost, package_cost, quantity_per_package, stored=None):
                 return from_package(stored_package)
             return stored_unit, stored_package
 
-    # The model validates >= 1, but a bypassed validator must not divide by zero.
+    # THE DIVIDE-BY-ZERO GUARD, and the boundary the bullets sit on two sides of.
+    # The write paths now run the field's ``MinValueValidator(1)`` as well as
+    # declaring it, so nothing new arrives below 1 — but the rows recorded before
+    # that do, and a queryset ``UPDATE`` still reaches the column past every
+    # validator. Everything below this line is arithmetic and is skipped for
+    # them; everything above it is not and is not.
     if not divides:
         return unit_cost, package_cost
 

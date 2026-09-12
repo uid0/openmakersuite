@@ -33,10 +33,16 @@ something a screen says today.
   to add a supplier link.
 * :data:`PACK_SIZE_RECORDED_ZERO` — a link records ``quantity_per_package`` of
   ``0``: a box holding no units, which is not a box. ``PositiveIntegerField``
-  permits it and ``MinValueValidator(1)`` only bites under ``full_clean()``, so
-  ``InventoryItemViewSet._sync_primary_supplier`` — which writes through
-  ``update_or_create`` — persists a posted ``0`` unchallenged. The operator's
-  action is to correct that row.
+  permits it and ``MinValueValidator(1)`` only bites under ``full_clean()``,
+  which ``Model.save()`` does not call — so
+  ``InventoryItemViewSet._sync_primary_supplier``, writing through
+  ``update_or_create``, persisted a posted ``0`` unchallenged. It no longer
+  does: :func:`clean_pack_size` is this module's WRITE face and that path now
+  goes through it, so no supported endpoint mints a new member of this state.
+  The state itself stays, because the rows already on disk do: they are left
+  exactly as recorded, and a queryset ``UPDATE`` still reaches the column past
+  every validator. The operator's action is to correct that row, through
+  ``/item-suppliers/`` or the admin.
 
 :func:`order_pack_size` adds a fourth, because the question it asks has one more
 way to come back empty:
@@ -90,12 +96,25 @@ rather than asking again, so the batched read paths keep their query budget.
 ``inventory/tests/test_pack_size_single_owner.py`` pins the reader set: a new
 read of ``quantity_per_package`` anywhere in ``backend/`` fails the build until
 it either goes through this module or is added to that snapshot deliberately.
+
+**The module has a WRITE face as well**, :func:`clean_pack_size`, because a
+declared validator that nothing runs is not a bound: ``MinValueValidator(1)``
+bites only under ``full_clean()``, and every hand-rolled writer skips it. Any
+writer that takes a pack size from a caller calls it.
+``inventory/tests/test_pack_size_write_guard.py`` carries the derived set of
+write paths, which of them validate, and the deliberate exclusions.
 """
 
 from dataclasses import dataclass
 from typing import Optional
 
+from django.core.exceptions import ValidationError
+
 from inventory.models import ItemSupplier
+
+#: The column this module interprets, named once. Both faces address it by this
+#: name — :func:`clean_pack_size` to reach the validators the field declares.
+COLUMN = "quantity_per_package"
 
 #: A link records a usable pack size — :attr:`PackSize.units` holds it.
 PACK_SIZE_KNOWN = "known"
@@ -103,7 +122,9 @@ PACK_SIZE_KNOWN = "known"
 #: No supplier link exists to record a pack size. A data gap, not a number.
 PACK_SIZE_NOT_RECORDED = "not_recorded"
 
-#: A link records ``quantity_per_package`` of 0 — a box holding no units.
+#: A link records ``quantity_per_package`` of 0 — a box holding no units. No
+#: supported write path mints one any more (:func:`clean_pack_size`); this is
+#: what the rows written before that guard read as.
 PACK_SIZE_RECORDED_ZERO = "recorded_zero"
 
 #: Supplier links exist, but none is orderable, so nothing we can BUY records a
@@ -169,6 +190,43 @@ def pack_size_of(link: Optional[ItemSupplier]) -> PackSize:
     if units <= 0:
         return PackSize(state=PACK_SIZE_RECORDED_ZERO, link=link)
     return PackSize(units=units, state=PACK_SIZE_KNOWN, link=link)
+
+
+def clean_pack_size(value):
+    """The pack size a write may RECORD, or raise. The WRITE face of this module.
+
+    :func:`pack_size_of` is the read face: it meets a ``quantity_per_package``
+    of 0 already on disk and reports :data:`PACK_SIZE_RECORDED_ZERO` — a box
+    holding no units, which is not a box. This is the other half, and the reason
+    that state gets no new members: a writer that takes a pack size from a
+    caller puts it through here first.
+
+    **The bound is not restated here.** This runs the validators
+    :class:`~inventory.models.ItemSupplier` itself declares on the column, so a
+    hand-rolled writer refuses exactly what ``/item-suppliers/`` and the admin
+    have always refused, in the same words, and "what is a legal pack size"
+    keeps ONE statement — the field. A literal ``< 1`` in this function would be
+    a second copy of the field's own rule, free to drift from the rule it exists
+    to enforce.
+
+    The refusal is raised as :class:`django.core.exceptions.ValidationError`
+    keyed on the column name, which
+    :func:`config.api_errors.standardized_exception_handler` already translates,
+    so it emerges through the same ``validation_failed`` envelope, under the
+    same field key, carrying the same sentence as the serializer-validated
+    endpoints. No client learns a new refusal shape.
+
+    Says nothing about rows already on disk. Existing
+    :data:`PACK_SIZE_RECORDED_ZERO` links are left exactly as they are, keep
+    reaching readers through :func:`pack_size_of`, and stay savable by every
+    path that does not re-supply their pack size — ``mark_discontinued`` and
+    the lead-time sweep among them.
+    """
+    field = ItemSupplier._meta.get_field(COLUMN)
+    try:
+        return field.clean(value, None)
+    except ValidationError as exc:
+        raise ValidationError({COLUMN: exc.messages}) from exc
 
 
 def declares_a_case(link: Optional[ItemSupplier]) -> Optional[int]:

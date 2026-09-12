@@ -244,6 +244,24 @@ only "case size unknown" for every one of them. They earn their keep by stopping
 keeping each unknown's CAUSE available to the surface that will word it — filed
 as separate follow-up. No flag moves between them.
 
+**The module has a WRITE face too, `clean_pack_size`, and it is why
+`RECORDED_ZERO` gets no new members.** A declared validator nothing runs is not
+a bound: `MinValueValidator(1)` bites only under `full_clean()`, which
+`Model.save()` never calls, so a hand-rolled writer declared the bound without
+running it. **Any writer that takes a pack size from a caller calls it.** Its
+docstring owns the mechanics and the refusal shape; the derived set of write
+paths — which validate, which are hand-rolled, and the deliberate exclusions —
+is in `inventory/tests/test_pack_size_write_guard.py`'s docstring. Derive that
+set again rather than recalling it if you add a writer.
+
+**Uncreatable is not the same as rewritten, and only the first was done.** The
+rows recorded before the guard are left exactly as recorded: no data migration,
+and no `CheckConstraint`, which could not be installed at all without rewriting
+or rejecting them. What becomes of them is the captain's decision, not the
+guard's. So `RECORDED_ZERO`, the `derive_costs` pack-0 hold and the `ScanPage`
+refusal text all stay live, and a queryset `UPDATE` still reaches the column
+past every validator.
+
 `inventory/tests/test_pack_size_single_owner.py` is the build gate: it walks
 every non-test module under `backend/` with the AST and pins the exact set of
 direct reads of the column. A new one anywhere fails until it goes through the
@@ -908,8 +926,17 @@ lost-update window on `stored_pricing`, are in
 [`docs/oms-supplier-cost-write-path-record.md`](docs/oms-supplier-cost-write-path-record.md)
 under "Still open, filed not fixed".
 
-Two consequences worth keeping in mind when touching this path:
+Three consequences worth keeping in mind when touching this path:
 
+- **Qualify one bullet in a set and the silent ones start making a claim too.**
+  Two of the `derive_costs` bullets say in words that they hold at every pack
+  size. Their neighbours — every bullet that performs arithmetic, and so does
+  not run below pack 1 — said nothing, and beside an explicit claim that
+  silence was read as agreement. The condition is now named ONCE in the
+  docstring, and what each bullet is actually true of is pinned by
+  `test_a_supplied_cost_moves_its_twin_only_where_the_pack_size_divides`. Read
+  the check, not a paraphrase; a clause on every bullet would have been six
+  copies of a boundary the code already draws.
 - **A derived column is added to `update_fields`.** `QuerySet.update_or_create`
   restricts `update_fields` to its own `defaults` keys, so without that a
   `package_cost` the model derives is computed and then dropped on the floor.

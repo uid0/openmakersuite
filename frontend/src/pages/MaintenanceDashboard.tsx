@@ -39,6 +39,7 @@ import { maintenanceAPI, reorderAPI, workOrderAPI } from '../services/api';
 import { LowStockAlert, MaintenanceItem, WorkOrder, WorkOrderUploadResult } from '../types';
 import { parseYmd } from '../utils/dates';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
+import { pluralizeUnit } from '../utils/packaging';
 
 const STATUS_COLORS: Record<string, string> = {
   open: 'blue',
@@ -687,7 +688,8 @@ const MaintenanceDashboard: React.FC = () => {
             <List size="sm" spacing="xs" mb="md">
               {stockWarning.alerts.map((alert) => (
                 <List.Item key={alert.material_id} data-testid="low-stock-alert">
-                  Low stock: {alert.name}: {alert.current}/{alert.minimum}
+                  Low stock: {alert.name}: {alert.current}/{alert.minimum}{' '}
+                  {pluralizeUnit(alert.unit, alert.minimum)}
                 </List.Item>
               ))}
             </List>

@@ -111,7 +111,12 @@ def build_restock_events(item: "InventoryItem", *, end: date) -> List[date]:
 
     Cancelled and voided purchase orders are excluded — an order that was never
     placed is not a restock, and counting it would stretch the measured gaps
-    around it.
+    around it. So is a voided LINE on an order that otherwise stands, through
+    ``PurchaseOrderItem.objects.standing()`` — the ONE rule for whether a
+    derived value may count a line. The order-level exclusion here already said
+    what the intent was; it just could not see a single struck-off line, so an
+    item removed from an order that went ahead without it still recorded a
+    shopping trip for that item.
 
     Args:
         item: the inventory item.
@@ -126,7 +131,8 @@ def build_restock_events(item: "InventoryItem", *, end: date) -> List[date]:
     from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
 
     days = (
-        PurchaseOrderItem.objects.filter(item_supplier__item=item)
+        PurchaseOrderItem.objects.standing()
+        .filter(item_supplier__item=item)
         .exclude(
             purchase_order__status__in=(
                 PurchaseOrder.Status.CANCELLED,

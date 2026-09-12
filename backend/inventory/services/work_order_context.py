@@ -473,7 +473,11 @@ def build_purchase_lines_context(work_order: "WorkOrder") -> list[dict[str, Any]
     """
     from .work_order_purchase_bridge import purchase_line_name, purchase_line_unit_cost
 
-    lines = [line for line in work_order.purchase_order_items.all() if not line.is_voided]
+    # ``stands`` rather than ``not line.is_voided``: the in-memory twin of
+    # ``PurchaseOrderItem.objects.standing()``, so this panel asks "does this
+    # line count?" by the same name as every other derived value. Behaviour
+    # unchanged — this site already had the answer right.
+    lines = [line for line in work_order.purchase_order_items.all() if line.stands]
     lines.sort(
         key=lambda line: (line.purchase_order.order_date, line.created_at),
         reverse=True,

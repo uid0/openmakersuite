@@ -625,6 +625,16 @@ def default_unit_cost(item_supplier):
     ``last_po_unit_cost`` derivation in ``inventory.services.item_metrics``
     (newest ``PurchaseOrderItem`` first).
 
+    **A struck-off line is not a price** — the fallback reads
+    ``PurchaseOrderItem.objects.standing()``, the ONE rule for whether a
+    derived value may count a line. It used to read the whole history, so an
+    item whose newest line from this supplier had been VOIDED came back priced
+    at the figure nobody agreed to pay, and that figure is what a scan-to-add
+    suggested and what ``add_line_item`` wrote onto the new line. Where the
+    voided line was the only history, this now returns ``None`` and the add is
+    refused (``no_unit_cost``) rather than quoting a struck-off price — the
+    same refusal a never-bought item already got.
+
     **``None`` when nothing is on file at all** (op-9m2v). This used to return
     ``Decimal("0.00")``, and a brand-new relationship with no price and no
     purchase history therefore added a line priced at nothing — a figure the
@@ -638,7 +648,8 @@ def default_unit_cost(item_supplier):
         return Decimal(price.amount)
 
     last = (
-        PurchaseOrderItem.objects.filter(item_supplier=item_supplier)
+        PurchaseOrderItem.objects.standing()
+        .filter(item_supplier=item_supplier)
         .order_by("-created_at")
         .values_list("unit_cost_actual", "unit_cost_ordered")
         .first()

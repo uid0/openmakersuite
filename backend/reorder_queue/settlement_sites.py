@@ -1332,8 +1332,8 @@ class _PyScanner:
                                     writes[anchor.column].append(f"{kw.arg} ({name}())")
                             if sync_name == "bulk_update":
                                 bulk_fields, _resolved = self._bulk_update_fields(sub)
-                                for field in bulk_fields & settling:
-                                    writes[anchor.column].append(f"{field} (bulk_update())")
+                                for field_name in bulk_fields & settling:
+                                    writes[anchor.column].append(f"{field_name} (bulk_update())")
             self.functions[qual] = {
                 "writes": writes,
                 "refreshed": refreshed,

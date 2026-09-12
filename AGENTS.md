@@ -384,6 +384,29 @@ supplier averages a `0`-day lead time. Guard these with `is not None`, never
 truthiness, or the payload reports a perfect record as "N/A" beside a sibling
 card reading 100%. See also the alert-suppression class below.
 
+### The lead-time unit class: CLOSED (op-published-date)
+
+A lead time counted in one unit written into, or compared against, a date
+computed in another. It surfaced three times — the delivery log's own
+promise/actual pair twice, then the date PUBLISHED to the operator being counted
+in business days while the log graded the delivery in calendar days, so a vendor
+that delivered exactly on the date the system showed was filed two days late and
+discounted in `supplier_selection`. The rule, in one sentence: **a duration and
+the date derived from it must be counted in the same unit, and for a supplier
+lead time that unit is CALENDAR days** — `inventory.tasks.update_average_lead_times`
+writes `ItemSupplier.average_lead_time` from plain elapsed days, so calendar is
+what the column already means.
+
+`inventory/services/lead_times.py` is the ONE derivation of a delivery date from
+a quote; its docstring names every producer that must go through it. There is no
+business-day arithmetic left in the backend — `add_business_days` was deleted
+rather than left beside a lead time for a fourth caller to reach for — so
+reintroducing any is the thing to refuse. A confirmed `PurchaseOrder.expected_delivery_date`
+still overrides the quote everywhere; that precedence belongs to the callers.
+`reorder_queue/tests/test_published_delivery_date_is_the_yardstick.py` lands a
+delivery on the published date and on each side of it, and fails if the two ends
+ever speak different units again.
+
 ### The alert-suppression class: CLOSED (op-c1ke)
 
 A value made honestly `None` gets collapsed by downstream arithmetic or a

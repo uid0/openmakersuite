@@ -2590,6 +2590,9 @@ const PurchaseOrderPage: React.FC = () => {
                   const onOrder = candidate.already_on_order;
                   // A voided line cannot be grown — the server refuses it with
                   // `line_voided` — so this row is a dead end, not a choice.
+                  // The hint below names DELETE and not "restore": nothing
+                  // un-voids a line, and the server's own `line_voided` message
+                  // says the same thing. Two surfaces, one true remedy.
                   const voided = Boolean(onOrder?.is_voided);
                   return (
                     <li key={candidate.item_supplier}>
@@ -2600,7 +2603,7 @@ const PurchaseOrderPage: React.FC = () => {
                         {onOrder && !voided
                           ? ` · already on this order (${onOrder.quantity_ordered})`
                           : ''}
-                        {voided ? ' · voided on this order — restore or remove that line first' : ''}
+                        {voided ? ' · voided on this order — delete that line first' : ''}
                       </span>
                       {voided ? null : (
                         // `btn-primary`, the same class this form's "Add to

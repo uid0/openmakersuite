@@ -774,7 +774,15 @@ describe('PurchaseOrderPage — adding a line to a draft order', () => {
     fireEvent.submit(entryField().closest('form')!);
 
     const boltRow = (await screen.findByText('M3 hex bolt')).closest('li')!;
-    expect(within(boltRow).getByText(/voided on this order/)).toBeInTheDocument();
+    // The hint names an action that EXISTS. It used to say "restore or remove",
+    // and nothing in OpenMakerSuite restores a voided line — `is_voided` is only
+    // ever written true, and the PATCH that edits a line does not accept it — so
+    // that sent the operator hunting for a button nobody built. The server's own
+    // `line_voided` refusal was corrected to the same remedy.
+    expect(
+      within(boltRow).getByText(/voided on this order . delete that line first/)
+    ).toBeInTheDocument();
+    expect(within(boltRow).queryByText(/restore/i)).not.toBeInTheDocument();
     expect(within(boltRow).queryByRole('button')).not.toBeInTheDocument();
     // The other candidate is still a live choice.
     expect(screen.getByRole('button', { name: /add m3 hex nut/i })).toBeInTheDocument();

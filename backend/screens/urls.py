@@ -4,11 +4,11 @@ URLs for the screens app.
 
 from django.urls import include, path
 
-from rest_framework.routers import DefaultRouter
+from config.routers import ApiRouter
 
 from . import views, weather_views
 
-router = DefaultRouter()
+router = ApiRouter()
 router.register(r"screens", views.ScreenViewSet, basename="screen")
 router.register(r"blocks", views.ScreenContentBlockViewSet, basename="screen-block")
 router.register(r"messages", views.SystemMessageViewSet, basename="system-message")

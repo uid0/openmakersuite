@@ -2,11 +2,11 @@
 
 from django.urls import include, path
 
-from rest_framework.routers import DefaultRouter
+from config.routers import ApiRouter
 
 from .views import ThermostatViewSet
 
-router = DefaultRouter()
+router = ApiRouter()
 router.register(r"thermostats", ThermostatViewSet, basename="thermostat")
 
 urlpatterns = [

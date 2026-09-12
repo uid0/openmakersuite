@@ -4,7 +4,7 @@ URLs for location check-in API.
 
 from django.urls import include, path
 
-from rest_framework.routers import DefaultRouter
+from config.routers import ApiRouter
 
 from .views import (
     LocationCheckInViewSet,
@@ -16,7 +16,7 @@ from .views import (
     location_ping_webhook,
 )
 
-router = DefaultRouter()
+router = ApiRouter()
 router.register(r"checkins", LocationCheckInViewSet, basename="location-checkin")
 router.register(r"feedback", LocationFeedbackViewSet, basename="location-feedback")
 router.register(r"security-reports", SecurityReportViewSet, basename="security-report")

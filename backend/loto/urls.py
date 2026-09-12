@@ -2,11 +2,11 @@
 
 from django.urls import include, path
 
-from rest_framework.routers import DefaultRouter
+from config.routers import ApiRouter
 
 from .views import AssetEnergySourceViewSet, AssetLOTORequirementsView, LOTODeviceViewSet
 
-router = DefaultRouter()
+router = ApiRouter()
 router.register(r"devices", LOTODeviceViewSet, basename="loto-device")
 router.register(r"energy-sources", AssetEnergySourceViewSet, basename="loto-energy-source")
 

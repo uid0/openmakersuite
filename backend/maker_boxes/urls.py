@@ -2,11 +2,11 @@
 
 from django.urls import include, path
 
-from rest_framework.routers import DefaultRouter
+from config.routers import ApiRouter
 
 from .views import MakerBoxViewSet, verify_scan
 
-router = DefaultRouter()
+router = ApiRouter()
 router.register(r"", MakerBoxViewSet, basename="maker-box")
 
 urlpatterns = [

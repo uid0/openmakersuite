@@ -4,7 +4,7 @@ URL routing for ForgeKey API.
 
 from django.urls import include, path
 
-from rest_framework.routers import DefaultRouter
+from config.routers import ApiRouter
 
 from .views import (
     AssetAuthorizationViewSet,
@@ -49,7 +49,7 @@ from .views import (
     RoomOperationalModeViewSet,
 )
 
-router = DefaultRouter()
+router = ApiRouter()
 router.register(r"device-types", DeviceTypeViewSet, basename="device-type")
 router.register(r"devices", ESP32DeviceViewSet, basename="esp32-device")
 router.register(r"asset-devices", AssetDeviceViewSet, basename="asset-device")

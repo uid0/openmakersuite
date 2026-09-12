@@ -2,7 +2,7 @@
 
 from django.urls import include, path
 
-from rest_framework.routers import DefaultRouter
+from config.routers import ApiRouter
 
 from .safety_views import (
     AssetPowerChainView,
@@ -25,7 +25,7 @@ from .views import (
     PowerPanelViewSet,
 )
 
-router = DefaultRouter()
+router = ApiRouter()
 router.register(r"breakers", BreakerViewSet, basename="breaker")
 router.register(r"outlets", OutletViewSet, basename="outlet")
 router.register(r"light-switches", LightSwitchViewSet, basename="light-switch")
@@ -36,7 +36,7 @@ router.register(r"disconnects", DisconnectViewSet, basename="disconnect")
 # the legacy /breakers and /outlets keep their existing shape. Mounted
 # by config.urls under /api/electrical/ to sit alongside the safety
 # read-only views.
-power_router = DefaultRouter()
+power_router = ApiRouter()
 power_router.register(r"panels-crud", PowerPanelViewSet, basename="powerpanel")
 power_router.register(r"breakers-crud", PowerBreakerViewSet, basename="powerbreaker")
 power_router.register(r"circuits-crud", PowerCircuitViewSet, basename="powercircuit")

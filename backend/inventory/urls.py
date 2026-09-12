@@ -4,7 +4,7 @@ URL configuration for inventory app.
 
 from django.urls import include, path
 
-from rest_framework.routers import DefaultRouter
+from config.routers import ApiRouter
 
 from .safety_sheet import LocationSafetySheetView
 from .views import (
@@ -45,7 +45,7 @@ from .views import (
     postmark_inbound_work_order,
 )
 
-router = DefaultRouter()
+router = ApiRouter()
 router.register(r"suppliers", SupplierViewSet)
 router.register(r"supplier-agreements", SupplierAgreementViewSet)
 router.register(r"categories", CategoryViewSet)

@@ -217,3 +217,40 @@ def test_the_shelf_reads_only_the_first_row_and_does_not_scan_past_a_zero():
     fresh = InventoryItem.objects.get(pk=item.pk)
 
     assert shelf_pack_size(fresh).state == PACK_SIZE_RECORDED_ZERO
+
+
+# ── The batched caller asks the same question and gets the same answer ───────
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda item: None,
+        lambda item: _link(item, "Acme", pack=24),
+        lambda item: _link(item, "Zero", pack=0),
+        lambda item: _link(item, "Gone", pack=24, is_discontinued=True),
+    ],
+    ids=["no_links", "known", "recorded_zero", "none_orderable"],
+)
+def test_the_batched_order_question_answers_exactly_as_the_per_item_one(build):
+    """``pack_size_for_choice`` and ``order_pack_size`` are ONE derivation.
+
+    ``item_metrics`` serializes a whole page's case sizes off choices it has
+    already resolved, so it calls the first; ``InventoryItem`` calls the second.
+    Two entry points to one rule is how the reason mapping would drift into two
+    copies, and a page then disagreeing with the detail about which unknown an
+    item is in is exactly the confusion op-2t4e closes. Every state, not just the
+    interesting one: a divergence on ``known`` would be just as wrong.
+    """
+    from inventory.services.pack_size import pack_size_for_choice
+    from inventory.services.supplier_selection import select_supplier
+
+    item = _item("Batched")
+    build(item)
+    item = InventoryItem.objects.get(pk=item.pk)
+
+    batched = pack_size_for_choice(select_supplier(item))
+    per_item = order_pack_size(item)
+
+    assert batched.state == per_item.state
+    assert batched.units == per_item.units

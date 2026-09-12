@@ -10,6 +10,7 @@ import '../styles/InventoryList.css';
 import { InventoryItem } from '../types';
 import { showError, showInfo } from '../utils/dialogs';
 import { reorderQuantityLabel, reorderThresholdLabel } from '../utils/packaging';
+import { caseSizeUnknownLabel, caseSizeUnknownNote } from '../utils/caseSize';
 
 interface InventoryCardProps {
   item: InventoryItem;
@@ -56,11 +57,17 @@ const InventoryCard: React.FC<InventoryCardProps> = ({
             <>
               <div className="stock-row">
                 <span className="stock-label">Current Cases:</span>
+                {/* The bare em dash said "no number" and nothing else. A
+                    card has no room for the remedy, so the label names WHICH
+                    unknown and the title carries what to do about it
+                    (op-2t4e). */}
                 <span
                   className={`stock-value ${item.needs_reorder ? 'low' : 'good'}`}
+                  title={caseSizeUnknownNote(item.case_size_state) ?? undefined}
+                  data-testid="list-current-cases"
                 >
                   {item.current_cases === null
-                    ? '—'
+                    ? caseSizeUnknownLabel(item.case_size_state)
                     : item.current_cases.toFixed(1)}
                 </span>
               </div>

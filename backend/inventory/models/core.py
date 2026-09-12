@@ -638,6 +638,36 @@ class InventoryItem(OwnableModel):
         return self.current_stock / pack.units
 
     @property
+    def case_size_state(self) -> str:
+        """WHICH of the pack-size states :attr:`current_cases` came out of.
+
+        The companion key to ``current_cases`` on the wire, and the reason it
+        exists: a ``None`` there has more than one cause, and the causes want
+        opposite things from an operator. ``not_recorded`` means nobody has told
+        us how many units a box holds — supply the missing fact. ``recorded_zero``
+        means a supplier link says a box holds none — correct the wrong one. Both
+        used to reach the same sentence, "case size unknown", which is a screen
+        saying one thing about two different situations (op-2t4e).
+
+        The STATE, never a sentence: the wording belongs to each client, which
+        have different screens and different room for one (the terminal today
+        renders no case line at all when this is unknown).
+        ``inventory.services.pack_size`` names the members;
+        ``frontend/src/utils/caseSize.ts`` is the web's one reading of them.
+
+        The SHELF question, so it has no ``no_orderable_link`` member — see
+        :attr:`_shelf_pack_size`, which it shares (and whose memoisation it
+        rides, so serialising this key beside ``current_cases`` costs nothing).
+        ``InventoryMetricsSerializer`` carries the order question's own state.
+
+        Answered for every item, case-based or not: ``use_case_based_reorder``
+        decides whether a CASE COUNT is meaningful, not whether we know what a
+        box holds, and a client that switches an item to case-based reordering
+        needs to know which state it is walking into.
+        """
+        return self._shelf_pack_size.state
+
+    @property
     def needs_reorder(self) -> bool:
         """Check if item stock is below minimum and needs reordering.
 

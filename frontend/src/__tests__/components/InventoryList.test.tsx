@@ -8,7 +8,7 @@
  * the item on base units. Every number that names a unit now reads the single
  * owner, `reorderThresholdLabel` / `reorderQuantityLabel`.
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import InventoryList from '../../components/InventoryList';
 import * as api from '../../services/api';
@@ -83,6 +83,31 @@ describe('InventoryList card units', () => {
     // The badge agrees with the threshold beside it: both base units.
     expect(screen.getByText(/Needs Reorder/)).toHaveTextContent('40 units');
     expect(screen.getByText(/Needs Reorder/)).not.toHaveTextContent(/case/i);
+  });
+
+  // op-2t4e. The card used to show a bare em dash for every unknown alike, which
+  // is the least informative form of the same conflation: it said "no number"
+  // and stopped. A card has no room for the remedy, so the visible label names
+  // WHICH unknown and the title carries what to do — but the two states must
+  // never render identically, which is what this pins.
+  it('tells the two unknown case sizes apart on the card', async () => {
+    const wordingFor = async (case_size_state: string) => {
+      await renderWith({ ...unknownCaseItem, case_size_state });
+      const cell = screen.getByTestId('list-current-cases');
+      const wording = `${cell.textContent} ${cell.getAttribute('title') ?? ''}`;
+      cleanup();
+      return wording;
+    };
+
+    const neverRecorded = await wordingFor('not_recorded');
+    const recordedZero = await wordingFor('recorded_zero');
+
+    expect(neverRecorded).not.toBe(recordedZero);
+    expect(neverRecorded).toMatch(/not recorded/i);
+    expect(recordedZero).toMatch(/recorded as 0/i);
+    // Each still reads as "there is no number here" at a glance.
+    expect(neverRecorded).toMatch(/\u2014/);
+    expect(recordedZero).toMatch(/\u2014/);
   });
 
   it('falls back to the flag threshold when reorder_display is absent', async () => {

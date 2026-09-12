@@ -47,6 +47,11 @@ METRICS_FIELDS = {
     "last_po_unit_cost",
     "is_case_based",
     "case_size",
+    # WHICH unknown a null ``case_size`` is (op-2t4e) — the same key the
+    # detail endpoint carries, because ``?with_metrics=1`` serves the same
+    # payload. Three unknowns wanting three different remedies, which base
+    # sent as one silence.
+    "case_size_state",
     # Why Cost / Lead may be blank or unbacked: the supplier scoring does not
     # punish a missing price or an empty delivery record (op-2rsp), so a
     # supplier can win carrying one, and the operator is told rather than left

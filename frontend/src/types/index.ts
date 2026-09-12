@@ -2,6 +2,17 @@
  * TypeScript type definitions for the application
  */
 
+/**
+ * How well we know an item's case size, as `inventory/services/pack_size.py`
+ * names the states (op-2t4e).
+ *
+ * The point of the union is that the three unknowns are NOT one state. Each
+ * points an operator at a different action, and a screen that renders them
+ * alike is telling two people with different problems the same thing.
+ * `utils/caseSize` is the one place the web words them.
+ */
+export type CaseSizeState = 'known' | 'not_recorded' | 'recorded_zero' | 'no_orderable_link';
+
 export interface Supplier {
   id: number;
   name: string;
@@ -309,6 +320,28 @@ export interface InventoryItem {
   // count: the server used to send raw units here, so "10 cases" meant ten
   // loose units and a low item stopped being flagged. Render it as unknown.
   current_cases: number | null;
+  /**
+   * WHY `current_cases` is null, when it is (op-2t4e).
+   *
+   * A null above has more than one cause and the causes want opposite things
+   * done: `not_recorded` means nobody has said how many units a box holds —
+   * supply the missing fact — and `recorded_zero` means a supplier link says a
+   * box holds none — correct the wrong one. Every web surface used to say
+   * "case size unknown" for both, so an operator could not tell which they
+   * were looking at.
+   *
+   * The SHELF question, so `no_orderable_link` never appears here: the box
+   * already on the shelf was bought from somebody who may since have died, and
+   * their recorded pack size still describes it (op-2rsp). That state reaches
+   * `InventoryItemMetrics.case_size_state` instead.
+   *
+   * A STATE, not a sentence. `utils/caseSize` is the one place the web turns it
+   * into words; no surface may word it itself, and none may re-derive it from
+   * supplier rows. Required because the server sends it for every item —
+   * `utils/caseSize` still handles `undefined`, which means a backend older
+   * than this page rather than anything about the item.
+   */
+  case_size_state: CaseSizeState;
   supplier: number | null;
   /**
    * THE VENDOR BLOCK: ABSENT, not null, for a caller with no session
@@ -500,6 +533,18 @@ export interface InventoryItemMetrics {
   reorder_point: number; // RP
   is_case_based: boolean;
   case_size: number | null; // units per case — a shelf fact, NOT withheld
+  /**
+   * WHICH unknown a null `case_size` is (op-2t4e) — the ORDER question, so
+   * unlike `InventoryItem.case_size_state` this one can answer
+   * `no_orderable_link`: the links exist, one may even record a good number,
+   * but nothing we can BUY sizes the next order. Three unknowns, three
+   * different remedies, one key that tells them apart.
+   *
+   * NOT withheld from an anonymous caller, for the reason `case_size` is not:
+   * it names no vendor and no price, and publishing an absence while
+   * withholding its cause would rebuild this very conflation for the scan flow.
+   */
+  case_size_state: CaseSizeState;
   /**
    * THE SIX KEYS BELOW ARE OPTIONAL BECAUSE THE SERVER OMITS THEM
    * (op-anonymous-read-posture). `metrics` stays `AllowAny` — it powers the

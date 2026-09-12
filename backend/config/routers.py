@@ -19,10 +19,11 @@ had never once returned a response. That is the evidence the surface has no
 callers, and a survey of the ones there are agrees:
 
 * Nothing in this repository builds a suffixed URL — not the React app, not the
-  backend tests, not the Playwright e2e fixtures, not the docs. The only literal
-  ``.json`` paths here (``forgekey`` ``desired.json``, ``.well-known/jwks.json``)
-  are hand-written ``path()`` entries, not router suffixes, and are untouched by
-  this flag.
+  backend tests, not the Playwright e2e fixtures, not the docs. The one literal
+  ``.json`` path in the whole URLconf,
+  ``api/forgekey/epaper/<uuid:display_id>/desired.json``, is a hand-written
+  ``path()`` entry rather than a router suffix: it captures no ``format`` group,
+  so this flag does not touch it and it still resolves.
 * ScanTTY, the cross-project consumer, builds every path trailing-slash and
   never appends a suffix (verified against ``uid0/scantty`` ``main`` at
   ``498af69448333a23264b03166029786e1968978b``).

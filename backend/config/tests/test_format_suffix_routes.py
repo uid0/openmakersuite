@@ -14,10 +14,11 @@ raising, and no router may start emitting suffix routes again.
 
 import re
 
-import pytest
 from django.contrib.auth import get_user_model
 from django.urls import get_resolver
 from django.urls.resolvers import URLPattern, URLResolver
+
+import pytest
 from rest_framework.test import APIClient
 
 # Real routed URLs, each confirmed to raise ``TypeError`` before this change.
@@ -82,10 +83,10 @@ def test_no_router_emits_format_suffix_routes():
     quietly reintroducing 500s. Before ``ApiRouter`` this found 486 patterns.
 
     A ``format`` GROUP is the router's suffix mechanism and the only thing that
-    reaches a handler as a keyword argument. Hand-written paths that merely END
-    in ``.json`` (``forgekey/epaper/<id>/desired.json``, ``.well-known/jwks.json``)
-    capture nothing and are deliberately NOT in scope: they route to views that
-    expect them.
+    reaches a handler as a keyword argument. A hand-written path that merely ENDS
+    in ``.json`` captures nothing and is deliberately NOT in scope: it routes to
+    a view that expects it. ``test_a_literal_json_path_is_not_collateral`` pins
+    the one such path in this URLconf.
     """
     offenders = [p for p in _url_patterns(get_resolver()) if re.search(r"\(\?P<format>", p)]
 
@@ -93,4 +94,22 @@ def test_no_router_emits_format_suffix_routes():
         f"{len(offenders)} URL pattern(s) capture a `format` group, so a suffixed request "
         "passes `format=` to a handler that may not accept it. Register the viewset on "
         f"`config.routers.ApiRouter`, not `DefaultRouter`. First few: {offenders[:5]}"
+    )
+
+
+def test_a_literal_json_path_is_not_collateral():
+    """The one hand-written ``.json`` path still resolves.
+
+    ``api/forgekey/epaper/<uuid>/desired.json`` is a filename, not a format
+    suffix — the e-paper firmware fetches it by that exact name. Turning suffix
+    routing off must not take it with them, and the exclusion above is only
+    honest if something checks it.
+    """
+    from django.urls import resolve
+
+    match = resolve("/api/forgekey/epaper/123e4567-e89b-12d3-a456-426614174000/desired.json")
+
+    assert match.url_name == "epaper-desired", (
+        f"the literal .json path resolved to {match.url_name!r}; it is a hand-written "
+        "route and must survive the removal of format-suffix routing."
     )

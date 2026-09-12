@@ -74,6 +74,12 @@ const InventoryItemFormPage: React.FC = () => {
   // creating a second one and orphaning the supplier rows already attached to
   // the first.
   const [createdItemId, setCreatedItemId] = useState<string | null>(null);
+  // The item this page will write to on the next submit: the routed item in
+  // edit mode, or the one an earlier partially-failed create already landed.
+  // Truthy means the submit PATCHes, so every piece of copy that promises a
+  // create — the button, the hero — reads this same fact. A label with its own
+  // flag is how a button comes to say "Create Item" while it updates.
+  const existingItemId = isEditMode && id ? id : createdItemId;
   const [showCreateCategory, setShowCreateCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [_newLocationName, setNewLocationName] = useState('');
@@ -442,9 +448,8 @@ const InventoryItemFormPage: React.FC = () => {
 
       // Save item
       let savedItem: InventoryItem;
-      const existingId = isEditMode && id ? id : createdItemId;
-      if (existingId) {
-        savedItem = (await inventoryAPI.updateItem(existingId, formData)).data;
+      if (existingItemId) {
+        savedItem = (await inventoryAPI.updateItem(existingItemId, formData)).data;
       } else {
         savedItem = (await inventoryAPI.createItem(formData)).data;
         setCreatedItemId(savedItem.id);
@@ -520,8 +525,8 @@ const InventoryItemFormPage: React.FC = () => {
       testId="inventory-item-form-page"
       hero={{
         eyebrow: 'Inventory · Item',
-        title: isEditMode ? 'Edit item' : 'New item',
-        description: isEditMode
+        title: existingItemId ? 'Edit item' : 'New item',
+        description: existingItemId
           ? 'Update stock thresholds, suppliers, hazard data, and pricing.'
           : 'Register a new inventory SKU with reorder thresholds and a primary supplier.',
         action: (
@@ -940,7 +945,7 @@ const InventoryItemFormPage: React.FC = () => {
               Cancel
             </Button>
             <Button type="submit" loading={saving}>
-              {isEditMode ? 'Save Changes' : 'Create Item'}
+              {existingItemId ? 'Save Changes' : 'Create Item'}
             </Button>
           </Group>
         </Paper>

@@ -624,9 +624,10 @@ class TestTheMoneyAnOperatorReads:
             finally:
                 close_old_connections()
 
-        with patch.object(
-            PurchaseOrder, "calculate_estimated_total", synchronized_calculate
-        ), ThreadPoolExecutor(max_workers=2) as pool:
+        with (
+            patch.object(PurchaseOrder, "calculate_estimated_total", synchronized_calculate),
+            ThreadPoolExecutor(max_workers=2) as pool,
+        ):
             first_write = pool.submit(edit, first.pk, Decimal("30.0000"), "writer-a")
             second_write = pool.submit(
                 edit, second.pk, Decimal("40.0000"), "writer-b", second_started

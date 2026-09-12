@@ -157,7 +157,17 @@ def _with_async_twins(names: set[str]) -> frozenset[str]:
 #: asking a question about it rather than displaying or storing it. ``create``
 #: is deliberately absent: it stores, and is covered by the write arm instead.
 PREDICATE_CALLS = _with_async_twins(
-    {"filter", "exclude", "get", "Q", "update", "annotate", "aggregate", "When"}
+    {
+        "filter",
+        "exclude",
+        "get",
+        "Q",
+        "update",
+        "annotate",
+        "aggregate",
+        "When",
+        "bool",
+    }
 )
 
 #: The subset of :data:`PREDICATE_CALLS` whose arguments are INDEPENDENT of one
@@ -390,6 +400,7 @@ class OrderShape:
     related_name: str
     #: The line model's class name.
     line_model: str
+
 
 @dataclass
 class Finding:
@@ -1286,9 +1297,7 @@ class _PyScanner:
                     func = sub.func
                     name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
                     sync_name = (
-                        name[1:]
-                        if name.startswith("a") and name[1:] in SYNC_WRITE_CALLS
-                        else name
+                        name[1:] if name.startswith("a") and name[1:] in SYNC_WRITE_CALLS else name
                     )
                     calls.add((name, _receiver_path(func)))
                     refreshed.add(name)

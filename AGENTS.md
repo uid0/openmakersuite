@@ -118,7 +118,7 @@ is stated in `ReorderRequestViewSet.mark_ordered`'s docstring and pinned by
 
 `inventory.services.supplier_selection` is the ONE answer to "which supplier for
 this item". Everything else reads it — `InventoryItem.primary_item_supplier` and
-the seven flat compat properties, `item_metrics` (the pinned ScanTTY contract),
+the flat compat properties, `item_metrics` (the pinned ScanTTY contract),
 the order pad and the PO-building screens. Do not re-derive it: three copies of
 `ORDER BY -is_primary, unit_cost` had already drifted apart before op-2rsp
 collapsed them.
@@ -139,18 +139,11 @@ fallback with `test_the_serialized_forecast_keeps_a_dead_vendors_lead_time` and
 `inventory/tests/test_forecast_lead_time_source.py` pins the preference; see "The
 alert-suppression class" below.
 
-The rule is three things, in this order:
-
-1. **Eligibility.** Only orderable links are candidates — a link that is not
-   `is_active`, or that is `is_discontinued`, is never the answer. That includes
-   one an operator flagged primary, because `mark_discontinued` deliberately
-   leaves `is_primary` set.
-2. **The gate.** An orderable link flagged primary wins OUTRIGHT and is never
-   scored. A flagged primary is not a term in a sum — any weight can be outbid,
-   and then the operator's explicit choice is merely expensive rather than
-   binding. Do not "fix" a selection problem by adjusting a bonus.
-3. **The score.** Only when nothing orderable is flagged does `score_candidate`
-   rank the candidates on cost, lead time and delivery record.
+**The rule itself — eligibility, then the flagged-primary gate, then the score —
+is written once, in `inventory/services/supplier_selection.py`'s module
+docstring, beside the code that applies it. Read it there.** It is deliberately
+not restated here: a second copy is a second thing to keep in step, which is the
+failure this whole entry exists to record.
 
 Ask `select_supplier` / `select_suppliers_for` when you must explain yourself to
 an operator: they separate `NO_SUPPLIERS` from `NONE_ORDERABLE`, which are
@@ -177,12 +170,16 @@ form that EDITS one relationship, a report grouped by the supplier an order
 ACTUALLY went to, and a scan that matched one vendor's barcode are legitimately
 singular and are NOT on this rule.
 
-The seven flat compat fields stay. The `InventoryItemSerializer` comment names
-each remaining reader with the surface it lives on and is the record of who
-still needs them; check it there rather than restating it here. The web words
-the whole choice in ONE place, `frontend/src/utils/supplierChoice.ts`. What any
-of it exposes to an unauthenticated caller is in
-`docs/API_PERMISSION_MATRIX.md`.
+The flat compat fields stay, and
+`inventory/tests/test_supplier_choice_payload.py::test_every_legacy_flat_field_is_still_served`
+is both the check that keeps them served and the authoritative list of them.
+There is no hand-maintained reader inventory anywhere any more — there was one
+in the `InventoryItemSerializer` comment and it went stale; that comment now
+says how to derive the reader set when a removal is actually proposed.
+
+The web words the whole choice in ONE place,
+`frontend/src/utils/supplierChoice.ts`. What any of it exposes to an
+unauthenticated caller is in `docs/API_PERMISSION_MATRIX.md`.
 
 Filtering happens in Python, on `item_suppliers.all()`, so the prefetch cache
 still serves it — a fresh `.filter()` reintroduces the per-row N+1 that #882
@@ -198,14 +195,9 @@ one extra grouped aggregate per page for it.
 **The scoring weights are a product decision, not an implementation detail**, and
 `inventory/tests/test_supplier_scoring.py` is where each one is asserted on
 real-shaped catalogue data. Its module docstring is the current record of what
-was decided and what is still open; read it before touching a weight. The shape
-of the arithmetic is one sentence: **every term starts at its full weight and is
-discounted only by evidence against that candidate**, so a gap in the data — no
-price on file, no delivery ever recorded — is neither punished nor paid, and the
-winner reports the gap (`SupplierChoice.scored_without_price` /
-`scored_without_history`, reaching `/items/{id}/metrics/` as
-`supplier_scored_without_price` / `supplier_scored_without_history`) rather than
-leaving an operator to infer it from a blank cell. One judgement is still
+was decided and what is still open; read it before touching a weight, along with
+`supplier_selection`'s own docstring for the shape of the arithmetic and why a
+gap in the data is neither punished nor paid. One judgement is still
 `REPORTED, NOT FIXED` there: where the cost cliff sits (150% of the item's
 average). Retuning it needs a captain decision, and the tests fail until it is
 deliberate.

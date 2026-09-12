@@ -772,50 +772,32 @@ class InventoryItemSerializer(VendorGatedSerializerMixin, serializers.ModelSeria
     valuation, and for the same reason: the endpoint must stay open.
     """
 
-    # Primary-supplier compat fields (issue #882). ``supplier_name`` here and the
-    # flat ``supplier_sku`` / ``supplier_url`` / ``unit_cost`` / ``package_cost``
-    # / ``quantity_per_package`` / ``average_lead_time`` keys listed in
-    # ``Meta.fields`` are READ-ONLY legacy accessors for the item's primary
-    # supplier, superseded by the ``suppliers[]`` array (below), the
-    # ``supplier_choice`` object (below) and the ``/metrics/``
-    # (``?with_metrics=1``) endpoint. They are retained because ScanTTY's detail
-    # screen reads all seven of them (``internal/tui/inventory_detail.go``) and
-    # the web reads FOUR. Each reader below was confirmed by opening the call
-    # site: a read only counts here when the object is an ``InventoryItem`` (or
-    # ``Kit``) payload from THIS serializer. Reads off an ``ItemSupplier`` row
-    # (``suppliers[]``, ``SupplierRelationshipForm``) are that row's own
-    # columns, and the order pad's look-alike keys are built per
-    # ``item_supplier`` in ``reorder_queue/views.py:by_supplier`` — neither is
-    # this field.
+    # Primary-supplier compat fields (issue #882). ``supplier_name`` here, and
+    # the flat supplier / cost / lead-time keys beside it in ``Meta.fields``,
+    # are READ-ONLY legacy accessors for the item's primary supplier. They are
+    # superseded by the ``suppliers[]`` array (below), the ``supplier_choice``
+    # object (below) and the ``/metrics/`` (``?with_metrics=1``) endpoint.
+    # ``Meta.fields`` is the list of them; this comment keeps no second copy of
+    # it and no count of it, because a count beside a list is one more thing to
+    # keep in step and the last one here did not stay in step.
     #
-    #   * ``supplier_sku``      — the kit list's SKU cell and the "From" column
-    #                             that attributes it (``KitListPage.tsx``), and
-    #                             the kit form's SKU box (``KitDetailPage.tsx``,
-    #                             ``applyKit``). ``KitSerializer`` subclasses
-    #                             this one, so ``kit.supplier_sku`` IS the flat
-    #                             accessor. Both are gated to signed-in viewers,
-    #                             which changes who may see it, not who reads it;
-    #   * ``supplier_url``      — the "View on <supplier>" link on the admin
-    #                             dashboard's by-supplier order pad
-    #                             (``AdminDashboard.tsx``, via
-    #                             ``request.item_details``);
-    #   * ``unit_cost``         — every price rendered as a number rather than
-    #                             as a named supplier's price (op-9m2v): the
-    #                             item detail card and its cost widget, the
-    #                             inventory list and table, the kit list and kit
-    #                             form, the scan page's cost row, the inventory
-    #                             CSV export, and the work order material picker;
-    #   * ``average_lead_time`` — the wait quoted beside a supplier the surface
-    #                             has already named from ``supplier_choice``:
-    #                             the scan page's info block and the admin
-    #                             dashboard's Lead Time column.
+    # They are retained because ScanTTY's item-detail screen still reads them
+    # (``internal/tui/inventory_detail.go``), so a hard removal needs a
+    # coordinated ScanTTY + web change.
+    # ``inventory/tests/test_supplier_choice_payload.py::
+    # test_every_legacy_flat_field_is_still_served`` is the check that keeps
+    # them served, and its assertions are the authoritative list.
     #
-    # ``supplier_name`` had no web reader left after op-3xsp — the scan page,
-    # the inventory CSV export, the reorder queue and the item page's anonymous
-    # block all moved onto ``supplier_choice``. ``package_cost`` and
-    # ``quantity_per_package`` have none either; the web reads those off
-    # ``suppliers[]`` and the order pad. ScanTTY still reads all seven, so they
-    # all stay. A future hard-removal needs coordinated ScanTTY + web changes.
+    # A per-surface web reader set used to be maintained here by hand. It is
+    # gone deliberately: nothing checked it, so it was only ever true once.
+    # DERIVE it when a removal is actually on the table: for every key asserted
+    # by the authoritative test above, run ``rg '<field>' frontend/src``. Count
+    # a read only where the object is an ``InventoryItem`` (or ``Kit``) payload
+    # from THIS serializer. Reads off an ``ItemSupplier`` row (``suppliers[]``,
+    # ``SupplierRelationshipForm``) are that row's own columns, and the order
+    # pad's look-alike keys are built per ``item_supplier`` in
+    # ``reorder_queue/views.py:by_supplier`` — neither is this field.
+    #
     # They resolve through the prefetch-friendly
     # ``InventoryItem.primary_item_supplier`` so serialising a page no longer
     # costs a query per row.
@@ -965,24 +947,28 @@ class InventoryItemSerializer(VendorGatedSerializerMixin, serializers.ModelSeria
 
     #: Everything on this payload that names a vendor or quotes their money.
     #:
-    #: * the seven flat primary-supplier compat keys — ``supplier_name`` is the
-    #:   vendor's name, ``supplier_sku`` their part number, ``supplier_url``
-    #:   their product page, and the rest are their prices and lead time.
-    #:   ``quantity_per_package`` is deliberately NOT here — see
-    #:   :attr:`InventoryMetricsSerializer.VENDOR_ONLY_FIELDS` for why a pack
-    #:   size is a shelf fact rather than a vendor one;
-    #: * ``suppliers`` — the full ``ItemSupplier`` roster, every vendor's name,
-    #:   SKU, both UPCs, both costs and lead time;
-    #: * ``supplier_choice`` — names the chosen vendor and the alternatives. Its
-    #:   own four operator-only keys stay (see ``SupplierChoiceSerializer``);
-    #:   they are a narrower gate INSIDE a key that is now withheld whole from
-    #:   the same audience, so they remain the answer for the signed-in reader
-    #:   and are never reached by an anonymous one;
-    #: * ``total_value`` — stock × the vendor's unit price. Withheld because
-    #:   ``current_stock`` is public beside it, so leaving this is leaving the
-    #:   unit price behind one division. That is the same "still derivable"
-    #:   objection review raised against the ``get_inventory_summary`` gate,
-    #:   answered here rather than restated.
+    #: The tuple below IS the list — it is not described again here, and no
+    #: count of it is kept, because a count beside a list is one more thing to
+    #: keep in step. What is recorded here is only what the tuple cannot say,
+    #: namely why the borderline members are in or out:
+    #:
+    #: * ``quantity_per_package`` is a flat primary-supplier key and is
+    #:   deliberately ABSENT. A pack size is a shelf fact rather than a vendor
+    #:   one — see :attr:`InventoryMetricsSerializer.VENDOR_ONLY_FIELDS`, which
+    #:   keeps ``case_size`` public for the same reason;
+    #: * ``supplier_choice`` is withheld WHOLE even though its own operator-only
+    #:   keys (see ``SupplierChoiceSerializer.OPERATOR_ONLY_FIELDS``) are a
+    #:   narrower gate inside it. The narrower gate remains the answer for the
+    #:   signed-in reader and is never reached by an anonymous one;
+    #: * ``total_value`` is withheld because ``current_stock`` is public beside
+    #:   it, so leaving it is leaving the unit price behind one division. That
+    #:   is the same "still derivable" objection review raised against the
+    #:   ``get_inventory_summary`` gate, answered here rather than restated.
+    #:
+    #: What is actually withheld from an anonymous caller is proved by
+    #: ``config/tests/test_anonymous_vendor_exposure.py``, which crawls the live
+    #: URL conf with seeded sentinels rather than trusting any list. That is the
+    #: check to read, and to extend, when this tuple changes.
     VENDOR_ONLY_FIELDS = (
         "supplier_name",
         "supplier_sku",

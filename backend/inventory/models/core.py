@@ -896,9 +896,9 @@ class InventoryItem(OwnableModel):
         :attr:`primary_item_supplier` is this with everything but the row thrown
         away. The memo lives HERE rather than there so that a caller who needs
         the reason — why this link, what else was on offer, whether the scoring
-        knew a price for it — pays nothing extra for asking: reading the seven
-        flat compat properties and reading the reason beside them is one
-        resolution, not two. Returns a
+        knew a price for it — pays nothing extra for asking: reading the flat
+        compat properties and reading the reason beside them is one resolution,
+        not two. Returns a
         :class:`~inventory.services.supplier_selection.SupplierChoice`, which is
         falsey when there is no supplier to buy from.
         """
@@ -912,37 +912,24 @@ class InventoryItem(OwnableModel):
 
         Delegates to the named :mod:`inventory.services.supplier_selection`
         service (issue #882) so the selection lives in one place rather than a
-        hidden model query. That service applies three things in strict order
-        (op-2rsp):
-
-        1. **Eligibility.** Only ORDERABLE links are candidates — ``is_active``
-           and not ``is_discontinued``. This is a precondition, not a tiebreak.
-        2. **The gate.** An orderable link an operator flagged ``is_primary``
-           wins OUTRIGHT and is never scored.
-        3. **The score.** Otherwise the candidates are ranked on cost, lead time
-           AND delivery record together, and the best-scoring one wins. It is
-           emphatically NOT "the cheapest": a modest premium that buys a large
-           lead-time saving wins here, and neither a missing price nor an empty
-           delivery record is punished. ``Meta.ordering`` only supplies the order
-           the candidates arrive in, which settles a tie between otherwise
-           identical rows.
+        hidden model query. That service's module docstring owns the selection
+        rule and its ordering (op-2rsp).
 
         ``None`` therefore means "no supplier you can buy from", which covers
         both "no suppliers at all" and "every supplier link is dead". A caller
         that has to explain that to an operator should ask
         :func:`~inventory.services.supplier_selection.select_supplier` instead
-        and read the reason; the seven flat compat properties below cannot, so
-        they simply go ``None`` as they already do for an item with no
-        suppliers.
+        and read the reason; the flat compat properties below cannot, so they simply
+        go ``None`` as they already do for an item with no suppliers.
 
         The result rides an ``item_suppliers`` prefetch when the caller set one
         up (the list/detail/reorder read paths all do, through
         :func:`~inventory.services.supplier_selection.item_suppliers_prefetch`,
         which also carries the delivery-record annotations the score reads), so
-        serialising the seven flat compat fields across a page costs ZERO extra
-        queries instead of an N+1. It is memoised per instance through
-        :attr:`supplier_choice` so reading all seven flats touches the database
-        at most once.
+        serialising the flat compat fields across a page costs ZERO extra queries
+        instead of an N+1. It is memoised per instance through
+        :attr:`supplier_choice` so reading every one of them touches the
+        database at most once.
         """
         return self.supplier_choice.item_supplier
 

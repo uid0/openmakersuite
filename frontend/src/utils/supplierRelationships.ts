@@ -218,7 +218,15 @@ export const relationshipPayload = (
   unit_cost: relationship.unit_cost,
   package_cost: relationship.package_cost,
   quantity_per_package: relationship.quantity_per_package,
-  average_lead_time: relationship.average_lead_time,
+  // Omitted where the editor recorded nothing, rather than sent as a number
+  // the operator never typed. That is how every other write path gets the
+  // model's default of 7 — the kit form's `supplier_terms` and
+  // `_sync_primary_supplier` both leave the key out — so a create takes the
+  // default and an update leaves a stored quote alone. Sending `0` instead,
+  // which this row used to seed, recorded same-day pickup.
+  ...(relationship.average_lead_time === null
+    ? {}
+    : { average_lead_time: relationship.average_lead_time }),
   is_primary: relationship.is_primary,
 });
 
@@ -243,6 +251,12 @@ export const relationshipChanged = (
     relationship.unit_cost !== saved.unit_cost ||
     relationship.package_cost !== saved.package_cost ||
     relationship.quantity_per_package !== saved.quantity_per_package ||
+    // A cleared box counts as a change even though `relationshipPayload` then
+    // sends no lead time: the PATCH leaves the stored quote alone and the row
+    // is replaced by the server's copy, so the box refills with what is
+    // actually stored rather than staying blank and dirty forever. An operator
+    // is told the truth — a recorded lead time cannot be un-recorded while the
+    // column is NOT NULL (`oms-lead-time-nullable`).
     relationship.average_lead_time !== saved.average_lead_time ||
     relationship.is_primary !== saved.is_primary
   );

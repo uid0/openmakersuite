@@ -50,6 +50,7 @@ import {
   reorderQuantityLabel,
   reorderThresholdLabel,
 } from '../utils/packaging';
+import { LEAD_TIME_NOT_RECORDED, formatLeadTimeDays } from '../utils/leadTime';
 import { VENDOR_WITHHELD_TEXT, vendorDataWithheld } from '../utils/vendorVisibility';
 
 /**
@@ -63,7 +64,7 @@ import { VENDOR_WITHHELD_TEXT, vendorDataWithheld } from '../utils/vendorVisibil
  */
 const NotRecorded: React.FC = () => (
   <Text size="sm" c="dimmed" fs="italic">
-    Not recorded
+    {LEAD_TIME_NOT_RECORDED}
   </Text>
 );
 
@@ -98,14 +99,19 @@ const recordedValue = (value: string | null | undefined, emphasis: SupplierCellE
     <NotRecorded />
   );
 
-const leadTimeValue = (days: number | null | undefined, emphasis: SupplierCellEmphasis) =>
-  typeof days === 'number' && Number.isFinite(days) ? (
-    <Text size="sm" c={dimColor(emphasis)}>
-      {days} day{days === 1 ? '' : 's'}
-    </Text>
-  ) : (
+// The wording comes from `utils/leadTime.ts` so this page and the
+// purchase-order form cannot drift apart on what an unrecorded lead time reads
+// as — the two surfaces that each invented their own answer before it existed.
+const leadTimeValue = (days: number | null | undefined, emphasis: SupplierCellEmphasis) => {
+  const recorded = formatLeadTimeDays(days);
+  return recorded === null ? (
     <NotRecorded />
+  ) : (
+    <Text size="sm" c={dimColor(emphasis)}>
+      {recorded}
+    </Text>
   );
+};
 
 // Cycle-count reason options (op-c7y4). Mirrors the reconciliation grid's
 // user-facing set — the system-only `vision_supply_check` reason is omitted.

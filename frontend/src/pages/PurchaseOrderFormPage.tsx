@@ -27,6 +27,7 @@ import '../styles/PurchaseOrderFormPage.css';
 import { workOrderOptionLabel } from '../utils/associations';
 import { utcYmd, ymdToUtcDateTime } from '../utils/dates';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
+import { leadTimeText } from '../utils/leadTime';
 import {
   derivePaymentSchedule,
   paymentScheduleSummary,
@@ -557,7 +558,13 @@ const PurchaseOrderFormPage: React.FC = () => {
             : null,
         package_cost: matchingItemSupplier.package_cost?.toString() ?? null,
         quantity_per_package: qpp,
-        lead_time_days: matchingItemSupplier.average_lead_time || 7,
+        // `?? null`, never `|| 7`: `average_lead_time` is NOT NULL with a
+        // default of 7, so a `0` here is a counter-pickup vendor who hands the
+        // part over the same day — and the `|| 7` this replaces rewrote that
+        // as a week, on the one line an operator might not have needed to
+        // order at all. A payload with no lead time is an absence and reads as
+        // one. See `utils/leadTime.ts` for the whole reading of the column.
+        lead_time_days: matchingItemSupplier.average_lead_time ?? null,
         supplier_sku: matchingItemSupplier.supplier_sku || '',
         supplier_url: matchingItemSupplier.supplier_url || '',
         is_primary: matchingItemSupplier.is_primary || false,
@@ -1350,7 +1357,9 @@ const PurchaseOrderFormPage: React.FC = () => {
                               />
                             )}
                           </td>
-                          <td className="col-lead">{item.lead_time_days} days</td>
+                          <td className="col-lead" data-testid={`po-line-lead-time-${item.item_supplier_id}`}>
+                            {leadTimeText(item.lead_time_days)}
+                          </td>
                           <td className="col-shipment">
                             <input
                               type="date"

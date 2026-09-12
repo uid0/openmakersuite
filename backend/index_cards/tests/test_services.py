@@ -257,6 +257,64 @@ class LongestLeadTimeTests(TestCase):
 
         self.assertEqual(self._longest(), 21)
 
+    def test_a_same_day_supplier_is_a_lead_time_not_an_absence(self) -> None:
+        """``0`` is a vendor you collect from, and the spread has to include it.
+
+        The falsy guard this replaces dropped every ``0``-day link out of the
+        list, so an item whose only orderable supplier is the shop down the
+        road reported no spread at all — a recorded answer printed as though
+        nobody had quoted one (``oms-lead-time-default-seven``).
+        """
+        self._link("Counter", 0)
+
+        self.assertEqual(self._longest(), 0)
+
+
+class SameDayLeadTimeOnTheCardTests(TestCase):
+    """A ``0``-day quote reaches the printed card as a lead time (op-lead-time-default).
+
+    ``ItemSupplier.average_lead_time`` is NOT NULL with a default of 7, so a
+    ``0`` is RECORDED — the vendor hands the part over the same day — while
+    ``InventoryItem.average_lead_time`` is ``None`` only when there is no
+    orderable link at all. Those are opposite facts and the card used to print
+    both as nothing.
+    """
+
+    def setUp(self) -> None:
+        self.item = InventoryItem.objects.create(
+            name="Counter stock",
+            description="x",
+            reorder_quantity=1,
+            current_stock=1,
+            minimum_stock=1,
+        )
+        self.renderer = IndexCardRenderer(base_url="http://localhost:3000")
+        self.renderer.include_vendor_data = True
+
+    def _lines(self):
+        item = InventoryItem.objects.prefetch_related("item_suppliers__supplier").get(
+            pk=self.item.pk
+        )
+        return self.renderer._stock_info_lines(item)
+
+    def test_a_same_day_supplier_prints_its_zero(self) -> None:
+        ItemSupplier.objects.create(
+            item=self.item,
+            supplier=Supplier.objects.create(
+                name="Shop down the road",
+                supplier_type=Supplier.SupplierType.LOCAL,
+            ),
+            supplier_sku="CNT-1",
+            unit_cost=1,
+            average_lead_time=0,
+        )
+
+        self.assertIn("Avg Lead: 0 days", self._lines())
+
+    def test_an_item_with_no_supplier_at_all_still_prints_no_lead_line(self) -> None:
+        """The control: ``None`` is a real absence and stays silent."""
+        self.assertFalse(any(line.startswith("Avg Lead") for line in self._lines()))
+
 
 class ReorderAtLineTests(TestCase):
     """The card's "Reorder at:" line names the unit the item is counted in (op-es7c).

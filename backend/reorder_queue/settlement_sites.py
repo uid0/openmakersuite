@@ -549,7 +549,7 @@ class _PyScanner:
         #: names one — ``PurchaseOrderItem.close_short()`` — can be told apart
         #: from a receiver that merely holds an object.
         self.classes: frozenset[str] = self._class_dotted()
-        self.imports, self.shadows = self._scope_bindings()
+        self.imports, self.shadows, self.definitions = self._scope_bindings()
         #: function qualname -> {"writes": bool, "refreshes": bool, "calls": set,
         #: "line": int}
         self.functions: dict[str, dict] = {}
@@ -571,12 +571,25 @@ class _PyScanner:
 
     @staticmethod
     def _scope_nodes(scope: ast.AST):
-        stack = list(ast.iter_child_nodes(scope))
+        stack = list(scope.body) if isinstance(scope, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef)) else []
         while stack:
             node = stack.pop()
             yield node
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
-                stack.extend(ast.iter_child_nodes(node))
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                stack.extend(node.decorator_list)
+                stack.extend(node.args.defaults)
+                stack.extend(default for default in node.args.kw_defaults if default is not None)
+                continue
+            if isinstance(node, ast.ClassDef):
+                stack.extend(node.decorator_list)
+                stack.extend(node.bases)
+                stack.extend(keyword.value for keyword in node.keywords)
+                continue
+            if isinstance(node, ast.Lambda):
+                stack.extend(node.args.defaults)
+                stack.extend(default for default in node.args.kw_defaults if default is not None)
+                continue
+            stack.extend(ast.iter_child_nodes(node))
 
     @staticmethod
     def _target_names(target: ast.AST) -> set[str]:
@@ -585,6 +598,7 @@ class _PyScanner:
     def _bindings_in(self, scope: ast.AST):
         imports: dict[str, set[tuple[str, str | None]]] = {}
         shadows: set[str] = set()
+        definitions: set[str] = set()
         if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             args = scope.args
             shadows.update(arg.arg for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs))
@@ -597,6 +611,9 @@ class _PyScanner:
                 for alias in node.names:
                     name, binding = self._import_binding(node, alias)
                     imports.setdefault(name, set()).add(binding)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                shadows.add(node.name)
+                definitions.add(node.name)
             elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                 for target in targets:
@@ -609,15 +626,16 @@ class _PyScanner:
                 shadows.add(node.name)
             elif isinstance(node, (ast.Global, ast.Nonlocal)):
                 shadows.update(node.names)
-        return imports, shadows
+        return imports, shadows, definitions
 
     def _scope_bindings(self):
         imports: dict[str, dict[str, set[tuple[str, str | None]]]] = {}
         shadows: dict[str, set[str]] = {}
-        imports[""], shadows[""] = self._bindings_in(self.tree)
+        definitions: dict[str, set[str]] = {}
+        imports[""], shadows[""], definitions[""] = self._bindings_in(self.tree)
         for dotted, node in self._qualified_functions(self.tree):
-            imports[dotted], shadows[dotted] = self._bindings_in(node)
-        return imports, shadows
+            imports[dotted], shadows[dotted], definitions[dotted] = self._bindings_in(node)
+        return imports, shadows, definitions
 
     def _visible_imports(self, dotted: str):
         visible: dict[str, tuple[str, str | None] | None] = {}
@@ -837,7 +855,7 @@ class _PyScanner:
             writes: list[str] = []
             refreshes = False
             calls: set[str] = set()
-            for sub in ast.walk(node):
+            for sub in self._scope_nodes(node):
                 if isinstance(sub, (ast.Assign, ast.AugAssign)):
                     targets = sub.targets if isinstance(sub, ast.Assign) else [sub.target]
                     for target in targets:
@@ -864,7 +882,12 @@ class _PyScanner:
                 "calls": calls,
                 "module": self.rel,
                 "imported": self._visible_imports(dotted),
-                "shadowed": set().union(*(self.shadows[scope] for scope in self._scopes(dotted))),
+                "shadowed": set().union(
+                    *(
+                        self.shadows[scope] - self.definitions[scope]
+                        for scope in self._scopes(dotted)
+                    )
+                ),
                 "classes": self.classes,
                 "scopes": self._scopes(dotted),
                 "owner_class": self._owner_class(dotted),

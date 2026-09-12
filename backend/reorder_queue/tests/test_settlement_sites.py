@@ -1562,6 +1562,104 @@ class TestTheWriteArmDischargesOnlyAlongRealCallEdges:
         )
         assert findings == []
 
+    def test_an_uncalled_nested_function_does_not_call_a_writer_for_its_parent(self, sweep):
+        findings = self._findings(
+            sweep,
+            [
+                ("appa/service.py", self.WRITER),
+                (
+                    "appc/service.py",
+                    "from appa.service import close_short\n"
+                    "from reorder_queue.services.receiving import refresh_receipt_status\n\n"
+                    "def settle(line, purchase_order):\n"
+                    "    def call_writer():\n"
+                    "        close_short(line)\n"
+                    "    refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert "appa/service.py" in [finding.path for finding in findings]
+
+    def test_a_called_nested_function_propagates_its_writers_obligation(self, sweep):
+        findings = self._findings(
+            sweep,
+            [
+                ("appa/service.py", self.WRITER),
+                (
+                    "appc/service.py",
+                    "from appa.service import close_short\n"
+                    "from reorder_queue.services.receiving import refresh_receipt_status\n\n"
+                    "def settle(line, purchase_order):\n"
+                    "    def call_writer():\n"
+                    "        close_short(line)\n"
+                    "    call_writer()\n"
+                    "    refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert findings == []
+
+    def test_a_nested_refresh_does_not_refresh_its_parent_writer(self, sweep):
+        findings = self._findings(
+            sweep,
+            [
+                (
+                    "appa/service.py",
+                    "from reorder_queue.services.receiving import refresh_receipt_status\n\n"
+                    "def close_short(line, purchase_order):\n"
+                    "    line.quantity_received = 0\n"
+                    "    def dead():\n"
+                    "        refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert [finding.path for finding in findings] == ["appa/service.py"]
+
+    def test_a_nested_definition_decorator_is_evaluated_by_its_parent(self, sweep):
+        findings = self._findings(
+            sweep,
+            [
+                ("appa/service.py", self.WRITER),
+                (
+                    "appc/service.py",
+                    "from appa.service import close_short\n"
+                    "from reorder_queue.services.receiving import refresh_receipt_status\n\n"
+                    "def settle(line, purchase_order):\n"
+                    "    @close_short(line)\n"
+                    "    def decorated():\n"
+                    "        pass\n"
+                    "    refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert findings == []
+
+    @pytest.mark.parametrize("declaration", ["def", "async def", "class"])
+    def test_a_nested_definition_shadows_an_imported_module(self, sweep, declaration):
+        signature = (
+            f"    {declaration} service:\n"
+            if declaration == "class"
+            else f"    {declaration} service():\n"
+        )
+        body = "        pass\n" if declaration == "class" else "        return None\n"
+        findings = self._findings(
+            sweep,
+            [
+                ("appa/service.py", self.WRITER),
+                (
+                    "appc/service.py",
+                    "from appa import service\n"
+                    "from reorder_queue.services.receiving import refresh_receipt_status\n\n"
+                    "def settle(line, purchase_order):\n"
+                    + signature
+                    + body
+                    + "    service.close_short(line)\n"
+                    "    refresh_receipt_status(purchase_order)\n",
+                ),
+            ],
+        )
+        assert [finding.path for finding in findings] == ["appa/service.py"]
+
     def test_a_caller_in_the_same_module_discharges_it(self, sweep):
         findings = self._findings(
             sweep,

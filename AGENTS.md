@@ -741,35 +741,6 @@ the new payload keys (`unit_cost_state`, `unit_cost_detail`,
 among the endpoints ScanTTY calls at all; and both new write-path refusals
 reach an operator with the full remedy text.
 
-**THE CROSS-PROJECT CONTRACT: one change ScanTTY must make
-(`oms-anonymous-reorder-duplicate-filing`).** `POST /api/reorders/requests/` now
-has THREE outcomes, not two. While a request for the item is still PENDING, an
-ANONYMOUS submission files no second row and answers **200** with the existing
-request plus `already_requested: true` and a member-facing `detail`; a filed one
-is 201 with `already_requested: false`; a real error is unchanged. The full rule
-and why only `pending` blocks live in `ReorderRequestCreateSerializer` in
-`reorder_queue/serializers.py`.
-
-Verified against `uid0/scantty` main at `b4af7e76` by reading it through the
-GitHub API:
-
-- `internal/tui/reorder_form.go` prints `"reorder #%v created"` on ANY non-4xx
-  response (`reorderSubmittedMsg`, ~:113). On the 200 it will now say a reorder
-  was created when none was. It should read `already_requested` off the
-  response and say "already requested — #%v is still pending" instead. This is
-  the one live defect; a `%v` over the echoed id is still correct either way,
-  since the id returned is the existing request's.
-- `omsapi.ReorderRequest` needs a field for it — an `AlreadyRequested bool`
-  tagged `already_requested,omitempty` — before the TUI can branch on it.
-
-**Verified SAFE, so nobody redoes the work:** `omsapi.jsonDecoder`
-(`internal/omsapi/client.go`) sets only `UseNumber()` and never
-`DisallowUnknownFields`, so the two new keys are ignored by `encoding/json` and
-nothing fails to decode; `Client.Post` errors only at `>= 400`, so the 200 is
-not itself an error path; and an AUTHENTICATED submit is untouched — the rule
-applies to anonymous callers only, so a ScanTTY holding a token never sees
-`already_requested: true` at all.
-
 **DECIDED AND DONE — the public inventory-summary valuation.** Filed by
 `fm/oms-falsy-zero-money-guards` as an escalation; the captain chose to stop
 publishing the valuation anonymously rather than correct the matrix, and

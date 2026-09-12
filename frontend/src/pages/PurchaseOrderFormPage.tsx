@@ -27,7 +27,7 @@ import '../styles/PurchaseOrderFormPage.css';
 import { workOrderOptionLabel } from '../utils/associations';
 import { utcYmd, ymdToUtcDateTime } from '../utils/dates';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
-import { leadTimeText } from '../utils/leadTime';
+import { aggregateLeadTimeText, leadTimeText } from '../utils/leadTime';
 import {
   derivePaymentSchedule,
   paymentScheduleSummary,
@@ -936,12 +936,12 @@ const PurchaseOrderFormPage: React.FC = () => {
                     </div>
                     <div className="stat">
                       <span className="stat-value">
-                        {Math.round(supplier.avg_lead_time)} days
-                        {supplier.avg_lead_time_provenance === 'default'
-                          ? ' (includes planning default)'
-                          : supplier.avg_lead_time_provenance === 'unknown'
-                            ? ' (includes unknown provenance)'
-                            : ''}
+                        {aggregateLeadTimeText(
+                          supplier.avg_lead_time == null
+                            ? null
+                            : Math.round(supplier.avg_lead_time),
+                          supplier.avg_lead_time_provenance
+                        )}
                       </span>
                       <span className="stat-label">avg lead time</span>
                     </div>

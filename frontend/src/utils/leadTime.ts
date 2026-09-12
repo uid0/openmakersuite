@@ -68,6 +68,19 @@ export const leadTimeText = (
   provenance?: LeadTimeProvenance | null
 ): string => formatLeadTimeDays(days, provenance) ?? LEAD_TIME_NOT_RECORDED;
 
+export const aggregateLeadTimeText = (
+  days: number | null | undefined,
+  provenance?: LeadTimeProvenance | null
+): string => {
+  if (days == null || !Number.isFinite(days)) return LEAD_TIME_NOT_RECORDED;
+  const value = `${days} day${days === 1 ? '' : 's'}`;
+  if (provenance === 'default') return `${value} (includes planning default)`;
+  if (provenance === 'unknown' || provenance == null) {
+    return `${value} (includes unknown provenance)`;
+  }
+  return value;
+};
+
 export const leadTimeProvenanceText = (provenance?: LeadTimeProvenance | null): string => {
   if (provenance === 'default') return 'This stored value is the planning default.';
   if (provenance === 'unknown') return 'This stored value predates lead-time provenance.';

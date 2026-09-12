@@ -65,7 +65,7 @@ const supplier = {
   items: [seededLine],
   assets: [] as api.ReorderDataAsset[],
   estimated_total: '2.50',
-  avg_lead_time: 5,
+  avg_lead_time: 5 as number | null,
   avg_lead_time_provenance: undefined as
     | 'default'
     | 'recorded'
@@ -165,6 +165,18 @@ describe('the line the server put on the pad', () => {
 });
 
 describe('the supplier aggregate', () => {
+  test('renders an absent average as not recorded', async () => {
+    const previousLeadTime = supplier.avg_lead_time;
+    supplier.avg_lead_time = null;
+    await addBySearch(
+      itemSupplierRow({ average_lead_time: 7, average_lead_time_provenance: 'recorded' })
+    );
+
+    expect(screen.getByText('Not recorded')).toBeInTheDocument();
+    expect(screen.queryByText('0 days')).not.toBeInTheDocument();
+    supplier.avg_lead_time = previousLeadTime;
+  });
+
   test('marks an average that includes a planning default', async () => {
     supplier.avg_lead_time_provenance = 'default';
     await addBySearch(

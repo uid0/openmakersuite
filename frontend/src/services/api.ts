@@ -2023,7 +2023,7 @@ export interface ReorderDataSupplier {
   estimated_total: string;
   unpriced_item_count?: number;
   estimated_total_is_partial?: boolean;
-  avg_lead_time: number;
+  avg_lead_time: number | null;
   avg_lead_time_provenance?: import('../types').LeadTimeProvenance | null;
 }
 

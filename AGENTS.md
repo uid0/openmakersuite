@@ -361,6 +361,33 @@ recorded. New omitted values are `default`, and every write that changes the
 number marks it `recorded`. Displays carry the marker through supplier-derived
 values and aggregates, wording defaults and unknown provenance explicitly.
 
+The human-facing supplier lead-time surfaces are:
+
+* the supplier relationship editor, which labels default and legacy provenance
+  beside the editable value;
+* the item-detail supplier table and supplier-detail item table, which render
+  each link through the shared formatter;
+* the scan page's chosen-supplier block, supplier detail, and order summary,
+  which render the chosen link through the shared formatter;
+* the admin dashboard reorder row and purchase-order line, which carry the
+  chosen link's provenance through their payloads;
+* the purchase-order supplier card, whose nullable aggregate says `Not
+  recorded` when it has no lines and otherwise says when its average includes a
+  default or unknown-provenance value;
+* the item metrics strip, which carries the selected link's provenance;
+* the serialized forecast reorder-point cell, which marks a point computed from
+  a default or legacy estimate while an observed delivery mean is recorded;
+* the index card's average and maximum lead lines, where the maximum retains the
+  winning link rather than dropping its provenance; and
+* Django admin's item-supplier inline and detail form, which show provenance
+  read-only and mark a changed lead time recorded.
+
+`LeadTimeChart` and the delivery-performance reports show observed delivery
+history rather than `ItemSupplier.average_lead_time`; their values are recorded
+measurements and their separate quoted-lead-time yardstick contract is described
+below. The demand-forecast report and digest use a lead time for decisions but
+do not display the supplier lead-time number.
+
 Two truthiness guards on this column remain, both computing a DATE rather than
 a display, both open: `InventoryItem.get_expected_delivery_date` (already filed
 by the alert-suppression class) and `purchase_orders._update_reorder_requests`,

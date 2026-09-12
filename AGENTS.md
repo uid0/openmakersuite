@@ -1152,125 +1152,25 @@ display inconsistency on staff's list, and `void_item` carrying no status gate.
 
 ### Order-level values computed from the lines
 
-There is more than one. **A value stored on `PurchaseOrder` and computed
-from its lines is declared in `settlement_signals.DERIVED_ORDER_VALUES`** —
-today `status` and `estimated_total` — as three facts and no more: the column
-it is stored in, the `PurchaseOrderItem` member its derivation is read off (its
-SEED), and the function that re-derives it. Everything else about it is
-derived: which line columns move it, when a write has to re-derive it, and
-which sites re-implement it.
+`backend/reorder_queue/settlement_signals.py` owns the declaration and runtime
+routing for every value stored on `PurchaseOrder` and computed from its lines.
+Its module docstring is the authoritative contract; read it before adding a
+derived value or changing a line-level input.
 
-**Adding a third is one entry there, not a new branch anywhere.** If you do not
-add it, the build says so: the guard derives the same set FROM THE TREE — any
-function assigning a `PurchaseOrder` column while reading the order's lines —
-and fails on one nothing declares. That check is the point of the whole
-arrangement; do not silence it by narrowing what it looks at.
-
-One rule covers all of them, in both halves:
-
-> A line SAVE re-derives value V for the affected order(s) exactly when one of
-> V's own INPUT fields moved, or the line was created, or it was reparented. A
-> line DELETE re-derives every value for the order it left. Any write that
-> fires no per-object signal must call V's own re-derivation by name.
-
-Per VALUE on both sides matters. Receiving writes `quantity_received`, a
-settlement input and not a cost one, so it must move the status and must not
-touch the money; a reprice writes `unit_cost_ordered` and must do the opposite.
-Calling `refresh_receipt_status` does not discharge an obligation to
-`recalculate_estimated_total`, and the guard says so.
-
-"Is receiving finished with this line?" is defined once, on
-`PurchaseOrderItem.is_settled`, and nowhere else.
-`backend/reorder_queue/settlement_sites.py` derives the whole set
-of sites from the declared seeds (it walks each with `ast` to the model fields,
-then sweeps `backend/` and `frontend/src`) and fails when one bypasses it. The
-same is now true of a line's cost, `PurchaseOrderItem.estimated_cost`: multiply
-`quantity_ordered` by `unit_cost_ordered` yourself, in Python or in TypeScript,
-and it is a finding. Run it for the report, `--sites` for every reader:
+`backend/reorder_queue/settlement_sites.py` owns the matching static guard and
+its documented limits. It rejects undeclared order-level values, independent
+reimplementations of a declared derivation, and bulk writers that do not reach
+that value's named refresh. Run it for the report, or add `--sites` to list
+readers:
 
 ```
 python3 backend/reorder_queue/settlement_sites.py
 ```
 
-It runs as `reorder_queue/tests/test_settlement_sites.py` in Backend Tests and
-as a step in Frontend Lint, so a frontend-only PR is covered too;
-`reorder_queue/tests/test_derived_order_values.py` covers the behaviour, every
-case parameterized over the declared values and their derived input fields so a
-third value arrives already covered. If it flags your change, route the site
-through the derivation rather than widening the guard:
-`PurchaseOrderItem.receipt_state` / `is_settled` and `estimated_cost` in
-Python, `PurchaseOrderItem.q_settled()` / `objects.outstanding()` /
-`objects.with_receipt_state()` in the ORM, and `receipt_state` / `is_settled` /
-`estimated_cost` off the API on the frontend. Anything that can settle a line
-must reach `services.refresh_receipt_status` before it returns, and anything
-that can change what a line costs must reach
-`services.recalculate_estimated_total`.
-
-**Where the refresh actually lives.** Saving or deleting a LINE re-derives its
-order on its own — `reorder_queue/settlement_signals.py` hangs off
-`PurchaseOrderItem`'s `post_save` / `post_delete`, and `pre_save` captures the
-order a line is LEAVING so a reparent re-derives both ends.
-
-Each value's closure is therefore derived TWICE, and neither copy is typed
-out: `settlement_signals.line_inputs(seed)` follows the seed through the
-imported class at runtime (no source read — this is a write path), and
-`settlement_sites.derive_anchor` follows the same seed through `models.py` for
-the static guard. A test asserts the two agree FOR EVERY VALUE, so widening a
-derivation must leave both able to follow it. No admin hook owns
-that re-derivation any more — the admin still opens `settlement_batch()` so a
-formset save asks once, and `ReceiptStatusFilter` still *reads* settlement
-through `with_receipt_state()`, but neither decides it. A hook used to: the
-change form, then the inline formset, then row delete, then bulk delete, then
-reparenting, each closed by adding another method name to a list, which is the
-mistake this section exists to stop.
-
-**The money value, and why voiding is not a re-roll.**
-`PurchaseOrder.estimated_total` is a STORED sum of the line costs. Voided lines
-STAY in it and `effective_estimated_total` subtracts them at read time, which
-is what keeps struck-off money visible — and nothing says "except voiding" to
-achieve that: `is_voided` is a settlement input and not a cost one, so the
-per-value gate leaves the total alone by the ordinary rule. A DELETED line, by
-contrast, is subtracted by nobody, so without the delete signal the order
-reports money for a line that no longer exists.
-
-Every route that changes what a line costs re-rolls the total now, including
-the Django admin's change form and inline formset. The closure is taken per
-value, so the cost closure
-(`quantity_ordered`, `unit_cost_ordered`) is compared for the money exactly as
-the settlement closure is for the status.
-
-**What the signals do NOT cover, and why the guard still has a job:**
-querysets fire no per-object save signal. `PurchaseOrderItem.objects.filter(...)
-.update(...)` and `bulk_update` write settlement and cost columns with nothing
-hearing about it, so those paths must call the re-derivations themselves —
-`services.purchase_orders.void_po` is the live example. Ordinary
-`queryset.delete()` IS covered (it fans `post_delete` out per row), but a FAST
-DELETE is not: a collector that can drop rows with one `_raw_delete` sends no
-signal, and `_raw_delete` called directly never does.
-
-Three properties the routing holds, all pinned by tests rather than asserted:
-receiving a twenty-line order re-derives it ONCE, per value (`settlement_batch()`
-coalesces inside the caller's unit of work, never on `transaction.on_commit` —
-endpoints serialize `purchase_order.status` into the response and ScanTTY reads
-it); a save that moved no value's inputs and did not move the line to another
-order re-derives NOTHING, so editing a note leaves an operator's chosen status
-alone and does not bump the order's `updated_at`; and a refresh cannot re-enter
-its own signal.
-
-Do not read a clean run as "there is nothing left". The scan prints the write
-shapes it can and cannot see on every run, each heading carrying the count of
-the list under it; that printed list is the honest boundary. Read it off a run
-rather than from here — a count restated in prose is a count that drifts, and
-this paragraph used to claim one that matched nothing in the code.
-
-**A file it could not read is not a file it cleared.** The scan exits non-zero
-for a module it cannot parse or decode, not just for a site that bypasses the
-derivation, and names each one under `NOT scanned`. It used to `continue` past
-them, so a run in which N modules failed to parse still printed `Scanned:
-backend, frontend/src` and a clean verdict — which is why Frontend Lint now sets
-up Python 3.14 before running it. Run the scan under the version the backend
-targets; a partial sweep says so in its summary rather than passing for a whole
-one.
+The scan runs in Backend Tests and Frontend Lint. Route a finding through the
+declared model derivation or named refresh; do not widen the guard. Behavioral
+coverage lives in `reorder_queue/tests/test_derived_order_values.py`, and the
+guard's contract is pinned by `reorder_queue/tests/test_settlement_sites.py`.
 
 **A custom `QuerySet` method can become a `Manager` method by accident.**
 `BaseManager._get_queryset_methods` copies every public queryset method onto the

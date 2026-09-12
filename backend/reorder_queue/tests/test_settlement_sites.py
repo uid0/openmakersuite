@@ -1128,10 +1128,9 @@ class TestAdminEditsReDeriveTheOrder:
     def _order_settled_but_for_one_line(self, admin_client, client, supplier, operator, spare_name):
         """An order whose only remaining outstanding line is the one to delete.
 
-        The spare line is added BEFORE anything settles, because a raw
-        ``objects.create`` re-derives nothing — adding it afterwards would leave
-        the order sitting at ``received`` over an outstanding line and prove
-        only that this setup was wrong.
+        The spare line is added BEFORE anything settles so the scenario reaches
+        ``partially_received`` through the ordinary receipt transition, with
+        this as its one remaining outstanding line.
         """
         purchase_order = make_po(supplier, operator)
         line = add_line(purchase_order, make_item(f"Gasket {spare_name}", supplier), 10)

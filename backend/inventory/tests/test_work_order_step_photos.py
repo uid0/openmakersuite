@@ -52,12 +52,6 @@ from inventory.views import WorkOrderViewSet
 pytestmark = pytest.mark.django_db
 
 
-@pytest.fixture(autouse=True)
-def _isolated_media(settings, tmp_path):
-    """Keep uploaded test images out of the tracked backend/media tree."""
-    settings.MEDIA_ROOT = str(tmp_path)
-
-
 def _image_bytes(size=(24, 18), color=(0, 128, 255)) -> bytes:
     buf = io.BytesIO()
     PILImage.new("RGB", size, color=color).save(buf, format="JPEG")

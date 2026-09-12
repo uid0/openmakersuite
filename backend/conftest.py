@@ -2,12 +2,15 @@
 Pytest configuration and fixtures for the entire test suite.
 """
 
+# ruff: noqa: E402
+
 from io import BytesIO
 
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test.utils import override_settings
 from django.utils.crypto import get_random_string
 
 import pytest
@@ -102,6 +105,44 @@ def clear_locmem_cache():
     cache.clear()
     yield
     cache.clear()
+
+
+@pytest.fixture(autouse=True, scope="session")
+def session_media_root(tmp_path_factory):
+    """Keep ``MEDIA_ROOT`` out of the working tree before any test code runs.
+
+    ``settings.MEDIA_ROOT`` is ``backend/media``, which is gitignored. A test
+    that saves a ``FileField`` there leaves the file behind, and the next run
+    that saves the same name gets Django's collision rename
+    (``Storage.get_alternative_name``: ``receipt.pdf`` -> ``receipt_4StNjH6.pdf``),
+    so any assertion on the stored name fails on the second local run and never
+    in CI, whose checkout starts without those files.
+
+    ``isolated_media_root`` below gives each test its own directory, but a
+    function-scoped fixture starts too late for class-level setup:
+    ``setUpTestData`` / ``setUpClass`` run first, and a factory there that
+    builds an image field would still write into ``backend/media``. This
+    session layer sits underneath and catches those writes. ``override_settings``
+    fires ``setting_changed``, which ``FileSystemStorage`` listens to, so
+    ``default_storage`` and every ``FileField`` storage follow it.
+    """
+    media_root = tmp_path_factory.mktemp("session-media")
+    with override_settings(MEDIA_ROOT=str(media_root)):
+        yield media_root
+
+
+@pytest.fixture(autouse=True)
+def isolated_media_root(session_media_root, settings, tmp_path_factory):
+    """Give every test its own empty ``MEDIA_ROOT`` outside the working tree.
+
+    A fresh directory per test lets a test assume it is the only writer, so a
+    stored filename is exactly the one it uploaded. The directory comes from
+    ``tmp_path_factory`` rather than inside ``tmp_path`` so a test's own
+    ``tmp_path`` stays empty for it. See ``session_media_root`` for why.
+    """
+    media_root = tmp_path_factory.mktemp("media")
+    settings.MEDIA_ROOT = str(media_root)
+    return media_root
 
 
 @pytest.fixture

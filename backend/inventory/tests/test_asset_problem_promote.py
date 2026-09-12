@@ -43,12 +43,6 @@ pytestmark = pytest.mark.django_db
 User = get_user_model()
 
 
-@pytest.fixture(autouse=True)
-def _isolated_media(settings, tmp_path):
-    """Keep uploaded test images out of the tracked backend/media tree."""
-    settings.MEDIA_ROOT = str(tmp_path)
-
-
 @pytest.fixture
 def staff(db):
     return User.objects.create_user(

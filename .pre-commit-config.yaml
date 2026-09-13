@@ -140,9 +140,10 @@ repos:
         pass_filenames: false
       - id: derivation-guard
         name: settlement derivation guard (scripts/ci-lint.sh)
+        # Mirror the source roots and suffixes scanned by settlement_sites.py.
         entry: scripts/ci-lint.sh derivation-guard
         language: system
-        files: ^backend/.*\.py$
+        files: ^(backend/.*\.py|frontend/src/.*\.(ts|tsx))$
         pass_filenames: false
 
   # Frontend: Run tests (optional - can be slow, comment out if needed)

@@ -20,6 +20,7 @@ from inventory.services.vendor_visibility import (
     VendorGatedSerializerMixin,
     vendor_visibility_from_context,
 )
+from inventory.services.link_version import StaleSupplierLink, lock_item_supplier_links
 from membership.actor import actor_display
 
 from .models import (
@@ -1817,6 +1818,7 @@ class KitSerializer(InventoryItemSerializer):
         expected_version = terms.get("version")
         sent = {key: value for key, value in terms.items() if key not in ("supplier", "version")}
         with transaction.atomic():
+            lock_item_supplier_links(instance.pk)
             relationship = {"item": instance, "supplier": terms["supplier"]}
             if expected_version is not None and expected_version > 0:
                 link = ItemSupplier.objects.select_for_update().filter(**relationship).first()

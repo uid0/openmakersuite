@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import connection, models, transaction
+from django.db import models, transaction
 from django.utils import timezone
 from django.utils.functional import cached_property
 from django.utils.text import slugify
@@ -24,7 +24,7 @@ from inventory.services.lead_time_source import (
     planning_default,
     settle_lead_time_source,
 )
-from inventory.services.link_version import claim_version
+from inventory.services.link_version import claim_version, lock_item_supplier_links
 
 from .ownership import OwnableModel
 
@@ -1642,10 +1642,9 @@ class ItemSupplier(models.Model):
         history entry. The order inside the block is: read the stored row and
         derive from it, demote siblings, snapshot the pre-save pricing (from that
         same read, so the derivation and the history cannot disagree about what
-        was on disk), save, then record. Every primary save first takes a
-        transaction-scoped advisory lock for the item and then locks its existing
-        links in primary-key order, so creates and updates share one arbitration
-        boundary even when the item has no links yet.
+        was on disk), save, then record. Every save first takes the shared
+        per-item supplier-link boundary, so creates, updates and primary
+        arbitration serialize before any row lock even when no links exist yet.
         """
         from ..services.suppliers import (
             derive_costs,
@@ -1657,19 +1656,7 @@ class ItemSupplier(models.Model):
 
         is_new = self.pk is None
         with transaction.atomic():
-            if self.is_primary:
-                if connection.vendor == "postgresql":
-                    with connection.cursor() as cursor:
-                        cursor.execute(
-                            "SELECT pg_advisory_xact_lock(hashtext(%s))",
-                            [f"inventory.itemsupplier.primary:{self.item_id}"],
-                        )
-                list(
-                    ItemSupplier.objects.select_for_update()
-                    .filter(item_id=self.item_id)
-                    .order_by("pk")
-                    .values_list("pk", flat=True)
-                )
+            lock_item_supplier_links(self.item_id)
             # First, before anything reads the stored row: lock it, refuse a save
             # made from a stale copy, and move the version on
             # (``inventory.services.link_version``).

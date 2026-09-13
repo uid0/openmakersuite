@@ -11,7 +11,7 @@ from decimal import Decimal, InvalidOperation
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models, transaction
 from django.db.models import F, Q
-from django.http import HttpResponse, StreamingHttpResponse
+from django.http import Http404, HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 
 from drf_spectacular.utils import OpenApiResponse, extend_schema
@@ -125,7 +125,11 @@ from .serializers import (
     WorkOrderToolSerializer,
     WorkOrderValidationSerializer,
 )
-from .services.link_version import STALE_VERSION_CODE, StaleSupplierLink
+from .services.link_version import (
+    STALE_VERSION_CODE,
+    StaleSupplierLink,
+    lock_item_supplier_links,
+)
 from .services.pack_size import clean_pack_size
 from .services.packaging import (
     base_reorder_quantity,
@@ -2038,54 +2042,53 @@ class ItemSupplierViewSet(viewsets.ModelViewSet):
         """PUT/PATCH a link; a ``version`` that is no longer current is a 409."""
         item_supplier_id = ItemSupplier._meta.pk.to_python(self.kwargs[self.lookup_field])
         raw_version = request.data.get("version")
+        version = None
         if raw_version is not None:
             try:
                 version = serializers.IntegerField(min_value=1).run_validation(raw_version)
             except serializers.ValidationError:
-                version = None
-            if version is not None:
-                try:
-                    with transaction.atomic():
-                        item_supplier = ItemSupplier.objects.select_for_update().get(
-                            pk=item_supplier_id
-                        )
-                        self.check_object_permissions(request, item_supplier)
-                        return super().update(request, *args, **kwargs)
-                except ItemSupplier.DoesNotExist:
-                    return stale_supplier_link_response(
-                        StaleSupplierLink(item_supplier_id, version, None)
-                    )
-                except StaleSupplierLink as exc:
-                    return stale_supplier_link_response(exc)
+                pass
         try:
             return super().update(request, *args, **kwargs)
+        except Http404:
+            if version is None:
+                raise
+            return stale_supplier_link_response(StaleSupplierLink(item_supplier_id, version, None))
         except StaleSupplierLink as exc:
             return stale_supplier_link_response(exc)
 
     def destroy(self, request, *args, **kwargs):
         item_supplier_id = ItemSupplier._meta.pk.to_python(self.kwargs[self.lookup_field])
         raw_version = request.query_params.get("version")
-        if raw_version is None:
-            return super().destroy(request, *args, **kwargs)
+        version = None
+        if raw_version is not None:
+            try:
+                version = serializers.IntegerField(min_value=1).run_validation(raw_version)
+            except serializers.ValidationError as exc:
+                raise serializers.ValidationError({"version": exc.detail}) from exc
 
-        try:
-            version = serializers.IntegerField(min_value=1).run_validation(raw_version)
-        except serializers.ValidationError as exc:
-            raise serializers.ValidationError({"version": exc.detail}) from exc
+        item_id = ItemSupplier.objects.filter(pk=item_supplier_id).values_list(
+            "item_id", flat=True
+        ).first()
+        if item_id is None:
+            if version is None:
+                return super().destroy(request, *args, **kwargs)
+            return stale_supplier_link_response(StaleSupplierLink(item_supplier_id, version, None))
 
         try:
             with transaction.atomic():
+                lock_item_supplier_links(item_id)
                 item_supplier = ItemSupplier.objects.select_for_update().get(
                     pk=item_supplier_id
                 )
                 self.check_object_permissions(request, item_supplier)
-                if item_supplier.version != version:
+                if version is not None and item_supplier.version != version:
                     raise StaleSupplierLink(item_supplier.pk, version, item_supplier.version)
                 self.perform_destroy(item_supplier)
         except ItemSupplier.DoesNotExist:
-            return stale_supplier_link_response(
-                StaleSupplierLink(item_supplier_id, version, None)
-            )
+            if version is None:
+                raise Http404
+            return stale_supplier_link_response(StaleSupplierLink(item_supplier_id, version, None))
         except StaleSupplierLink as exc:
             return stale_supplier_link_response(exc)
         return Response(status=status.HTTP_204_NO_CONTENT)

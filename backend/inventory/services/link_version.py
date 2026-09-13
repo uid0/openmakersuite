@@ -29,6 +29,13 @@ adds it gives every existing row ``1`` without rewriting the table.
 WHY THE CHECK CANNOT RACE THE WRITE
 -----------------------------------
 
+:func:`lock_item_supplier_links` is the first lock taken by every supplier-link
+write. On PostgreSQL it takes one transaction-scoped advisory lock per item, so
+creates, updates, deletes, primary arbitration and existence checks serialize
+before any caller takes an ``ItemSupplier`` row lock. It is a no-op on other
+databases. One ordering rule prevents a row-lock/advisory-lock inversion while
+also providing a shared boundary when an item has no links yet.
+
 :func:`claim_version` takes ``SELECT ... FOR UPDATE`` on the row inside the
 save's transaction, compares, and bumps. A second save of the same row blocks
 on that lock until the first commits and then reads the committed version, so
@@ -88,6 +95,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
+from django.db import connection
+
 if TYPE_CHECKING:
     from inventory.models.core import ItemSupplier
 
@@ -95,6 +104,16 @@ VERSION_FIELD = "version"
 
 #: The refusal's ``error.code`` on the API. Stable: clients switch on it.
 STALE_VERSION_CODE = "stale_version"
+
+
+def lock_item_supplier_links(item_id) -> None:
+    if connection.vendor != "postgresql":
+        return
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT pg_advisory_xact_lock(hashtext(%s))",
+            [f"inventory.itemsupplier.links:{item_id}"],
+        )
 
 
 class StaleSupplierLink(Exception):

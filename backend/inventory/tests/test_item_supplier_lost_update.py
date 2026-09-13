@@ -974,3 +974,72 @@ def test_two_concurrent_first_primary_creates_serialize_to_one_winner():
     assert [first.is_alive(), second.is_alive()] == [False, False]
     assert outcomes == {"first": "saved", "second": "saved"}
     assert ItemSupplier.objects.filter(item=item, is_primary=True).count() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_tokened_primary_patch_racing_a_sibling_promotion_does_not_deadlock(
+    django_user_model,
+):
+    if connection.vendor != "postgresql":
+        pytest.skip("requires PostgreSQL transaction advisory locks")
+
+    user = django_user_model.objects.create_user(
+        username="lock-order", password="pw", is_staff=True, is_superuser=True
+    )
+    item = InventoryItemFactory(image=None)
+    primary = ItemSupplierFactory(item=item, is_primary=True, supplier_sku="PRIMARY")
+    sibling = ItemSupplierFactory(item=item, is_primary=False, supplier_sku="SIBLING")
+    first_written = threading.Event()
+    release_first = threading.Event()
+    outcomes = {}
+
+    def patch_primary():
+        api = APIClient()
+        api.force_authenticate(user=user)
+        try:
+            with transaction.atomic():
+                response = api.patch(
+                    detail_url(primary.pk),
+                    {"supplier_sku": "PRIMARY-EDIT", "version": primary.version},
+                    format="json",
+                )
+                outcomes["primary"] = response.status_code
+                first_written.set()
+                assert release_first.wait(timeout=30)
+        except Exception as exc:  # pragma: no cover
+            outcomes["primary"] = exc
+            first_written.set()
+        finally:
+            connection.close()
+
+    def promote_sibling():
+        api = APIClient()
+        api.force_authenticate(user=user)
+        try:
+            response = api.patch(
+                detail_url(sibling.pk),
+                {"is_primary": True, "version": sibling.version},
+                format="json",
+            )
+            outcomes["sibling"] = response.status_code
+        except Exception as exc:  # pragma: no cover
+            outcomes["sibling"] = exc
+        finally:
+            connection.close()
+
+    first = threading.Thread(target=patch_primary, daemon=True)
+    second = threading.Thread(target=promote_sibling, daemon=True)
+    first.start()
+    assert first_written.wait(timeout=30)
+    second.start()
+    try:
+        _wait_until_a_connection_waits_on_a_lock()
+    finally:
+        release_first.set()
+        first.join(timeout=30)
+        second.join(timeout=30)
+
+    assert [first.is_alive(), second.is_alive()] == [False, False]
+    assert outcomes["primary"] in (200, 409)
+    assert outcomes["sibling"] in (200, 409)
+    assert ItemSupplier.objects.filter(item=item, is_primary=True).count() == 1

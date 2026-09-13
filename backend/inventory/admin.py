@@ -17,7 +17,7 @@ from django.utils.safestring import mark_safe
 
 from facilities.models import AssetSiteRequirements
 from inventory.services.lead_time_source import PLANNING_DEFAULT_DAYS
-from inventory.services.link_version import StaleSupplierLink
+from inventory.services.link_version import StaleSupplierLink, lock_item_supplier_links
 
 from .models import (
     Asset,
@@ -221,6 +221,7 @@ class ItemSupplierAdminForm(ModelForm):
                 )
             return cleaned_data
         with transaction.atomic():
+            lock_item_supplier_links(self.instance.item_id)
             current = (
                 ItemSupplier.objects.select_for_update()
                 .filter(pk=self.instance.pk)

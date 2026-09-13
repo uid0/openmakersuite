@@ -19,31 +19,29 @@ repos:
       - id: detect-private-key
       - id: mixed-line-ending
 
-  # Python code formatting
-  - repo: https://github.com/psf/black
-    rev: 24.1.1
+  # Match the root hooks by delegating to CI's authoritative lint script.
+  # pre-commit runs this configuration from the repository root, so the entry
+  # and input patterns remain root-relative.
+  - repo: local
     hooks:
       - id: black
-        language_version: python3.13
-        exclude: migrations/
-
-  # Python import sorting
-  - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
-    hooks:
+        name: black (scripts/ci-lint.sh)
+        entry: scripts/ci-lint.sh black
+        language: system
+        files: &backend_lint_inputs ^(backend/|scripts/ci-lint\.sh$|\.gitignore$)
+        pass_filenames: false
       - id: isort
-        exclude: migrations/
-        args: ["--profile", "black", "--line-length", "100"]
-
-  # Python linting
-  - repo: https://github.com/pycqa/flake8
-    rev: 7.0.0
-    hooks:
+        name: isort (scripts/ci-lint.sh)
+        entry: scripts/ci-lint.sh isort
+        language: system
+        files: *backend_lint_inputs
+        pass_filenames: false
       - id: flake8
-        exclude: migrations/
-        args: [
-        "--config","./backend/.flake8"
-        ]
+        name: flake8 (scripts/ci-lint.sh)
+        entry: scripts/ci-lint.sh flake8
+        language: system
+        files: *backend_lint_inputs
+        pass_filenames: false
 
   # Security checks
   # Same bandit version, scope and skips as the root .pre-commit-config.yaml

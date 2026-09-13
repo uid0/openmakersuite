@@ -76,6 +76,6 @@ Given a `.criteria/<slug>.md` file, implement code changes in `backend/` and/or 
 ### Done means
 
 - All criteria tests pass.
-- `pre-commit run --all-files` is clean (or at minimum: `black --check`, `isort --check-only`, `flake8` on backend).
+- `pre-commit run --all-files` is clean (or at minimum: `scripts/ci-lint.sh`).
 - Both test suites green (`pytest`, `npm test`).
 - PR description references AC-N for each change so reviewers can trace intent.

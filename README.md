@@ -166,13 +166,12 @@ npm start
 The project includes comprehensive linting and testing:
 
 ```bash
-# Backend
-cd backend
-black .                    # Code formatting
-isort .                    # Import sorting
-flake8 .                   # Style checking
-bandit -r .               # Security scanning
-pytest --cov             # Tests with coverage
+# Lint exactly as CI does (from the project root)
+scripts/ci-lint.sh         # Backend and frontend lint jobs
+
+# Backend security and tests
+(cd backend && bandit -r .)           # Security scanning
+(cd backend && pytest --cov)          # Tests with coverage
 
 # Frontend
 cd frontend

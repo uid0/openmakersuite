@@ -58,7 +58,7 @@ This will:
 
 | Hook stage | Tooling | What it checks | Skip with |
 |------------|---------|----------------|-----------|
-| `pre-commit` | pre-commit framework | black, isort, flake8, bandit, file cleanups, npm lock sync, TS compile | `git commit --no-verify` |
+| `pre-commit` | pre-commit framework | black, isort, flake8, eslint, tsc and the derivation guard (each through `scripts/ci-lint.sh`, so at CI's versions; needs [`uv`](https://docs.astral.sh/uv/)), bandit, file cleanups, npm lock sync | `git commit --no-verify` |
 | `commit-msg` | conventional-pre-commit (Python) and `@commitlint/config-conventional` via Husky | Commit message follows [Conventional Commits](https://www.conventionalcommits.org/) (`<type>(<scope>): <subject>`). Both checks enforce the same spec; either path catches violations. | `git commit --no-verify` |
 | `pre-push` | Husky → `npm run lint` + `npm run test:fast` | Frontend lint + fast Vitest run, but only when commits being pushed touched `frontend/` | `git push --no-verify` |
 

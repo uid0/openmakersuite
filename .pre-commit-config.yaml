@@ -25,32 +25,31 @@ repos:
       - id: check-toml
       - id: detect-private-key
 
-  # Backend: Python code formatting
-  - repo: https://github.com/psf/black
-    rev: 24.10.0
+  # Delegate backend linting to CI's authoritative script; its header documents
+  # tool provisioning, versions and working-directory behavior. The shared
+  # input pattern also reruns these whole-tree checks when their inputs change.
+  # One hook per check keeps `pre-commit run isort` and `SKIP=flake8` working.
+  - repo: local
     hooks:
       - id: black
-        language_version: python3.13
-        files: ^backend/
-        exclude: ^backend/.*migrations/
-        args: ["--check"] # Match CI: black --check
-
-  # Backend: Python import sorting
-  - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
-    hooks:
+        name: black (scripts/ci-lint.sh)
+        entry: scripts/ci-lint.sh black
+        language: system
+        files: &backend_lint_inputs ^(backend/|scripts/ci-lint\.sh$|\.gitignore$)
+        pass_filenames: false
       - id: isort
-        files: ^backend/
-        exclude: ^backend/.*migrations/
-        args: ["--profile", "black", "--check-only"] # Match CI: isort --check-only
+        name: isort (scripts/ci-lint.sh)
+        entry: scripts/ci-lint.sh isort
+        language: system
+        files: *backend_lint_inputs
+        pass_filenames: false
+      - id: flake8
+        name: flake8 (scripts/ci-lint.sh)
+        entry: scripts/ci-lint.sh flake8
+        language: system
+        files: *backend_lint_inputs
+        pass_filenames: false
 
-  # Backend: Python linting
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.11.12
-    hooks:
-    -   id: ruff
-        alias: autoformat
-        args: [--fix]
   # Backend: Security checks - Bandit
   - repo: https://github.com/PyCQA/bandit
     # Keep in step with the bandit pin in backend/requirements-dev.txt, which
@@ -112,17 +111,32 @@ repos:
         pass_filenames: false
         always_run: false
 
+  # Delegate frontend linting to CI's authoritative script; its header owns the
+  # dependency and version contract. The shared input pattern also reruns these
+  # whole-tree checks when their inputs change.
   - repo: local
     hooks:
-      - id: typescript-check
-        name: TypeScript compilation check
-        # Same command as CI's Frontend Lint job; trust tsc's exit status rather
-        # than counting matching lines, which passed on errors outside src/.
-        entry: bash -c 'cd frontend && npm run typecheck'
+      - id: eslint
+        name: eslint (scripts/ci-lint.sh)
+        entry: scripts/ci-lint.sh eslint
         language: system
-        files: ^frontend/((src|e2e)/.*\.(ts|tsx)|tsconfig\.json|vite\.config\.ts|package(-lock)?\.json)$
+        files: &frontend_lint_inputs ^(frontend/|scripts/ci-lint\.sh$)
         pass_filenames: false
-        always_run: false
+      - id: typescript-check
+        name: TypeScript compilation check (scripts/ci-lint.sh)
+        # Trust tsc's exit status rather than counting matching lines, which
+        # passed on errors outside src/.
+        entry: scripts/ci-lint.sh typecheck
+        language: system
+        files: *frontend_lint_inputs
+        pass_filenames: false
+      - id: derivation-guard
+        name: settlement derivation guard (scripts/ci-lint.sh)
+        # Mirror the scan roots and rerun when the shared script changes.
+        entry: scripts/ci-lint.sh derivation-guard
+        language: system
+        files: ^(backend/.*\.py|frontend/src/.*\.(ts|tsx)|scripts/ci-lint\.sh)$
+        pass_filenames: false
 
   # Frontend: Run tests (optional - can be slow, comment out if needed)
   - repo: local

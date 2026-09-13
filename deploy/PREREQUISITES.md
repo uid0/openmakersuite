@@ -246,16 +246,17 @@ npm --version     # 10.x or newer
 
 ## 7. Optional: pre-commit (contributors only)
 
-If you are committing back to the repo, install `pre-commit` so the same
-formatters CI runs land on your changes locally:
+If you are committing back to the repo, install `pre-commit` to run the local
+hooks before changes reach CI:
 
 ```bash
 pip install --user pre-commit
 pre-commit install
 ```
 
-`pre-commit run --all-files` should be clean before you push. CI rejects
-diffs with `isort`, `black`, or `flake8` failures.
+`pre-commit run --all-files` should be clean before you push. Its lint hooks
+delegate to `scripts/ci-lint.sh`, the authoritative local command for the same
+backend and frontend lint checks CI runs (and require `uv` on `PATH`).
 
 ## End-to-end verification
 

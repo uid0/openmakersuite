@@ -3,8 +3,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Use the authoritative lint command shared with CI; its header owns the exact
+# checks and tool-provisioning contract.
+run_lint() {
+  echo "== Lint (scripts/ci-lint.sh) =="
+  "$ROOT_DIR/scripts/ci-lint.sh"
+}
+
 run_backend() {
-  echo "== Backend quality and coverage =="
+  echo "== Backend tests and coverage =="
   cd "$ROOT_DIR/backend"
 
   export DEBUG="${DEBUG:-1}"
@@ -13,14 +20,11 @@ run_backend() {
   export REDIS_URL="${REDIS_URL:-redis://localhost:6379/0}"
 
   python -m pip install -r requirements.txt -r requirements-dev.txt
-  black --check .
-  isort --check-only .
-  flake8 .
   pytest
 }
 
 run_frontend() {
-  echo "== Frontend quality, coverage, build, and E2E =="
+  echo "== Frontend tests, coverage, build, and E2E =="
   cd "$ROOT_DIR/frontend"
 
   export NODE_OPTIONS="${NODE_OPTIONS:---dns-result-order=ipv4first}"
@@ -42,5 +46,6 @@ run_frontend() {
   fi
 }
 
+run_lint
 run_backend
 run_frontend

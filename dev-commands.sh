@@ -12,10 +12,12 @@ case "$1" in
         cd /workspace/backend && python -m pytest && cd /workspace/frontend && npm test
         ;;
     "lint-backend")
-        cd /workspace/backend && flake8 . && black --check . && isort --check .
+        # CI's Backend Lint checks at CI's versions; flake8 from the
+        # requirements-dev install would also load flake8-bugbear.
+        /workspace/scripts/ci-lint.sh backend
         ;;
     "lint-frontend")
-        cd /workspace/frontend && npm run lint
+        /workspace/scripts/ci-lint.sh frontend
         ;;
     "run-backend")
         cd /workspace/backend && python manage.py runserver 0.0.0.0:8000

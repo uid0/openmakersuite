@@ -96,6 +96,8 @@ lint:  ## Run every check CI's lint jobs run (scripts/ci-lint.sh)
 lint-backend:  ## Lint backend code with flake8, as CI does
 	scripts/ci-lint.sh flake8
 
+# format-backend and isort-backend REWRITE files, using the backend container's
+# tools rather than CI's pins, so no lint or pre-commit target runs them.
 format-backend:  ## Format backend code with black
 	$(DOCKER_COMPOSE) exec backend black . || echo "black not installed"
 
@@ -207,11 +209,13 @@ ci-test:  ## Run CI tests locally (mimics GitHub Actions)
 	@make test-frontend
 	@echo "\n✅ All CI checks passed!"
 
-pre-commit:  ## Run pre-commit checks (format, lint, test)
+# Checks, not rewrites: every scripts/ci-lint.sh check (backend and frontend),
+# then the backend tests. It used to run format-backend and isort-backend,
+# which rewrite files with whatever black/isort the backend container has
+# (none, in the image) instead of checking at CI's versions.
+pre-commit:  ## Run pre-commit checks (every CI lint check, then backend tests)
 	@echo "Running pre-commit checks..."
-	@make format-backend
-	@make isort-backend
-	@make lint-backend
+	@make lint
 	@make test-backend
 	@echo "\n✅ Pre-commit checks complete!"
 

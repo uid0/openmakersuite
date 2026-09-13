@@ -18,6 +18,9 @@
  * server's state or is added here deliberately, with a reason. A listed module
  * that reads FEWER times fails too, so the list cannot go stale and quietly
  * leave room for a later read.
+ * Like the backend gate, this per-file count cannot detect a same-file swap
+ * that removes one approved read and adds one derivation. Changes to reads in
+ * an allowlisted module therefore remain a review responsibility.
  *
  * **Scope: `quantity_per_package` only**, exactly as the backend gate. The
  * `caseSize.ts` header also rules out re-deriving the state from supplier-link
@@ -94,15 +97,34 @@ export const ALLOWED = {
 
 const toPosix = (p) => p.split(path.sep).join('/');
 
-/** The property name a member expression reads, when it is statically known. */
-const memberName = (node) => {
-  const { property } = node;
-  if (!node.computed) return property.type === 'Identifier' ? property.name : null;
-  if (property.type === 'Literal' && typeof property.value === 'string') return property.value;
-  if (property.type === 'TemplateLiteral' && property.expressions.length === 0) {
-    return property.quasis[0].value.cooked;
+/** A string expression whose value ESLint can establish without execution. */
+const staticString = (node, sourceCode, seen = new Set()) => {
+  if (node.type === 'Literal' && typeof node.value === 'string') return node.value;
+  if (node.type === 'TemplateLiteral' && node.expressions.length === 0) {
+    return node.quasis[0].value.cooked;
+  }
+  if (node.type !== 'Identifier' || seen.has(node)) return null;
+
+  seen.add(node);
+  let scope = sourceCode.getScope(node);
+  while (scope) {
+    const variable = scope.set.get(node.name);
+    if (variable) {
+      if (variable.defs.length !== 1 || variable.defs[0].type !== 'Variable') return null;
+      const declarator = variable.defs[0].node;
+      if (declarator.parent.kind !== 'const' || declarator.id.type !== 'Identifier') return null;
+      return declarator.init ? staticString(declarator.init, sourceCode, seen) : null;
+    }
+    scope = scope.upper;
   }
   return null;
+};
+
+/** The property name a member expression reads, when it is statically known. */
+const memberName = (node, sourceCode) => {
+  const { property } = node;
+  if (!node.computed) return property.type === 'Identifier' ? property.name : null;
+  return staticString(property, sourceCode);
 };
 
 /** The key a destructuring property names, when it is statically known. */
@@ -157,13 +179,14 @@ export const packSizeSingleOwner = {
   },
 
   create(context) {
+    const sourceCode = context.sourceCode;
     const file = toPosix(path.relative(FRONTEND_DIR, context.filename));
     const allowed = Object.hasOwn(ALLOWED, file) ? ALLOWED[file][0] : null;
     const reads = [];
 
     return {
       MemberExpression(node) {
-        if (memberName(node) === COLUMN && !isWriteTarget(node)) reads.push(node);
+        if (memberName(node, sourceCode) === COLUMN && !isWriteTarget(node)) reads.push(node);
       },
       'ObjectPattern > Property'(node) {
         if (patternKeyName(node) === COLUMN) reads.push(node);

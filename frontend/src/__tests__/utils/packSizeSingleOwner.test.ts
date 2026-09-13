@@ -50,6 +50,8 @@ describe('pack-size single-owner lint rule', () => {
       { filename: NEW_MODULE, code: "const label = 'quantity_per_package'; // quantity_per_package" },
       // An unrelated column never trips the gate.
       { filename: NEW_MODULE, code: 'const n = link.quantity_per_pallet + link.package_cost;' },
+      // A key whose runtime value cannot be established is not guessed at.
+      { filename: NEW_MODULE, code: 'const units = link[fieldName];' },
       // An allowlisted module reading exactly its allowlisted number of times.
       {
         filename: SCAN_PAGE,
@@ -63,6 +65,16 @@ describe('pack-size single-owner lint rule', () => {
       // The same read, spelled dynamically.
       { filename: NEW_MODULE, code: "const units = link['quantity_per_package'];", errors: [newReader] },
       { filename: NEW_MODULE, code: 'const units = link[`quantity_per_package`];', errors: [newReader] },
+      {
+        filename: NEW_MODULE,
+        code: "const key = 'quantity_per_package'; const units = link[key] || 1;",
+        errors: [newReader],
+      },
+      {
+        filename: NEW_MODULE,
+        code: 'const key = `quantity_per_package`; const units = link[key];',
+        errors: [newReader],
+      },
       // Destructuring is a read, in a declaration and in a parameter list.
       { filename: NEW_MODULE, code: 'const { quantity_per_package } = link;', errors: [newReader] },
       {

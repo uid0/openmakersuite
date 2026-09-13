@@ -141,17 +141,11 @@ cosign verify-blob --certificate *.pem --signature *.sig *.tar.gz
 
 ## 🔄 Workflow Dependencies
 
-The release workflow depends on these other workflows completing successfully:
-
-1. **CI** (`.github/workflows/ci.yml`):
-   - Backend tests with coverage
-   - Frontend tests with coverage
-   - Security checks (Bandit, Safety)
-   - Linting (Black, isort, flake8)
-
-2. **Docker Build** (part of CI):
-   - Multi-platform container builds
-   - Container registry pushes
+`release.yml` runs after a **CI** (`.github/workflows/ci.yml`) run on `main`
+completes successfully, or on manual dispatch. It does not depend on
+`docker-build.yml`, which publishes images on its own triggers. See
+[`CI_CD.md`](../CI_CD.md) for how release, image publishing and deploys relate
+to CI.
 
 ## 🎯 Best Practices
 

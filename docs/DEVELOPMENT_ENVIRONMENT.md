@@ -48,7 +48,6 @@ The primary issue was that React Testing Library's behavior around `act()` can v
 
 **Key Benefits:**
 
-- **Identical to CI**: Ubuntu 22.04, Python 3.11, Node.js 18
 - **Consistent Environment Variables**: `CI=true` matches production
 - **Pre-configured Tools**: All linting, testing, and development tools included
 - **VS Code Integration**: Optimized extensions and settings
@@ -56,13 +55,12 @@ The primary issue was that React Testing Library's behavior around `act()` can v
 
 ### 3. Environment Matching
 
-**DevContainer exactly matches CI configuration:**
+**DevContainer environment:**
 
-- OS: Ubuntu 22.04 (same as `ubuntu-latest` in GitHub Actions)
-- Python: 3.11 (exact match)
-- Node.js: 18 (exact match)
+- Base image and Python/Node versions: `.devcontainer/devcontainer.json`
+  (CI's are pinned separately in `.github/workflows/ci.yml`; compare the two
+  rather than trusting a copied version list)
 - Environment: `CI=true` for consistent test behavior
-- Dependencies: Identical versions as CI
 
 ## Usage
 

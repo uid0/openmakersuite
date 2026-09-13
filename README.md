@@ -195,14 +195,10 @@ docker-compose exec backend python manage.py migrate
 
 ### Automated Testing
 
-GitHub Actions runs comprehensive tests on every push:
-
-- ✅ Backend unit & integration tests (pytest)
-- ✅ Frontend component tests (Jest/React Testing Library)
-- ✅ Code quality checks (Black, isort, flake8, ESLint)
-- ✅ Security scanning (Bandit, Safety, Gitleaks)
-- ✅ Docker build verification
-- ✅ Coverage reporting (Codecov)
+GitHub Actions runs lint, tests, security scanning, and Docker and deployment
+validation for pull requests and for pushes to `main` and `develop`.
+`.github/workflows/ci.yml` is the job inventory; [`CI_CD.md`](CI_CD.md) explains
+what gates a merge and where to look when a job fails.
 
 ### Manual Testing
 

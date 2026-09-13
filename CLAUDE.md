@@ -20,8 +20,8 @@ scripts/ci-lint.sh
 ```
 
 The script is the canonical local command for CI's backend formatting and lint,
-frontend lint and type check, and derivation guard. See `CONTRIBUTING.md` for the
-CI gate inventory. Pre-commit install once per worktree:
+frontend lint and type check, and derivation guard. See `CI_CD.md` for how CI
+gates a merge. Pre-commit install once per worktree:
 
 ```
 pip install pre-commit && pre-commit install

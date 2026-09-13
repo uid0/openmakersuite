@@ -46,8 +46,9 @@ Frontend at `http://localhost:3000`, API at `http://localhost:8000/api/`,
 admin at `http://localhost:8000/admin/`.
 
 **Containerized dev environment.** A VS Code devcontainer is provided in
-`.devcontainer/` for an environment that matches CI (Ubuntu 22.04, Python
-3.11, Node 18). See [`docs/DEVELOPMENT_ENVIRONMENT.md`](DEVELOPMENT_ENVIRONMENT.md).
+`.devcontainer/`; its base image and runtime versions are set in
+`.devcontainer/devcontainer.json`, and CI's in `.github/workflows/ci.yml`.
+See [`docs/DEVELOPMENT_ENVIRONMENT.md`](DEVELOPMENT_ENVIRONMENT.md).
 
 **Test suites.** Both must be green before a change ships:
 

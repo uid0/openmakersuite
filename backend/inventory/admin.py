@@ -256,9 +256,24 @@ class RefuseStaleSupplierLinkMixin:
             return HttpResponseRedirect(request.get_full_path())
 
 
+class ItemSupplierInlineFormSet(BaseInlineFormSet):
+    def save_existing(self, form, instance, commit=True):
+        saved = super().save_existing(form, instance, commit)
+        if commit and form.cleaned_data.get("is_primary") and "is_primary" in form.changed_data:
+            for sibling_form in self.initial_forms:
+                sibling = sibling_form.instance
+                if sibling.pk == saved.pk or sibling_form.cleaned_data.get("is_primary"):
+                    continue
+                sibling.expected_version = (
+                    ItemSupplier.objects.values_list("version", flat=True).get(pk=sibling.pk)
+                )
+        return saved
+
+
 class ItemSupplierInline(admin.TabularInline):
     model = ItemSupplier
     form = ItemSupplierAdminForm
+    formset = ItemSupplierInlineFormSet
     extra = 1
     fields = [
         # Hidden: the version this row was rendered at (ItemSupplierAdminForm).

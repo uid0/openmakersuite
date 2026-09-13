@@ -54,11 +54,18 @@ WHO SENDS A TOKEN, AND HOW A REFUSAL REACHES A PERSON
   ``409`` with ``error.code == "stale_version"`` (``docs/API_ERROR_CONTRACT.md``).
   The web item form always sends the version it loaded and tells the operator
   their copy is out of date, with a reload.
+* ``DELETE /api/inventory/item-suppliers/{id}/?version=N`` — the same refusal;
+  the check and deletion share one row lock. The web item form sends the token.
 * ``PATCH``/``PUT /api/inventory/kits/{id}/`` with ``supplier_terms.version`` —
   the same ``409``, and the whole kit save is rolled back with it.
 * The Django admin (``ItemSupplierAdmin`` and the item admin's inline) — the
   version the page was rendered with rides in a hidden field and a stale POST
   is refused as a form error.
+
+The standalone admin delete page and bulk delete action carry no token because
+their confirmation step reads the current row rather than posting editable
+values from an older copy. Inline deletion does carry ``loaded_version`` and is
+refused by the same form validation as an inline edit.
 
 Paths that send no token, and why they need none: creates (nothing was loaded);
 ``_sync_primary_supplier`` (item create only, so the link is always new);

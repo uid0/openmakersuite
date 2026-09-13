@@ -390,7 +390,7 @@ const InventoryItemFormPage: React.FC = () => {
       for (const [index, removed] of itemSuppliers.entries()) {
         if (keptIds.has(removed.id)) continue;
         try {
-          await inventoryAPI.deleteItemSupplier(removed.id);
+          await inventoryAPI.deleteItemSupplier(removed.id, removed.version);
         } catch (err) {
           throw supplierWriteError(err, removed, index, suppliers);
         }

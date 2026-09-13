@@ -261,8 +261,10 @@ export const inventoryAPI = {
   updateItemSupplier: (itemSupplierId: number, data: Partial<ItemSupplierWritePayload>) =>
     api.patch<ItemSupplier>(`/inventory/item-suppliers/${itemSupplierId}/`, data),
 
-  deleteItemSupplier: (itemSupplierId: number) =>
-    api.delete(`/inventory/item-suppliers/${itemSupplierId}/`),
+  deleteItemSupplier: (itemSupplierId: number, version?: number) =>
+    api.delete(`/inventory/item-suppliers/${itemSupplierId}/`, {
+      params: version === undefined ? undefined : { version },
+    }),
 
   listItems: (params?: {
     category?: number;

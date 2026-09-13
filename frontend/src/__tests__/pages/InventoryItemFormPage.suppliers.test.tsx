@@ -429,6 +429,22 @@ describe('InventoryItemFormPage — supplier relationships', { timeout: 30000 },
 
     await waitFor(() => expect(supplierWrites('delete')).toHaveLength(1));
     expect(supplierWrites('delete')[0].url).toBe('/inventory/item-suppliers/91/');
+    expect(supplierWrites('delete')[0].params).toEqual({ version: 1 });
+  });
+
+  it('surfaces a stale removal and never retries it', async () => {
+    mock.onDelete('/inventory/item-suppliers/91/').reply(409, STALE_REFUSAL);
+    renderEdit([itemSupplier()]);
+
+    await waitFor(() => expect(screen.getByDisplayValue('ACME-1')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Remove supplier #1/ }));
+    save();
+
+    await waitFor(() => expect(screen.getByText(/Your copy is out of date/)).toBeInTheDocument());
+    expect(supplierWrites('delete')).toHaveLength(1);
+    expect(supplierWrites('delete')[0].params).toEqual({ version: 1 });
+    expect(screen.getByRole('button', { name: 'Reload suppliers' })).toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 
   it('sends nothing for a relationship the operator did not touch', async () => {

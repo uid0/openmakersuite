@@ -2041,6 +2041,28 @@ class ItemSupplierViewSet(viewsets.ModelViewSet):
         except StaleSupplierLink as exc:
             return stale_supplier_link_response(exc)
 
+    def destroy(self, request, *args, **kwargs):
+        raw_version = request.query_params.get("version")
+        if raw_version is None:
+            return super().destroy(request, *args, **kwargs)
+
+        try:
+            version = serializers.IntegerField(min_value=1).run_validation(raw_version)
+        except serializers.ValidationError as exc:
+            raise serializers.ValidationError({"version": exc.detail}) from exc
+
+        try:
+            with transaction.atomic():
+                item_supplier = self.get_queryset().select_for_update().get(
+                    pk=self.kwargs[self.lookup_field]
+                )
+                if item_supplier.version != version:
+                    raise StaleSupplierLink(item_supplier.pk, version, item_supplier.version)
+                self.perform_destroy(item_supplier)
+        except StaleSupplierLink as exc:
+            return stale_supplier_link_response(exc)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     def get_queryset(self):
         queryset = super().get_queryset()
 

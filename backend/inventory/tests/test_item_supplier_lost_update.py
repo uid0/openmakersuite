@@ -114,6 +114,40 @@ class TestTheTokenOnTheApi:
         assert response.status_code == 200, response.data
         assert on_disk(link.pk) == {"average_lead_time": 12, "supplier_sku": "LOADED", "version": 2}
 
+    def test_a_stale_delete_preserves_the_newer_row(self, client, link):
+        loaded = load(client, link.pk)
+        client.patch(detail_url(link.pk), {"average_lead_time": 12}, format="json")
+
+        response = client.delete(f"{detail_url(link.pk)}?version={loaded['version']}")
+
+        assert response.status_code == 409
+        assert response.data["error"]["code"] == "stale_version"
+        assert response.data["error"]["details"] == {
+            "id": link.pk,
+            "sent_version": 1,
+            "current_version": 2,
+        }
+        assert on_disk(link.pk)["average_lead_time"] == 12
+
+    def test_a_current_delete_succeeds(self, client, link):
+        response = client.delete(f"{detail_url(link.pk)}?version={link.version}")
+
+        assert response.status_code == 204
+        assert not ItemSupplier.objects.filter(pk=link.pk).exists()
+
+    def test_a_tokenless_delete_is_unchanged(self, client, link):
+        response = client.delete(detail_url(link.pk))
+
+        assert response.status_code == 204
+        assert not ItemSupplier.objects.filter(pk=link.pk).exists()
+
+    @pytest.mark.parametrize("version", ["not-an-integer", "0", "-1"])
+    def test_an_invalid_delete_version_is_rejected(self, client, link, version):
+        response = client.delete(f"{detail_url(link.pk)}?version={version}")
+
+        assert response.status_code == 400
+        assert ItemSupplier.objects.filter(pk=link.pk).exists()
+
     def test_the_second_of_two_saves_from_one_load_is_refused_and_told_why(self, client, link):
         """The captain's scenario, through the routed endpoint."""
         first_person = load(client, link.pk)
@@ -581,6 +615,28 @@ class TestAdminItemInline:
         assert formset.is_valid(), formset.errors
         formset.save()
         assert on_disk(link.pk)["average_lead_time"] == 12
+
+    def test_a_primary_switch_does_not_stale_its_own_demoted_row(self):
+        item = InventoryItemFactory(image=None)
+        promoted = ItemSupplierFactory(item=item, is_primary=False, supplier_sku="PROMOTE")
+        demoted = ItemSupplierFactory(item=item, is_primary=True, supplier_sku="DEMOTE")
+        promoted.refresh_from_db()
+        formset = self._formset(
+            item,
+            [
+                self._row(promoted, is_primary="on"),
+                self._row(demoted, is_primary=""),
+            ],
+        )
+
+        assert formset.is_valid(), formset.errors
+        with transaction.atomic():
+            formset.save()
+
+        promoted.refresh_from_db()
+        demoted.refresh_from_db()
+        assert promoted.is_primary
+        assert not demoted.is_primary
 
 
 def test_admin_registrations_carry_the_backstop():

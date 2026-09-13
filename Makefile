@@ -84,12 +84,8 @@ clean:  ## Clean up containers, volumes, and cache
 	rm -rf frontend/coverage
 	rm -rf frontend/node_modules/.cache
 
-# Lint targets run scripts/ci-lint.sh on the host: the script CI's Backend Lint
-# and Frontend Lint jobs call, at the tool versions CI uses (it needs uv; see
-# the script's header). The backend ones used to run inside the backend
-# container, whose image installs requirements.txt only, so each tool was
-# missing and the `|| echo "... not installed"` fallback passed the target
-# without linting; lint-frontend ran eslint alone, never tsc.
+# Lint targets run CI's authoritative lint script on the host; see its header
+# for the tool-provisioning contract.
 lint:  ## Run every check CI's lint jobs run (scripts/ci-lint.sh)
 	scripts/ci-lint.sh
 

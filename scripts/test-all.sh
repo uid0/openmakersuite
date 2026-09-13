@@ -3,10 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Lint through scripts/ci-lint.sh, the script CI's Backend Lint and Frontend
-# Lint jobs call. Running black/isort/flake8 from the requirements-dev install
-# below instead let flake8 load the flake8-bugbear plugin that install brings,
-# so it reported B findings CI never sees, and skipped eslint and tsc entirely.
+# Use the authoritative lint command shared with CI; its header owns the exact
+# checks and tool-provisioning contract.
 run_lint() {
   echo "== Lint (scripts/ci-lint.sh) =="
   "$ROOT_DIR/scripts/ci-lint.sh"

@@ -25,16 +25,9 @@ repos:
       - id: check-toml
       - id: detect-private-key
 
-  # Backend: black, isort and flake8, run by scripts/ci-lint.sh, the script
-  # CI's Backend Lint job and the no-mistakes lint step call. These used to be
-  # the upstream mirror hooks at their own revs (isort 5.13.2 against CI's
-  # 8.0.1, black 24.10.0, and ruff standing in for flake8), run from the repo
-  # root on staged files only, so pre-commit failed files CI accepts and
-  # rewrote imports into an order CI then rejected. A local hook cannot drift:
-  # the script provisions exactly the versions backend/requirements-dev.txt
-  # pins (it needs `uv` on PATH for that) and runs each tool from backend/
-  # against the whole tree, as CI does. The shared input pattern covers that
-  # working tree, the shared script, and configuration that changes its result.
+  # Delegate backend linting to CI's authoritative script; its header documents
+  # tool provisioning, versions and working-directory behavior. The shared
+  # input pattern also reruns these whole-tree checks when their inputs change.
   # One hook per check keeps `pre-commit run isort` and `SKIP=flake8` working.
   - repo: local
     hooks:
@@ -118,12 +111,9 @@ repos:
         pass_filenames: false
         always_run: false
 
-  # Frontend: eslint and tsc, plus the settlement derivation guard, the rest of
-  # scripts/ci-lint.sh, so a commit that passes these hooks passes every check
-  # CI's lint jobs run. The script also reinstalls frontend/node_modules with
-  # `npm ci` when it does not hold exactly what package-lock.json pins, so
-  # eslint and tsc run at CI's versions. Their shared input pattern covers the
-  # frontend working tree and the script that invokes the tools.
+  # Delegate frontend linting to CI's authoritative script; its header owns the
+  # dependency and version contract. The shared input pattern also reruns these
+  # whole-tree checks when their inputs change.
   - repo: local
     hooks:
       - id: eslint

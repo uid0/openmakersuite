@@ -45,14 +45,12 @@ You can also run commands manually:
 
 ```bash
 # Backend
-cd backend
-python manage.py runserver 0.0.0.0:8000
-python -m pytest
+(cd backend && python manage.py runserver 0.0.0.0:8000)
+(cd backend && python -m pytest)
 
 # Frontend
-cd frontend
-npm start
-npm test
+(cd frontend && npm start)
+(cd frontend && npm test)
 
 # Lint, as CI's lint jobs do (from the project root)
 scripts/ci-lint.sh backend

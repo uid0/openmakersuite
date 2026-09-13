@@ -1654,6 +1654,13 @@ class ItemSupplier(models.Model):
 
         is_new = self.pk is None
         with transaction.atomic():
+            if self.is_primary:
+                list(
+                    ItemSupplier.objects.select_for_update()
+                    .filter(item_id=self.item_id)
+                    .order_by("pk")
+                    .values_list("pk", flat=True)
+                )
             # First, before anything reads the stored row: lock it, refuse a save
             # made from a stale copy, and move the version on
             # (``inventory.services.link_version``).

@@ -141,6 +141,50 @@ class TestTheTokenOnTheApi:
         assert response.status_code == 204
         assert not ItemSupplier.objects.filter(pk=link.pk).exists()
 
+    def test_a_versioned_delete_of_an_already_deleted_row_is_stale(self, client, link):
+        link_id = link.pk
+        version = link.version
+        link.delete()
+
+        response = client.delete(f"{detail_url(link_id)}?version={version}")
+
+        assert response.status_code == 409
+        assert response.data["error"]["details"] == {
+            "id": link_id,
+            "sent_version": version,
+            "current_version": None,
+        }
+
+    def test_a_versioned_patch_of_an_already_deleted_row_is_stale(self, client, link):
+        link_id = link.pk
+        version = link.version
+        link.delete()
+
+        response = client.patch(
+            detail_url(link_id), {"supplier_sku": "TOO-LATE", "version": version}, format="json"
+        )
+
+        assert response.status_code == 409
+        assert response.data["error"]["details"] == {
+            "id": link_id,
+            "sent_version": version,
+            "current_version": None,
+        }
+
+    @pytest.mark.parametrize("method", ["delete", "patch"])
+    def test_a_tokenless_write_of_an_already_deleted_row_stays_not_found(
+        self, client, link, method
+    ):
+        link_id = link.pk
+        link.delete()
+
+        if method == "delete":
+            response = client.delete(detail_url(link_id))
+        else:
+            response = client.patch(detail_url(link_id), {"supplier_sku": "TOO-LATE"}, format="json")
+
+        assert response.status_code == 404
+
     @pytest.mark.parametrize("version", ["not-an-integer", "0", "-1"])
     def test_an_invalid_delete_version_is_rejected(self, client, link, version):
         response = client.delete(f"{detail_url(link.pk)}?version={version}")
@@ -763,3 +807,59 @@ def test_two_interleaved_saves_from_one_load_cannot_both_land():
     assert (outcomes["second"].sent, outcomes["second"].current) == (1, 2)
     row = ItemSupplier.objects.get(pk=link.pk)
     assert (row.average_lead_time, row.supplier_sku, row.version) == (12, link.supplier_sku, 2)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_two_concurrent_primary_promotions_serialize_to_one_winner():
+    """Concurrent promotions cannot deterministically fail on every PostgreSQL plan."""
+    if not connection.features.has_select_for_update:
+        pytest.skip("requires row-level select_for_update locking")
+
+    item = InventoryItemFactory(image=None)
+    first_link = ItemSupplierFactory(item=item, is_primary=False)
+    second_link = ItemSupplierFactory(item=item, is_primary=False)
+    first_copy = ItemSupplier.objects.get(pk=first_link.pk)
+    second_copy = ItemSupplier.objects.get(pk=second_link.pk)
+    first_written = threading.Event()
+    release_first = threading.Event()
+    outcomes = {}
+
+    def promote_first():
+        try:
+            with transaction.atomic():
+                first_copy.is_primary = True
+                first_copy.save()
+                first_written.set()
+                assert release_first.wait(timeout=30)
+            outcomes["first"] = "saved"
+        except Exception as exc:  # pragma: no cover
+            outcomes["first"] = exc
+            first_written.set()
+        finally:
+            connection.close()
+
+    def promote_second():
+        try:
+            second_copy.is_primary = True
+            second_copy.save()
+            outcomes["second"] = "saved"
+        except Exception as exc:  # pragma: no cover
+            outcomes["second"] = exc
+        finally:
+            connection.close()
+
+    first = threading.Thread(target=promote_first, daemon=True)
+    second = threading.Thread(target=promote_second, daemon=True)
+    first.start()
+    assert first_written.wait(timeout=30)
+    second.start()
+    try:
+        _wait_until_a_connection_waits_on_a_lock()
+    finally:
+        release_first.set()
+        first.join(timeout=30)
+        second.join(timeout=30)
+
+    assert [first.is_alive(), second.is_alive()] == [False, False]
+    assert outcomes == {"first": "saved", "second": "saved"}
+    assert ItemSupplier.objects.filter(item=item, is_primary=True).count() == 1

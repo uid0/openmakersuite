@@ -2036,12 +2036,34 @@ class ItemSupplierViewSet(viewsets.ModelViewSet):
 
     def update(self, request, *args, **kwargs):
         """PUT/PATCH a link; a ``version`` that is no longer current is a 409."""
+        item_supplier_id = ItemSupplier._meta.pk.to_python(self.kwargs[self.lookup_field])
+        raw_version = request.data.get("version")
+        if raw_version is not None:
+            try:
+                version = serializers.IntegerField(min_value=1).run_validation(raw_version)
+            except serializers.ValidationError:
+                version = None
+            if version is not None:
+                try:
+                    with transaction.atomic():
+                        item_supplier = ItemSupplier.objects.select_for_update().get(
+                            pk=item_supplier_id
+                        )
+                        self.check_object_permissions(request, item_supplier)
+                        return super().update(request, *args, **kwargs)
+                except ItemSupplier.DoesNotExist:
+                    return stale_supplier_link_response(
+                        StaleSupplierLink(item_supplier_id, version, None)
+                    )
+                except StaleSupplierLink as exc:
+                    return stale_supplier_link_response(exc)
         try:
             return super().update(request, *args, **kwargs)
         except StaleSupplierLink as exc:
             return stale_supplier_link_response(exc)
 
     def destroy(self, request, *args, **kwargs):
+        item_supplier_id = ItemSupplier._meta.pk.to_python(self.kwargs[self.lookup_field])
         raw_version = request.query_params.get("version")
         if raw_version is None:
             return super().destroy(request, *args, **kwargs)
@@ -2053,12 +2075,17 @@ class ItemSupplierViewSet(viewsets.ModelViewSet):
 
         try:
             with transaction.atomic():
-                item_supplier = self.get_queryset().select_for_update().get(
-                    pk=self.kwargs[self.lookup_field]
+                item_supplier = ItemSupplier.objects.select_for_update().get(
+                    pk=item_supplier_id
                 )
+                self.check_object_permissions(request, item_supplier)
                 if item_supplier.version != version:
                     raise StaleSupplierLink(item_supplier.pk, version, item_supplier.version)
                 self.perform_destroy(item_supplier)
+        except ItemSupplier.DoesNotExist:
+            return stale_supplier_link_response(
+                StaleSupplierLink(item_supplier_id, version, None)
+            )
         except StaleSupplierLink as exc:
             return stale_supplier_link_response(exc)
         return Response(status=status.HTTP_204_NO_CONTENT)

@@ -17,11 +17,11 @@ either goes through the derivation or is added here deliberately, with a reason.
 **Scope: ``backend/`` ONLY, and the columns by NAME.** Two honest limits, both
 narrower than "a reader that bypasses the derivation fails the build" sounds:
 
-1. The walk stops at the Python tree. A FRONTEND reader of a price is not gated,
-   exactly as ``quantity_per_package``'s is not. The frontend price sites this
-   branch changed (``PurchaseOrderFormPage``'s pad totals, the reports' money
-   columns) were found by derivation and review, not by this test. Extending the
-   scan to frontend sources is the same filed follow-up.
+1. The walk stops at the Python tree. A FRONTEND reader of a price is not gated.
+   The frontend price sites this branch changed (``PurchaseOrderFormPage``'s
+   pad totals, the reports' money columns) were found by derivation and review,
+   not by this test. Unlike prices, ``quantity_per_package`` now has its own
+   frontend ESLint gate; this test makes no claim about that rule.
 2. ``unit_cost`` is a column name on FIVE models here —
    ``ItemSupplier``, ``PriceHistory``, ``UsageLog``,
    ``WorkOrderMaterialUsage`` and ``MaintenanceItem`` — and the AST cannot tell

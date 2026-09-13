@@ -6,7 +6,9 @@ import os
 
 from django.contrib import admin, messages
 from django.core.files.base import ContentFile
-from django.forms import BaseInlineFormSet, CharField, Form, IntegerField, ModelForm
+from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.forms import BaseInlineFormSet, CharField, Form, HiddenInput, IntegerField, ModelForm
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render
 from django.urls import path, reverse
@@ -15,6 +17,7 @@ from django.utils.safestring import mark_safe
 
 from facilities.models import AssetSiteRequirements
 from inventory.services.lead_time_source import PLANNING_DEFAULT_DAYS
+from inventory.services.link_version import StaleSupplierLink
 
 from .models import (
     Asset,
@@ -161,7 +164,20 @@ class ItemSupplierAdminForm(ModelForm):
     default on an add, the stored number on a change — so the source is decided
     by ``save()`` exactly as it is for an API write that omits the key. See
     :mod:`inventory.services.lead_time_source`.
+
+    **A stale page is refused, not saved.** A change form re-reads its
+    ``initial`` values from the database when the POST arrives, so nothing the
+    form holds can tell a box the operator left alone from a box holding what the
+    page rendered an hour ago — a stale page simply writes its old values over
+    newer ones. ``loaded_version`` carries the link's version as RENDERED, in a
+    hidden input, and :meth:`clean` refuses the POST with a form error when the
+    link has moved on since (:mod:`inventory.services.link_version`). The row is
+    locked for that read, and the admin's change view runs validation and the
+    save in one transaction, so no other save can land between the check and
+    the write.
     """
+
+    loaded_version = IntegerField(required=False, min_value=1, widget=HiddenInput)
 
     average_lead_time = IntegerField(
         required=False,
@@ -177,9 +193,67 @@ class ItemSupplierAdminForm(ModelForm):
         model = ItemSupplier
         fields = "__all__"
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk is not None:
+            self.fields["loaded_version"].initial = self.instance.version
+
     def clean_average_lead_time(self):
         days = self.cleaned_data.get("average_lead_time")
         return self.instance.average_lead_time if days is None else days
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if self.instance.pk is None:
+            # An add form loaded nothing, so there is nothing to be stale against.
+            return cleaned_data
+        loaded = cleaned_data.get("loaded_version")
+        if loaded is None:
+            if "loaded_version" not in self.errors:
+                # Not a page this form rendered (or one rendered before the field
+                # existed): which values it holds cannot be told, so it is not
+                # allowed to overwrite whatever is stored now.
+                raise ValidationError(
+                    "This page does not say which version of the supplier link it was "
+                    "loaded from, so it was not saved. Reload the page and make your "
+                    "change again.",
+                    code="stale_version",
+                )
+            return cleaned_data
+        with transaction.atomic():
+            current = (
+                ItemSupplier.objects.select_for_update()
+                .filter(pk=self.instance.pk)
+                .values_list("version", flat=True)
+                .first()
+            )
+        if current != loaded:
+            raise ValidationError(
+                StaleSupplierLink(self.instance, loaded, current).message, code="stale_version"
+            )
+        # ``save()`` checks it again under the same lock — the guarantee for any
+        # caller that validates and saves outside one transaction.
+        self.instance.expected_version = loaded
+        return cleaned_data
+
+
+class RefuseStaleSupplierLinkMixin:
+    """Answer a stale supplier-link save that escaped form validation with a reload.
+
+    :meth:`ItemSupplierAdminForm.clean` refuses a stale page as a form error, so
+    this is the backstop for a :class:`StaleSupplierLink` raised by
+    ``ItemSupplier.save()`` itself — for example an inline row saved after
+    another row of the same POST has demoted it from primary. The admin's
+    transaction is rolled back and the operator is sent back to the page with
+    the reason, instead of a server error.
+    """
+
+    def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
+        try:
+            return super().changeform_view(request, object_id, form_url, extra_context)
+        except StaleSupplierLink as exc:
+            self.message_user(request, exc.message, level=messages.ERROR)
+            return HttpResponseRedirect(request.get_full_path())
 
 
 class ItemSupplierInline(admin.TabularInline):
@@ -187,6 +261,8 @@ class ItemSupplierInline(admin.TabularInline):
     form = ItemSupplierAdminForm
     extra = 1
     fields = [
+        # Hidden: the version this row was rendered at (ItemSupplierAdminForm).
+        "loaded_version",
         "supplier",
         "supplier_sku",
         "supplier_url",
@@ -248,7 +324,7 @@ class ItemSupplierInline(admin.TabularInline):
 
 
 @admin.register(ItemSupplier)
-class ItemSupplierAdmin(admin.ModelAdmin):
+class ItemSupplierAdmin(RefuseStaleSupplierLinkMixin, admin.ModelAdmin):
     """Admin interface for managing item-supplier relationships and pricing."""
 
     form = ItemSupplierAdminForm
@@ -284,6 +360,8 @@ class ItemSupplierAdmin(admin.ModelAdmin):
             "Basic Information",
             {
                 "fields": (
+                    # Hidden: the version this page was rendered at.
+                    "loaded_version",
                     "item",
                     "supplier",
                     "supplier_sku",
@@ -516,7 +594,7 @@ class InventorySafetyProfileInline(admin.StackedInline):
 
 
 @admin.register(InventoryItem)
-class InventoryItemAdmin(admin.ModelAdmin):
+class InventoryItemAdmin(RefuseStaleSupplierLinkMixin, admin.ModelAdmin):
     list_display = [
         "name",
         "sku",

@@ -138,6 +138,7 @@ from .services.packaging import (
 from .services.pricing import package_price_of, price_float, unit_price_of
 from .services.problem_auto_resolve import resolve_problems_for_work_order
 from .services.problem_settlement import settle_problem
+from .services.link_version import STALE_VERSION_CODE, StaleSupplierLink
 from .services.supplier_selection import item_suppliers_prefetch
 from .services.work_order_tools import create_work_order_tools
 
@@ -1881,6 +1882,22 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         )
 
 
+def stale_supplier_link_response(exc: StaleSupplierLink) -> Response:
+    """The documented refusal of a supplier-link write made from a stale copy.
+
+    ``409`` with ``error.code == "stale_version"``; ``error.message`` is the
+    sentence to show the person, and ``error.details`` carries ``id``,
+    ``sent_version`` and ``current_version`` (``null`` once the link is gone).
+    See ``inventory.services.link_version`` and ``docs/API_ERROR_CONTRACT.md``.
+    """
+    return error_response(
+        STALE_VERSION_CODE,
+        message=exc.message,
+        details=exc.details(),
+        status_code=status.HTTP_409_CONFLICT,
+    )
+
+
 class KitViewSet(viewsets.ModelViewSet):
     """Kit SKUs: purchasable bundles that decompose into component stock (op-8n0).
 
@@ -1897,6 +1914,20 @@ class KitViewSet(viewsets.ModelViewSet):
 
     serializer_class = KitSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def update(self, request, *args, **kwargs):
+        """PUT/PATCH a kit, all or nothing when its supplier terms are stale.
+
+        The kit's own fields and components are written before its supplier
+        terms, so a ``supplier_terms.version`` refused at the link would
+        otherwise leave half of the save behind. The operator is told to reload;
+        a kit saved without the terms they typed is not what they asked for.
+        """
+        try:
+            with transaction.atomic():
+                return super().update(request, *args, **kwargs)
+        except StaleSupplierLink as exc:
+            return stale_supplier_link_response(exc)
 
     def get_queryset(self):
         """Kits only, with the bill of materials and supplier terms prefetched.
@@ -2002,6 +2033,13 @@ class ItemSupplierViewSet(viewsets.ModelViewSet):
     # UPCs, their price and their lead time. Authenticated reads
     # (op-anonymous-read-posture).
     permission_classes = [IsAuthenticated]
+
+    def update(self, request, *args, **kwargs):
+        """PUT/PATCH a link; a ``version`` that is no longer current is a 409."""
+        try:
+            return super().update(request, *args, **kwargs)
+        except StaleSupplierLink as exc:
+            return stale_supplier_link_response(exc)
 
     def get_queryset(self):
         queryset = super().get_queryset()

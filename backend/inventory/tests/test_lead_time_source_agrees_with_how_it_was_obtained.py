@@ -423,7 +423,12 @@ def update_via_admin_change_form(client, link, shape):
         shape = _rendered(form_class(instance=link)["average_lead_time"])
     form = form_class(
         data=_admin_form_data(
-            link.item, link.supplier, _resolve(shape, link), supplier_sku="ADMIN-EDIT"
+            link.item,
+            link.supplier,
+            _resolve(shape, link),
+            supplier_sku="ADMIN-EDIT",
+            # The hidden version the page was rendered with, as a browser posts it.
+            loaded_version=_rendered(form_class(instance=link)["loaded_version"]),
         ),
         instance=link,
     )
@@ -433,7 +438,10 @@ def update_via_admin_change_form(client, link, shape):
 
 def update_via_admin_item_inline(client, link, shape):
     link = ItemSupplier.objects.get(pk=link.pk)
+    unbound = _inline_formset_class(link.item)(instance=link.item)
     row = {
+        # The hidden version the row was rendered with, as a browser posts it.
+        "loaded_version": _rendered(unbound.forms[0]["loaded_version"]),
         "id": str(link.pk),
         "item": str(link.item_id),
         "supplier": str(link.supplier_id),
@@ -444,7 +452,6 @@ def update_via_admin_item_inline(client, link, shape):
     }
     value = _resolve(shape, link)
     if value is UNTOUCHED:
-        unbound = _inline_formset_class(link.item)(instance=link.item)
         value = _rendered(unbound.forms[0]["average_lead_time"])
     if value is not ABSENT:
         row["average_lead_time"] = str(value)

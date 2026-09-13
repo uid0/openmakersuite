@@ -33,27 +33,28 @@ repos:
   # rewrote imports into an order CI then rejected. A local hook cannot drift:
   # the script provisions exactly the versions backend/requirements-dev.txt
   # pins (it needs `uv` on PATH for that) and runs each tool from backend/
-  # against the whole tree, as CI does. One hook per check keeps
-  # `pre-commit run isort` and `SKIP=flake8` working.
+  # against the whole tree, as CI does. The shared input pattern covers that
+  # working tree, the shared script, and configuration that changes its result.
+  # One hook per check keeps `pre-commit run isort` and `SKIP=flake8` working.
   - repo: local
     hooks:
       - id: black
         name: black (scripts/ci-lint.sh)
         entry: scripts/ci-lint.sh black
         language: system
-        files: ^backend/.*\.py$|^backend/pyproject\.toml$|^backend/requirements-dev\.txt$
+        files: &backend_lint_inputs ^(backend/|scripts/ci-lint\.sh$|\.gitignore$)
         pass_filenames: false
       - id: isort
         name: isort (scripts/ci-lint.sh)
         entry: scripts/ci-lint.sh isort
         language: system
-        files: ^backend/.*\.py$|^backend/pyproject\.toml$|^backend/requirements-dev\.txt$
+        files: *backend_lint_inputs
         pass_filenames: false
       - id: flake8
         name: flake8 (scripts/ci-lint.sh)
         entry: scripts/ci-lint.sh flake8
         language: system
-        files: ^backend/.*\.py$|^backend/\.flake8$|^backend/requirements-dev\.txt$
+        files: *backend_lint_inputs
         pass_filenames: false
 
   # Backend: Security checks - Bandit
@@ -121,14 +122,15 @@ repos:
   # scripts/ci-lint.sh, so a commit that passes these hooks passes every check
   # CI's lint jobs run. The script also reinstalls frontend/node_modules with
   # `npm ci` when it does not hold exactly what package-lock.json pins, so
-  # eslint and tsc run at CI's versions.
+  # eslint and tsc run at CI's versions. Their shared input pattern covers the
+  # frontend working tree and the script that invokes the tools.
   - repo: local
     hooks:
       - id: eslint
         name: eslint (scripts/ci-lint.sh)
         entry: scripts/ci-lint.sh eslint
         language: system
-        files: ^frontend/(src/.*\.(ts|tsx|js|jsx)|eslint\.config\.mjs|package(-lock)?\.json)$
+        files: &frontend_lint_inputs ^(frontend/|scripts/ci-lint\.sh$)
         pass_filenames: false
       - id: typescript-check
         name: TypeScript compilation check (scripts/ci-lint.sh)
@@ -136,14 +138,14 @@ repos:
         # passed on errors outside src/.
         entry: scripts/ci-lint.sh typecheck
         language: system
-        files: ^frontend/((src|e2e)/.*\.(ts|tsx)|tsconfig\.json|vite\.config\.ts|package(-lock)?\.json)$
+        files: *frontend_lint_inputs
         pass_filenames: false
       - id: derivation-guard
         name: settlement derivation guard (scripts/ci-lint.sh)
-        # Mirror the source roots and suffixes scanned by settlement_sites.py.
+        # Mirror the scan roots and rerun when the shared script changes.
         entry: scripts/ci-lint.sh derivation-guard
         language: system
-        files: ^(backend/.*\.py|frontend/src/.*\.(ts|tsx))$
+        files: ^(backend/.*\.py|frontend/src/.*\.(ts|tsx)|scripts/ci-lint\.sh)$
         pass_filenames: false
 
   # Frontend: Run tests (optional - can be slow, comment out if needed)

@@ -25,26 +25,27 @@ repos:
   # (rewriting, not checking), isort 5.13.2 and flake8 7.0.0, none of which is
   # what CI runs. pre-commit runs hooks from the repo root even with
   # `-c backend/.pre-commit-config.yaml`, so the entry and patterns are
-  # root-relative.
+  # root-relative. The shared input pattern covers the backend working tree,
+  # the shared script, and configuration that changes its result.
   - repo: local
     hooks:
       - id: black
         name: black (scripts/ci-lint.sh)
         entry: scripts/ci-lint.sh black
         language: system
-        files: ^backend/.*\.py$|^backend/pyproject\.toml$|^backend/requirements-dev\.txt$
+        files: &backend_lint_inputs ^(backend/|scripts/ci-lint\.sh$|\.gitignore$)
         pass_filenames: false
       - id: isort
         name: isort (scripts/ci-lint.sh)
         entry: scripts/ci-lint.sh isort
         language: system
-        files: ^backend/.*\.py$|^backend/pyproject\.toml$|^backend/requirements-dev\.txt$
+        files: *backend_lint_inputs
         pass_filenames: false
       - id: flake8
         name: flake8 (scripts/ci-lint.sh)
         entry: scripts/ci-lint.sh flake8
         language: system
-        files: ^backend/.*\.py$|^backend/\.flake8$|^backend/requirements-dev\.txt$
+        files: *backend_lint_inputs
         pass_filenames: false
 
   # Security checks

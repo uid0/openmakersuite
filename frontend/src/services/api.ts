@@ -261,8 +261,10 @@ export const inventoryAPI = {
   updateItemSupplier: (itemSupplierId: number, data: Partial<ItemSupplierWritePayload>) =>
     api.patch<ItemSupplier>(`/inventory/item-suppliers/${itemSupplierId}/`, data),
 
-  deleteItemSupplier: (itemSupplierId: number) =>
-    api.delete(`/inventory/item-suppliers/${itemSupplierId}/`),
+  deleteItemSupplier: (itemSupplierId: number, version?: number) =>
+    api.delete(`/inventory/item-suppliers/${itemSupplierId}/`, {
+      params: version === undefined ? undefined : { version },
+    }),
 
   listItems: (params?: {
     category?: number;
@@ -566,14 +568,20 @@ export interface ItemSupplierWritePayload {
   package_cost: string | null;
   quantity_per_package: number;
   /**
-   * Omitted where the editor has no figure, or on an update still holds the
-   * figure it loaded, so a create takes the model's own default and an update
-   * leaves the stored value alone. Sending a number here
+   * Omitted where the editor has no figure, so a create takes the model's own
+   * default and an update leaves the stored value alone. Sending a number here
    * asserts it as the supplier's quote — including `0`, which is same-day
-   * pickup rather than a neutral placeholder.
+   * pickup rather than a neutral placeholder. Re-sending the stored number
+   * keeps the stored source (`inventory/services/lead_time_source.py`).
    */
   average_lead_time?: number;
   is_primary: boolean;
+  /**
+   * On an update, the `version` the row was loaded at. The server refuses the
+   * write with a 409 `stale_version` once anyone has written the row since,
+   * rather than letting this copy overwrite newer values. Never sent on a create.
+   */
+  version?: number;
 }
 
 export type PackTransition = 'open' | 'finish';

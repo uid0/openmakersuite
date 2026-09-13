@@ -235,6 +235,10 @@ export interface ItemSupplier {
   notes: string;
   created_at: string;
   updated_at: string;
+  // The optimistic-concurrency token (`inventory/services/link_version.py`):
+  // every write moves it on. Sending back the version a copy was loaded at makes
+  // a write from a stale copy a 409 `stale_version` instead of an overwrite.
+  version: number;
 }
 
 // ---- Unit of measure / packaging matrix (op-hzji P1, op-es7c P2a, op-ev14 P2b) ----
@@ -2780,6 +2784,11 @@ export interface KitSupplierTerms {
   unit_cost: string | number | null;
   supplier_url?: string;
   average_lead_time?: number;
+  /** The `version` of this supplier's link as the page loaded it. Zero means an
+   * existing kit loaded no link for this supplier; omission means a new kit.
+   * Changed existence or content refuses the whole kit save with a 409
+   * `stale_version` (`inventory/services/link_version.py`). */
+  version?: number;
 }
 
 /** Compact "this component comes in these kits" row. */

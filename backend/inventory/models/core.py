@@ -24,6 +24,7 @@ from inventory.services.lead_time_source import (
     planning_default,
     settle_lead_time_source,
 )
+from inventory.services.link_version import claim_version, lock_item_supplier_links
 
 from .ownership import OwnableModel
 
@@ -1549,6 +1550,20 @@ class ItemSupplier(models.Model):
     notes = models.TextField(blank=True, help_text="Notes about this supplier for this item")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # The optimistic-concurrency token. Moved on by every write, under a row
+    # lock, in ``save()``; see ``inventory.services.link_version``.
+    version = models.PositiveIntegerField(
+        default=1,
+        editable=False,
+        help_text=(
+            "Moves on by one with every write to this link. A save that states the "
+            "version it loaded is refused once the link has moved on."
+        ),
+    )
+
+    #: The version the caller loaded this row at, or ``None`` to save without a
+    #: check. Consumed by the next ``save()``. Not a column.
+    expected_version: Optional[int] = None
 
     # Refuses the bulk writes that would bypass ``save()`` for the lead-time pair.
     objects = ItemSupplierQuerySet.as_manager()
@@ -1627,7 +1642,9 @@ class ItemSupplier(models.Model):
         history entry. The order inside the block is: read the stored row and
         derive from it, demote siblings, snapshot the pre-save pricing (from that
         same read, so the derivation and the history cannot disagree about what
-        was on disk), save, then record.
+        was on disk), save, then record. Every save first takes the shared
+        per-item supplier-link boundary, so creates, updates and primary
+        arbitration serialize before any row lock even when no links exist yet.
         """
         from ..services.suppliers import (
             derive_costs,
@@ -1639,20 +1656,28 @@ class ItemSupplier(models.Model):
 
         is_new = self.pk is None
         with transaction.atomic():
+            stored_item_id = None
+            if not is_new:
+                stored_item_id = (
+                    ItemSupplier.objects.filter(pk=self.pk)
+                    .values_list("item_id", flat=True)
+                    .first()
+                )
+            lock_item_supplier_links(stored_item_id, self.item_id)
+            # First, before anything reads the stored row: lock it, refuse a save
+            # made from a stale copy, and move the version on
+            # (``inventory.services.link_version``).
+            kwargs["update_fields"] = claim_version(self, kwargs.get("update_fields"))
+
             # Read the pre-save row INSIDE the transaction so the derivation,
             # the single-primary enforcement, the save and the PriceHistory row
             # commit or roll back together, and so the derivation and
             # pricing_changed share ONE read of the stored row and cannot
             # disagree about what was on disk.
             #
-            # This does NOT isolate the read from a concurrent writer: the SELECT
-            # takes no row lock, so under PostgreSQL's default READ COMMITTED
-            # another transaction can still commit between it and the UPDATE. The
-            # lost update itself is pre-existing, but the history behaviour in
-            # that race is NOT identical to base: sharing this one read also means
-            # pricing_changed cannot see such a writer, where base's own separate
-            # later SELECT sometimes did and filed a row. Both halves are filed as
-            # one open defect in docs/oms-supplier-cost-write-path-record.md.
+            # ``claim_version`` above holds the row lock from before this read
+            # until the transaction ends, so no other save of this row can commit
+            # between the read and the UPDATE.
             stored = stored_pricing(self)
             supplied_unit, supplied_package = self.unit_cost, self.package_cost
             self.unit_cost, self.package_cost = derive_costs(
@@ -1683,6 +1708,8 @@ class ItemSupplier(models.Model):
             price_changed = pricing_changed(self, stored)
             super().save(*args, **kwargs)
             record_price_history(self, is_new=is_new, price_changed=price_changed)
+        # Only a write that succeeded has used its token up.
+        self.expected_version = None
 
 
 class PriceHistory(models.Model):

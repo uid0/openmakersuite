@@ -25,6 +25,7 @@ import { promptInput, showError } from '../utils/dialogs';
 import { InventoryItemFormData, inventoryItemSchema } from '../utils/formSchemas';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 import {
+  adoptOwnDemotions,
   relationshipChanged,
   relationshipFromSaved,
   relationshipPayload,
@@ -84,6 +85,11 @@ const InventoryItemFormPage: React.FC = () => {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [_newLocationName, setNewLocationName] = useState('');
   const [supplierRelationships, setSupplierRelationships] = useState<SupplierRelationship[]>([]);
+  // A supplier write was refused because the row changed on the server after
+  // this page loaded it. Saving again cannot fix that, so the error offers a
+  // reload instead; nothing is retried or overwritten on the operator's behalf.
+  const [staleSuppliers, setStaleSuppliers] = useState(false);
+  const [reloadingSuppliers, setReloadingSuppliers] = useState(false);
 
   // Packaging matrix (op-lkxl). Held outside react-hook-form because it does
   // not go through the multipart body: `packaging_levels` is a nested list and
@@ -252,6 +258,31 @@ const InventoryItemFormPage: React.FC = () => {
     }
   };
 
+  /**
+   * Replace the supplier editor with the server's current rows.
+   *
+   * The way out of a stale refusal: the operator's unsaved supplier edits are
+   * discarded for what is actually stored, so their next save starts from a
+   * copy the server will accept. The item's own fields are left alone — the
+   * item itself was already saved by the time a supplier row can be refused.
+   */
+  const reloadSuppliers = async () => {
+    if (!existingItemId) return;
+    try {
+      setReloadingSuppliers(true);
+      const fresh = (await inventoryAPI.getItemSuppliers(existingItemId)).data.results;
+      setItemSuppliers(fresh);
+      setSupplierRelationships(fresh.map(relationshipFromSaved));
+      setStaleSuppliers(false);
+      setError(null);
+    } catch (err) {
+      console.error('Error reloading supplier relationships:', err);
+      setError('Could not reload the suppliers. Refresh the page to see their current values.');
+    } finally {
+      setReloadingSuppliers(false);
+    }
+  };
+
   const handleCreateCategory = async () => {
     if (!newCategoryName.trim()) return;
 
@@ -338,6 +369,11 @@ const InventoryItemFormPage: React.FC = () => {
    *    swallowed, and the rows that did land are recorded back into state — so
    *    the retry PATCHes a row that was already created rather than POSTing it
    *    again and colliding with the `(item, supplier)` uniqueness constraint.
+   * 3. **Every update states the version it loaded**, so a row someone else
+   *    wrote after the page loaded is refused rather than overwritten. The
+   *    server's demotion of the other primaries is itself such a write, so after
+   *    a promotion lands the rows it demoted are re-read and adopted
+   *    (`adoptOwnDemotions`) — only where the demotion is all that changed.
    */
   const saveSupplierRelationships = async (savedItem: InventoryItem) => {
     const keptIds = new Set(
@@ -354,7 +390,7 @@ const InventoryItemFormPage: React.FC = () => {
       for (const [index, removed] of itemSuppliers.entries()) {
         if (keptIds.has(removed.id)) continue;
         try {
-          await inventoryAPI.deleteItemSupplier(removed.id);
+          await inventoryAPI.deleteItemSupplier(removed.id, removed.version);
         } catch (err) {
           throw supplierWriteError(err, removed, index, suppliers);
         }
@@ -363,13 +399,15 @@ const InventoryItemFormPage: React.FC = () => {
 
       for (const index of relationshipWriteOrder(nextRelationships)) {
         const relationship = nextRelationships[index];
+        let written: ItemSupplier;
         try {
           if (relationship.id === undefined) {
             const created = await inventoryAPI.createItemSupplier(
               relationshipPayload(relationship, savedItem.id)
             );
-            nextRelationships[index] = relationshipFromSaved(created.data);
-            nextSaved = [...nextSaved, created.data];
+            written = created.data;
+            nextRelationships[index] = relationshipFromSaved(written);
+            nextSaved = [...nextSaved, written];
           } else {
             const loaded = nextSaved.find((saved) => saved.id === relationship.id);
             if (!relationshipChanged(relationship, loaded)) continue;
@@ -377,13 +415,21 @@ const InventoryItemFormPage: React.FC = () => {
               relationship.id,
               relationshipPayload(relationship, undefined, loaded)
             );
-            nextRelationships[index] = relationshipFromSaved(updated.data);
-            nextSaved = nextSaved.map((saved) =>
-              saved.id === relationship.id ? updated.data : saved
-            );
+            written = updated.data;
+            nextRelationships[index] = relationshipFromSaved(written);
+            nextSaved = nextSaved.map((saved) => (saved.id === relationship.id ? written : saved));
           }
         } catch (err) {
           throw supplierWriteError(err, relationship, index, suppliers);
+        }
+
+        if (
+          written.is_primary &&
+          nextSaved.some((saved) => saved.id !== written.id && saved.is_primary)
+        ) {
+          // This write demoted those rows on the server (see point 3 above).
+          const fresh = (await inventoryAPI.getItemSuppliers(savedItem.id)).data.results;
+          nextSaved = adoptOwnDemotions(nextSaved, fresh, written.id);
         }
       }
     } finally {
@@ -393,6 +439,8 @@ const InventoryItemFormPage: React.FC = () => {
   };
 
   const onSubmit = async (data: InventoryItemFormData) => {
+    // A new attempt answers for itself; a refusal it repeats sets this again.
+    setStaleSuppliers(false);
     // Refuse an impossible chain — or an unfinished supplier row — here rather
     // than sending it: the backend rejects the same things, but the item write
     // would already have landed by then, leaving half a save behind.
@@ -460,6 +508,14 @@ const InventoryItemFormPage: React.FC = () => {
         await saveSupplierRelationships(savedItem);
       } catch (err: any) {
         console.error('Error saving supplier relationships:', err);
+        if (err?.stale) {
+          setStaleSuppliers(true);
+          setError(
+            `Item saved, but a supplier relationship was not: ${err.detail} Saving again will ` +
+              'not overwrite it — reload the suppliers, then make your supplier change again.'
+          );
+          return;
+        }
         setError(
           `Item saved, but a supplier relationship did not: ${extractErrorMessage(
             err,
@@ -536,6 +592,19 @@ const InventoryItemFormPage: React.FC = () => {
       {error && (
         <Alert icon={<IconAlertCircle size={16} />} title="Error" color="red">
           {error}
+          {staleSuppliers && (
+            <Group mt="sm">
+              <Button
+                size="xs"
+                variant="white"
+                color="red"
+                onClick={reloadSuppliers}
+                loading={reloadingSuppliers}
+              >
+                Reload suppliers
+              </Button>
+            </Group>
+          )}
         </Alert>
       )}
 

@@ -256,15 +256,22 @@ def enforce_single_primary(item_supplier: "ItemSupplier") -> None:
     of the same item. A no-op when this row is not primary. On a new (unsaved)
     row ``pk`` is ``None`` and ``.exclude(pk=None)`` excludes nothing, so all
     existing primaries for the item are demoted — the intended behaviour.
+
+    A demotion is a write to the demoted row, so it moves that row's ``version``
+    on in the same statement: a copy loaded while the row was still primary is
+    stale, and saving it back would silently re-promote it over the operator who
+    chose another supplier (``inventory.services.link_version``).
     """
     if not item_supplier.is_primary:
         return
+
+    from django.db.models import F
 
     from inventory.models.core import ItemSupplier
 
     ItemSupplier.objects.filter(item=item_supplier.item, is_primary=True).exclude(
         pk=item_supplier.pk
-    ).update(is_primary=False)
+    ).update(is_primary=False, version=F("version") + 1)
 
 
 def pricing_changed(item_supplier: "ItemSupplier", stored: Optional[dict] = None) -> bool:

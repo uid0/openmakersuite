@@ -16,6 +16,7 @@ from rest_framework import serializers
 # related querysets here. Safe at module top: serializers import only after all
 # app models are loaded, so there is no import cycle.
 from electrical_circuits.models import Disconnect, PowerBreaker
+from inventory.services.link_version import StaleSupplierLink, lock_item_supplier_links
 from inventory.services.vendor_visibility import (
     VendorGatedSerializerMixin,
     vendor_visibility_from_context,
@@ -249,6 +250,20 @@ class ItemSupplierSerializer(serializers.ModelSerializer):
     unit_weight = serializers.DecimalField(max_digits=8, decimal_places=3, read_only=True)
     package_dimensions_display = serializers.CharField(read_only=True)
 
+    # The optimistic-concurrency token (``inventory.services.link_version``).
+    # Every representation carries the row's current version. A write MAY send
+    # back the version it loaded; the save is then refused with a 409
+    # ``stale_version`` if the row has moved on. A write that omits it is not
+    # checked, so a client that predates the token (ScanTTY) is unaffected.
+    version = serializers.IntegerField(
+        required=False,
+        min_value=1,
+        help_text=(
+            "The row's current version. Send back the version you loaded to have a "
+            "stale write refused (409 stale_version) instead of overwriting newer values."
+        ),
+    )
+
     class Meta:
         model = ItemSupplier
         fields = [
@@ -283,8 +298,19 @@ class ItemSupplierSerializer(serializers.ModelSerializer):
             "notes",
             "created_at",
             "updated_at",
+            "version",
         ]
         read_only_fields = ["created_at", "updated_at"]
+
+    def create(self, validated_data):
+        # Nothing was loaded, so there is nothing to be stale against; a new row
+        # starts at the model's own first version whatever was sent.
+        validated_data.pop("version", None)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        instance.expected_version = validated_data.pop("version", None)
+        return super().update(instance, validated_data)
 
 
 class ItemSupplierDetailSerializer(ItemSupplierSerializer):
@@ -1540,7 +1566,14 @@ class KitSupplierTermsSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ItemSupplier
-        fields = ["supplier", "supplier_sku", "supplier_url", "unit_cost", "average_lead_time"]
+        fields = [
+            "supplier",
+            "supplier_sku",
+            "supplier_url",
+            "unit_cost",
+            "average_lead_time",
+            "version",
+        ]
         extra_kwargs = {
             # ``supplier_sku`` is the only one the model declares as mandatory
             # and non-blank. The kit form has always let it be omitted or
@@ -1551,6 +1584,11 @@ class KitSupplierTermsSerializer(serializers.ModelSerializer):
             "unit_cost": {"required": False},
             "average_lead_time": {"required": False},
         }
+
+    # The version of this supplier's link the kit page loaded
+    # (``inventory.services.link_version``). Zero records that the page loaded
+    # no link for this supplier; a positive value records the link it loaded.
+    version = serializers.IntegerField(required=False, min_value=0)
 
     def to_internal_value(self, data):
         """Refuse a key this block does not write, instead of dropping it.
@@ -1777,20 +1815,33 @@ class KitSerializer(InventoryItemSerializer):
         """
         if not terms:
             return
-        sent = {key: value for key, value in terms.items() if key != "supplier"}
+        expected_version = terms.get("version")
+        sent = {key: value for key, value in terms.items() if key not in ("supplier", "version")}
         with transaction.atomic():
-            link, created = ItemSupplier.objects.select_for_update().get_or_create(
-                item=instance,
-                supplier=terms["supplier"],
-                defaults={**sent, "is_primary": True},
-            )
+            lock_item_supplier_links(instance.pk)
+            relationship = {"item": instance, "supplier": terms["supplier"]}
+            if expected_version is not None and expected_version > 0:
+                link = ItemSupplier.objects.select_for_update().filter(**relationship).first()
+                if link is None:
+                    raise StaleSupplierLink(None, expected_version, None)
+                created = False
+            else:
+                link, created = ItemSupplier.objects.select_for_update().get_or_create(
+                    **relationship,
+                    defaults={**sent, "is_primary": True},
+                )
             if created:
                 return
+            if expected_version == 0:
+                raise StaleSupplierLink(link.pk, expected_version, link.version)
             # Only the keys the caller actually sent. An absent key is not a
             # value: it must leave the stored column exactly as it was, which is
             # what makes editing a SKU an edit to the SKU and nothing else.
             for field, value in sent.items():
                 setattr(link, field, value)
+            # A version names the copy the page loaded. A create has nothing it
+            # could be stale against, which is why this is set only here.
+            link.expected_version = expected_version
             link.save()
 
     def create(self, validated_data):

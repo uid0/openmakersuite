@@ -388,3 +388,94 @@ describe('the kit form says when the terms on screen belong to another supplier'
     );
   });
 });
+
+/**
+ * Two people edit the same kit's supplier terms. One saves a new part number;
+ * the other then saves the SKU box still holding the one it loaded. The terms
+ * carry the version of the link the page loaded, so the server refuses the
+ * second save (409 `stale_version`, `inventory/services/link_version.py`) and
+ * this page says so — it never retries or overwrites on the operator's behalf.
+ */
+describe('the kit form refuses to overwrite supplier terms someone else changed', () => {
+  beforeEach(() => localStorage.setItem('token', 'test-token'));
+  afterEach(() => localStorage.removeItem('token'));
+
+  const KIT_WITH_LINK = {
+    ...KIT,
+    suppliers: [{ id: 11, supplier: 50, supplier_name: 'Acme Supplies', supplier_sku: 'T3200', version: 3 }],
+  };
+  const STALE_REFUSAL = {
+    response: {
+      status: 409,
+      data: {
+        error: {
+          code: 'stale_version',
+          message: 'Someone else changed this supplier link after you loaded it.',
+          details: { id: 11, sent_version: 3, current_version: 4 },
+        },
+      },
+    },
+  };
+
+  const saveTermsFor = async (supplierId: string) => {
+    const user = userEvent.setup();
+    (kitAPI.getKit as ReturnType<typeof vi.fn>).mockResolvedValue({ data: KIT_WITH_LINK });
+
+    renderDetail();
+    await waitFor(() => expect(screen.getByTestId('kit-supplier-sku')).toHaveValue('T3200'));
+    await user.type(screen.getByTestId('kit-supplier'), supplierId);
+    await user.click(screen.getByTestId('kit-save'));
+    await waitFor(() => expect(kitAPI.updateKit).toHaveBeenCalled());
+    return { user, payload: (kitAPI.updateKit as ReturnType<typeof vi.fn>).mock.calls[0][1] };
+  };
+
+  it('sends the version of the link it loaded', async () => {
+    (kitAPI.updateKit as ReturnType<typeof vi.fn>).mockResolvedValue({ data: KIT_WITH_LINK });
+
+    const { payload } = await saveTermsFor('50');
+
+    expect(payload.supplier_terms).toMatchObject({ supplier: 50, supplier_sku: 'T3200', version: 3 });
+  });
+
+  it('sends expected absence for an unlinked supplier on an existing kit', async () => {
+    (kitAPI.updateKit as ReturnType<typeof vi.fn>).mockResolvedValue({ data: KIT_WITH_LINK });
+
+    const { payload } = await saveTermsFor('77');
+
+    expect(payload.supplier_terms).toMatchObject({ supplier: 77, version: 0 });
+  });
+
+  it('tells the operator their copy is out of date, and reloads the kit on request', async () => {
+    (kitAPI.updateKit as ReturnType<typeof vi.fn>).mockRejectedValue(STALE_REFUSAL);
+
+    const { user } = await saveTermsFor('50');
+
+    await waitFor(() =>
+      expect(screen.getByTestId('kit-save-error')).toHaveTextContent(
+        /Nothing was saved: someone else changed this supplier’s terms .* your copy is out of date/,
+      ),
+    );
+    expect(kitAPI.updateKit).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('kit-save-success')).not.toBeInTheDocument();
+
+    (kitAPI.getKit as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: {
+        ...KIT_WITH_LINK,
+        supplier_sku: 'T3200-B',
+        suppliers: [{ ...KIT_WITH_LINK.suppliers[0], supplier_sku: 'T3200-B', version: 4 }],
+      },
+    });
+    await user.click(screen.getByRole('button', { name: 'Reload kit' }));
+
+    await waitFor(() => expect(screen.getByTestId('kit-supplier-sku')).toHaveValue('T3200-B'));
+    expect(screen.queryByTestId('kit-save-error')).not.toBeInTheDocument();
+
+    (kitAPI.updateKit as ReturnType<typeof vi.fn>).mockResolvedValue({ data: KIT_WITH_LINK });
+    await user.click(screen.getByTestId('kit-save'));
+    await waitFor(() => expect(kitAPI.updateKit).toHaveBeenCalledTimes(2));
+    expect((kitAPI.updateKit as ReturnType<typeof vi.fn>).mock.calls[1][1].supplier_terms).toMatchObject({
+      supplier_sku: 'T3200-B',
+      version: 4,
+    });
+  });
+});

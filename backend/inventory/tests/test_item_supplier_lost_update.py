@@ -863,3 +863,54 @@ def test_two_concurrent_primary_promotions_serialize_to_one_winner():
     assert [first.is_alive(), second.is_alive()] == [False, False]
     assert outcomes == {"first": "saved", "second": "saved"}
     assert ItemSupplier.objects.filter(item=item, is_primary=True).count() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_two_concurrent_first_primary_creates_serialize_to_one_winner():
+    if connection.vendor != "postgresql":
+        pytest.skip("requires PostgreSQL transaction advisory locks")
+
+    item = InventoryItemFactory(image=None)
+    first_link = ItemSupplier(item=item, supplier=SupplierFactory(), is_primary=True)
+    second_link = ItemSupplier(item=item, supplier=SupplierFactory(), is_primary=True)
+    first_written = threading.Event()
+    release_first = threading.Event()
+    outcomes = {}
+
+    def create_first():
+        try:
+            with transaction.atomic():
+                first_link.save()
+                first_written.set()
+                assert release_first.wait(timeout=30)
+            outcomes["first"] = "saved"
+        except Exception as exc:  # pragma: no cover
+            outcomes["first"] = exc
+            first_written.set()
+        finally:
+            connection.close()
+
+    def create_second():
+        try:
+            second_link.save()
+            outcomes["second"] = "saved"
+        except Exception as exc:  # pragma: no cover
+            outcomes["second"] = exc
+        finally:
+            connection.close()
+
+    first = threading.Thread(target=create_first, daemon=True)
+    second = threading.Thread(target=create_second, daemon=True)
+    first.start()
+    assert first_written.wait(timeout=30)
+    second.start()
+    try:
+        _wait_until_a_connection_waits_on_a_lock()
+    finally:
+        release_first.set()
+        first.join(timeout=30)
+        second.join(timeout=30)
+
+    assert [first.is_alive(), second.is_alive()] == [False, False]
+    assert outcomes == {"first": "saved", "second": "saved"}
+    assert ItemSupplier.objects.filter(item=item, is_primary=True).count() == 1

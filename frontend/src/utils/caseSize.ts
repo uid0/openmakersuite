@@ -12,6 +12,10 @@
  * make unnecessary, and a second copy of the rule here would be free to drift
  * from the one that actually decides.
  *
+ * The `quantity_per_package` half of that is enforced: a web read of the column
+ * outside the allowlist in `eslint-rules/pack-size-single-owner.mjs` fails lint.
+ * The supplier-link and `is_active` / `is_discontinued` halves are not.
+ *
  * THE DEFECT THIS CLOSES: three web surfaces said `— (case size unknown)` and
  * one said a bare em dash, for every unknown alike. An operator reading that
  * could not tell whether they were supplying a fact nobody had recorded or

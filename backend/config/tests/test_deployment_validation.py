@@ -203,13 +203,24 @@ class TestProductionEnvValidatorAC23:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "no error reporting configured" not in result.stdout.lower()
 
-    @pytest.mark.parametrize("value", ["False", "false", "0", "off", "no", ""])
+    @pytest.mark.parametrize(
+        "value", ["False", "false", "0", "off", "no", "", "FALSE", "fAlSe", "OFF", "No"]
+    )
     @pytest.mark.parametrize("key", ["SESSION_COOKIE_SECURE", "CSRF_COOKIE_SECURE"])
     def test_cookie_secure_falsy_override_warns(self, tmp_path, key, value):
         env = _write_env(tmp_path, overrides={key: value})
         result = _run_validator(env)
         assert result.returncode == 0, result.stdout
         assert key in result.stdout
+        assert "bad substitution" not in result.stderr
+
+    @pytest.mark.parametrize("value", ["True", "1", "on", "yes", "none", "nope", "offline"])
+    @pytest.mark.parametrize("key", ["SESSION_COOKIE_SECURE", "CSRF_COOKIE_SECURE"])
+    def test_cookie_secure_non_falsy_override_has_no_warning(self, tmp_path, key, value):
+        env = _write_env(tmp_path, overrides={key: value})
+        result = _run_validator(env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert key not in result.stdout
 
     @pytest.mark.parametrize("key", ["SESSION_COOKIE_SECURE", "CSRF_COOKIE_SECURE"])
     def test_cookie_secure_unset_has_no_warning(self, tmp_path, key):

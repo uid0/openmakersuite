@@ -81,9 +81,12 @@ const MakerBoxAdminPage: React.FC = () => {
     setSheetPrinting(true);
     setError(null);
     try {
-      const ids = boxes.slice(0, SHEET_CAPACITY).map((b) => b.bin_id);
-      // @ts-expect-error KNOWN DEFECT: pre-conversion rows have bin_id null, and
-      // those nulls are sent to print-sheet as bin ids.
+      const ids = boxes.slice(0, SHEET_CAPACITY).map(
+        (b): string =>
+          // @ts-expect-error KNOWN DEFECT: pre-conversion rows have bin_id null, and
+          // those nulls are sent to print-sheet as bin ids.
+          b.bin_id,
+      );
       const res = await makerBoxesAPI.printSheet(ids);
       const blob = new Blob([res.data], { type: 'image/png' });
       const url = URL.createObjectURL(blob);

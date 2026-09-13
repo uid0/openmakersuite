@@ -4349,7 +4349,9 @@ class FixtureViewSet(viewsets.ModelViewSet):
 
         try:
             send_fixture_refill_webhook.delay(str(refill_request.id))
-        except Exception as e:  # nosec B110
+        # The former B110 suppression targeted an intentionally swallowed
+        # webhook error, but this handler records the failure below.
+        except Exception as e:
             # Log but don't fail the request if webhook fails
             # This is intentional - webhook failures should not block refill requests
             import logging

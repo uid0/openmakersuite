@@ -1458,7 +1458,9 @@ jobs:
 
   # Aggregator that branch protection points at. Treats "skipped" as a pass so
   # path-filter skips don't block doc-only PRs. Treats "failure" or "cancelled"
-  # as a fail.
+  # as a fail. `changes` itself must be "success": if it fails, is cancelled or
+  # is skipped, every path-filtered job below is skipped, and without this check
+  # the gate would go green with nothing tested.
   ci-complete:
     name: ✅ CI Complete
     runs-on: ubuntu-latest
@@ -1472,6 +1474,7 @@ jobs:
             [[ "$1" == "success" || "$1" == "skipped" ]]
           }
 
+          CHANGES="${{ needs.changes.result }}"
           BACKEND_LINT="${{ needs.backend-lint.result }}"
           BACKEND="${{ needs.backend-tests.result }}"
           FRONTEND_LINT="${{ needs.frontend-lint.result }}"
@@ -1483,6 +1486,7 @@ jobs:
           DEPLOY_ART="${{ needs.deploy-artifacts.result }}"
           PROD_SMOKE="${{ needs.prod-stack-smoke.result }}"
 
+          echo "Detect changes:  $CHANGES"
           echo "Backend lint:    $BACKEND_LINT"
           echo "Backend tests:   $BACKEND"
           echo "Frontend lint:   $FRONTEND_LINT"
@@ -1495,6 +1499,12 @@ jobs:
           echo "Prod smoke:      $PROD_SMOKE"
 
           fail=0
+          # No skipped pass here: the path-filter skips are only trustworthy
+          # when change detection itself succeeded.
+          if [[ "$CHANGES" != "success" ]]; then
+            echo "❌ Detect Changes did not succeed ($CHANGES); path-filtered skips below are not a pass"
+            fail=1
+          fi
           for r in "$BACKEND_LINT" "$BACKEND" "$FRONTEND_LINT" "$FRONTEND" "$E2E" "$DOCKER" "$SECURITY" "$DEPLOY" "$DEPLOY_ART" "$PROD_SMOKE"; do
             ok "$r" || fail=1
           done
@@ -1503,6 +1513,6 @@ jobs:
             echo "✅ All required CI checks passed (or were correctly skipped)"
             exit 0
           else
-            echo "❌ One or more required jobs failed or were cancelled"
+            echo "❌ One or more required jobs did not pass (see results above)"
             exit 1
           fi

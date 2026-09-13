@@ -181,7 +181,9 @@ class TestTheTokenOnTheApi:
         if method == "delete":
             response = client.delete(detail_url(link_id))
         else:
-            response = client.patch(detail_url(link_id), {"supplier_sku": "TOO-LATE"}, format="json")
+            response = client.patch(
+                detail_url(link_id), {"supplier_sku": "TOO-LATE"}, format="json"
+            )
 
         assert response.status_code == 404
 
@@ -502,7 +504,9 @@ class TestKitSupplierTerms:
         )
 
         assert response.status_code == 200, response.data
-        assert ItemSupplier.objects.get(item_id=kit_link.item_id, supplier=other).supplier_sku == "NEW"
+        assert (
+            ItemSupplier.objects.get(item_id=kit_link.item_id, supplier=other).supplier_sku == "NEW"
+        )
 
     def test_tokenless_terms_still_create_an_absent_link(self, client, kit_link):
         other = SupplierFactory()
@@ -514,7 +518,10 @@ class TestKitSupplierTerms:
         )
 
         assert response.status_code == 200, response.data
-        assert ItemSupplier.objects.get(item_id=kit_link.item_id, supplier=other).supplier_sku == "COMPAT"
+        assert (
+            ItemSupplier.objects.get(item_id=kit_link.item_id, supplier=other).supplier_sku
+            == "COMPAT"
+        )
 
 
 # ---------------------------------------------------------------------------

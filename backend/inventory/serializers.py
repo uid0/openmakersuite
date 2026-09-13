@@ -16,11 +16,11 @@ from rest_framework import serializers
 # related querysets here. Safe at module top: serializers import only after all
 # app models are loaded, so there is no import cycle.
 from electrical_circuits.models import Disconnect, PowerBreaker
+from inventory.services.link_version import StaleSupplierLink, lock_item_supplier_links
 from inventory.services.vendor_visibility import (
     VendorGatedSerializerMixin,
     vendor_visibility_from_context,
 )
-from inventory.services.link_version import StaleSupplierLink, lock_item_supplier_links
 from membership.actor import actor_display
 
 from .models import (

@@ -2067,9 +2067,11 @@ class ItemSupplierViewSet(viewsets.ModelViewSet):
             except serializers.ValidationError as exc:
                 raise serializers.ValidationError({"version": exc.detail}) from exc
 
-        item_id = ItemSupplier.objects.filter(pk=item_supplier_id).values_list(
-            "item_id", flat=True
-        ).first()
+        item_id = (
+            ItemSupplier.objects.filter(pk=item_supplier_id)
+            .values_list("item_id", flat=True)
+            .first()
+        )
         if item_id is None:
             if version is None:
                 return super().destroy(request, *args, **kwargs)
@@ -2078,9 +2080,7 @@ class ItemSupplierViewSet(viewsets.ModelViewSet):
         try:
             with transaction.atomic():
                 lock_item_supplier_links(item_id)
-                item_supplier = ItemSupplier.objects.select_for_update().get(
-                    pk=item_supplier_id
-                )
+                item_supplier = ItemSupplier.objects.select_for_update().get(pk=item_supplier_id)
                 self.check_object_permissions(request, item_supplier)
                 if version is not None and item_supplier.version != version:
                     raise StaleSupplierLink(item_supplier.pk, version, item_supplier.version)

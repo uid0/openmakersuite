@@ -269,9 +269,9 @@ class ItemSupplierInlineFormSet(BaseInlineFormSet):
                 sibling = sibling_form.instance
                 if sibling.pk == saved.pk or sibling_form.cleaned_data.get("is_primary"):
                     continue
-                sibling.expected_version = (
-                    ItemSupplier.objects.values_list("version", flat=True).get(pk=sibling.pk)
-                )
+                sibling.expected_version = ItemSupplier.objects.values_list(
+                    "version", flat=True
+                ).get(pk=sibling.pk)
         return saved
 
 

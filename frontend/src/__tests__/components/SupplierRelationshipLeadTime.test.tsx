@@ -23,8 +23,8 @@ import React from 'react';
 import SupplierRelationshipForm, {
   SupplierRelationship,
 } from '../../components/SupplierRelationshipForm';
-import { relationshipPayload } from '../../utils/supplierRelationships';
-import { Supplier } from '../../types';
+import { relationshipFromSaved, relationshipPayload } from '../../utils/supplierRelationships';
+import { ItemSupplier, LeadTimeSource, Supplier } from '../../types';
 
 const renderWithProvider = (component: React.ReactElement) =>
   render(<MantineProvider>{component}</MantineProvider>);
@@ -148,5 +148,72 @@ describe('the lead-time box on an existing row', () => {
     expect(onChange).toHaveBeenCalledWith([
       expect.objectContaining({ average_lead_time: null }),
     ]);
+  });
+});
+
+/**
+ * An edit that leaves the lead-time box alone sends no lead time.
+ *
+ * The server keeps a row's lead-time source when a PATCH echoes the stored
+ * number (`inventory/services/lead_time_source.py`), but the number this page
+ * holds is the one it LOADED. If the measuring task has written a new figure
+ * since, echoing the loaded one overwrites the measurement and stores it as a
+ * quote nobody gave. Leaving the key out lets the server keep whatever it has.
+ */
+describe('an edit that does not touch the lead time', () => {
+  const loaded = (days: number, source: LeadTimeSource): ItemSupplier => ({
+    id: 91,
+    item: 'item-1',
+    item_name: 'Hex bolt',
+    supplier: 1,
+    supplier_name: 'Test Supplier',
+    supplier_sku: 'SKU-001',
+    supplier_url: '',
+    package_upc: '',
+    unit_upc: '',
+    quantity_per_package: 1,
+    package_height: null,
+    package_width: null,
+    package_length: null,
+    package_weight: null,
+    package_volume: null,
+    unit_weight: null,
+    package_dimensions_display: '',
+    unit_cost: '10.99',
+    package_cost: null,
+    average_lead_time: days,
+    average_lead_time_source: source,
+    is_primary: true,
+    is_active: true,
+    is_discontinued: false,
+    notes: '',
+    created_at: '2026-09-13T00:00:00Z',
+    updated_at: '2026-09-13T00:00:00Z',
+  });
+
+  test.each([
+    [7, 'default'],
+    [12, 'measured'],
+    [7, 'unknown'],
+  ] as const)('an SKU-only edit of a %i-day %s lead time sends no lead time', (days, source) => {
+    const saved = loaded(days, source);
+    const edited = { ...relationshipFromSaved(saved), supplier_sku: 'SKU-002' };
+
+    const payload = relationshipPayload(edited, undefined, saved);
+
+    expect(payload.supplier_sku).toBe('SKU-002');
+    expect('average_lead_time' in payload).toBe(false);
+  });
+
+  test.each([
+    [7, 9],
+    [7, 0],
+  ])('a lead time moved from %i to %i is sent as the operator typed it', (from, to) => {
+    const saved = loaded(from, 'default');
+    const edited = { ...relationshipFromSaved(saved), average_lead_time: to };
+
+    expect(relationshipPayload(edited, undefined, saved)).toMatchObject({
+      average_lead_time: to,
+    });
   });
 });

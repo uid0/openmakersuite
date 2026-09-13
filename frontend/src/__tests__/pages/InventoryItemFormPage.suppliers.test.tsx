@@ -373,6 +373,32 @@ describe('InventoryItemFormPage — supplier relationships', { timeout: 30000 },
     expect(supplierWrites('delete')).toHaveLength(0);
   });
 
+  it('keeps a lead time measured since the page loaded when only the SKU is edited', async () => {
+    // The page loaded 7 days (the planning default); the measuring task then
+    // wrote 12 days (measured). With the lead time left out of the PATCH, the
+    // server keeps both and answers with them. Echoing the loaded 7 instead
+    // would have overwritten the measurement and stored it as a quote.
+    const measuredSinceLoad = itemSupplier({
+      supplier_sku: 'ACME-2',
+      average_lead_time: 12,
+      average_lead_time_source: 'measured',
+    });
+    mock.onPatch('/inventory/item-suppliers/91/').reply(200, measuredSinceLoad);
+    renderEdit([itemSupplier({ average_lead_time: 7, average_lead_time_source: 'default' })]);
+
+    await waitFor(() => expect(screen.getByDisplayValue('ACME-1')).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText(/Supplier SKU/), { target: { value: 'ACME-2' } });
+    save();
+
+    await waitFor(() => expect(supplierWrites('patch')).toHaveLength(1));
+    const body = JSON.parse(supplierWrites('patch')[0].data as string);
+    expect(body).toMatchObject({ supplier_sku: 'ACME-2' });
+    expect(body).not.toHaveProperty('average_lead_time');
+    await waitFor(() =>
+      expect(screen.getByLabelText(/Average Lead Time/)).toHaveValue(12)
+    );
+  });
+
   it('persists every field the editor offers', async () => {
     mock.onPatch('/inventory/item-suppliers/91/').reply(200, itemSupplier());
     renderEdit([itemSupplier()]);
@@ -382,10 +408,13 @@ describe('InventoryItemFormPage — supplier relationships', { timeout: 30000 },
     // Derived from the DOM, not from a list kept in this file: every text or
     // number input the editor renders gets a distinct value, and every one of
     // them has to come back in the request body. An offered control that is not
-    // wired to the payload fails here.
+    // wired to the payload fails here. Numbers start above anything the fixture
+    // loaded: a box typed back to its loaded value is not a change, and the
+    // lead time in particular is then deliberately left out.
     const typed = new Map<string, string>();
     editableInputs().forEach((input, index) => {
-      const value = input.getAttribute('type') === 'number' ? String(index + 2) : `edited-${index}`;
+      const value =
+        input.getAttribute('type') === 'number' ? String(index + 100) : `edited-${index}`;
       fireEvent.change(input, { target: { value } });
       typed.set(fieldNameFor(input), value);
     });

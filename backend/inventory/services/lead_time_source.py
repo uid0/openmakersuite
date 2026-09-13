@@ -40,16 +40,11 @@ Here provenance is PRODUCED by what decides the stored value, and nothing else:
    mistaken for the default. The mark cannot be put on any other number.
 2. **A measurement carries its mark the same way**, via
    :func:`measured_lead_time`, called by the one task that measures.
-3. **Everything else is a DELTA against what this instance loaded.** A plain
-   number equal to the instance's original value leaves its original source
-   alone (an echo cannot relabel, an unknown stays unknown); a different one is
-   ``recorded``. ``from_db()`` captures that pair and ``refresh_from_db()``
-   refreshes it. Before an existing row is written, ``save()`` locks its current
-   database row until the transaction ends. That serializes the comparison and
-   write against concurrent saves, but deliberately does not prevent a stale
-   instance from overwriting a newer value; it guarantees only that such an
-   overwrite keeps the provenance of the value the stale instance actually
-   loaded rather than inventing a new one from the intervening database value.
+3. **Everything else is a DELTA against the stored row** — the same principle
+   ``derive_costs`` follows for prices, for the same reason: only ``save()`` sees
+   both what the caller supplied and what is on disk. A plain number equal to the
+   stored one leaves the stored source alone (an echo cannot relabel, an unknown
+   stays unknown); a different one is ``recorded``.
 
 ``ItemSupplier.save()`` calls :func:`settle_lead_time_source` on every save, and
 the source column is ``editable=False``: no ``ModelForm`` or ``ModelSerializer``
@@ -58,6 +53,16 @@ limit, stated rather than hidden: re-sending the number a row already holds
 cannot promote a ``default`` or ``unknown`` 7 to ``recorded`` — confirming "the
 supplier really did quote 7" needs a different number or a future explicit
 action. That errs toward saying less than is known, never more.
+
+A concurrent stale save is outside that guarantee. It can overwrite a newer
+lead-time edit — the model's pre-existing lost-update behaviour — and, because
+the authority compares with the row then on disk, can label an untouched stale
+default as ``recorded``. That provenance error is downstream of the same lost
+update and is tracked with optimistic concurrency for the whole write; keeping
+a second per-instance provenance snapshot would add independently drifting
+state without preventing the overwrite. A possible separate follow-up is an
+explicit action to reset an existing supplier to the planning default; blank on
+edit deliberately means unchanged and does not perform that reset.
 
 EVERY WRITE PATH, AND HOW IT REACHES THIS
 -----------------------------------------
@@ -111,7 +116,6 @@ PLANNING_DEFAULT_DAYS = 7
 
 VALUE_FIELD = "average_lead_time"
 SOURCE_FIELD = "average_lead_time_source"
-SNAPSHOT_ATTRIBUTE = "_loaded_average_lead_time_pair"
 
 
 class LeadTimeSource(models.TextChoices):
@@ -163,11 +167,10 @@ def measured_lead_time(days: int) -> int:
     return _Measured(days)
 
 
-def decide_lead_time_source(value, loaded: Optional[tuple[int, str]]) -> str:
-    """The source a row holding ``value`` must carry, given what it loaded.
+def decide_lead_time_source(value, stored: Optional[tuple[int, str]]) -> str:
+    """The source a row holding ``value`` must carry, given what is on disk.
 
-    ``loaded`` is the instance's original ``(days, source)``, or ``None`` for a
-    create.
+    ``stored`` is the persisted ``(days, source)``, or ``None`` for a create.
     """
     if type(value) is _PlanningDefault:
         return LeadTimeSource.DEFAULT
@@ -178,32 +181,21 @@ def decide_lead_time_source(value, loaded: Optional[tuple[int, str]]) -> str:
             "ItemSupplier.average_lead_time must be an integer value at save time; "
             "database expressions and unvalidated values cannot carry truthful provenance."
         )
-    if loaded is not None and value == loaded[0]:
-        return loaded[1]
+    if stored is not None and value == stored[0]:
+        return stored[1]
     return LeadTimeSource.RECORDED
 
 
-def capture_loaded_lead_time(item_supplier: "ItemSupplier") -> None:
-    """Snapshot the coherent value/source pair currently loaded on an instance."""
-    values = item_supplier.__dict__
-    if VALUE_FIELD in values and SOURCE_FIELD in values:
-        setattr(
-            item_supplier,
-            SNAPSHOT_ATTRIBUTE,
-            (values[VALUE_FIELD], values[SOURCE_FIELD]),
-        )
-
-
-def loaded_lead_time(item_supplier: "ItemSupplier") -> Optional[tuple[int, str]]:
-    """The value/source pair this instance loaded, if it came from the database."""
-    return getattr(item_supplier, SNAPSHOT_ATTRIBUTE, None)
-
-
-def lock_stored_lead_time(item_supplier: "ItemSupplier") -> None:
-    """Lock an existing row until the surrounding save transaction completes."""
+def stored_lead_time(item_supplier: "ItemSupplier") -> Optional[tuple[int, str]]:
+    """The persisted ``(days, source)`` of this row, or ``None`` for a create."""
     if item_supplier.pk is None:
-        return
-    (type(item_supplier).objects.select_for_update().only("pk").get(pk=item_supplier.pk))
+        return None
+    return (
+        type(item_supplier)
+        .objects.filter(pk=item_supplier.pk)
+        .values_list(VALUE_FIELD, SOURCE_FIELD)
+        .first()
+    )
 
 
 def settle_lead_time_source(item_supplier: "ItemSupplier", update_fields):
@@ -214,13 +206,9 @@ def settle_lead_time_source(item_supplier: "ItemSupplier", update_fields):
     either, so a restricted save cannot set one apart from the other.
     """
     if update_fields is not None and VALUE_FIELD not in update_fields:
-        loaded = loaded_lead_time(item_supplier)
-        if loaded is not None:
-            item_supplier.average_lead_time_source = loaded[1]
         return frozenset(update_fields) - {SOURCE_FIELD}
-    lock_stored_lead_time(item_supplier)
     item_supplier.average_lead_time_source = decide_lead_time_source(
-        item_supplier.average_lead_time, loaded_lead_time(item_supplier)
+        item_supplier.average_lead_time, stored_lead_time(item_supplier)
     )
     if update_fields is None:
         return None

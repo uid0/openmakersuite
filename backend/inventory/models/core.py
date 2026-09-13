@@ -1565,22 +1565,6 @@ class ItemSupplier(models.Model):
         primary = " (Primary)" if self.is_primary else ""
         return f"{self.item.name} - {self.supplier.name}{primary}"
 
-    @classmethod
-    def from_db(cls, db, field_names, values):
-        instance = super().from_db(db, field_names, values)
-        from ..services.lead_time_source import capture_loaded_lead_time
-
-        capture_loaded_lead_time(instance)
-        return instance
-
-    def refresh_from_db(self, using=None, fields=None, from_queryset=None):
-        if fields is not None and {"average_lead_time", "average_lead_time_source"} & set(fields):
-            fields = set(fields) | {"average_lead_time", "average_lead_time_source"}
-        super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
-        from ..services.lead_time_source import capture_loaded_lead_time
-
-        capture_loaded_lead_time(self)
-
     @property
     def package_volume(self) -> Optional[Decimal]:
         """Calculate package volume in cubic inches."""
@@ -1698,9 +1682,6 @@ class ItemSupplier(models.Model):
             enforce_single_primary(self)
             price_changed = pricing_changed(self, stored)
             super().save(*args, **kwargs)
-            from ..services.lead_time_source import capture_loaded_lead_time
-
-            capture_loaded_lead_time(self)
             record_price_history(self, is_new=is_new, price_changed=price_changed)
 
 

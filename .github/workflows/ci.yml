@@ -661,6 +661,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.docker == 'true'
+    # Sized from run history, not a guess: over 344 runs (2026-07-24 to
+    # 2026-09-13) the job's longest was 33.9 min, and the week of 2026-09-07
+    # ran p50 27 / p90 30 as the suite grows. Without a limit a hang holds the
+    # check for GitHub's 360-min default. The build-and-test step carries its
+    # own tighter limit so a stuck pytest fails the step and "Show logs on
+    # failure" still runs; a job-level timeout alone cancels instead.
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v7
@@ -676,6 +683,7 @@ jobs:
           docker volume prune -f 2>/dev/null || true
 
       - name: Build and test with docker compose
+        timeout-minutes: 55
         env:
           POSTGRES_PASSWORD: test_password_for_ci_only
           # COMPOSE_BAKE delegates `compose build` to `buildx bake`, which

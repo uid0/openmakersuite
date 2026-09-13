@@ -55,6 +55,7 @@ backend/.coverage
 backend/bandit-report.json
 backend/coverage.xml
 backend/htmlcov/
+backend/epaper_preview.png
 /staticfiles
 /static
 

@@ -483,7 +483,11 @@ class TestDefaultListReorderValueParity:
         now = timezone.now()
         item = InventoryItemFactory(image=None, current_stock=0, minimum_stock=5)
         # A lead time on the primary supplier so expected_delivery_date resolves.
-        item.item_suppliers.update(average_lead_time=7)
+        # Saved, not ``QuerySet.update``: only ``save()`` decides a lead time's
+        # source, and the queryset refuses to write one around it.
+        for link in item.item_suppliers.all():
+            link.average_lead_time = 7
+            link.save()
 
         newest_ordered = ReorderRequest.objects.create(
             item=item, quantity=1, status=ReorderRequest.Status.ORDERED

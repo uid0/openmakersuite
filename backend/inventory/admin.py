@@ -6,7 +6,7 @@ import os
 
 from django.contrib import admin, messages
 from django.core.files.base import ContentFile
-from django.forms import BaseInlineFormSet, CharField, Form, ModelForm
+from django.forms import BaseInlineFormSet, CharField, Form, IntegerField, ModelForm
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render
 from django.urls import path, reverse
@@ -14,6 +14,7 @@ from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
 from facilities.models import AssetSiteRequirements
+from inventory.services.lead_time_source import PLANNING_DEFAULT_DAYS
 
 from .models import (
     Asset,
@@ -147,8 +148,43 @@ class LocationAdmin(admin.ModelAdmin):
             )
 
 
+class ItemSupplierAdminForm(ModelForm):
+    """A supplier link's admin form, which never restates the lead-time default.
+
+    A ``ModelForm`` prefills a field from the model default, so the lead-time box
+    used to open holding ``7``: an operator who never touched it posted that 7
+    back as a number they typed, and ``ItemSupplier.save()`` would have to
+    record it as a quote. The field is declared here with no ``initial``, so the
+    box starts blank on a new link (an add form has no instance to prefill
+    from; a change form prefills the stored number), and a blank box
+    passes the instance's OWN value through untouched — the marked planning
+    default on an add, the stored number on a change — so the source is decided
+    by ``save()`` exactly as it is for an API write that omits the key. See
+    :mod:`inventory.services.lead_time_source`.
+    """
+
+    average_lead_time = IntegerField(
+        required=False,
+        min_value=0,
+        label="Average lead time",
+        help_text=(
+            "Calendar days. Leave blank to use the planning default of "
+            f"{PLANNING_DEFAULT_DAYS} days until this supplier quotes their own."
+        ),
+    )
+
+    class Meta:
+        model = ItemSupplier
+        fields = "__all__"
+
+    def clean_average_lead_time(self):
+        days = self.cleaned_data.get("average_lead_time")
+        return self.instance.average_lead_time if days is None else days
+
+
 class ItemSupplierInline(admin.TabularInline):
     model = ItemSupplier
+    form = ItemSupplierAdminForm
     extra = 1
     fields = [
         "supplier",
@@ -169,10 +205,12 @@ class ItemSupplierInline(admin.TabularInline):
         "package_cost",
         "unit_cost_display",
         "average_lead_time",
+        "average_lead_time_source",
         "is_primary",
         "is_active",
     ]
     readonly_fields = [
+        "average_lead_time_source",
         "unit_cost_display",
         "package_dimensions_display",
         "package_volume_display",
@@ -213,6 +251,8 @@ class ItemSupplierInline(admin.TabularInline):
 class ItemSupplierAdmin(admin.ModelAdmin):
     """Admin interface for managing item-supplier relationships and pricing."""
 
+    form = ItemSupplierAdminForm
+
     list_display = [
         "item_link",
         "supplier",
@@ -229,6 +269,7 @@ class ItemSupplierAdmin(admin.ModelAdmin):
     search_fields = ["item__name", "item__sku", "supplier__name", "supplier_sku"]
     readonly_fields = [
         "unit_cost",
+        "average_lead_time_source",
         "created_at",
         "updated_at",
         "api_link",
@@ -280,7 +321,14 @@ class ItemSupplierAdmin(admin.ModelAdmin):
         ),
         (
             "Pricing Information",
-            {"fields": ("package_cost", "unit_cost", "average_lead_time")},
+            {
+                "fields": (
+                    "package_cost",
+                    "unit_cost",
+                    "average_lead_time",
+                    "average_lead_time_source",
+                )
+            },
         ),
         (
             "API & History",

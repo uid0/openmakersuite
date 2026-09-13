@@ -110,8 +110,9 @@ record already held whenever a client posts a partial (or empty) body — and th
 web app posts no body at all on several of these actions. Gate the write on
 `if "field" in request.data`, and where the service needs to tell "unsupplied"
 from "explicitly cleared" give it an `UNCHANGED` sentinel default rather than
-`None` (`reorder_queue.services.purchase_orders.confirm_order`). The convention
-is stated in `ReorderRequestViewSet.mark_ordered`'s docstring and pinned by
+`None` (`reorder_queue.services.purchase_orders.confirm_order`). The sentinel's
+reason is the comment on `purchase_orders.UNCHANGED`; the omitted-field gate is
+stated in `ReorderRequestViewSet.mark_ordered`'s docstring; both are pinned by
 `reorder_queue/tests/test_po_confirm_preserves_expected_delivery_date.py`.
 
 ### Which supplier an item is bought from: one derivation, orderable only
@@ -261,32 +262,13 @@ boundary between the server's state and the words shown in the web app.
 ### Which supplier's wait the reorder point allows for (op-3vqk)
 
 `component_forecast.lead_times_for` is the ONE lead-time resolver, feeding the
-serialized forecast's `reorder_point` and — through `inventory.tasks
-.generate_demand_forecasts` — the stored demand forecast's `needs_reorder`
-threshold and so the nightly digest. The rule, in one sentence: **the reorder
-point must be computed from the lead time of the supplier we would actually buy
-from; and an item with no orderable supplier must still appear on the forecast,
-with its lead time honestly attributed.**
-
-Before this, two resolutions ignored who we buy from: the observed mean averaged
-`LeadTimeLog` across ALL of an item's links, and the estimated fallback took the
-flagged-primary link's `average_lead_time` — or, with nothing flagged, whichever
-row the planner returned first, since the query ordered by `-is_primary` and
-nothing else. An item with a flagged 30-day primary could therefore be costed at
-a 7-day rival's wait, understating its reorder point roughly fourfold and sitting
-below its true trigger unflagged; and the same shape could resolve two ways in
-one request.
-
-It returns a `LeadTime(days, basis)`, and the basis is three-valued because these
-are three facts, not two:
-
-- `orderable_supplier` — the link `select_suppliers_for` picked. The only basis on
-  which `reorder_point` is a horizon anyone can order against.
-- `unorderable_supplier` — links exist, every one inactive or discontinued. The
-  number is REAL and the row keeps its full lead component and its flag; the
-  vendor behind it just cannot be bought from.
-- `no_supplier` — no link, so nothing on record. The only basis where
-  `lead_time_known` is false.
+serialized forecast's `reorder_point` and — through
+`inventory.tasks.generate_demand_forecasts` — the stored demand forecast's
+`needs_reorder` threshold and so the nightly digest. The rule sentence is in
+`inventory/tests/test_forecast_lead_time_source.py`'s module docstring; the
+history it replaced, the three-valued `LeadTime.basis` and why the unorderable
+branch is not filtered away are in `lead_times_for`'s docstring and the
+`LEAD_TIME_*` constants beside it. Read them there.
 
 **One alert clears, and it is a STATED EXCEPTION to the "nothing leaves"
 invariant — do not "fix" it back.** Correcting whose wait the threshold uses
@@ -323,49 +305,27 @@ anywhere that it is; adding the column and a reader is filed as follow-up
 
 ### A lead-time lateness must name the promise it scores
 
-`LeadTimeLog` carries TWO promises and only one is scored. `variance_days`,
-`was_late` and every rate derived from them measure the lead time the supplier
-QUOTED WHEN THE ORDER WAS SENT; `expected_delivery_date` is the separately
-confirmed order date and nothing scores it. That is deliberate — the model
-docstring carries the reasoning, and
-`test_variance_scores_the_standing_quote_not_the_confirmed_date` pins it. Do not
-reopen it.
+`LeadTimeLog` carries TWO promises and only one is scored: the lead time the
+supplier QUOTED WHEN THE ORDER WAS SENT, not the confirmed
+`expected_delivery_date`. That is deliberate; do not reopen it. The owners:
 
-**As of the ORDER, not as of now.** `ItemSupplier.average_lead_time` is a live
-column — operators edit it and `inventory.tasks.update_average_lead_times`
-rewrites it on a schedule — so `mark_sent` freezes it onto each line as
-`PurchaseOrderItem.quoted_lead_time_days` and `create_lead_time_log` grades
-against that copy. Never reach back to the link to judge a delivery that has
-already happened: requoting a vendor must change what the NEXT order is judged
-against and nothing that is already in. Orders sent before that column existed
-carry no snapshot and were NOT back-filled, for the reason the read-only report
-below gives in general terms — a promise nobody recorded cannot be recovered —
-so they fall back to the live quote and say so on
-`LeadTimeLog.estimated_lead_time_basis`.
-
-The consequence for anything you build: a row can read `+7, was_late` having
-arrived on the day the operator agreed, so **no screen, payload or export may
-show one of those numbers without naming the yardstick**, and per-row surfaces
-show `met_confirmed_date` beside it. Take the words from
-`LeadTimeLog.VARIANCE_YARDSTICK{,_LABEL}` rather than writing your own, and note
-`met_confirmed_date` is tri-state — `None` where the order confirmed no date,
-because this row's own `expected_delivery_date` falls back to the quote and is
-then not an agreed date at all. `reorder_queue/tests/test_lead_time_yardstick_is_named.py`
-pins every surface and fails if a new one renders a bare "N days late".
+- which promise is scored and why, and the display rule — no screen, payload or
+  export shows `variance_days`, `was_late` or a derived rate without naming
+  `LeadTimeLog.VARIANCE_YARDSTICK{,_LABEL}`: the `LeadTimeLog` docstring;
+- grading as of the ORDER (the quote frozen by `mark_sent`) and the older
+  orders deliberately not back-filled: the comment on
+  `PurchaseOrderItem.quoted_lead_time_days` and `receiving.create_lead_time_log`;
+- `met_confirmed_date` being tri-state: `LeadTimeLog.met_confirmed_date`;
+- the surfaces held to it: `reorder_queue/tests/test_lead_time_yardstick_is_named.py`,
+  which pins today's surfaces — a new surface must be added to it.
 
 Naming the yardstick means naming it in the KEY, not only in the label a person
-reads: a consumer decoding `on_time_rate` or `was_late` asserts a bare lateness
-however the screen is worded. Two contracts were therefore RENAMED, which is a
-breaking change for any client outside this repo:
+reads, so two contracts were RENAMED — a breaking change for any client outside
+this repo:
 
-`GET /api/inventory/suppliers/<id>/` and `/analytics/`, in the
-`lead_time_analytics` block served identically by both:
-
-| was | is |
-| --- | --- |
-| `on_time_percentage` | `within_quoted_lead_time_pct` |
-| `average_variance` | `avg_variance_vs_quoted_lead_time_days` |
-| `recent_logs[].was_late` | `was_over_quoted_lead_time` |
+`GET /api/inventory/suppliers/<id>/` and `/analytics/`, the `lead_time_analytics`
+block: the old and new key names are in
+`SupplierDetailSerializer.get_lead_time_analytics`'s docstring.
 
 `GET /api/reorders/reports/purchasing/export/?type=lead_time_analysis`, in the
 CSV header row (machine keys, matching the export's three untouched siblings) —
@@ -387,11 +347,9 @@ were deliberately NOT renamed and must not be; they carry
 supplier endpoints and does not read the CSV, which is what made those two
 renameable.
 
-A rate or average of exactly `0` is an ANSWER, not an absence — a vendor that
-hit its quote on every order averages a variance of `0.0`, and a counter-pickup
-supplier averages a `0`-day lead time. Guard these with `is not None`, never
-truthiness, or the payload reports a perfect record as "N/A" beside a sibling
-card reading 100%. See also the alert-suppression class below.
+A rate or average of exactly `0` is an ANSWER, not an absence; guard with
+`is not None`, never truthiness — the comment in `get_lead_time_analytics` owns
+the case. See also the alert-suppression class below.
 
 ### The alert-suppression class: CLOSED (op-c1ke)
 
@@ -465,8 +423,9 @@ two member-facing pages; that is why the consumer set is DERIVED, not recalled.
 `oms-falsy-zero-money-guards`. See "What a price costs" below. The supplier
 scoring's own falsy guards — a `unit_cost` of 0 and an `average_lead_time` of 0
 both read as "unknown" — were reserved to the captain and are now CLOSED too
-(`oms-supplier-scoring-weight-flaws`; `test_supplier_scoring.py` pins the new
-behaviour, and `receiving.create_lead_time_log`'s `average_lead_time or 14`, the
+(`oms-supplier-scoring-weight-flaws`; the docstrings of
+`supplier_selection.cost_factor` / `lead_time_factor` own the rule,
+`test_supplier_scoring.py` pins the new behaviour, and `receiving.create_lead_time_log`'s `average_lead_time or 14`, the
 guard that wrote a fortnight into a same-day vendor's delivery record, went with
 them). `get_expected_delivery_date`'s
 `and self.average_lead_time` — where a KNOWN zero-day lead time yields no date —
@@ -560,16 +519,8 @@ What is worth knowing before you open it:
   purchasing asset X"); the inventory branch was the odd one out. Both messages
   name the two remedies (send `unit_cost`, or price the supplier link), and the
   web form blocks first so the operator is told before the 400.
-- **The supplier scoring's half of this is now CLOSED.**
-  `score_candidate`'s `if link.unit_cost and average_unit_cost` was the same
-  mistake — a free supplier could never win on price while its `0.00` still
-  dragged the yardstick. It was captain-reserved, because repairing it changes
-  which supplier the system picks, and the captain has since decided it: the
-  cost term reads through `pricing.unit_price_of`, so a `0.00` is the known
-  price it is, and `test_a_free_supplier_is_priced_at_zero_and_wins_on_it` pins
-  the outcome. Shipped as `oms-supplier-scoring-weight-flaws` — see the
-  supplier-selection note in the falsy-zero section above for the rest of what
-  that branch settled.
+- **The supplier scoring's half of this is CLOSED** — stated once, under "The
+  MONEY half of the class" in the alert-suppression section above.
 
 `inventory/tests/test_price_single_owner.py` is the build gate, the twin of the
 pack-size one: it walks every non-test module under `backend/` with the AST and
@@ -795,13 +746,11 @@ branch's own evidence is in
 What follows is only what a future session needs and cannot derive.
 
 `inventory.services.vendor_visibility` is the ONE answer to "may this caller see
-vendor data". It is the sibling of `supplier_selection` and `pack_size` and the
-same discipline: it decides WHO is asking; each serializer decides WHICH of its
-own keys are vendor facts, in its `VENDOR_ONLY_FIELDS`. It FAILS CLOSED, so a
-serializer built without `context` restricts rather than discloses — which means
-a view that hand-builds one MUST pass `self.get_serializer_context()`, and one
-that forgets silently withholds vendor data from a signed-in operator. That trap
-is live: `_annotate_metrics` was a `@staticmethod` and had to stop being one.
+vendor data"; its module docstring owns the rule (WHO is asking, never WHICH
+keys; fails closed). The consequence at call sites: a view that hand-builds a
+serializer MUST pass `self.get_serializer_context()`, or it silently withholds
+vendor data from a signed-in operator — `_annotate_metrics` was a
+`@staticmethod` and had to stop being one.
 
 Two shapes, and which a route gets is not a style choice: an endpoint whose
 every row IS vendor data is CLOSED OUTRIGHT; an endpoint the anonymous QR-scan
@@ -843,26 +792,13 @@ how a screen was once reported anonymously readable when it was not. The matrix
 resolves what is ENFORCED now and is evidence again, but confirm anything
 load-bearing with a request.
 
-**A `FileField` URL is answered by nginx, not Django.** No `permission_classes`
-change reaches `/media/`. `config.protected_media.VENDOR_MEDIA_PREFIXES` owns
-the list of prefixes that hold vendor paperwork; nginx gates each with
-`auth_request`, and the same list is enforced in Python for every deployment
-without nginx in front. That Python view is registered unconditionally, not
-under `if settings.DEBUG` — a rule that exists only in development is how the
-dev server and production came to disagree about who may read an invoice.
-
-**THE UNIT OF THAT DERIVATION IS AN UPLOAD FIELD, NOT A URL PREFIX**, and this
-is the part worth carrying forward. Answering "which prefixes have I already
-seen?" stops early; asking "where can a vendor document be STORED?" over every
-`upload_to` under `backend/` reaches the callable-valued fields a string-literal
-sweep cannot see and the roots fed by inbound mail, whose contents are whatever
-a vendor emailed in and cannot be narrowed by argument. Per this file's own
-"when a hand sweep misses TWICE, build the gate" rule, the classification is
-enforced rather than remembered:
-`backend/config/tests/test_upload_field_classification.py` walks the tree with
-the AST and fails on any `upload_to` that is neither gated nor carried in its
-`OPEN_PREFIXES` with a written reason. Add an upload field and that test tells
-you to classify it.
+**A `FileField` URL is answered by nginx, not Django**, so no
+`permission_classes` change reaches `/media/`. `config/protected_media.py`'s
+module docstring owns the gated prefixes, the nginx/Python split and why
+`serve_media` is registered unconditionally.
+`backend/config/tests/test_upload_field_classification.py` fails on any
+unclassified `upload_to`; its docstring owns why the unit is an upload field,
+not a URL prefix.
 
 **A CHECK THAT CANNOT FAIL IS WORSE THAN NO CHECK**, because it reads as
 evidence. Three shapes recur: checks that ASSERT NOTHING (a remedy present in a
@@ -931,228 +867,101 @@ Two consequences worth keeping in mind when touching this path:
 
 ### A status transition owes a SET of facts, and every path owes all of it
 
-A transition is never just `status=`. It carries a moment, sometimes an actor,
-often linked records and an audit row. The failure mode is not forgetting the
-set — it is writing the set out by hand at a SECOND call site, which then joins
-it incompletely. Two live examples, both found this way and both fixed:
+A transition is never just `status=`: it carries a moment, sometimes an actor,
+linked records and an audit row, and the failure mode is writing that set out
+by hand at a SECOND call site, which joins it incompletely. The rules live on
+the code that applies them — read them there:
 
-- `reorder_queue.admin.mark_as_sent` set `status`/`sent_by` with
-  `queryset.update()` beside `services.mark_sent`. No `sent_at`, so
-  `services.receiving.create_lead_time_log` returned early and a delivery
-  against that order wrote NO `LeadTimeLog` — in the table
-  `inventory.services.supplier_selection` scores suppliers from. It also skipped
-  the reorder-request sweep and the `po_send` audit row.
-- `inventory.admin.mark_closed` set `status` alone where all three other routes
-  to `resolved`/`closed` stamp `resolved_at`/`resolved_by`.
+- the purchase-order send, its audit-row exception to the #883 split and its
+  one `transaction.atomic()`: `reorder_queue/services/purchase_orders.py`'s
+  module docstring and `mark_sent`; the admin bug that motivated it:
+  `PurchaseOrderAdmin.mark_as_sent`; the COUNT-not-`.exists()` pin:
+  `reorder_queue/tests/test_admin_status_transitions.py`;
+- stamping a problem report from the SOURCE state, the `or not resolved_at`
+  arm and every writer that calls it: `inventory/services/problem_settlement.py`;
+  `mark_closed`'s deliberately unfiltered population: `AssetProblemAdmin._settle`
+  and `mark_closed` in `inventory/admin.py`;
+- the damage signatures, the order count being a floor, why nothing can be
+  back-filled, and why the remaining doors are stated as a boundary rather than
+  listed: `reorder_queue/management/commands/report_unstamped_transitions.py`'s
+  module docstring (the open routing decision is
+  [issue 1053](https://github.com/uid0/openmakersuite/issues/1053)).
 
-The rules that follow:
+What no single owner carries, and applies to any new transition:
 
-- **The service function owns the transition; admin actions call it.** N queries
-  for a checkbox selection is what the record costs. `services.mark_sent`,
-  `services.confirm_order`, `services.reorder_requests.approve_request` /
-  `cancel_request` and `inventory.services.problem_settlement.settle_problem`
-  are the definitions. The last one is the worked example of why an admin
-  helper is not far enough: while the rule lived in `AssetProblemAdmin._settle`
-  the admin was correct and both API resolve routes still carried their own
-  stale copy, so the same report settled differently depending on which button
-  reached it. A rule with more than one writer belongs in `services/`.
-- **A transition with more than one performer owns its audit row too**, hence
-  `mark_sent` recording `po_send` itself — the one documented exception to the
-  #883 split (views keep their own `record_audit_event` calls). Pin it with a
-  COUNT, not `.exists()`, or the caller's copy can come back unnoticed.
-- **`queryset.update()` never moves an `auto_now` `updated_at`.** That alone
-  makes a bulk status action show a stale "Updated" on the admin and in ScanTTY.
-  Reach for `.update()` only where you can say what you are bypassing;
-  `services.purchase_orders.void_po` is the example that can.
-- **Preserve each action's population when you convert it.** `mark_closed` is
-  deliberately unfiltered — narrowing it removes an operator's ability to file
-  away a resolved report.
-- **The set is one unit of work.** `services.mark_sent` writes the order, the
-  linked requests and the audit row inside a single `transaction.atomic()`: a
-  fact-set that is only true whole must not be able to commit half of itself,
-  or a failed send leaves exactly the incomplete transition the set exists to
-  prevent. A caller that transitions several rows gets one unit per row.
-- **Derive a stamp's condition from what the column MEANS, and the meaning is
-  usually about the SOURCE state.** `resolved_at`/`resolved_by` record when a
-  report ENTERED settlement, so `settle_problem`'s one predicate is
-  `problem.status not in {resolved, closed} and new_status in {resolved,
-  closed}` — read before the new status is assigned. Two earlier drafts of this
-  rule keyed on the TARGET and each bought one bug: "closing preserves" left a
-  months-old stamp on a report reopened after a recurrence, and "resolving
-  restamps" then wiped the first resolver when an already-resolved report was
-  resolved again (no API route has a status precondition, so a stale detail
-  page reaches it). One arm is deliberate on top of that: `or not resolved_at`
-  fills a settled row that carries no stamp at all, because filling a gap left
-  by the pre-fix bulk write is not overwriting anybody. Every writer calls the
-  one function — both `AssetProblem` API routes, `LocationProblemViewSet`,
-  the admin actions, and `resolve_problems_for_work_order`. Do not re-derive
-  either half at a call site; the sibling `LocationProblem` route kept its own
-  copy one commit longer than the rest and that is exactly where the stale
-  stamp survived.
-
-`reorder_queue/management/commands/report_unstamped_transitions.py` names the
-rows written before the fix. **Key such a report on the DAMAGE SIGNATURE, not
-on the status the row sits at today** — a damaged row keeps moving (an approved
-request bulk-written without `reviewed_at` is carried on to `ordered` and
-`received` by paths that never touch the review columns), and a report that
-under-counts the population it exists to size is worse than none, because a
-small number reads as reassurance. The output names each signature it used, so
-a count can never be read as covering something narrower. Where a signature
-CANNOT be made status-independent — a cancelled purchase order's null `sent_at`
-is indistinguishable from a truthful one, so those rows stay out — say so on
-the line beside the number and call the count a floor. An honest floor is
-usable; a total that quietly is not one is not. It is permanently read-only, and the reason is the
-general one: **a moment nobody recorded cannot be recovered from a moment nobody
-recorded.** `order_date` is a different, editable fact and `updated_at` has been
-overwritten; back-filling either into `LeadTimeLog` would put invented numbers
-into the column that chooses suppliers, which is worse than the honest gap
-(`DeliveryRecord.factor` already returns 1 for "no history" on purpose).
-
-**A report keyed on a signature is not a report on a closed historical set**,
-and must not read as one. What HAS closed is the send **transitions**: every
-path that ENTERS an order into the supplier's hands goes through
-`services.mark_sent`, which stamps — see "Sending a purchase order" below. **Nothing else is.** `status`,
-`sent_at` and `sent_by` are writable on the API and editable on the admin
-change form, so ANY write that leaves an order in a sent-onward status with a
-null `sent_at` lands this signature, whether it moves the status or clears the
-stamp — as does a direct database edit, which no application code can close.
-
-**State that as a boundary, never as a list of doors.** Three successive
-drafts enumerated the remaining routes and each was short by one, because they
-are the complement of a small closed set rather than a set anybody can finish
-writing down; a list that is short in the reassuring direction is exactly the
-kind of reassurance that stops somebody looking. The boundary needs no
-maintenance when a fifth door turns up. Whether to route those writes or narrow
-the fields is the open product decision, filed with the traces as
-[issue 1053](https://github.com/uid0/openmakersuite/issues/1053).
+- **A rule with more than one writer belongs in `services/`, not in an admin
+  helper.** While the settlement rule lived in `AssetProblemAdmin._settle` the
+  admin was right and both API resolve routes kept stale copies. The current
+  definitions: `services.mark_sent`, `services.confirm_order`,
+  `services.reorder_requests.approve_request` / `cancel_request` and
+  `inventory.services.problem_settlement.settle_problem`.
+- **`queryset.update()` never moves an `auto_now` `updated_at`**; reach for it
+  only where you can say what you are bypassing.
+- **A report that under-counts the population it sizes is worse than none**,
+  because a small number reads as reassurance: call a count a floor on the line
+  beside it, and state an open set as a boundary, never as a list of doors — a
+  list short in the reassuring direction stops somebody looking.
 
 ### Sending a purchase order: the rule, and where it is enforced
 
 **A purchase order must carry at least one line before it may be marked sent,
-and the send records the moment.** Both halves at every path, because a rule
-enforced on one route is a rule the other routes disagree with.
+and the send records the moment**, on every path. The owners:
 
-`services.purchase_orders.send_refusal` is THE rule — one function, three
-readers: the guard inside `mark_sent`, the refusal in
-`PurchaseOrderViewSet.perform_update`, and `send_blocked_reason` on the order
-serializer. It answers the CONTENT question only (`has_active_items`) and says
-nothing about `status`: the DRAFT precondition differs per path and stays with
-each caller, and folding it in would make `send_blocked_reason` answer "it is
-already sent" to a screen that is not asking.
+- the rule, its three readers and why it says nothing about `status`:
+  `services.purchase_orders.send_refusal`;
+- the five send paths and where a sixth is pinned:
+  `reorder_queue/tests/test_send_requires_lines.py`'s module docstring and
+  `test_every_send_path_stamps_the_whole_transition`;
+- `PATCH {"status": "sent"}` popped out of `save()` and routed through the
+  service: `PurchaseOrderViewSet.perform_update`;
+- the admin change form deferring the send to `save_related`:
+  `PurchaseOrderAdmin.save_model` / `save_related`;
+- only an ENTRY into "the supplier has it" is a send:
+  `PurchaseOrder.SENT_ONWARD_STATUSES`;
+- why the refusal is an `APIException` sentence, not a field map or a
+  hand-built `{"error": ...}`: `SendRefusedError` in `reorder_queue/views.py`;
+- `send_blocked_reason`, served so no client keeps its own copy:
+  `get_send_blocked_reason` on the order serializer — `PurchaseOrderPage`
+  disables the button and prints that sentence rather than counting lines;
+- the report's second signature (sent with no line rows) and why all-voided
+  orders are excluded: `report_unstamped_transitions`.
 
-FIVE paths reach `services.mark_sent`, and a sixth joins the list in
-`test_every_send_path_stamps_the_whole_transition`, which is parametrised over
-all of them: the API send action, `PATCH {"status": "sent"}`, the
-sales-order-number auto-send (oms-qdxss), the admin changelist action, and the
-admin CHANGE FORM. The last two were the ones nobody expects.
-
-- **`PATCH {"status": "sent"}` was the open one.** `status` is still WRITABLE —
-  the endpoint was NOT narrowed, unlike the sibling `ReorderRequestSerializer`
-  (op-xj1i), because there the PATCH went round a *permission* gate and here it
-  goes round a *transition*. `perform_update` pops `status` out of the fields
-  `save()` writes and calls the service, so the endpoint keeps its contract and
-  the transition keeps its fact set. A PATCH to any other status is untouched —
-  deliberately, and **what the send rule covers is the transition to `sent`,
-  not the `sent_at` column**. Any write that leaves an order sent-onward with a
-  null `sent_at` still costs the delivery its `LeadTimeLog`, and neither the
-  API nor the admin change form guards that. Do not try to list the ways in:
-  each status has its own service function with its own preconditions
-  (`confirm_order` requires SENT; the receiving statuses are DERIVED by
-  `receiving.refresh_receipt_status`), so routing them, or narrowing the
-  fields, is its own product decision — filed with the traces as
-  [issue 1053](https://github.com/uid0/openmakersuite/issues/1053), not folded
-  in here.
-- **The admin change form** edits `status`/`sent_at`/`sent_by` directly. Its
-  send is DEFERRED from `save_model` to `save_related`, because whether the
-  order may be sent depends on lines the inline formset has not saved yet —
-  refusing in `save_model` would tell an operator adding a line and sending in
-  one save that the order has none, which would be false. `mark_sent(at=...)`
-  honours a `sent_at` the operator typed; backdating is why that field is
-  editable.
-- **Only an ENTRY into "the supplier has it" is a send.**
-  `PurchaseOrder.SENT_ONWARD_STATUSES` is the ONE definition, read by the API
-  routing and by `report_unstamped_transitions`. Re-asserting a status a row
-  already holds is a filing change and must never re-stamp the moment — the
-  same source-state predicate `problem_settlement.settle_problem` uses.
-- **The refusal is a sentence, and it reaches the operator.** `send_to_supplier`
-  answers through `config.api_errors.error_response`, and the update path raises
-  an `APIException` rather than a serializer `ValidationError`: a field map
-  lands in `error.details` while `error.message` — the string the web toast and
-  ScanTTY's `APIError.Error()` display — falls back to the generic "One or more
-  fields failed validation.". A hand-built `{"error": "<prose>"}` is worse
-  still: ScanTTY's `parseError` cannot decode it and shows the raw body.
-- **The screen that offers the send explains the refusal before the click.**
-  `send_blocked_reason` is served like `can_receive` / `can_delete_items` so no
-  client keeps its own copy; `PurchaseOrderPage` disables the button and prints
-  the server's sentence, rather than counting lines itself.
-
-`report_unstamped_transitions` reports the rows written before all this, under
-two signatures: sent with no `sent_at`, and sent with **no line-item rows at
-all**. An order whose lines are all VOIDED is deliberately in neither — striking
-every line off an order that already went out is the oms-a8o workflow, not
-damage. Nothing is recoverable in either population, and the reasons differ: a
-moment nobody recorded cannot be reconstructed, and a pre-send line delete
-leaves no reason, no ghost and no audit row, so what a line-less order was for
-is gone too.
+`status`, `sent_at` and `sent_by` stay writable on the order endpoint and
+editable on the admin change form. The endpoint was not narrowed — unlike the
+sibling `ReorderRequestSerializer` (op-xj1i), where the PATCH went round a
+*permission* gate rather than a *transition*. The send rule covers the transition to `sent`,
+not the `sent_at` column; routing the other statuses is its own decision because
+each has its own service and preconditions (`confirm_order` requires SENT; the
+receiving statuses are derived by `receiving.refresh_receipt_status`) — filed as
+[issue 1053](https://github.com/uid0/openmakersuite/issues/1053).
 
 ### The pre-send boundary: when a PO is still the shop's own document
 
 `PurchaseOrder.PRE_SUPPLIER_STATUSES` is the ONE definition of "the supplier has
-not seen this order", and it sits beside `RECEIVABLE_STATUSES` /
-`IN_RECEIVING_STATUSES` on the model. Both line-set guards read it —
-`services.line_entry.assert_addable` and `assert_deletable` — and the API serves
-the answer rather than making clients derive it: `can_delete_items` on the order
-serializer (beside `can_receive`, same discipline) and `can_add_items` on the
-item-lookup payload. Gate on the set; never compare to `Status.DRAFT` by name,
-or a second pre-send state becomes a hunt through the comparisons.
+not seen this order"; gate on it, never on `Status.DRAFT` by name. The rules
+live on the code that applies them — read them there, do not restate them here:
 
-It is what separates the two line-removal verbs, which are NOT variants of each
-other: while the order is pre-send a mistaken line is a typo and is DELETED
-outright (no reason, irreversible, no ghost); once the supplier holds a copy it
-can only be VOIDED (reason required, struck off, kept on the record). The web
-page offers exactly one of the two, chosen off `can_delete_items`.
+- the boundary, its readers and why the terminal statuses are outside it: the
+  comment on `PurchaseOrder.PRE_SUPPLIER_STATUSES` in `reorder_queue/models.py`;
+- delete (pre-send) versus void (after), the two refusal reasons and why the
+  split is never keyed on `sent_at` alone: `services.line_entry.assert_deletable`
+  (and its mirror `assert_addable`);
+- the refusal of a line carrying `quantity_received > 0`:
+  `PurchaseOrderViewSet._destroy_item`'s docstring;
+- the web offering exactly one of the two verbs: `get_can_delete_items` on the
+  order serializer.
 
-The delete path REFUSES a line carrying `quantity_received > 0`, with a 400 and
-a message naming the recorded quantity. `DRAFT` is initial-only — nothing in
-the codebase writes an order back to it — so that branch should be unreachable,
-and it is kept anyway: an impossibility argument is only true while every
-future change re-verifies it, whereas a guard holds without anyone re-verifying
-anything, and what it protects against is destroying goods a receipt says
-arrived. Prefer the guard to the argument wherever the argument is about what
-some other part of the codebase will never do.
-
-Outside the pre-send set sit two different reasons, and `assert_deletable` says
-whichever is true: "the supplier already has this line, void it instead" and
-"this order is closed and never went out, start a new one". The split is derived
-from the two frozensets — the closed case is *outside `PRE_SUPPLIER_STATUSES`
-and outside `IN_RECEIVING_STATUSES`*, i.e. the terminal statuses, never a typed
-list of labels — with `sent_at` read only as corroboration. Do NOT key such a
-split on `sent_at` alone: rows the pre-fix `PurchaseOrderAdmin.mark_as_sent`
-sent without a stamp are still in the table, so an order can be live with its
-supplier and hold no stamp. (`status`/`sent_at`/`sent_by` remain editable on
-the admin change form and writable on `PurchaseOrderSerializer`; writing
-`status` no longer bypasses the transition — see "Sending a purchase order" —
-but that closes no historical row and no direct database edit.) A refusal is only
-legitimate when the operator can act on it, and a refusal that misstates why is
-worse than a bare one. (The admin action itself now goes through
-`services.mark_sent` and stamps the whole set — see "A status transition owes a
-SET of facts" above, which owns that rule and the read-only report on the rows
-written before it.)
+The general lesson from the `quantity_received` refusal travels: prefer a guard to an
+argument wherever the argument is about what some other part of the codebase
+will never do.
 
 ### Two kinds of empty purchase order, and when emptiness hides one
 
-The LIST action hides an order **emptied by voiding** that is outside
-`PurchaseOrder.PRE_SUPPLIER_STATUSES`, and nothing else. An order with **no
-line items at all** is listed in every status.
-
-No status NAME appears in the condition: the pre-send clause reads the
-`PRE_SUPPLIER_STATUSES` frozenset, the same one `assert_addable` /
-`assert_deletable` / `get_can_delete_items` read, so a second pre-send status
-is one edit to that frozenset and none of it is here.
-
-`PurchaseOrderViewSet.get_queryset` owns the derivation;
-`reorder_queue/tests/test_po_list_emptiness.py` owns the behaviour, crossing
-status × line-population rather than enumerating cases in prose.
+The LIST action hides only an order emptied by voiding after it left the shop;
+an order with no line items at all is listed in every status. The rule and its
+reasoning are the comment on the list filter in
+`PurchaseOrderViewSet.get_queryset`; `reorder_queue/tests/test_po_list_emptiness.py`
+owns the behaviour.
 
 Two related questions are known and filed separately: the `VOIDED`-order
 display inconsistency on staff's list, and `void_item` carrying no status gate.
@@ -1179,16 +988,12 @@ declared model derivation or named refresh; do not widen the guard. Behavioral
 coverage lives in `reorder_queue/tests/test_derived_order_values.py`, and the
 guard's contract is pinned by `reorder_queue/tests/test_settlement_sites.py`.
 
-**A custom `QuerySet` method can become a `Manager` method by accident.**
-`BaseManager._get_queryset_methods` copies every public queryset method onto the
-manager EXCEPT those marked `queryset_only`, and that marker does not survive an
-override. `PurchaseOrderItemQuerySet.delete` shipped without re-setting it,
-which made `PurchaseOrderItem.objects.delete()` a real, callable method that
-takes no filter and empties the table. Any override of a method Django withholds
-needs `<name>.queryset_only = True` after its `def`, the way `QuerySet`'s own
-does. Enforced across every model in the repo — the check derives the withheld
-set from `QuerySet` and `Manager` rather than naming `delete`, so a second
-queryset class in any app is already covered.
+**A custom `QuerySet` method can become a `Manager` method by accident** — an
+override of a method Django withholds must re-set `queryset_only = True`. The
+mechanism is the comment on `LineDeleteCoalescingQuerySet.delete` in
+`reorder_queue/models.py`; the repo-wide check is
+`TestNoQuerySetOverrideLeaksOntoItsManager` in
+`reorder_queue/tests/test_settlement_sites.py`.
 
 ### Which stock-changing actions owe an audit row (op-scan-audit)
 
@@ -1231,14 +1036,9 @@ captured none" and "this path captures none" — the same conflation of *found
 nothing* with *could not tell* that the missing row itself was. Anything else
 this path cannot report the way the desk does belongs behind that marker too.
 
-`is_damaged` / `is_expired` are the second members of that set. The scanner asks
-the operator about condition; the desk never does. So a scan row carries both
-keys ALWAYS (`false` is the operator answering "sound") and a desk row carries
-NEITHER — defaulting `false` onto a desk row would claim an answer nobody was
-asked for, which is the same *found nothing* / *could not tell* conflation
-again. Read the flag ONCE into a local shared by the `DeliveryItem` and the
-audit row: two independent reads of the same request field is how a trail
-drifts from the record it describes.
+`is_damaged` / `is_expired` are the second members of that set — always on a
+scan row, never on a desk row, each read once; `scan_barcode`'s docstring and
+the comments at those reads own why.
 
 **Read the figures AFTER settlement, and write the row inside the receipt's
 transaction.** `quantity_variance` / `receipt_state` describe what THIS receipt

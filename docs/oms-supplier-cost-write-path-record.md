@@ -564,6 +564,13 @@ branch up.
 
 ### Lost-update window on the stored-row read
 
+**CLOSED (2026-09-13) by `backend/inventory/services/link_version.py`.**
+`ItemSupplier.save()` now takes `SELECT ... FOR UPDATE` on the row before
+`stored_pricing` reads it, so no other save of the row can commit between that
+read and the `UPDATE`, and the derivation and `pricing_changed` see the
+committed row. A session that states the version it loaded is refused outright
+once the row has moved on. The record below is kept as written.
+
 `stored_pricing` issues a plain `SELECT` with no `select_for_update()`. Being
 inside `ItemSupplier.save()`'s `transaction.atomic` block makes the write set
 commit or roll back together and gives the derivation and `pricing_changed` a

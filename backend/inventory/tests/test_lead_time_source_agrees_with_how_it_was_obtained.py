@@ -660,3 +660,103 @@ def test_the_source_reaches_the_api_beside_every_stored_value_it_describes(clien
     assert anonymous["vendor_data_withheld"] is True
     assert "average_lead_time" not in anonymous
     assert "average_lead_time_source" not in anonymous
+
+
+# ---------------------------------------------------------------------------
+# A stale copy: refused, never relabelled.
+#
+# This used to be the documented limit of the rule above. The rule compares
+# with the row on disk, so a page that loaded an untouched default 7, saved
+# after someone recorded 12, overwrote the 12 AND labelled its stale 7
+# ``recorded``. Each path that writes back a copy it loaded now states the
+# version it loaded (``inventory.services.link_version``), so that save is
+# refused and the row keeps what the newer write left.
+# ---------------------------------------------------------------------------
+
+
+def stale_echo_via_item_suppliers_patch(client, link, page):
+    response = client.patch(
+        reverse("itemsupplier-detail", args=[link.pk]),
+        {
+            "average_lead_time": page.average_lead_time,
+            "supplier_sku": "STALE",
+            "version": page.version,
+        },
+        format="json",
+    )
+    assert response.status_code == 409
+
+
+def stale_echo_via_kit_supplier_terms(client, link, page):
+    InventoryItem.objects.filter(pk=link.item_id).update(is_kit=True, current_stock=0)
+    response = client.patch(
+        reverse("kit-detail", args=[link.item_id]),
+        {
+            "supplier_terms": {
+                "supplier": link.supplier_id,
+                "supplier_sku": "STALE",
+                "average_lead_time": page.average_lead_time,
+                "version": page.version,
+            }
+        },
+        format="json",
+    )
+    assert response.status_code == 409
+
+
+def stale_echo_via_admin_change_form(client, link, page):
+    form_class = ItemSupplierAdmin(ItemSupplier, AdminSite()).get_form(None, obj=page, change=True)
+    rendered = form_class(instance=page)
+    current = ItemSupplier.objects.get(pk=link.pk)
+    form = form_class(
+        data=_admin_form_data(
+            page.item,
+            page.supplier,
+            _rendered(rendered["average_lead_time"]),
+            supplier_sku="STALE",
+            loaded_version=_rendered(rendered["loaded_version"]),
+        ),
+        instance=current,
+    )
+    assert not form.is_valid()
+
+
+def stale_echo_via_admin_item_inline(client, link, page):
+    row = {
+        "loaded_version": str(page.version),
+        "id": str(page.pk),
+        "supplier": str(page.supplier_id),
+        "supplier_sku": "STALE",
+        "quantity_per_package": "1",
+        "average_lead_time": str(page.average_lead_time),
+        "is_primary": "on",
+        "is_active": "on",
+    }
+    formset = _inline_formset(link.item, [row], initial=1)
+    assert not formset.is_valid()
+
+
+@pytest.mark.parametrize(
+    "stale_echo",
+    [
+        stale_echo_via_item_suppliers_patch,
+        stale_echo_via_kit_supplier_terms,
+        stale_echo_via_admin_change_form,
+        stale_echo_via_admin_item_inline,
+    ],
+    ids=lambda driver: driver.__name__,
+)
+@pytest.mark.parametrize("prior", [("default", 7), ("unknown", 7)], ids=lambda p: f"was-{p[0]}")
+def test_a_stale_echo_is_refused_rather_than_relabelled(client, stale_echo, prior):
+    link = seed_link(InventoryItemFactory(image=None), SupplierFactory(), prior)
+    page = ItemSupplier.objects.get(pk=link.pk)  # the page an operator has open
+
+    newer = client.patch(
+        reverse("itemsupplier-detail", args=[link.pk]), {"average_lead_time": 12}, format="json"
+    )
+    assert newer.status_code == 200
+    assert stored(link.pk) == ("recorded", 12)
+
+    stale_echo(client, link, page)
+
+    assert stored(link.pk) == ("recorded", 12)

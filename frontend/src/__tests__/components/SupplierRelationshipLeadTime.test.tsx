@@ -152,13 +152,18 @@ describe('the lead-time box on an existing row', () => {
 });
 
 /**
- * An edit that leaves the lead-time box alone sends no lead time.
+ * An edit that leaves the lead-time box alone re-sends the loaded number, with
+ * the version it was loaded at.
  *
  * The server keeps a row's lead-time source when a PATCH echoes the stored
- * number (`inventory/services/lead_time_source.py`), but the number this page
- * holds is the one it LOADED. If the measuring task has written a new figure
- * since, echoing the loaded one overwrites the measurement and stores it as a
- * quote nobody gave. Leaving the key out lets the server keep whatever it has.
+ * number (`inventory/services/lead_time_source.py`). The number this page holds
+ * is the one it LOADED, and it can differ from what is stored only when the row
+ * was written after the page loaded it — the measuring task, or another person.
+ * That case used to be dodged by leaving the lead time out (while every other
+ * field was still overwritten). It is now refused for the whole row: the PATCH
+ * carries `version`, and the server answers a stale one with a 409
+ * (`inventory/services/link_version.py`; the refusal is exercised end to end in
+ * `InventoryItemFormPage.suppliers.test.tsx`).
  */
 describe('an edit that does not touch the lead time', () => {
   const loaded = (days: number, source: LeadTimeSource): ItemSupplier => ({
@@ -189,20 +194,31 @@ describe('an edit that does not touch the lead time', () => {
     notes: '',
     created_at: '2026-09-13T00:00:00Z',
     updated_at: '2026-09-13T00:00:00Z',
+    version: 4,
   });
 
   test.each([
     [7, 'default'],
     [12, 'measured'],
     [7, 'unknown'],
-  ] as const)('an SKU-only edit of a %i-day %s lead time sends no lead time', (days, source) => {
-    const saved = loaded(days, source);
-    const edited = { ...relationshipFromSaved(saved), supplier_sku: 'SKU-002' };
+  ] as const)(
+    'an SKU-only edit of a %i-day %s lead time echoes it with the loaded version',
+    (days, source) => {
+      const saved = loaded(days, source);
+      const edited = { ...relationshipFromSaved(saved), supplier_sku: 'SKU-002' };
 
-    const payload = relationshipPayload(edited, undefined, saved);
+      expect(relationshipPayload(edited, undefined, saved)).toMatchObject({
+        supplier_sku: 'SKU-002',
+        average_lead_time: days,
+        version: 4,
+      });
+    }
+  );
 
-    expect(payload.supplier_sku).toBe('SKU-002');
-    expect('average_lead_time' in payload).toBe(false);
+  test('a create carries no version, having loaded nothing', () => {
+    const edited = { ...relationshipFromSaved(loaded(7, 'default')), id: undefined };
+
+    expect('version' in relationshipPayload(edited, 'item-1')).toBe(false);
   });
 
   test.each([

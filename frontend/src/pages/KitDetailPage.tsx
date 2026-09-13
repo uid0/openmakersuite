@@ -21,6 +21,7 @@ import { isAuthenticated } from '../components/RequireAuth';
 import { kitAPI, inventoryAPI } from '../services/api';
 import { Kit, Supplier } from '../types';
 import { alternativeSupplierNamesText, chosenSupplierName } from '../utils/supplierChoice';
+import { isStaleSupplierLink } from '../utils/supplierRelationships';
 import { labelIfWithheld, vendorDataWithheld } from '../utils/vendorVisibility';
 
 /** Pull a field-addressed message out of the API error envelope. */
@@ -66,6 +67,10 @@ const KitDetailPage: React.FC = () => {
   // Scoped mutation state — never a page-level spinner.
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // The save was refused because the supplier link changed on the server after
+  // this page loaded it. Saving again cannot fix that, so a reload is offered.
+  const [staleTerms, setStaleTerms] = useState(false);
+  const [reloading, setReloading] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
 
   /** Fold a server kit into the form. Shared by load and every save. */
@@ -140,6 +145,17 @@ const KitDetailPage: React.FC = () => {
     if (saving || !canSave) return;
     setSaving(true);
     setSaveError(null);
+    setStaleTerms(false);
+
+    // The link these terms land on, as this page loaded it — so a link someone
+    // else has written since is refused (409 `stale_version`) instead of having
+    // its part number overwritten by the one the SKU box was seeded with. None
+    // when this supplier has no link yet: the save creates one, and a create
+    // has nothing it could be stale against.
+    const loadedLink =
+      supplierId === ''
+        ? undefined
+        : (kit?.suppliers ?? []).find((row) => row.supplier === Number(supplierId));
 
     const payload = {
       name: name.trim(),
@@ -155,6 +171,7 @@ const KitDetailPage: React.FC = () => {
               supplier: Number(supplierId),
               supplier_sku: supplierSku,
               unit_cost: unitCost === '' ? null : String(unitCost),
+              ...(loadedLink === undefined ? {} : { version: loadedLink.version }),
             },
           }
         : {}),
@@ -169,9 +186,34 @@ const KitDetailPage: React.FC = () => {
       setSavedAt(new Date().toISOString());
       if (isNew) navigate(`/inventory/kits/${res.data.id}`, { replace: true });
     } catch (err) {
-      setSaveError(readError(err, 'Could not save this kit.'));
+      if (isStaleSupplierLink(err)) {
+        // Nothing was saved — the server rolls the whole kit save back.
+        setStaleTerms(true);
+        setSaveError(
+          'Nothing was saved: someone else changed this supplier’s terms after you loaded the ' +
+            'page, so your copy is out of date. Reload the kit to see the current values, then ' +
+            'make your change again.'
+        );
+      } else {
+        setSaveError(readError(err, 'Could not save this kit.'));
+      }
     } finally {
       setSaving(false);
+    }
+  };
+
+  /** Replace what the page shows with the kit as it is stored now. */
+  const reloadKit = async () => {
+    if (isNew) return;
+    setReloading(true);
+    try {
+      applyKit((await kitAPI.getKit(kitId as string)).data);
+      setStaleTerms(false);
+      setSaveError(null);
+    } catch {
+      setSaveError('Could not reload this kit. Refresh the page to see its current values.');
+    } finally {
+      setReloading(false);
     }
   };
 
@@ -258,6 +300,13 @@ const KitDetailPage: React.FC = () => {
         {saveError && (
           <Alert color="red" data-testid="kit-save-error">
             {saveError}
+            {staleTerms && (
+              <Group mt="sm">
+                <Button size="xs" variant="white" color="red" onClick={reloadKit} loading={reloading}>
+                  Reload kit
+                </Button>
+              </Group>
+            )}
           </Alert>
         )}
         {savedAt && !saveError && (

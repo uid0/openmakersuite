@@ -125,6 +125,7 @@ from .serializers import (
     WorkOrderToolSerializer,
     WorkOrderValidationSerializer,
 )
+from .services.link_version import STALE_VERSION_CODE, StaleSupplierLink
 from .services.pack_size import clean_pack_size
 from .services.packaging import (
     base_reorder_quantity,
@@ -138,7 +139,6 @@ from .services.packaging import (
 from .services.pricing import package_price_of, price_float, unit_price_of
 from .services.problem_auto_resolve import resolve_problems_for_work_order
 from .services.problem_settlement import settle_problem
-from .services.link_version import STALE_VERSION_CODE, StaleSupplierLink
 from .services.supplier_selection import item_suppliers_prefetch
 from .services.work_order_tools import create_work_order_tools
 

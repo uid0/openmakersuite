@@ -91,12 +91,15 @@ STALE_VERSION_CODE = "stale_version"
 class StaleSupplierLink(Exception):
     """A save stated the version it loaded, and the row has moved on since."""
 
-    def __init__(self, item_supplier: "ItemSupplier", sent: int, current: Optional[int]):
-        self.item_supplier_id = item_supplier.pk
+    def __init__(self, item_supplier_id, sent: int, current: Optional[int]):
+        self.item_supplier_id = item_supplier_id
         self.sent = sent
         #: ``None`` when the row has been deleted since it was loaded.
         self.current = current
-        super().__init__(self.message)
+        super().__init__(item_supplier_id, sent, current)
+
+    def __str__(self) -> str:
+        return self.message
 
     @property
     def message(self) -> str:
@@ -143,7 +146,7 @@ def claim_version(item_supplier: "ItemSupplier", update_fields):
         .first()
     )
     if expected is not None and expected != current:
-        raise StaleSupplierLink(item_supplier, expected, current)
+        raise StaleSupplierLink(item_supplier.pk, expected, current)
     if current is None:
         # No row to move on from (a save that will INSERT under an explicit pk).
         return update_fields

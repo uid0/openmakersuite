@@ -210,7 +210,10 @@ export const relationshipFromSaved = (saved: ItemSupplier): SupplierRelationship
  * The offered fields of one row, as the endpoint takes them.
  *
  * `loaded` is the server's copy the row was built from, on an update; a create
- * has none.
+ * has none. An update always carries that copy's `version`, so a row someone
+ * else has written since this page loaded it is refused (a 409
+ * `stale_version`, `inventory/services/link_version.py`) instead of having its
+ * newer values overwritten by the ones on this page.
  */
 export const relationshipPayload = (
   relationship: SupplierRelationship,
@@ -231,19 +234,71 @@ export const relationshipPayload = (
   // default and an update leaves a stored quote alone. Sending `0` instead,
   // which this row used to seed, recorded same-day pickup.
   //
-  // Also omitted where the box still holds the number as loaded: an edit to
-  // the SKU says nothing about the lead time. The server keeps the stored
-  // source when an echoed number equals the stored one
-  // (`inventory/services/lead_time_source.py`), but this page's copy can be
-  // stale — the measuring task may have written 12 (measured) since the page
-  // loaded 7 (default) — and an echoed 7 would then overwrite the measurement
-  // and store it as a quote nobody gave.
-  ...(relationship.average_lead_time === null ||
-  relationship.average_lead_time === loaded?.average_lead_time
+  // A number still equal to the one loaded IS sent. The server keeps the
+  // stored source when an echoed number equals the stored one
+  // (`inventory/services/lead_time_source.py`), and the one way the two could
+  // differ — someone else, or the measuring task, wrote the row after this
+  // page loaded it — is now refused through `version` rather than dodged by
+  // leaving the lead time out while every other field was still overwritten.
+  ...(relationship.average_lead_time === null
     ? {}
     : { average_lead_time: relationship.average_lead_time }),
   is_primary: relationship.is_primary,
+  ...(loaded === undefined ? {} : { version: loaded.version }),
 });
+
+/**
+ * Whether a rejected write was refused because this page's copy is stale.
+ *
+ * The server's documented refusal (`docs/API_ERROR_CONTRACT.md`): a 409 whose
+ * `error.code` is `stale_version`. Recognised by code, not by wording.
+ */
+export const isStaleSupplierLink = (err: unknown): boolean => {
+  const response = (err as { response?: { status?: number; data?: unknown } })?.response;
+  const code = (response?.data as { error?: { code?: unknown } } | undefined)?.error?.code;
+  return response?.status === 409 && code === 'stale_version';
+};
+
+/** The server's sentence for a stale refusal, with this page's own fallback. */
+const staleSupplierLinkMessage = (err: unknown): string => {
+  const message = (err as { response?: { data?: { error?: { message?: unknown } } } })?.response
+    ?.data?.error?.message;
+  return typeof message === 'string' && message.trim() !== ''
+    ? message
+    : 'Someone else changed this supplier after you loaded the page, so your changes to it were ' +
+        'not saved. Your copy is out of date: reload the suppliers to see the current values.';
+};
+
+/**
+ * The server's copies of the rows this page's own promotion has just demoted.
+ *
+ * Saving a row as primary makes the SERVER clear the flag on the item's other
+ * suppliers, and that demotion is a write: it moves each demoted row's version
+ * on. The rows this page loaded as primary therefore no longer hold the version
+ * they were loaded at — not because anyone else touched them, but because this
+ * save did. Left alone, the page's own next write to such a row (the demotion
+ * the editor shows, or an edit alongside it) would be refused as stale.
+ *
+ * A row is adopted from `fresh` only when the ONLY offered field that moved
+ * since it was loaded is the primary flag, now cleared — exactly the demotion
+ * this save caused. Anything else that moved means someone else wrote the row,
+ * and it keeps its loaded version so that write is refused, not overwritten.
+ */
+export const adoptOwnDemotions = (
+  saved: ItemSupplier[],
+  fresh: ItemSupplier[],
+  promotedId: number
+): ItemSupplier[] => {
+  const freshById = new Map(fresh.map((row) => [row.id, row]));
+  return saved.map((row) => {
+    const current = freshById.get(row.id);
+    if (row.id === promotedId || !row.is_primary || current === undefined || current.is_primary) {
+      return row;
+    }
+    const onlyDemoted = !relationshipChanged(relationshipFromSaved({ ...row, is_primary: false }), current);
+    return onlyDemoted ? current : row;
+  });
+};
 
 /**
  * Whether a persisted row differs from the server's copy in any offered field.
@@ -348,14 +403,23 @@ export const supplierFieldErrors = (err: unknown): string | null => {
  * A failed row write, re-thrown as a `detail` payload so the page reports it
  * the same way it reports a backend error — naming the supplier, because the
  * editor can hold several and only one of them failed.
+ *
+ * `stale` marks the one refusal that saving again cannot fix: the row changed
+ * on the server after this page loaded it. The page offers a reload for it and
+ * never retries or overwrites on the operator's behalf.
  */
 export const supplierWriteError = (
   err: unknown,
   relationship: { supplier: number | null; supplier_name?: string },
   index: number,
   suppliers: Supplier[]
-): { detail: string } => ({
-  detail: `${relationshipLabel(relationship, index, suppliers)} — ${
-    supplierFieldErrors(err) ?? extractErrorMessage(err, 'please try again.')
-  }`,
-});
+): { detail: string; stale: boolean } => {
+  const label = relationshipLabel(relationship, index, suppliers);
+  if (isStaleSupplierLink(err)) {
+    return { detail: `${label} — ${staleSupplierLinkMessage(err)}`, stale: true };
+  }
+  return {
+    detail: `${label} — ${supplierFieldErrors(err) ?? extractErrorMessage(err, 'please try again.')}`,
+    stale: false,
+  };
+};

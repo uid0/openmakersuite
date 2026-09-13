@@ -54,15 +54,21 @@ cannot promote a ``default`` or ``unknown`` 7 to ``recorded`` — confirming "th
 supplier really did quote 7" needs a different number or a future explicit
 action. That errs toward saying less than is known, never more.
 
-A concurrent stale save is outside that guarantee. It can overwrite a newer
-lead-time edit — the model's pre-existing lost-update behaviour — and, because
-the authority compares with the row then on disk, can label an untouched stale
-default as ``recorded``. That provenance error is downstream of the same lost
-update and is tracked with optimistic concurrency for the whole write; keeping
-a second per-instance provenance snapshot would add independently drifting
-state without preventing the overwrite. A possible separate follow-up is an
-explicit action to reset an existing supplier to the planning default; blank on
-edit deliberately means unchanged and does not perform that reset.
+A save made from a STALE copy is refused rather than relabelled. The rule
+compares with the row on disk, so a copy loaded before someone else's edit would
+otherwise overwrite that edit and label its untouched stale 7 ``recorded``. The
+cause is the lost update, not the label, and it is closed for the whole row:
+every path that writes back a copy it loaded (the web item form, the kit form,
+the admin) states the version it loaded, and ``ItemSupplier.save()`` refuses it
+under a row lock once the row has moved on — see
+:mod:`inventory.services.link_version`. No per-instance snapshot of the source
+is kept; none is needed. A client that sends no version (ScanTTY, until it
+adopts the token) is still last-write-wins, and what it writes is labelled by
+the same delta as any other save.
+
+A possible separate follow-up is an explicit action to reset an existing
+supplier to the planning default; blank on edit deliberately means unchanged and
+does not perform that reset.
 
 EVERY WRITE PATH, AND HOW IT REACHES THIS
 -----------------------------------------
@@ -80,7 +86,8 @@ Derived from "what can put a number in the column", not from the field name.
 * The Django admin (``ItemSupplierAdmin`` and the item admin's inline) —
   ``ItemSupplierAdminForm``: the box starts blank and a blank box passes the
   instance's own value through, so an untouched add form takes the marked
-  default and an untouched change form writes an echo.
+  default and an untouched change form writes an echo. A change form rendered
+  before the row moved on is refused (its hidden ``loaded_version``).
 * ``inventory.tasks.update_average_lead_times`` -> :func:`measured_lead_time` +
   ``save(update_fields=["average_lead_time"])``; the source column is added to
   ``update_fields`` whenever the value is written.

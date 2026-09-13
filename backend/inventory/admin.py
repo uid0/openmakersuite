@@ -5,8 +5,8 @@ Admin configuration for inventory app.
 import os
 
 from django.contrib import admin, messages
-from django.core.files.base import ContentFile
 from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
 from django.db import transaction
 from django.forms import BaseInlineFormSet, CharField, Form, HiddenInput, IntegerField, ModelForm
 from django.http import HttpResponseRedirect
@@ -229,7 +229,7 @@ class ItemSupplierAdminForm(ModelForm):
             )
         if current != loaded:
             raise ValidationError(
-                StaleSupplierLink(self.instance, loaded, current).message, code="stale_version"
+                StaleSupplierLink(self.instance.pk, loaded, current).message, code="stale_version"
             )
         # ``save()`` checks it again under the same lock — the guarantee for any
         # caller that validates and saves outside one transaction.

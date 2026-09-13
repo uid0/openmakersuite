@@ -126,8 +126,20 @@ const itemSupplier = (overrides: Record<string, unknown> = {}) => ({
   notes: '',
   created_at: '2026-07-01T00:00:00Z',
   updated_at: '2026-07-01T00:00:00Z',
+  version: 1,
   ...overrides,
 });
+
+/** The server's refusal of a write made from a stale copy (`docs/API_ERROR_CONTRACT.md`). */
+const STALE_REFUSAL = {
+  error: {
+    code: 'stale_version',
+    message:
+      'Someone else changed this supplier link after you loaded it, so your changes were not ' +
+      'saved. Your copy is out of date: reload to see the current values, then make your change again.',
+    details: { id: 91, sent_version: 1, current_version: 2 },
+  },
+};
 
 let mock: MockAdapter;
 
@@ -272,32 +284,91 @@ describe('InventoryItemFormPage — supplier relationships', { timeout: 30000 },
     await waitFor(() => expect(supplierWrites('patch')).toHaveLength(1));
     const [request] = supplierWrites('patch');
     expect(request.url).toBe('/inventory/item-suppliers/91/');
-    expect(JSON.parse(request.data as string)).toMatchObject({ supplier_sku: 'ACME-2' });
+    // With the version it was loaded at, so a row changed since is refused.
+    expect(JSON.parse(request.data as string)).toMatchObject({ supplier_sku: 'ACME-2', version: 1 });
   });
 
-  it('promotes a supplier to primary, writing the promotion before the demotion', async () => {
-    mock.onPatch(/\/inventory\/item-suppliers\/9[12]\/$/).reply(200, itemSupplier());
-    renderEdit([
-      itemSupplier(),
-      itemSupplier({ id: 92, supplier: 2, supplier_name: 'Bolt Depot', supplier_sku: 'BD-9', is_primary: false }),
-    ]);
+  describe('promoting a supplier to primary', () => {
+    const acme = itemSupplier();
+    const boltDepot = itemSupplier({
+      id: 92,
+      supplier: 2,
+      supplier_name: 'Bolt Depot',
+      supplier_sku: 'BD-9',
+      is_primary: false,
+    });
+    // What the server holds once the promotion has landed: it demoted Acme
+    // itself, and that demotion moved Acme's version on.
+    const acmeDemoted = { ...acme, is_primary: false, version: 2 };
+    const boltDepotPromoted = { ...boltDepot, is_primary: true, version: 2 };
 
-    await waitFor(() => expect(screen.getByDisplayValue('BD-9')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'Set as Primary' }));
-    save();
+    /** The page loads `[acme, boltDepot]`; every later read answers `afterPromotion`. */
+    const renderPromotion = (afterPromotion: Record<string, unknown>[]) => {
+      mock.onGet(/\/inventory\/item-suppliers\/\?item_id=/).replyOnce(200, { results: [acme, boltDepot] });
+      mock.onPatch('/inventory/item-suppliers/92/').reply(200, boltDepotPromoted);
+      renderEdit(afterPromotion);
+    };
 
-    await waitFor(() => expect(supplierWrites('patch')).toHaveLength(2));
-    const [first, second] = supplierWrites('patch');
-    // The promotion goes first, so the server's own single-primary enforcement
-    // does the demoting: the item has exactly one primary from that request on,
-    // whatever happens to the rest of the save.
-    expect(first.url).toBe('/inventory/item-suppliers/92/');
-    expect(JSON.parse(first.data as string)).toMatchObject({ is_primary: true });
-    expect(second.url).toBe('/inventory/item-suppliers/91/');
-    expect(JSON.parse(second.data as string)).toMatchObject({ is_primary: false });
-    expect(
-      supplierWrites('patch').filter((request) => JSON.parse(request.data as string).is_primary === true)
-    ).toHaveLength(1);
+    it('writes the promotion first and lets the server do the demoting', async () => {
+      renderPromotion([acmeDemoted, boltDepotPromoted]);
+
+      await waitFor(() => expect(screen.getByDisplayValue('BD-9')).toBeInTheDocument());
+      fireEvent.click(screen.getByRole('button', { name: 'Set as Primary' }));
+      save();
+
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalled());
+      // The promotion goes first, so the server's own single-primary enforcement
+      // does the demoting: the item has exactly one primary from that request on,
+      // whatever happens to the rest of the save. Acme's demotion is all that
+      // changed on it, and the server has already made it — so nothing more is
+      // sent, and in particular nothing the server would refuse as stale.
+      expect(supplierWrites('patch').map((request) => request.url)).toEqual([
+        '/inventory/item-suppliers/92/',
+      ]);
+      expect(JSON.parse(supplierWrites('patch')[0].data as string)).toMatchObject({
+        is_primary: true,
+        version: 1,
+      });
+      expect(screen.queryByText(/out of date/)).not.toBeInTheDocument();
+    });
+
+    it('sends an edit to the demoted row with the version the demotion left it at', async () => {
+      mock.onPatch('/inventory/item-suppliers/91/').reply(200, { ...acmeDemoted, supplier_sku: 'ACME-2', version: 3 });
+      renderPromotion([acmeDemoted, boltDepotPromoted]);
+
+      await waitFor(() => expect(screen.getByDisplayValue('BD-9')).toBeInTheDocument());
+      fireEvent.click(screen.getByRole('button', { name: 'Set as Primary' }));
+      fireEvent.change(screen.getByDisplayValue('ACME-1'), { target: { value: 'ACME-2' } });
+      save();
+
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalled());
+      const [promotion, edit] = supplierWrites('patch');
+      expect(promotion.url).toBe('/inventory/item-suppliers/92/');
+      expect(edit.url).toBe('/inventory/item-suppliers/91/');
+      expect(JSON.parse(edit.data as string)).toMatchObject({
+        supplier_sku: 'ACME-2',
+        is_primary: false,
+        version: 2,
+      });
+    });
+
+    it('does not adopt a demoted row someone else also changed, so that write is refused', async () => {
+      // Someone else re-priced Acme after the page loaded; the demotion then moved
+      // its version on again. Adopting the fresh copy would let this page's stale
+      // case price overwrite theirs.
+      const repricedAndDemoted = { ...acmeDemoted, package_cost: '15.00', version: 3 };
+      mock.onPatch('/inventory/item-suppliers/91/').reply(409, STALE_REFUSAL);
+      renderPromotion([repricedAndDemoted, boltDepotPromoted]);
+
+      await waitFor(() => expect(screen.getByDisplayValue('BD-9')).toBeInTheDocument());
+      fireEvent.click(screen.getByRole('button', { name: 'Set as Primary' }));
+      fireEvent.change(screen.getByDisplayValue('ACME-1'), { target: { value: 'ACME-2' } });
+      save();
+
+      await waitFor(() => expect(screen.getByText(/Your copy is out of date/)).toBeInTheDocument());
+      expect(JSON.parse(supplierWrites('patch')[1].data as string)).toMatchObject({ version: 1 });
+      expect(mockNavigate).not.toHaveBeenCalled();
+    });
   });
 
   it('creates a relationship the operator added, against the saved item', async () => {
@@ -373,30 +444,79 @@ describe('InventoryItemFormPage — supplier relationships', { timeout: 30000 },
     expect(supplierWrites('delete')).toHaveLength(0);
   });
 
-  it('keeps a lead time measured since the page loaded when only the SKU is edited', async () => {
-    // The page loaded 7 days (the planning default); the measuring task then
-    // wrote 12 days (measured). With the lead time left out of the PATCH, the
-    // server keeps both and answers with them. Echoing the loaded 7 instead
-    // would have overwritten the measurement and stored it as a quote.
-    const measuredSinceLoad = itemSupplier({
-      supplier_sku: 'ACME-2',
+  describe('a supplier changed by someone else after the page loaded', () => {
+    // The page loaded 7 days (the planning default) at version 1. Someone else
+    // — or the measuring task — has since written 12 days, moving the row to
+    // version 2. This page's copy is out of date.
+    const asLoaded = itemSupplier({ average_lead_time: 7, average_lead_time_source: 'default' });
+    const asStoredNow = itemSupplier({
+      supplier_sku: 'ACME-9',
       average_lead_time: 12,
       average_lead_time_source: 'measured',
+      version: 2,
     });
-    mock.onPatch('/inventory/item-suppliers/91/').reply(200, measuredSinceLoad);
-    renderEdit([itemSupplier({ average_lead_time: 7, average_lead_time_source: 'default' })]);
 
-    await waitFor(() => expect(screen.getByDisplayValue('ACME-1')).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText(/Supplier SKU/), { target: { value: 'ACME-2' } });
-    save();
+    const refuseTheStaleCopy = async () => {
+      mock.onGet(/\/inventory\/item-suppliers\/\?item_id=/).replyOnce(200, { results: [asLoaded] });
+      mock.onPatch('/inventory/item-suppliers/91/').replyOnce(409, STALE_REFUSAL);
+      renderEdit([asStoredNow]);
 
-    await waitFor(() => expect(supplierWrites('patch')).toHaveLength(1));
-    const body = JSON.parse(supplierWrites('patch')[0].data as string);
-    expect(body).toMatchObject({ supplier_sku: 'ACME-2' });
-    expect(body).not.toHaveProperty('average_lead_time');
-    await waitFor(() =>
-      expect(screen.getByLabelText(/Average Lead Time/)).toHaveValue(12)
-    );
+      await waitFor(() => expect(screen.getByDisplayValue('ACME-1')).toBeInTheDocument());
+      fireEvent.change(screen.getByLabelText(/Supplier SKU/), { target: { value: 'ACME-2' } });
+      save();
+      await waitFor(() => expect(screen.getByText(/Your copy is out of date/)).toBeInTheDocument());
+    };
+
+    it('tells the operator their copy is out of date instead of overwriting the newer values', async () => {
+      await refuseTheStaleCopy();
+
+      // The write carried the version it loaded — that is what the server refused.
+      expect(supplierWrites('patch')).toHaveLength(1);
+      expect(JSON.parse(supplierWrites('patch')[0].data as string)).toMatchObject({
+        supplier_sku: 'ACME-2',
+        average_lead_time: 7,
+        version: 1,
+      });
+      const banner = screen.getByRole('alert');
+      expect(banner).toHaveTextContent(/Acme Fasteners — Someone else changed this supplier link/);
+      expect(banner).toHaveTextContent(/Saving again will not overwrite it/);
+      expect(mockNavigate).not.toHaveBeenCalled();
+      // What the operator typed is still in front of them.
+      expect(screen.getByLabelText(/Supplier SKU/)).toHaveValue('ACME-2');
+    });
+
+    it('never retries on its own, and saving again is refused again rather than forced', async () => {
+      await refuseTheStaleCopy();
+      mock.onPatch('/inventory/item-suppliers/91/').replyOnce(409, STALE_REFUSAL);
+
+      save();
+
+      await waitFor(() => expect(supplierWrites('patch')).toHaveLength(2));
+      expect(JSON.parse(supplierWrites('patch')[1].data as string)).toMatchObject({ version: 1 });
+      await waitFor(() => expect(screen.getByText(/Your copy is out of date/)).toBeInTheDocument());
+      expect(mockNavigate).not.toHaveBeenCalled();
+    });
+
+    it('reloads the suppliers on request, and the next save starts from the current copy', async () => {
+      await refuseTheStaleCopy();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Reload suppliers' }));
+
+      await waitFor(() => expect(screen.getByLabelText(/Supplier SKU/)).toHaveValue('ACME-9'));
+      expect(screen.getByLabelText(/Average Lead Time/)).toHaveValue(12);
+      expect(screen.queryByText(/out of date/)).not.toBeInTheDocument();
+
+      mock.onPatch('/inventory/item-suppliers/91/').reply(200, { ...asStoredNow, supplier_sku: 'ACME-2', version: 3 });
+      fireEvent.change(screen.getByLabelText(/Supplier SKU/), { target: { value: 'ACME-2' } });
+      save();
+
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalled());
+      expect(JSON.parse(supplierWrites('patch')[1].data as string)).toMatchObject({
+        supplier_sku: 'ACME-2',
+        average_lead_time: 12,
+        version: 2,
+      });
+    });
   });
 
   it('persists every field the editor offers', async () => {
@@ -409,8 +529,7 @@ describe('InventoryItemFormPage — supplier relationships', { timeout: 30000 },
     // number input the editor renders gets a distinct value, and every one of
     // them has to come back in the request body. An offered control that is not
     // wired to the payload fails here. Numbers start above anything the fixture
-    // loaded: a box typed back to its loaded value is not a change, and the
-    // lead time in particular is then deliberately left out.
+    // loaded: a box typed back to its loaded value is not a change.
     const typed = new Map<string, string>();
     editableInputs().forEach((input, index) => {
       const value =
@@ -550,7 +669,9 @@ describe('InventoryItemFormPage — supplier relationships', { timeout: 30000 },
         boltFails = false;
         return [500, {}];
       }
-      return [201, itemSupplier({ id: 94, supplier: 2, item: 'new-id' })];
+      // Not primary: the editor posted it as a second, non-primary row, and the
+      // server never answers with two primaries on one item.
+      return [201, itemSupplier({ id: 94, supplier: 2, item: 'new-id', is_primary: false })];
     });
     renderCreate();
 

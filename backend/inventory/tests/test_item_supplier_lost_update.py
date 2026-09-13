@@ -430,7 +430,7 @@ class TestAdminChangeForm:
         )
 
         assert not form.is_valid()
-        assert form.non_field_errors() == [StaleSupplierLink(link, 1, 2).message]
+        assert form.non_field_errors() == [StaleSupplierLink(link.pk, 1, 2).message]
         assert on_disk(link.pk) == {"average_lead_time": 12, "supplier_sku": "LOADED", "version": 2}
 
     def test_a_current_page_saves(self, link):
@@ -495,7 +495,7 @@ class TestAdminChangeForm:
         current = ItemSupplier.objects.get(pk=link.pk)
 
         def refuse(self, request, obj, form, change):
-            raise StaleSupplierLink(obj, obj.version, obj.version + 1)
+            raise StaleSupplierLink(obj.pk, obj.version, obj.version + 1)
 
         monkeypatch.setattr(ItemSupplierAdmin, "save_model", refuse)
 
@@ -551,7 +551,9 @@ class TestAdminItemInline:
         django_client = _logged_in_admin()
         ItemSupplier.objects.get(pk=link.pk).save()
 
-        page = django_client.get(reverse("admin:inventory_inventoryitem_change", args=[link.item_id]))
+        page = django_client.get(
+            reverse("admin:inventory_inventoryitem_change", args=[link.item_id])
+        )
 
         assert page.status_code == 200
         assert re.search(
@@ -568,7 +570,7 @@ class TestAdminItemInline:
         formset = self._formset(link.item, [self._row(page, supplier_sku="INLINE-STALE")])
 
         assert not formset.is_valid()
-        assert formset.errors[0]["__all__"] == [StaleSupplierLink(link, 1, 2).message]
+        assert formset.errors[0]["__all__"] == [StaleSupplierLink(link.pk, 1, 2).message]
         assert on_disk(link.pk)["average_lead_time"] == 12
 
     def test_a_current_row_saves(self, link):
@@ -592,6 +594,26 @@ def test_admin_registrations_carry_the_backstop():
 # ---------------------------------------------------------------------------
 # The check and the write are one step.
 # ---------------------------------------------------------------------------
+
+
+def test_a_refused_save_is_still_refused_when_the_same_copy_is_saved_again(link):
+    """A token is used up by a write that LANDED, not by one that was refused.
+
+    Otherwise a caller that catches the refusal and simply calls ``save()`` again
+    would find the check gone and overwrite the newer values after all.
+    """
+    page = ItemSupplier.objects.get(pk=link.pk)
+    page.expected_version = page.version
+    newer = ItemSupplier.objects.get(pk=link.pk)
+    newer.average_lead_time = 12
+    newer.save()
+
+    page.average_lead_time = 7
+    for _attempt in range(2):
+        with pytest.raises(StaleSupplierLink):
+            page.save()
+
+    assert on_disk(link.pk)["average_lead_time"] == 12
 
 
 def _wait_until_a_connection_waits_on_a_lock(timeout=15):

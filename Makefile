@@ -1,11 +1,13 @@
-.PHONY: help build up down logs shell test test-backend test-frontend coverage migrate superuser clean setup-dev install-hooks
+.PHONY: help build up down logs shell test test-backend test-frontend coverage migrate superuser clean setup-dev install-hooks lint lint-backend lint-frontend format-check-backend isort-check-backend quality-backend run-hooks
 
 DOCKER_COMPOSE ?= $(shell docker compose version >/dev/null 2>&1 && echo "docker compose")
 ifeq ($(strip $(DOCKER_COMPOSE)),)
 DOCKER_COMPOSE := $(shell command -v docker-compose >/dev/null 2>&1 && echo "docker-compose")
 endif
+# Deferred (`=`), so only targets that use Docker Compose fail without it; the
+# lint targets run on the host.
 ifeq ($(strip $(DOCKER_COMPOSE)),)
-$(error Docker Compose is not installed. Install Docker Compose plugin or docker-compose v1)
+DOCKER_COMPOSE = $(error Docker Compose is not installed. Install Docker Compose plugin or docker-compose v1)
 endif
 
 help:  ## Show this help message
@@ -82,28 +84,32 @@ clean:  ## Clean up containers, volumes, and cache
 	rm -rf frontend/coverage
 	rm -rf frontend/node_modules/.cache
 
-lint-backend:  ## Lint backend code with flake8
-	$(DOCKER_COMPOSE) exec backend flake8 . || echo "flake8 not installed"
+# Lint targets run scripts/ci-lint.sh on the host: the script CI's Backend Lint
+# and Frontend Lint jobs call, at the tool versions CI uses (it needs uv; see
+# the script's header). The backend ones used to run inside the backend
+# container, whose image installs requirements.txt only, so each tool was
+# missing and the `|| echo "... not installed"` fallback passed the target
+# without linting; lint-frontend ran eslint alone, never tsc.
+lint:  ## Run every check CI's lint jobs run (scripts/ci-lint.sh)
+	scripts/ci-lint.sh
+
+lint-backend:  ## Lint backend code with flake8, as CI does
+	scripts/ci-lint.sh flake8
 
 format-backend:  ## Format backend code with black
 	$(DOCKER_COMPOSE) exec backend black . || echo "black not installed"
 
-format-check-backend:  ## Check backend code formatting without changing
-	$(DOCKER_COMPOSE) exec backend black --check --diff . || echo "black not installed"
+format-check-backend:  ## Check backend code formatting without changing, as CI does
+	scripts/ci-lint.sh black
 
 isort-backend:  ## Sort backend imports
 	$(DOCKER_COMPOSE) exec backend isort . || echo "isort not installed"
 
-isort-check-backend:  ## Check backend import sorting without changing
-	$(DOCKER_COMPOSE) exec backend isort --check-only --diff . || echo "isort not installed"
+isort-check-backend:  ## Check backend import sorting without changing, as CI does
+	scripts/ci-lint.sh isort
 
-quality-backend:  ## Run all backend code quality checks
-	@echo "Running flake8..."
-	@make lint-backend
-	@echo "\nChecking black formatting..."
-	@make format-check-backend
-	@echo "\nChecking import sorting..."
-	@make isort-check-backend
+quality-backend:  ## Run CI's Backend Lint checks (black, isort, flake8)
+	scripts/ci-lint.sh backend
 
 security-backend:  ## Run backend security checks
 	@echo "Running bandit security checks..."
@@ -111,8 +117,8 @@ security-backend:  ## Run backend security checks
 	@echo "\nChecking for vulnerable dependencies..."
 	$(DOCKER_COMPOSE) exec backend safety check || echo "safety not installed"
 
-lint-frontend:  ## Lint frontend code
-	$(DOCKER_COMPOSE) exec frontend npm run lint || echo "No lint script configured"
+lint-frontend:  ## Run CI's Frontend Lint checks (eslint, tsc, derivation guard)
+	scripts/ci-lint.sh frontend
 
 install:  ## Install dependencies
 	$(DOCKER_COMPOSE) run backend pip install -r requirements.txt
@@ -179,9 +185,11 @@ install-dev:  ## Install development dependencies
 	$(DOCKER_COMPOSE) exec backend pip install -r requirements-dev.txt
 	@echo "✅ Development dependencies installed!"
 
-run-hooks:  ## Run pre-commit hooks on all files
+# On the host: the backend container mounts only backend/, so it has neither
+# the git checkout pre-commit needs nor the scripts/ci-lint.sh the hooks call.
+run-hooks:  ## Run pre-commit hooks on all files (on the host)
 	@echo "Running pre-commit hooks on all files..."
-	$(DOCKER_COMPOSE) exec backend pre-commit run --all-files
+	pre-commit run --all-files
 
 update-hooks:  ## Update pre-commit hooks to latest versions
 	$(DOCKER_COMPOSE) exec backend pre-commit autoupdate
@@ -190,7 +198,7 @@ update-hooks:  ## Update pre-commit hooks to latest versions
 ci-test:  ## Run CI tests locally (mimics GitHub Actions)
 	@echo "Running CI tests locally..."
 	@echo "\n=== Code Quality Checks ==="
-	@make quality-backend
+	@make lint
 	@echo "\n=== Security Checks ==="
 	@make security-backend
 	@echo "\n=== Backend Tests ==="

@@ -13,6 +13,9 @@ echo "📦 Installing Python development dependencies..."
 cd backend
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
+# scripts/ci-lint.sh (./dev-commands.sh lint-backend) provisions CI's pinned
+# black/isort/flake8 through uv.
+pip install uv
 cd ..
 
 # Install Node.js dependencies for frontend
@@ -119,10 +122,12 @@ case "$1" in
         cd /workspace/backend && python -m pytest && cd /workspace/frontend && npm test
         ;;
     "lint-backend")
-        cd /workspace/backend && flake8 . && black --check . && isort --check .
+        # CI's Backend Lint checks at CI's versions; flake8 from the
+        # requirements-dev install would also load flake8-bugbear.
+        /workspace/scripts/ci-lint.sh backend
         ;;
     "lint-frontend")
-        cd /workspace/frontend && npm run lint
+        /workspace/scripts/ci-lint.sh frontend
         ;;
     "run-backend")
         cd /workspace/backend && python manage.py runserver 0.0.0.0:8000

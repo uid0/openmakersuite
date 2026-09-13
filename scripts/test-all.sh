@@ -3,8 +3,17 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Lint through scripts/ci-lint.sh, the script CI's Backend Lint and Frontend
+# Lint jobs call. Running black/isort/flake8 from the requirements-dev install
+# below instead let flake8 load the flake8-bugbear plugin that install brings,
+# so it reported B findings CI never sees, and skipped eslint and tsc entirely.
+run_lint() {
+  echo "== Lint (scripts/ci-lint.sh) =="
+  "$ROOT_DIR/scripts/ci-lint.sh"
+}
+
 run_backend() {
-  echo "== Backend quality and coverage =="
+  echo "== Backend tests and coverage =="
   cd "$ROOT_DIR/backend"
 
   export DEBUG="${DEBUG:-1}"
@@ -13,14 +22,11 @@ run_backend() {
   export REDIS_URL="${REDIS_URL:-redis://localhost:6379/0}"
 
   python -m pip install -r requirements.txt -r requirements-dev.txt
-  black --check .
-  isort --check-only .
-  flake8 .
   pytest
 }
 
 run_frontend() {
-  echo "== Frontend quality, coverage, build, and E2E =="
+  echo "== Frontend tests, coverage, build, and E2E =="
   cd "$ROOT_DIR/frontend"
 
   export NODE_OPTIONS="${NODE_OPTIONS:---dns-result-order=ipv4first}"
@@ -42,5 +48,6 @@ run_frontend() {
   fi
 }
 
+run_lint
 run_backend
 run_frontend

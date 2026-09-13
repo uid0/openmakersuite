@@ -12,10 +12,11 @@ Run the checks in the same order as CI:
 ./scripts/test-all.sh
 ```
 
-The script installs backend and frontend dependencies, runs backend
-formatting/linting/tests with coverage, verifies key frontend dependencies,
-runs Vitest with and without coverage, builds the frontend, and runs Playwright
-E2E tests.
+The script runs `scripts/ci-lint.sh` (the black, isort, flake8, eslint, tsc and
+derivation-guard checks CI's lint jobs run, at CI's tool versions), installs
+backend and frontend dependencies, runs backend tests with coverage, verifies
+key frontend dependencies, runs Vitest with and without coverage, builds the
+frontend, and runs Playwright E2E tests.
 
 Use this when Playwright services or browsers are not available:
 
@@ -41,13 +42,17 @@ export ALLOWED_HOSTS=localhost,127.0.0.1
 export REDIS_URL=redis://localhost:6379/0
 ```
 
-Run quality checks:
+Run quality checks the way CI's Backend Lint job does, from the repository root:
 
 ```bash
-black --check .
-isort --check-only .
-flake8 .
+scripts/ci-lint.sh backend
 ```
+
+Do not run `black`, `isort` and `flake8` from the environment installed above
+instead: it holds the flake8-bugbear plugin, which CI does not install, so
+flake8 reports findings CI never sees. `scripts/ci-lint.sh` runs each tool from
+`backend/` at the version `requirements-dev.txt` pins, without plugins (it
+needs [`uv`](https://docs.astral.sh/uv/) on `PATH`).
 
 Run tests with configured coverage:
 

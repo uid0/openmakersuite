@@ -26,6 +26,12 @@ pip install --quiet pre-commit
 pre-commit install --install-hooks
 pre-commit install --hook-type commit-msg
 
+# The black/isort/flake8 hooks run scripts/ci-lint.sh, which provisions CI's
+# pinned tool versions through uv.
+if ! command -v uv >/dev/null 2>&1; then
+  echo "⚠ uv not found: the lint hooks (scripts/ci-lint.sh) need it — https://docs.astral.sh/uv/"
+fi
+
 # --- Frontend: npm install (also wires Husky via the prepare script) ----------
 
 if [ -d "frontend" ] && command -v npm >/dev/null 2>&1; then

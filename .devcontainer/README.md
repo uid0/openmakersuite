@@ -48,13 +48,15 @@ You can also run commands manually:
 cd backend
 python manage.py runserver 0.0.0.0:8000
 python -m pytest
-flake8 . && black --check . && isort --check .
 
 # Frontend
 cd frontend
 npm start
 npm test
-npm run lint
+
+# Lint, as CI's lint jobs do (from the project root)
+scripts/ci-lint.sh backend
+scripts/ci-lint.sh frontend
 ```
 
 ## 🌐 Accessing Services

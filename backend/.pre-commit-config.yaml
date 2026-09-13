@@ -19,31 +19,33 @@ repos:
       - id: detect-private-key
       - id: mixed-line-ending
 
-  # Python code formatting
-  - repo: https://github.com/psf/black
-    rev: 24.1.1
+  # black, isort and flake8 through scripts/ci-lint.sh, the script CI's Backend
+  # Lint job calls, exactly as the root .pre-commit-config.yaml runs them (see
+  # the comment there). The mirror hooks these replace pinned black 24.1.1
+  # (rewriting, not checking), isort 5.13.2 and flake8 7.0.0, none of which is
+  # what CI runs. pre-commit runs hooks from the repo root even with
+  # `-c backend/.pre-commit-config.yaml`, so the entry and patterns are
+  # root-relative.
+  - repo: local
     hooks:
       - id: black
-        language_version: python3.13
-        exclude: migrations/
-
-  # Python import sorting
-  - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
-    hooks:
+        name: black (scripts/ci-lint.sh)
+        entry: scripts/ci-lint.sh black
+        language: system
+        files: ^backend/.*\.py$|^backend/pyproject\.toml$|^backend/requirements-dev\.txt$
+        pass_filenames: false
       - id: isort
-        exclude: migrations/
-        args: ["--profile", "black", "--line-length", "100"]
-
-  # Python linting
-  - repo: https://github.com/pycqa/flake8
-    rev: 7.0.0
-    hooks:
+        name: isort (scripts/ci-lint.sh)
+        entry: scripts/ci-lint.sh isort
+        language: system
+        files: ^backend/.*\.py$|^backend/pyproject\.toml$|^backend/requirements-dev\.txt$
+        pass_filenames: false
       - id: flake8
-        exclude: migrations/
-        args: [
-        "--config","./backend/.flake8"
-        ]
+        name: flake8 (scripts/ci-lint.sh)
+        entry: scripts/ci-lint.sh flake8
+        language: system
+        files: ^backend/.*\.py$|^backend/\.flake8$|^backend/requirements-dev\.txt$
+        pass_filenames: false
 
   # Security checks
   # Same bandit version, scope and skips as the root .pre-commit-config.yaml

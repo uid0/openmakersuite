@@ -59,12 +59,6 @@ pytestmark = pytest.mark.django_db
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
-@pytest.fixture(autouse=True)
-def _isolated_media(settings, tmp_path):
-    """Keep uploaded receipts out of the tracked ``backend/media`` tree."""
-    settings.MEDIA_ROOT = str(tmp_path)
-
-
 def _staff_client():
     user = User.objects.create_user(
         username=f"staff_{get_random_string(6)}",

@@ -38,12 +38,6 @@ from inventory.views import WorkOrderViewSet
 pytestmark = pytest.mark.django_db
 
 
-@pytest.fixture(autouse=True)
-def _isolated_media(settings, tmp_path):
-    """Keep uploaded test files out of the tracked backend/media tree."""
-    settings.MEDIA_ROOT = str(tmp_path)
-
-
 def _make_file(name="manual.pdf") -> SimpleUploadedFile:
     return SimpleUploadedFile(name, b"%PDF-1.4 fake", content_type="application/pdf")
 

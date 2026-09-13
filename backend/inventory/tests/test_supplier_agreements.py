@@ -44,12 +44,6 @@ pytestmark = pytest.mark.django_db
 AGREEMENTS_URL = "/api/inventory/supplier-agreements/"
 
 
-@pytest.fixture(autouse=True)
-def _isolated_media(settings, tmp_path):
-    """Keep uploaded test files out of the tracked backend/media tree."""
-    settings.MEDIA_ROOT = str(tmp_path)
-
-
 def _authed_client():
     user = User.objects.create_user(username="buyer", password="x")
     client = APIClient()

@@ -44,12 +44,6 @@ User = get_user_model()
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 @pytest.fixture(autouse=True)
-def _isolated_media(settings, tmp_path):
-    """Keep uploaded receipts out of the tracked ``backend/media`` tree."""
-    settings.MEDIA_ROOT = str(tmp_path)
-
-
-@pytest.fixture(autouse=True)
 def _chart_of_accounts(db):
     """Guarantee the chart exists before a ledger test posts against it.
 

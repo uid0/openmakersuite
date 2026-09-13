@@ -52,12 +52,6 @@ def _results(resp):
     return data
 
 
-@pytest.fixture(autouse=True)
-def _isolated_media(settings, tmp_path):
-    """Keep uploaded test files out of the tracked backend/media tree."""
-    settings.MEDIA_ROOT = str(tmp_path)
-
-
 def _make_document(asset, **kwargs):
     """Create an AssetDocument row directly (used to seed list/supersede setup)."""
     kwargs.setdefault("title", "Seed doc")

@@ -53,11 +53,20 @@ repos:
         args: [--fix]
   # Backend: Security checks - Bandit
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.6
+    # Keep in step with the bandit pin in backend/requirements-dev.txt, which
+    # is what CI runs. Renovate does not bump pre-commit revs, so this one is
+    # manual. 1.7.6 predates Python 3.14 support: its B104-B108 and B608
+    # plugins fail to load there, so the B105/B106 skips below read as
+    # "Unknown test" and bandit exits before scanning.
+    rev: 1.9.4
     hooks:
       - id: bandit
         files: ^backend/
         exclude: ^(backend/.*migrations/|backend/.*tests.*)
+        # The recursive `backend` target already covers every file, so the
+        # staged filenames pre-commit would append are redundant; not passing
+        # them keeps the scan identical to CI whichever files are staged.
+        pass_filenames: false
         # Match CI invocation in .github/workflows/ci.yml: skip B101
         # (assert_used), B105 (hardcoded_password_string), B106
         # (hardcoded_password_funcarg), and B308 (mark_safe); exclude

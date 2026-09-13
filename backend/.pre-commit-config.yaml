@@ -46,12 +46,28 @@ repos:
         ]
 
   # Security checks
+  # Same bandit version, scope and skips as the root .pre-commit-config.yaml
+  # hook and CI (see the comments there). pre-commit runs hooks from the repo
+  # root even with `-c backend/.pre-commit-config.yaml`, so paths are
+  # root-relative. pass_filenames is off because bandit's argparse takes its
+  # targets as one positional group: filenames appended after `-r <dir> -s ...`
+  # are rejected as "unrecognized arguments".
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.6
+    rev: 1.9.4
     hooks:
       - id: bandit
-        exclude: ^(migrations|.*tests.*)/
-        args: ["-r", ".", "-s", "B101"]  # Skip B101 (assert_used) - acceptable in test files
+        files: ^backend/
+        exclude: ^(backend/.*migrations/|backend/.*tests.*)
+        pass_filenames: false
+        args:
+          [
+            "-r",
+            "-s",
+            "B101,B105,B106,B308",
+            "-x",
+            "*/tests/*,*/migrations/*",
+            "backend",
+          ]
 
   # Django-specific checks
   - repo: https://github.com/adamchainz/django-upgrade

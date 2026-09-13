@@ -873,6 +873,39 @@ describe('AssetDetailPage', () => {
     });
   });
 
+  describe('age (no received date)', () => {
+    const renderWithAsset = (asset: Asset) => {
+      mockAssetsAPI.getAsset.mockResolvedValue({
+        data: asset,
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      });
+      render(
+        <MantineProvider><MemoryRouter>
+          <AssetDetailPage />
+        </MemoryRouter></MantineProvider>
+      );
+    };
+
+    it('shows the age of an asset with a received date', async () => {
+      renderWithAsset({ ...mockAsset, date_received: '2024-01-01', age_in_days: 400 });
+
+      await screen.findByText('Test Asset');
+      expect(screen.getByText('Age:').closest('.info-item')).toHaveTextContent('1 years, 35 days');
+    });
+
+    it('an asset with no received date has no age, never "0 years"', async () => {
+      // The backend sends age_in_days: null when date_received is null.
+      renderWithAsset({ ...mockAsset, date_received: null, age_in_days: null });
+
+      await screen.findByText('Test Asset');
+      expect(screen.queryByText('Age:')).not.toBeInTheDocument();
+      expect(screen.queryByText(/0 years/)).not.toBeInTheDocument();
+    });
+  });
+
   describe('resilience (#457 R4)', () => {
     const renderDetail = () =>
       render(

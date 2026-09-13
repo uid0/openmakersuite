@@ -420,6 +420,33 @@ describe('AssetList', () => {
     });
   });
 
+  it('a card for an asset with no received date has no age, never "0 years"', async () => {
+    // The backend sends age_in_days: null when date_received is null.
+    mockAssetsAPI.listAssets.mockResolvedValue({
+      data: {
+        count: 2,
+        next: null,
+        previous: null,
+        results: [
+          { ...mockAssets[0], date_received: '2024-01-01', age_in_days: 800 },
+          { ...mockAssets[1], date_received: null, age_in_days: null },
+        ],
+      },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    });
+
+    renderComponent();
+
+    const known = (await screen.findByText('Test Asset 1')).closest('.asset-card') as HTMLElement;
+    expect(known).toHaveTextContent('Age:2 years');
+    const unknown = screen.getByText('Test Asset 2').closest('.asset-card') as HTMLElement;
+    expect(unknown).not.toHaveTextContent('Age:');
+    expect(unknown).not.toHaveTextContent(/0 years/);
+  });
+
   it('appends the next page when the scroll sentinel intersects', async () => {
     const page1Asset = { ...mockAssets[0], id: '101', name: 'Asset Page One' };
     const page2Asset = { ...mockAssets[1], id: '102', name: 'Asset Page Two' };

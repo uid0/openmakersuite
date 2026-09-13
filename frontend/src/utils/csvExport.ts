@@ -418,7 +418,7 @@ export function exportAssetReportToCSV(
 /**
  * Format age in days to readable string
  */
-function formatAge(ageInDays: number | undefined): string {
+function formatAge(ageInDays: number | null | undefined): string {
   if (ageInDays === undefined || ageInDays === null) return 'N/A';
   const years = Math.floor(ageInDays / 365);
   const days = ageInDays % 365;

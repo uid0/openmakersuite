@@ -109,7 +109,7 @@ const AssetTableView: React.FC<AssetTableViewProps> = ({
     }
   };
 
-  const formatAge = (ageInDays: number | undefined) => {
+  const formatAge = (ageInDays: number | null | undefined) => {
     if (ageInDays === undefined || ageInDays === null) return 'N/A';
     const years = Math.floor(ageInDays / 365);
     const days = ageInDays % 365;

@@ -306,9 +306,7 @@ describe('AssetTableView', () => {
       category_name: '',
       display_manufacturer: '',
       date_received: null,
-      // Asset.age_in_days is typed number, but the backend sends null when
-      // date_received is null; undefined keeps this test's original input.
-      age_in_days: undefined as unknown as number,
+      age_in_days: null,
     };
 
     renderComponent({ assets: [assetWithMissingFields] });

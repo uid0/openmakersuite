@@ -89,7 +89,7 @@ export async function createTestUser(
   password: string,
   email?: string,
   isStaff = false
-): Promise<{ username: string; password: string; token?: string }> {
+): Promise<{ id: number; username: string; password: string; token: string }> {
   const response = await fetch(`${API_BASE_URL}/auth/register/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -116,7 +116,7 @@ export async function createTestUser(
       if (!token) {
         throw new Error('Login succeeded but no access token returned');
       }
-      return { username, password, token };
+      return { id: await fetchUserId(token), username, password, token };
     } else {
       const errorText = await loginResponse.text();
       // If login fails due to membership, try to update user via admin API
@@ -136,7 +136,25 @@ export async function createTestUser(
   // For E2E tests, we need to create memberships or make users staff/board members
   // This should be done in the test setup using an admin token
   
-  return { username, password, token };
+  return { id: await fetchUserId(token), username, password, token };
+}
+
+/**
+ * Resolve a user's id from their access token. /auth/register/ and
+ * /auth/login/ return no id, and specs seed rows that reference the user.
+ */
+async function fetchUserId(token: string): Promise<number> {
+  const response = await fetch(`${API_BASE_URL}/membership/profile/me/`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw new Error(`Could not resolve user id: ${response.status} ${await response.text()}`);
+  }
+  const { id } = await response.json();
+  if (typeof id !== 'number') {
+    throw new Error(`Could not resolve user id: profile returned ${JSON.stringify(id)}`);
+  }
+  return id;
 }
 
 /**

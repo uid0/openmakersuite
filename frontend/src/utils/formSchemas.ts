@@ -13,15 +13,19 @@ export const nonNegativeNumberSchema = z.number().min(0, 'Must be zero or greate
 // Common field schemas
 export const requiredString = z.string().min(1, 'This field is required');
 export const optionalString = z.string().optional();
-// The dropped key lives alone in its own literal: TypeScript reports only the
-// first unknown key per object literal, so suppressing it inline would also hide
-// any bad key added beside it.
-const requiredNumberDroppedParams: z.core.$ZodNumberParams = {
-  // @ts-expect-error KNOWN DEFECT: zod 4 dropped required_error, so this message is
-  // silently ignored at runtime.
-  required_error: 'This field is required',
-};
-export const requiredNumber = z.number({ ...requiredNumberDroppedParams });
+
+/**
+ * zod 4's replacement for zod 3's `required_error`, which zod 4 ignores.
+ * Reports `message` when the field is empty — undefined, or the null / ''
+ * a cleared form control submits — and leaves every other issue (a value of
+ * the wrong type, an unknown option) to zod's own message.
+ */
+const requiredError =
+  (message: string) =>
+  (issue: { input?: unknown }): string | undefined =>
+    issue.input === undefined || issue.input === null || issue.input === '' ? message : undefined;
+
+export const requiredNumber = z.number({ error: requiredError('This field is required') });
 export const optionalNumber = z.number().optional();
 
 // Date schemas
@@ -182,16 +186,11 @@ export const inventoryItemSchema = z
 export type InventoryItemFormData = z.infer<typeof inventoryItemSchema>;
 
 // Supplier Form Schema
-// Kept apart from the z.enum call for the same reason as requiredNumberDroppedParams.
-const supplierTypeDroppedParams: z.core.$ZodEnumParams = {
-  // @ts-expect-error KNOWN DEFECT: zod 4 dropped required_error, so a missing
-  // supplier type shows zod's generic "Invalid option" message instead.
-  required_error: 'Supplier type is required',
-};
-
 export const supplierSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200, 'Name must be 200 characters or less'),
-  supplier_type: z.enum(['local', 'online', 'national'], { ...supplierTypeDroppedParams }),
+  supplier_type: z.enum(['local', 'online', 'national'], {
+    error: requiredError('Supplier type is required'),
+  }),
   website: z.string().url('Invalid URL').optional().or(z.literal('')),
   account_number: z.string().max(100, 'Account number must be 100 characters or less').optional(),
   tax_free_paperwork_filed: z.boolean().default(false),

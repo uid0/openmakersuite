@@ -815,7 +815,8 @@ export interface Asset {
   qr_code_scan_url: string | null;
   status: AssetStatus;
   condition_notes: string;
-  age_in_days: number;
+  // null when the asset has no date_received: its age is unknown, not zero.
+  age_in_days: number | null;
   is_active: boolean;
   report_only: boolean;
   notes: string;

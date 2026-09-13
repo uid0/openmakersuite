@@ -98,7 +98,7 @@ const AssetCard: React.FC<AssetCardProps> = ({
             </div>
           )}
 
-          {asset.age_in_days !== undefined && (
+          {typeof asset.age_in_days === 'number' && (
             <div className="info-row">
               <span className="info-label">Age:</span>
               <span className="info-value">{Math.floor(asset.age_in_days / 365)} years</span>

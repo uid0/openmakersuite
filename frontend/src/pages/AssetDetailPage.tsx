@@ -704,7 +704,7 @@ const AssetDetailPage: React.FC = () => {
                 <span className="info-value">{formatDate(asset.date_received)}</span>
               </div>
             )}
-            {asset.age_in_days !== undefined && (
+            {typeof asset.age_in_days === 'number' && (
               <div className="info-item">
                 <span className="info-label">Age:</span>
                 <span className="info-value">

@@ -6,21 +6,19 @@
  * has the name and username but doesn't want to bind it to a specific bin
  * row yet).
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { makerBoxesAPI, MakerBox } from '../services/api';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 
-// KNOWN DEFECT: no 'pre_conversion' entry, and /maker-boxes/
-// lists pre-conversion rows, so badge.color below throws and the page crashes.
-const STATUS_BADGE: Record<
-  Exclude<MakerBox['status'], 'pre_conversion'>,
-  { label: string; color: string }
-> & Partial<Record<'pre_conversion', { label: string; color: string }>> = {
+// Every status needs a badge: /maker-boxes/ lists all rows, including ones
+// the pre-conversion workflow queued before a bin was allocated.
+const STATUS_BADGE: Record<MakerBox['status'], { label: string; color: string }> = {
   valid: { label: 'Valid', color: '#1f8a3a' },
   grace: { label: 'Grace', color: '#d4a017' },
   expired: { label: 'Expired', color: '#c0392b' },
   unassigned: { label: 'Unassigned', color: '#777' },
   unknown: { label: 'Unknown', color: '#c0392b' },
+  pre_conversion: { label: 'Pre-conversion', color: '#2c6fbb' },
 };
 
 // Avery 5371 holds 10 cards per sheet — surface the cap so the warden
@@ -76,17 +74,18 @@ const MakerBoxAdminPage: React.FC = () => {
     [manual.username, manual.first_name, manual.last_name],
   );
 
+  // Pre-conversion rows have no bin_id yet, so there is no card to print.
+  const printableBinIds = useMemo(
+    () => boxes.map((b) => b.bin_id).filter((binId): binId is string => binId !== null),
+    [boxes],
+  );
+
   const handlePrintSheet = useCallback(async () => {
-    if (boxes.length === 0) return;
+    if (printableBinIds.length === 0) return;
     setSheetPrinting(true);
     setError(null);
     try {
-      const ids = boxes.slice(0, SHEET_CAPACITY).map(
-        (b): string =>
-          // @ts-expect-error KNOWN DEFECT: pre-conversion rows have bin_id null, and
-          // those nulls are sent to print-sheet as bin ids.
-          b.bin_id,
-      );
+      const ids = printableBinIds.slice(0, SHEET_CAPACITY);
       const res = await makerBoxesAPI.printSheet(ids);
       const blob = new Blob([res.data], { type: 'image/png' });
       const url = URL.createObjectURL(blob);
@@ -98,7 +97,7 @@ const MakerBoxAdminPage: React.FC = () => {
     } finally {
       setSheetPrinting(false);
     }
-  }, [boxes]);
+  }, [printableBinIds]);
 
   return (
     <div style={{ padding: '1.5rem' }}>
@@ -149,12 +148,12 @@ const MakerBoxAdminPage: React.FC = () => {
           <button
             type="button"
             onClick={handlePrintSheet}
-            disabled={sheetPrinting || boxes.length === 0}
+            disabled={sheetPrinting || printableBinIds.length === 0}
             data-testid="print-avery-sheet"
           >
             {sheetPrinting
               ? 'Rendering…'
-              : `Print Avery sheet (${Math.min(boxes.length, SHEET_CAPACITY)}/${SHEET_CAPACITY})`}
+              : `Print Avery sheet (${Math.min(printableBinIds.length, SHEET_CAPACITY)}/${SHEET_CAPACITY})`}
           </button>
         </div>
         {loading && <p>Loading…</p>}
@@ -173,7 +172,7 @@ const MakerBoxAdminPage: React.FC = () => {
             </thead>
             <tbody>
               {boxes.map((box) => {
-                const badge = STATUS_BADGE[box.status] as { label: string; color: string };
+                const badge = STATUS_BADGE[box.status];
                 return (
                   <tr key={box.id} style={{ borderTop: '1px solid #ddd' }}>
                     <td style={{ padding: '0.25rem' }}>{box.bin_id}</td>

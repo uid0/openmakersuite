@@ -1,0 +1,13 @@
+# no-mistakes repository config: https://github.com/kunchenguid/no-mistakes
+#
+# The daemon reads `commands` ONLY from the default branch (origin/main), never
+# from the branch being validated, so a change here takes effect for runs
+# started after it merges.
+
+commands:
+  # The same checks CI's Backend Lint and Frontend Lint jobs run (black, isort,
+  # flake8, eslint, tsc, and the derivation guard), from the same script, so a
+  # tree that fails them fails this step before push. Left unset, the lint step
+  # was an agent pass that discovered linters itself and passed an F402 that
+  # CI's flake8 then rejected.
+  lint: scripts/ci-lint.sh

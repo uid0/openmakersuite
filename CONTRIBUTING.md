@@ -78,6 +78,10 @@ The `.github/workflows/ci.yml` workflow defines the required gates. Branch prote
 - **Code Quality & Security** (bandit, pip-audit, gitleaks) — required.
 - **Deploy Validation** (helm lint, helm template, kubeconform) — required.
 
+Run `scripts/ci-lint.sh` to reproduce both CI lint jobs locally with the same
+tool versions, working directories, and configuration. Pass `backend` or
+`frontend` to limit the run to one job's checks.
+
 CI uses path filters: doc-only changes (`docs/**`, `*.md`, `.criteria/**`, README) skip the heavy jobs and `✅ CI Complete` still passes.
 
 ### Frontend builds keep `caniuse-lite` fresh automatically

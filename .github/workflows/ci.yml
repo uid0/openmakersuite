@@ -35,10 +35,12 @@ jobs:
             backend:
               - 'backend/**'
               - '.github/workflows/ci.yml'
+              - 'scripts/ci-lint.sh'
               - '.pre-commit-config.yaml'
             frontend:
               - 'frontend/**'
               - '.github/workflows/ci.yml'
+              - 'scripts/ci-lint.sh'
             docker:
               - 'backend/**'
               - 'frontend/**'
@@ -67,6 +69,11 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     timeout-minutes: 5
+    env:
+      # scripts/ci-lint.sh owns these checks, so the no-mistakes lint step
+      # (.no-mistakes.yaml) runs exactly what this job runs; `path` makes it
+      # use the tools pinned below instead of provisioning its own.
+      CI_LINT_TOOLS: path
 
     steps:
       - uses: actions/checkout@v7
@@ -97,13 +104,13 @@ jobs:
           pip install $(grep -E '^(black|isort|flake8)==' requirements-dev.txt)
 
       - name: Check code formatting with black
-        run: cd backend && black --check .
+        run: scripts/ci-lint.sh black
 
       - name: Check import sorting with isort
-        run: cd backend && isort --check-only .
+        run: scripts/ci-lint.sh isort
 
       - name: Lint with flake8
-        run: cd backend && flake8 .
+        run: scripts/ci-lint.sh flake8
 
   backend-tests:
     name: Backend Tests
@@ -271,6 +278,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     timeout-minutes: 5
+    env:
+      # See backend-lint: scripts/ci-lint.sh is shared with .no-mistakes.yaml.
+      CI_LINT_TOOLS: path
 
     steps:
       - uses: actions/checkout@v7
@@ -290,16 +300,12 @@ jobs:
           NODE_OPTIONS: "--dns-result-order=ipv4first"
 
       - name: Run eslint
-        run: |
-          cd frontend
-          npm run lint
+        run: scripts/ci-lint.sh eslint
 
       # Vite and Vitest strip types without checking them, so nothing else in
       # CI catches a type error; this job is the only gate.
       - name: Run TypeScript check
-        run: |
-          cd frontend
-          npm run typecheck
+        run: scripts/ci-lint.sh typecheck
 
       # The scan is stdlib-only and imports nothing from Django, so this job
       # needs no backend ENVIRONMENT — but it does need an interpreter that can
@@ -325,7 +331,7 @@ jobs:
           # an order-level value computed from the lines that nothing declares,
           # and for a file it could not read: see
           # backend/reorder_queue/settlement_sites.py.
-          python3 backend/reorder_queue/settlement_sites.py
+          scripts/ci-lint.sh derivation-guard
 
   frontend-tests:
     name: Frontend Tests

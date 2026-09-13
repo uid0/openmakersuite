@@ -13,13 +13,15 @@ Project conventions and role assignment for Claude Code in openmakersuite. Also 
 
 ## Before committing
 
-Run `pre-commit run --all-files`. If that's not installed, at minimum:
+Run `pre-commit run --all-files`. If that's not installed, at minimum run the checks CI's lint jobs run, from the script they call (`backend` or `frontend` limits it to one side):
 
 ```
-cd backend && isort --profile black . && black --check . && flake8 .
+scripts/ci-lint.sh
 ```
 
-CI fails on `isort`, `black`, and `flake8` — all three must be green locally before you push, or CI will reject the PR. Pre-commit install once per worktree:
+The script is the canonical local command for CI's backend formatting and lint,
+frontend lint and type check, and derivation guard. See `CONTRIBUTING.md` for the
+CI gate inventory. Pre-commit install once per worktree:
 
 ```
 pip install pre-commit && pre-commit install

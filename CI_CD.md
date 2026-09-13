@@ -32,9 +32,12 @@ fail, and still does not block a merge.
 Docker, prod-stack boot, Helm/K8s rendering) only run when the paths they
 depend on changed, so a doc-only PR does not pay for them. `ci-complete`
 accepts `skipped` as a pass for that reason, and treats `failure` and
-`cancelled` as a fail. The corollary: if a job is skipped when you expected it
-to run, the path filter is the thing to fix, not the job. Editing `ci.yml`
-itself matches every filter, so a workflow change runs everything.
+`cancelled` as a fail. The exception is `changes` (Detect Changes) itself,
+which must be `success`: when it fails, is cancelled or is skipped, every
+path-filtered job is skipped with nothing tested, so those skips are not a
+pass. The corollary: if a job is skipped when you expected it to run, the path
+filter is the thing to fix, not the job. Editing `ci.yml` itself matches every
+filter, so a workflow change runs everything.
 
 **Lint is split from tests.** The lint jobs run in parallel with the test jobs
 and time out quickly, so a formatting failure is reported in minutes instead of

@@ -524,7 +524,7 @@ def looks_like_scan(raw_bytes: bytes, *, is_image: bool = False) -> bool:
         if "work_order_id" in fields:
             return False
         return any(True for _ in _iter_pdf_images(reader))
-    except Exception:  # noqa: BLE001  # nosec B110 - unreadable => not a scan we can OMR
+    except Exception:  # noqa: BLE001  # unreadable => not a scan we can OMR
         return False
 
 
@@ -1153,7 +1153,7 @@ def _looks_like_qr_payload(image_bytes: bytes) -> bool:
     """Best-effort: does this embedded image contain decodable QR content?"""
     try:
         return bool(_decode_qr_payloads(image_bytes))
-    except Exception:  # noqa: BLE001  # nosec B110
+    except Exception:  # noqa: BLE001
         return False
 
 

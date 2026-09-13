@@ -65,32 +65,25 @@ type HistoryEntry = {
 
 const HISTORY_LIMIT = 8;
 
-// KNOWN DEFECT: no 'project_storage_stint' label, so a stint
-// scan toasts "undefined: <name>" and its history badge is blank.
-const actionLabel: Record<
-  Exclude<ScanDispatchResult['action'], 'project_storage_stint'>,
-  string
-> & Partial<Record<'project_storage_stint', string>> = {
+const actionLabel: Record<ScanDispatchResult['action'], string> = {
   inventory_reorder: 'Mark for reorder',
   inventory_receive: 'Receive',
   asset_checkin: 'Asset check-in',
   location_checkin: 'Location check-in',
   fixture: 'Fixture',
   donation_item: 'Donation item',
+  project_storage_stint: 'Project storage',
   unknown: 'Unknown',
 };
 
-// KNOWN DEFECT: no 'project_storage_stint' color (see actionLabel).
-const actionColor: Record<
-  Exclude<ScanDispatchResult['action'], 'project_storage_stint'>,
-  string
-> & Partial<Record<'project_storage_stint', string>> = {
+const actionColor: Record<ScanDispatchResult['action'], string> = {
   inventory_reorder: 'orange',
   inventory_receive: 'teal',
   asset_checkin: 'blue',
   location_checkin: 'grape',
   fixture: 'cyan',
   donation_item: 'lime',
+  project_storage_stint: 'indigo',
   unknown: 'red',
 };
 

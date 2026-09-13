@@ -92,6 +92,8 @@ from .serializers import (
     InventoryMetricsSerializer,
     ItemDeliverySerializer,
     ItemOrderCostSerializer,
+    ItemSupplierBatchEntrySerializer,
+    ItemSupplierBatchSerializer,
     ItemSupplierSerializer,
     KitSerializer,
     KitSummarySerializer,
@@ -125,6 +127,7 @@ from .serializers import (
     WorkOrderToolSerializer,
     WorkOrderValidationSerializer,
 )
+from .services.link_batch import LinkChange, SupplierLinkBatchRefused, write_supplier_links
 from .services.link_version import (
     STALE_VERSION_CODE,
     StaleSupplierLink,
@@ -2092,6 +2095,74 @@ class ItemSupplierViewSet(viewsets.ModelViewSet):
         except StaleSupplierLink as exc:
             return stale_supplier_link_response(exc)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(
+        request=ItemSupplierBatchSerializer,
+        responses={
+            200: OpenApiResponse(description='Every entry written: `{"links": [link, ...]}`.'),
+            400: OpenApiResponse(description="Nothing written; `error.details.links` per entry."),
+            409: OpenApiResponse(description="Nothing written; an entry's `version` is stale."),
+        },
+    )
+    @action(detail=False, methods=["post"], url_path="batch")
+    def batch(self, request):
+        """Create and update several links of ONE item atomically.
+
+        The way two links exchange suppliers: the ``(item, supplier)`` pairs are
+        judged once every entry has been applied, not row by row. All or nothing
+        — a refusal or failure leaves every link as it was. See
+        ``inventory.services.link_batch`` and ``docs/API_ERROR_CONTRACT.md``.
+        """
+        envelope = ItemSupplierBatchSerializer(data=request.data)
+        envelope.is_valid(raise_exception=True)
+        item = envelope.validated_data["item"]
+
+        changes: list[LinkChange] = []
+        errors: list[dict] = []
+        for entry in envelope.validated_data["links"]:
+            entry_errors: dict = {}
+            link_id = None
+            if entry.get("id") is not None:
+                try:
+                    link_id = serializers.IntegerField(min_value=1).run_validation(entry["id"])
+                except serializers.ValidationError as exc:
+                    entry_errors["id"] = exc.detail
+            data = {name: value for name, value in entry.items() if name != "id"}
+            if link_id is None:
+                # A create names the batch's item; one naming another is refused below.
+                data.setdefault("item", item.pk)
+            entry_serializer = ItemSupplierBatchEntrySerializer(
+                data=data, partial=link_id is not None, context=self.get_serializer_context()
+            )
+            if not entry_serializer.is_valid():
+                entry_errors.update(entry_serializer.errors)
+            fields = dict(getattr(entry_serializer, "validated_data", None) or {})
+            version = fields.pop("version", None)
+            entry_item = fields.pop("item", item)
+            if entry_item.pk != item.pk:
+                entry_errors.setdefault("item", []).append(
+                    "Every link in a request must belong to the request's item."
+                )
+            errors.append(entry_errors)
+            changes.append(
+                LinkChange(
+                    id=link_id, version=version if link_id is not None else None, fields=fields
+                )
+            )
+        if any(errors):
+            raise serializers.ValidationError({"links": errors})
+
+        try:
+            links = write_supplier_links(item, changes)
+        except StaleSupplierLink as exc:
+            return stale_supplier_link_response(exc)
+        except SupplierLinkBatchRefused as exc:
+            raise serializers.ValidationError(
+                {"links": [exc.errors.get(index, {}) for index in range(len(changes))]}
+            ) from exc
+        return Response(
+            {"links": self.get_serializer(links, many=True).data}, status=status.HTTP_200_OK
+        )
 
     def get_queryset(self):
         queryset = super().get_queryset()

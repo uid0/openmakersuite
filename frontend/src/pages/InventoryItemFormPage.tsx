@@ -26,10 +26,13 @@ import { InventoryItemFormData, inventoryItemSchema } from '../utils/formSchemas
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 import {
   adoptOwnDemotions,
+  needsAtomicSupplierWrite,
+  relationshipBatchEntry,
   relationshipChanged,
   relationshipFromSaved,
   relationshipPayload,
   relationshipWriteOrder,
+  supplierBatchError,
   supplierWriteError,
   validateSupplierRelationships,
 } from '../utils/supplierRelationships';
@@ -352,12 +355,16 @@ const InventoryItemFormPage: React.FC = () => {
   /**
    * Write the supplier-relationship editor back to the `item-suppliers` API.
    *
-   * The editor is a list, and `ItemSupplierViewSet` is a plain `ModelViewSet`
-   * with no bulk route, so this is one request per changed row: DELETE for the
-   * rows the operator removed, POST for the ones added, PATCH for the ones
-   * edited, and nothing at all for a row left alone.
+   * The editor is a list, written against `ItemSupplierViewSet` one request per
+   * changed row: DELETE for the rows the operator removed, POST for the ones
+   * added, PATCH for the ones edited, and nothing at all for a row left alone.
    *
-   * Two things follow from writing a list one row at a time:
+   * The exception is a save whose rows trade suppliers (`needsAtomicSupplierWrite`):
+   * no order of single-row writes can land it, so after the removals every
+   * added and edited row goes out as ONE atomic batch, which the server applies
+   * all or nothing with each row's version checked first.
+   *
+   * Three things follow from writing a list one row at a time:
    *
    * 1. **Order matters for the primary flag.** "Only one primary" belongs to
    *    the server — saving a row with `is_primary` set clears the flag on the
@@ -395,6 +402,55 @@ const InventoryItemFormPage: React.FC = () => {
           throw supplierWriteError(err, removed, index, suppliers);
         }
         nextSaved = nextSaved.filter((saved) => saved.id !== removed.id);
+      }
+
+      if (needsAtomicSupplierWrite(nextRelationships, nextSaved)) {
+        const rows = relationshipWriteOrder(nextRelationships)
+          .map((index) => ({ relationship: nextRelationships[index], index }))
+          .filter(
+            ({ relationship }) =>
+              relationship.id === undefined ||
+              relationshipChanged(
+                relationship,
+                nextSaved.find((saved) => saved.id === relationship.id)
+              )
+          );
+        let links: ItemSupplier[];
+        try {
+          links = (
+            await inventoryAPI.batchItemSuppliers(
+              savedItem.id,
+              rows.map(({ relationship }) =>
+                relationshipBatchEntry(
+                  relationship,
+                  nextSaved.find((saved) => saved.id === relationship.id)
+                )
+              )
+            )
+          ).data.links;
+        } catch (err) {
+          throw supplierBatchError(err, rows, suppliers);
+        }
+
+        rows.forEach(({ relationship, index }, position) => {
+          const written = links[position];
+          nextRelationships[index] = relationshipFromSaved(written);
+          nextSaved =
+            relationship.id === undefined
+              ? [...nextSaved, written]
+              : nextSaved.map((saved) => (saved.id === written.id ? written : saved));
+        });
+
+        const promoted = links.find((written) => written.is_primary);
+        if (
+          promoted !== undefined &&
+          nextSaved.some((saved) => saved.id !== promoted.id && saved.is_primary)
+        ) {
+          // The batch's promotion demoted rows it did not carry (point 3 above).
+          const fresh = (await inventoryAPI.getItemSuppliers(savedItem.id)).data.results;
+          nextSaved = adoptOwnDemotions(nextSaved, fresh, promoted.id);
+        }
+        return;
       }
 
       for (const index of relationshipWriteOrder(nextRelationships)) {

@@ -10,6 +10,7 @@ from django.db import transaction
 
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
+from rest_framework.validators import UniqueTogetherValidator
 
 # The asset's breaker/disconnect FKs live on facilities.AssetSiteRequirements
 # (#880); the serializer keeps the historical PK-shaped keys, so it needs the
@@ -311,6 +312,40 @@ class ItemSupplierSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         instance.expected_version = validated_data.pop("version", None)
         return super().update(instance, validated_data)
+
+
+class ItemSupplierBatchEntrySerializer(ItemSupplierSerializer):
+    """One entry of ``POST /api/inventory/item-suppliers/batch/``, field by field.
+
+    The single-link serializer's fields and field validation, without its
+    ``(item, supplier)`` unique-together validator: that validator judges an
+    entry against the rows as they are NOW, which is exactly what refuses an
+    exchange. The batch judges the pairs as they will be once every entry has
+    been applied (``inventory.services.link_batch``).
+    """
+
+    def get_validators(self):
+        return [
+            validator
+            for validator in super().get_validators()
+            if not isinstance(validator, UniqueTogetherValidator)
+        ]
+
+
+class ItemSupplierBatchSerializer(serializers.Serializer):
+    """The envelope of ``POST /api/inventory/item-suppliers/batch/``."""
+
+    item = serializers.PrimaryKeyRelatedField(queryset=InventoryItem.objects.all())
+    links = serializers.ListField(
+        child=serializers.DictField(),
+        min_length=1,
+        max_length=50,
+        help_text=(
+            "The item's links to write, all or nothing. An entry with an `id` is a partial "
+            "update of that link (send `version` to have a stale copy refused); an entry "
+            "without one is a new link for the item."
+        ),
+    )
 
 
 class ItemSupplierDetailSerializer(ItemSupplierSerializer):

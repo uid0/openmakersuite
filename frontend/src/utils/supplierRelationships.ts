@@ -5,12 +5,13 @@
  * The editor used to be decorative: `InventoryItemFormPage` carried a
  * `TODO: Implement supplier relationship saving via ItemSupplier API` where the
  * writes belong, so every edit made in that section was dropped on Save without
- * a word. Nothing new is needed on the server — `ItemSupplierViewSet` is a full
- * `ModelViewSet` — so all of this is client-side bookkeeping: which rows changed,
- * in what order to write them, and how to name a rejection so the operator can
- * act on it.
+ * a word. `ItemSupplierViewSet` is a full `ModelViewSet`, so most of this is
+ * client-side bookkeeping: which rows changed, in what order to write them, and
+ * how to name a rejection so the operator can act on it. The one change no
+ * row-by-row order can express — rows exchanging suppliers — goes to the
+ * server's atomic batch instead (`needsAtomicSupplierWrite`).
  */
-import { ItemSupplierWritePayload } from '../services/api';
+import { ItemSupplierBatchEntry, ItemSupplierWritePayload } from '../services/api';
 import { ItemSupplier, Supplier } from '../types';
 import { SupplierRelationship } from '../components/SupplierRelationshipForm';
 import { extractErrorMessage } from './extractErrorMessage';
@@ -54,41 +55,42 @@ export const relationshipLabel = (
   `Supplier #${index + 1}`;
 
 /**
- * The way out of an `(item, supplier)` collision, in the operator's terms.
+ * The way out of an `(item, supplier)` collision the server caught, in the
+ * operator's terms.
  *
- * Shared by the pre-flight refusal and the report of a collision the server
- * caught first, so both name the same escape route: the rows are written one at
- * a time and there is no order in which two of them can trade suppliers, so the
- * pair has to be freed by a save of its own.
+ * Every collision between this page's own rows is either resolved before
+ * anything is sent — rows that trade suppliers go out as one atomic batch — or
+ * refused as a supplier listed twice. So a collision the server still reports
+ * means a row this page does not show holds the supplier: someone else linked
+ * it after the page loaded, and only a reload shows it.
  */
 export const SUPPLIER_PAIR_ESCAPE =
-  'Two rows cannot exchange suppliers in one save. Remove the row that holds it, save, then ' +
-  'add it back with the other supplier.';
+  'Another row on this item that this page does not show already holds it — reload the page ' +
+  "to see the item's current suppliers, then choose again.";
 
 /** DRF's `UniqueTogetherValidator` sentence, which names nothing to act on. */
 const UNIQUE_TOGETHER_REASON = /must make a unique set/i;
 
 /**
- * Reasons the editor's current rows cannot be written, in operator language.
+ * Whether the row-by-row writes of `saveSupplierRelationships` would collide on
+ * an `(item, supplier)` pair this same save is freeing — the rows then have to
+ * go to the server as one atomic batch instead.
  *
- * Checked before anything is sent, for the same reason the packaging chain is:
- * the item write lands first, so a row the server is certain to reject would
- * otherwise fail *after* half the save had already happened. Every reason here
- * is one the operator can act on without leaving the page.
+ * Walks the real write sequence rather than judging rows in isolation, because
+ * whether a pair is free depends entirely on what has already been written when
+ * a row's turn comes. A swap (row A X→Y, row B Y→X) collides in every order; so
+ * does a new primary row claiming the supplier an existing row is moving away
+ * from, since the primary is written first. Every retry repeats the same order,
+ * so without the batch such a save could never land.
  *
- * The `(item, supplier)` check walks the real write sequence rather than
- * judging rows in isolation, because whether a pair is free depends entirely on
- * what has already been written when a row's turn comes. Only a conflict the
- * walk can actually prove is refused — anything it cannot prove is sent, and a
- * rejection is reported with the same escape route (`supplierFieldErrors`).
+ * A pair two rows would still share once everything is written is not a
+ * collision this answers: that is a real conflict, and
+ * `validateSupplierRelationships` refuses it before anything is sent.
  */
-export const validateSupplierRelationships = (
+export const needsAtomicSupplierWrite = (
   relationships: SupplierRelationship[],
-  suppliers: Supplier[],
   saved: ItemSupplier[] = []
-): string[] => {
-  const errors: string[] = [];
-  const seen = new Map<number, number>();
+): boolean => {
   const savedById = new Map(saved.map((row) => [row.id, row]));
   const keptIds = new Set(
     relationships
@@ -106,9 +108,9 @@ export const validateSupplierRelationships = (
     }
   });
 
-  relationshipWriteOrder(relationships).forEach((index) => {
+  return relationshipWriteOrder(relationships).some((index) => {
     const relationship = relationships[index];
-    if (relationship.supplier === null) return;
+    if (relationship.supplier === null) return false;
 
     const persisted =
       relationship.id === undefined ? undefined : savedById.get(relationship.id);
@@ -123,19 +125,30 @@ export const validateSupplierRelationships = (
     }
 
     const holderId = heldBy.get(relationship.supplier);
-    if (holderId === undefined || holderId === relationship.id) return;
-
-    // Still held, and its holder has not been written yet — every retry repeats
-    // this same order and collides in the same place.
-    const holderIndex = relationships.findIndex((row) => row.id === holderId);
-    const targetName =
-      suppliers.find((supplier) => supplier.id === relationship.supplier)?.name ??
-      `supplier #${relationship.supplier}`;
-    errors.push(
-      `Supplier #${index + 1} cannot take ${targetName}: Supplier #${holderIndex + 1} still ` +
-        `holds it on this item. ${SUPPLIER_PAIR_ESCAPE}`
-    );
+    return holderId !== undefined && holderId !== relationship.id;
   });
+};
+
+/**
+ * Reasons the editor's current rows cannot be written, in operator language.
+ *
+ * Checked before anything is sent, for the same reason the packaging chain is:
+ * the item write lands first, so a row the server is certain to reject would
+ * otherwise fail *after* half the save had already happened. Every reason here
+ * is one the operator can act on without leaving the page.
+ *
+ * Rows trading suppliers are not refused: `needsAtomicSupplierWrite` sends them
+ * as one batch. Only a supplier two rows would still share once the save is
+ * complete is a real conflict.
+ */
+export const validateSupplierRelationships = (
+  relationships: SupplierRelationship[],
+  suppliers: Supplier[],
+  saved: ItemSupplier[] = []
+): string[] => {
+  const errors: string[] = [];
+  const seen = new Map<number, number>();
+  const savedById = new Map(saved.map((row) => [row.id, row]));
 
   relationships.forEach((relationship, index) => {
     const label = relationshipLabel(relationship, index, suppliers);
@@ -148,6 +161,17 @@ export const validateSupplierRelationships = (
     const first = seen.get(relationship.supplier);
     if (first === undefined) {
       seen.set(relationship.supplier, index);
+    }
+
+    // `(item, supplier)` is unique — two rows for one supplier cannot both be
+    // stored, and which one survives would be an accident. Judged on the end
+    // state before the untouched-row skip below: it is a conflict whichever of
+    // the two rows this save writes.
+    if (first !== undefined) {
+      errors.push(
+        `${label} is listed twice (Supplier #${first + 1} and #${index + 1}); ` +
+          'an item can only link a supplier once.'
+      );
     }
 
     // Only a row this save actually writes can be rejected by the server; a
@@ -164,15 +188,6 @@ export const validateSupplierRelationships = (
     // a guaranteed 400 rather than a stored blank.
     if (relationship.supplier_sku.trim() === '') {
       errors.push(`${label} needs a supplier SKU.`);
-    }
-
-    // `unique_together = [["item", "supplier"]]` — two rows for one supplier
-    // cannot both be stored, and which one survives would be an accident.
-    if (first !== undefined) {
-      errors.push(
-        `${label} is listed twice (Supplier #${first + 1} and #${index + 1}); ` +
-          'an item can only link a supplier once.'
-      );
     }
   });
 
@@ -422,4 +437,60 @@ export const supplierWriteError = (
     detail: `${label} — ${supplierFieldErrors(err) ?? extractErrorMessage(err, 'please try again.')}`,
     stale: false,
   };
+};
+
+/**
+ * One row as an entry of the atomic batch: the same offered fields and
+ * `version` a single-row write sends, plus the row's `id` on an update. The
+ * batch names the item once, so no entry carries it.
+ */
+export const relationshipBatchEntry = (
+  relationship: SupplierRelationship,
+  loaded?: ItemSupplier
+): ItemSupplierBatchEntry => ({
+  ...(relationship.id === undefined ? {} : { id: relationship.id }),
+  ...relationshipPayload(relationship, undefined, loaded),
+});
+
+/**
+ * A refused atomic batch, reported against the rows it names.
+ *
+ * The batch writes nothing when it refuses, so every row the operator changed
+ * is still theirs to fix. A stale refusal names the one row whose copy is out
+ * of date (`error.details.id`); a validation refusal carries one error map per
+ * entry (`error.details.links`), and each non-empty one is reported against its
+ * row the way a single-row rejection would be.
+ */
+export const supplierBatchError = (
+  err: unknown,
+  rows: { relationship: SupplierRelationship; index: number }[],
+  suppliers: Supplier[]
+): { detail: string; stale: boolean } => {
+  const error = (err as { response?: { data?: { error?: { details?: unknown } } } })?.response
+    ?.data?.error;
+
+  if (isStaleSupplierLink(err)) {
+    const staleId = (error?.details as { id?: unknown } | undefined)?.id;
+    const row = rows.find(({ relationship }) => relationship.id === staleId) ?? rows[0];
+    return supplierWriteError(err, row.relationship, row.index, suppliers);
+  }
+
+  const perEntry = (error?.details as { links?: unknown } | undefined)?.links;
+  if (Array.isArray(perEntry)) {
+    const parts = rows.flatMap(({ relationship, index }, position) => {
+      const entryErrors = perEntry[position];
+      if (!entryErrors || typeof entryErrors !== 'object' || Object.keys(entryErrors).length === 0) {
+        return [];
+      }
+      return [
+        supplierWriteError({ response: { data: entryErrors } }, relationship, index, suppliers)
+          .detail,
+      ];
+    });
+    if (parts.length > 0) {
+      return { detail: parts.join(' '), stale: false };
+    }
+  }
+
+  return { detail: extractErrorMessage(err, 'please try again.'), stale: false };
 };

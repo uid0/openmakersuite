@@ -1501,6 +1501,9 @@ views:
         - IsAuthenticated
   inventory.views.ItemSupplierViewSet:
     actions:
+      batch:
+        permission_classes:
+        - IsAuthenticated
       create:
         permission_classes:
         - IsAuthenticated

@@ -298,8 +298,8 @@ fi
 # that happens — the override is almost never intentional in prod.
 
 is_falsy() {
-    case "${1,,}" in
-        ""|0|false|off|no) return 0 ;;
+    case "$1" in  # bracket globs, not a lowercasing expansion: macOS /bin/bash is 3.2
+        ""|0|[Ff][Aa][Ll][Ss][Ee]|[Oo][Ff][Ff]|[Nn][Oo]) return 0 ;;
     esac
     return 1
 }

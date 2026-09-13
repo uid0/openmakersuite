@@ -65,7 +65,7 @@ Each row maps a critical journey or surface to the test owner(s) responsible for
 | Production env validation (AC-23)                          | CI         | `.github/workflows/ci.yml` `Run prod env validator …` step + `scripts/validate-prod-env.sh`.                 |
 | Backup / restore scripts (AC-25)                           | CI + manual| `.github/workflows/ci.yml` `Lint shell scripts` step + `restore-drill.sh --dry-run` parse check (deploy-artifacts job) + `backend/config/tests/test_backup_restore_scripts.py` covers parse/help for `scripts/backup-db.sh`, `restore-db.sh`, `backup-media.sh`, `restore-media.sh`, `backup-config.sh`, `smoke.sh`, `restore-drill.sh`. DB drill end-to-end CI-enforced via `Prod Stack Smoke` job (`restore-drill.sh --skip-media --skip-smoke` + livez reprobe — `deploy/BACKUP_RESTORE.md` §8.1). Manual quarterly K8s drill for media + config in §8.2. |
 | Production smoke checks (AC-35)                            | CI + manual| `.github/workflows/ci.yml` `Prod Stack Smoke (prod compose boot)` job + manual runbook in `deploy/SMOKE_TESTS.md`. |
-| Deployment artifact validation (AC-36)                     | CI         | `.github/workflows/ci.yml` `Render docker-compose.prod.yml`, `helm lint`, `kubeconform` jobs.                |
+| Deployment artifact validation (AC-36)                     | CI         | `.github/workflows/ci.yml` `Render docker-compose.prod.yml`, `helm lint`, `kubeconform` steps.                |
 
 ## AC-38: Proficiency metrics
 

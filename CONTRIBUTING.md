@@ -60,33 +60,23 @@ This will:
 |------------|---------|----------------|-----------|
 | `pre-commit` | pre-commit framework | black, isort, flake8, bandit, file cleanups, npm lock sync, TS compile | `git commit --no-verify` |
 | `commit-msg` | conventional-pre-commit (Python) and `@commitlint/config-conventional` via Husky | Commit message follows [Conventional Commits](https://www.conventionalcommits.org/) (`<type>(<scope>): <subject>`). Both checks enforce the same spec; either path catches violations. | `git commit --no-verify` |
-| `pre-push` | Husky → `npm run lint` + `npm run test:fast` | Frontend lint + fast Jest run, but only when commits being pushed touched `frontend/` | `git push --no-verify` |
+| `pre-push` | Husky → `npm run lint` + `npm run test:fast` | Frontend lint + fast Vitest run, but only when commits being pushed touched `frontend/` | `git push --no-verify` |
 
 > Use `--no-verify` only for true emergencies. CI re-runs the same gates and will reject violations regardless.
 
 Husky lives at the repo root (`.husky/`). Frontend-only contributors who don't install the Python `pre-commit` framework still get commit-msg + pre-push validation as long as `cd frontend && npm install` has run (the `prepare` script wires `core.hooksPath`).
 
-### What CI enforces (required vs advisory)
+### What CI enforces
 
-The `.github/workflows/ci.yml` workflow defines the required gates. Branch protection requires `✅ CI Complete`, which aggregates:
-
-- **Backend Lint** (black/isort/flake8) — required, parallel with tests so lint failures fail fast.
-- **Backend Tests** (pytest + migrations) — required.
-- **Frontend Lint** (ESLint + `npm run typecheck`) — required; the type check must remain at zero errors.
-- **Frontend Tests** (jest + build + Playwright e2e) — required. Playwright runs with `continue-on-error` (advisory).
-- **Docker Build Test** — required.
-- **Code Quality & Security** (bandit, pip-audit, gitleaks) — required.
-- **Deploy Validation** (helm lint, helm template, kubeconform) — required.
+`.github/workflows/ci.yml` defines the jobs; the single required status check is `✅ CI Complete`, which fails if any job it aggregates failed. [`CI_CD.md`](CI_CD.md) explains how the jobs are gated and path-filtered, what else blocks a merge, and where to look when a job fails.
 
 Run `scripts/ci-lint.sh` to reproduce both CI lint jobs locally with the same
 tool versions, working directories, and configuration. Pass `backend` or
 `frontend` to limit the run to one job's checks.
 
-CI uses path filters: doc-only changes (`docs/**`, `*.md`, `.criteria/**`, README) skip the heavy jobs and `✅ CI Complete` still passes.
-
 ### Frontend builds keep `caniuse-lite` fresh automatically
 
-`frontend/package.json` defines a `prebuild` script that runs `npx --yes update-browserslist-db@latest` before every `npm run build` (npm runs `prebuild` automatically as part of the `build` lifecycle). This refreshes the bundled browserslist database so webpack/react-scripts don't warn about a stale `caniuse-lite`. No manual action is required — local builds, CI, and Docker production builds all pick this up by invoking `npm run build`.
+`frontend/package.json` defines a `prebuild` script that runs `npx --yes update-browserslist-db@latest` before every `npm run build` (npm runs `prebuild` automatically as part of the `build` lifecycle). This refreshes the browserslist database consumed by the Vite build. No manual action is required — local builds, CI, and Docker production builds all pick this up by invoking `npm run build`.
 
 ### Code Style
 

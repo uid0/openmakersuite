@@ -62,8 +62,8 @@ cluster deployments, see **[Supported Deployment Paths](docs/deployment-paths.md
 ### Prerequisites
 
 - Docker & Docker Compose
-- Node.js 18+ (for local frontend development)
-- Python 3.11+ (for local backend development)
+- Python and Node.js at the supported versions documented in
+  [`deploy/PREREQUISITES.md`](deploy/PREREQUISITES.md)
 
 For full per-distro install steps, see [`deploy/PREREQUISITES.md`](deploy/PREREQUISITES.md).
 
@@ -177,8 +177,8 @@ pytest --cov             # Tests with coverage
 # Frontend
 cd frontend
 npm run lint              # ESLint checking
-npm test                  # Jest tests
-npm run test:coverage     # Coverage report
+npm run test:ci           # Vitest unit and integration tests
+npm run test:ci:coverage  # Coverage report
 ```
 
 ### Database Migrations
@@ -195,14 +195,10 @@ docker-compose exec backend python manage.py migrate
 
 ### Automated Testing
 
-GitHub Actions runs comprehensive tests on every push:
-
-- ✅ Backend unit & integration tests (pytest)
-- ✅ Frontend component tests (Jest/React Testing Library)
-- ✅ Code quality checks (Black, isort, flake8, ESLint)
-- ✅ Security scanning (Bandit, Safety, Gitleaks)
-- ✅ Docker build verification
-- ✅ Coverage reporting (Codecov)
+GitHub Actions runs lint, tests, security scanning, and Docker and deployment
+validation for pull requests and for pushes to `main` and `develop`.
+`.github/workflows/ci.yml` is the job inventory; [`CI_CD.md`](CI_CD.md) explains
+what gates a merge and where to look when a job fails.
 
 ### Manual Testing
 

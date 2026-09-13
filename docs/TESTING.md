@@ -1,6 +1,8 @@
 # Testing and Code Coverage
 
-This project uses pytest for the Django backend, Jest and React Testing Library for frontend unit and integration tests, and Playwright for browser-level E2E coverage.
+This project uses pytest for the Django backend, Vitest and React Testing
+Library for frontend unit and integration tests, and Playwright for
+browser-level E2E coverage.
 
 ## One-command local check
 
@@ -10,7 +12,10 @@ Run the checks in the same order as CI:
 ./scripts/test-all.sh
 ```
 
-The script installs backend and frontend dependencies, runs backend formatting/linting/tests with coverage, verifies key frontend dependencies, runs Jest with and without coverage, builds the frontend, and runs Playwright E2E tests.
+The script installs backend and frontend dependencies, runs backend
+formatting/linting/tests with coverage, verifies key frontend dependencies,
+runs Vitest with and without coverage, builds the frontend, and runs Playwright
+E2E tests.
 
 Use this when Playwright services or browsers are not available:
 
@@ -187,38 +192,14 @@ Open the HTML report with `npx playwright show-report` after downloading.
 
 ## CI and Codecov
 
-GitHub Actions runs on pushes and pull requests targeting `main` and `develop`.
+What each CI test job runs, and against which services and environment, is
+defined in `.github/workflows/ci.yml`; [`CI_CD.md`](../CI_CD.md) covers what gates
+a merge and how to reproduce a failing job.
 
-Backend CI:
-
-- Installs `backend/requirements.txt` and `backend/requirements-dev.txt`.
-- Runs Black, isort, and flake8.
-- Runs migrations against PostgreSQL.
-- Runs `pytest` with coverage from `backend/pytest.ini`.
-- Verifies `backend/coverage.xml` exists.
-- Uploads backend coverage to Codecov with `fail_ci_if_error: false`.
-
-Frontend CI:
-
-- Verifies `package-lock.json` with `npm ci --dry-run --ignore-scripts`.
-- Runs `npm ci`.
-- Verifies key dependencies with `npm ls`.
-- Runs `npm run test:ci:coverage` on every CI run.
-- Builds the production bundle.
-- Verifies `frontend/coverage/clover.xml` and `frontend/coverage/lcov.info`.
-- Uploads frontend coverage to Codecov with `fail_ci_if_error: false`.
-
-E2E CI (`E2E Tests (Playwright)`):
-
-- Triggers when backend or frontend changes.
-- Spins up Postgres and Redis as service containers.
-- Installs backend dependencies, runs migrations, starts Django with `DEBUG=1` on `:8000`.
-- Builds the frontend and serves the build with `scripts/serve-spa.py` on `:3000`.
-- Installs Playwright chromium and runs the e2e suite against the live stack.
-- Uploads the Playwright HTML report on every run; uploads raw traces/videos/screenshots on failure.
-- Blocking: there is no `continue-on-error`. A Playwright failure fails the PR.
-
-Coverage thresholds are enforced by pytest/Jest. Codecov upload is reporting-only and must not be the only gate.
+Coverage thresholds are enforced by the test runners themselves
+(`--cov-fail-under` in `backend/pytest.ini`, `coverage.thresholds` in
+`frontend/vite.config.ts`). The Codecov upload is reporting-only and must not be
+the only gate.
 
 ## Writing Tests
 

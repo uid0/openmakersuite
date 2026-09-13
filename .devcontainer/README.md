@@ -72,9 +72,8 @@ The devcontainer automatically forwards ports:
 ## 🛠️ Environment Details
 
 **Development-Optimized Setup:**
-- Ubuntu Linux (same as GitHub Actions)
-- Python 3.11 with pip and development tools
-- Node.js 18 with npm
+- Ubuntu base image, Python and Node.js at the versions set in
+  `devcontainer.json` (CI pins its own in `.github/workflows/ci.yml`)
 - SQLite database (development-friendly)
 - Redis 7 (via system service)
 

@@ -253,14 +253,10 @@ derivation or is added to that allowlist with a reason. The allowlist holds only
 the column's own definition, verbatim copies (`PriceHistory`, the payload
 fields) and the write path — never a derivation.
 
-**The gate is BACKEND-ONLY.** It walks `backend/` and nothing else, so a
-frontend reader of `quantity_per_package` is NOT covered and does not fail the
-build. That is precisely how `ScanPage.tsx`'s reorder form kept multiplying by a
-recorded 0 after the backend readers were all moved onto the derivation; it was
-found by review, not by the gate, and is fixed in the page itself. Extending the
-scan to frontend sources is filed as separate follow-up. The "a reader added
-later fails the build" criterion holds for backend readers only — read it that
-way, and do not assume a green suite says anything about `frontend/`.
+The web has a companion lint gate at
+`frontend/eslint-rules/pack-size-single-owner.mjs`. Its header owns the frontend
+scope, allowlist, and syntactic limits; `frontend/src/utils/caseSize.ts` owns the
+boundary between the server's state and the words shown in the web app.
 
 ### Which supplier's wait the reorder point allows for (op-3vqk)
 
@@ -521,13 +517,11 @@ still open:
    `SupplierRelationshipForm.tsx` coerces a typed 0 to 1 on the WRITE path, in
    the pack-size input's `onChange`
    (`quantity_per_package: Number(e.target.value) || 1`), silently changing what
-   an operator typed. Those counts are as of this branch — grep the expressions,
-   do not trust the numbers. These are FRONTEND sites and the pack-size build
-   gate walks `backend/` only, which is why none of them fails a build today.
-3. **Extending the pack-size build gate to frontend sources**, the follow-up
-   named above with the gate's backend-only scope. It sits beside 2 because 2
-   is the population it would cover: nothing gates a frontend reader until it
-   exists.
+   an operator typed. The direct reads and why they are not item-level case-size
+   derivations are owned by the allowlist in
+   `frontend/eslint-rules/pack-size-single-owner.mjs`; changing their counts or
+   adding a reader elsewhere fails frontend lint. The write expression is not a
+   read of the saved column and remains outside that gate.
 
 ### What a price costs, and whether we know: one derivation (op-9m2v)
 
@@ -583,10 +577,10 @@ pins the exact set of direct reads of `unit_cost` / `package_cost`. It adds
 `Coalesce` and the aggregates to the scanned wrappers, because
 `Sum(F("current_stock") * Coalesce("unit_cost_value", Value(0)))` in
 `inventory.views`'s stock-value reports is `unit_cost or 0` written in SQL.
-**Two honest limits:** the walk is `backend/`-only (a frontend price reader is
-not gated, exactly as `quantity_per_package`'s is not), and `unit_cost` is a
-column name on five models here, so the allowlist has to say per entry which
-model a read is on. `inventory/tests/test_price_guards.py` owns the behaviour,
+**Two honest limits:** the walk is `backend/`-only (frontend price readers are
+not gated), and `unit_cost` is a column name on five models here, so the
+allowlist has to say per entry which model a read is on.
+`inventory/tests/test_price_guards.py` owns the behaviour,
 every test labelled BEFORE/AFTER or CONTROL against the invariant *no money
 figure changes versus base EXCEPT where base was presenting an unknown price as
 a real number.*

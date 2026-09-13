@@ -12,6 +12,12 @@
  * make unnecessary, and a second copy of the rule here would be free to drift
  * from the one that actually decides.
  *
+ * The `quantity_per_package` half of that is enforced: a web read of the column
+ * outside the allowlist in `eslint-rules/pack-size-single-owner.mjs` fails lint.
+ * Lint enforces only that column read. Not re-deriving case-size state from
+ * supplier-link counts or `is_active` / `is_discontinued` remains a documented
+ * rule that lint does not enforce.
+ *
  * THE DEFECT THIS CLOSES: three web surfaces said `— (case size unknown)` and
  * one said a bare em dash, for every unknown alike. An operator reading that
  * could not tell whether they were supplying a fact nobody had recorded or

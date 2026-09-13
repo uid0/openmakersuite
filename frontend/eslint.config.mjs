@@ -4,6 +4,7 @@ import reactHooksPlugin from 'eslint-plugin-react-hooks';
 import tsParser from '@typescript-eslint/parser';
 import tsPlugin from '@typescript-eslint/eslint-plugin';
 import globals from 'globals';
+import omsLocal from './eslint-rules/pack-size-single-owner.mjs';
 
 export default [
   {
@@ -75,6 +76,16 @@ export default [
       '@typescript-eslint/no-unused-expressions': 'off',
       '@typescript-eslint/no-require-imports': 'off',
       '@typescript-eslint/ban-ts-comment': 'off',
+    },
+  },
+  {
+    // The web half of the pack-size single-owner gate: a new reader of
+    // `quantity_per_package` fails lint. See the rule's header for the rule
+    // and its allowlist.
+    files: ['src/**/*.{ts,tsx}'],
+    plugins: { 'oms-local': omsLocal },
+    rules: {
+      'oms-local/pack-size-single-owner': 'error',
     },
   },
 ];

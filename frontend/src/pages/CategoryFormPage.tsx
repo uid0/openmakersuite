@@ -77,8 +77,8 @@ const CategoryFormPage: React.FC = () => {
     }
   };
 
-  const buildCategoryOptions = (items: Category[], excludeId?: number, level: number = 0): JSX.Element[] => {
-    const options: JSX.Element[] = [];
+  const buildCategoryOptions = (items: Category[], excludeId?: number, level: number = 0): React.JSX.Element[] => {
+    const options: React.JSX.Element[] = [];
     
     items
       .filter((item) => item.id !== excludeId)

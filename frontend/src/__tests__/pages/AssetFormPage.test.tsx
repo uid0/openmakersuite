@@ -45,16 +45,17 @@ const sessionExpiredError = (): AxiosError =>
 
 describe('AssetFormPage', () => {
   const mockCategories: Category[] = [
-    { id: 1, name: 'Electronics', slug: 'electronics', parent: null, created_at: '', updated_at: '' },
-    { id: 2, name: 'Tools', slug: 'tools', parent: null, created_at: '', updated_at: '' },
+    { id: 1, name: 'Electronics', slug: 'electronics', description: '', parent: null },
+    { id: 2, name: 'Tools', slug: 'tools', description: '', parent: null },
   ];
 
   const mockLocations: Location[] = [
-    { id: 1, name: 'Workshop A', description: '', created_at: '', updated_at: '' },
-    { id: 2, name: 'Workshop B', description: '', created_at: '', updated_at: '' },
+    { id: 1, name: 'Workshop A', description: '', is_active: true, parent: null, created_at: '', updated_at: '' },
+    { id: 2, name: 'Workshop B', description: '', is_active: true, parent: null, created_at: '', updated_at: '' },
   ];
 
-  const mockInventoryItems: InventoryItem[] = [
+  // Picker options only: the form reads id, name and sku, so the rest of InventoryItem is omitted.
+  const mockInventoryItems = [
     {
       id: 'item-1',
       name: 'Test Item',
@@ -64,13 +65,11 @@ describe('AssetFormPage', () => {
       minimum_stock: 5,
       reorder_quantity: 20,
       use_case_based_reorder: false,
-      minimum_cases: null,
-      reorder_cases: null,
+      minimum_cases: 1,
+      reorder_cases: 1,
       category: 1,
       category_name: 'Electronics',
-      location: 1,
-      location_name: 'Workshop A',
-      shelf_position: '',
+      location: 'Workshop A',
       is_hazardous: false,
       msds_url: '',
       nfpa_health_hazard: null,
@@ -83,7 +82,7 @@ describe('AssetFormPage', () => {
       created_at: '',
       updated_at: '',
     },
-  ];
+  ] as InventoryItem[];
 
   const mockSIGs: SIG[] = [
     { id: 1, name: 'SIG 1', member_count: 5, asset_count: 2, inventory_count: 3, admins: [], is_user_admin: false },
@@ -106,7 +105,7 @@ describe('AssetFormPage', () => {
       config: {} as any,
     });
     mockInventoryAPI.listItems.mockResolvedValue({
-      data: { results: mockInventoryItems },
+      data: { count: mockInventoryItems.length, next: null, previous: null, results: mockInventoryItems },
       status: 200,
       statusText: 'OK',
       headers: {},
@@ -180,6 +179,15 @@ describe('AssetFormPage', () => {
       needs_compressed_air: false,
       needs_ventilation: false,
       is_chargeable: false,
+      is_cost_recoverable: false,
+      mac_address: '',
+      training_required: false,
+      required_certifications: [],
+      required_certification_details: [],
+      breaker: null,
+      breaker_summary: null,
+      disconnect: null,
+      disconnect_summary: null,
       last_scanned_at: null,
       ownership_type: 'space',
       owning_group: null,
@@ -302,6 +310,15 @@ describe('AssetFormPage', () => {
       needs_compressed_air: false,
       needs_ventilation: false,
       is_chargeable: false,
+      is_cost_recoverable: false,
+      mac_address: '',
+      training_required: false,
+      required_certifications: [],
+      required_certification_details: [],
+      breaker: null,
+      breaker_summary: null,
+      disconnect: null,
+      disconnect_summary: null,
       last_scanned_at: null,
       ownership_type: 'space',
       owning_group: null,
@@ -520,6 +537,15 @@ describe('AssetFormPage', () => {
       needs_compressed_air: false,
       needs_ventilation: false,
       is_chargeable: false,
+      is_cost_recoverable: false,
+      mac_address: '',
+      training_required: false,
+      required_certifications: [],
+      required_certification_details: [],
+      breaker: null,
+      breaker_summary: null,
+      disconnect: null,
+      disconnect_summary: null,
       last_scanned_at: null,
       ownership_type: 'space',
       owning_group: null,

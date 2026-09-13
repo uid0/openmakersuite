@@ -43,7 +43,7 @@ const LogisticsDashboard: React.FC = () => {
   const [siteSettings, setSiteSettings] = useState<SiteSettings | null>(null);
   const [topLocations, setTopLocations] = useState<TopLocationRow[]>([]);
   const logoRef = useRef<HTMLDivElement>(null);
-  const animationFrameRef = useRef<number>();
+  const animationFrameRef = useRef<number | undefined>(undefined);
   const positionRef = useRef({ x: 100, y: 100 });
   const velocityRef = useRef({ x: 2, y: 2 });
 

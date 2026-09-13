@@ -24,6 +24,8 @@ const scanResult = (overrides: Partial<ScanResult> = {}): ScanResult => ({
   username: 'alice',
   first_name: 'Alice',
   last_name: 'Anderson',
+  email: '',
+  expires_at: null,
   status: 'valid',
   days_remaining: 30,
   ...overrides,

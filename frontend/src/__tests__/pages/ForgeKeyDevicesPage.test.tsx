@@ -16,7 +16,7 @@ import { forgekeyAPI, inventoryAPI } from '../../services/api';
 import { networkError } from '../helpers/offline';
 
 vi.mock('../../services/api', async () => {
-  const actual = await vi.importActual('../../services/api');
+  const actual = await vi.importActual<typeof import('../../services/api')>('../../services/api');
   return {
     ...actual,
     forgekeyAPI: {

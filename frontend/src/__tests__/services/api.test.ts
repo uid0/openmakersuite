@@ -137,7 +137,7 @@ describe('API Service', () => {
       };
 
       mock.onPost('/inventory/items/').reply((config) => {
-        expect(config.headers['Content-Type']).toContain('multipart/form-data');
+        expect(config.headers?.['Content-Type']).toContain('multipart/form-data');
         return [201, mockResponse];
       });
 
@@ -177,7 +177,7 @@ describe('API Service', () => {
       };
 
       mock.onPatch('/inventory/items/test-id/').reply((config) => {
-        expect(config.headers['Content-Type']).toContain('multipart/form-data');
+        expect(config.headers?.['Content-Type']).toContain('multipart/form-data');
         return [200, mockResponse];
       });
 
@@ -690,7 +690,7 @@ describe('API Service', () => {
     test('createAsset creates new asset', async () => {
       const assetData = {
         name: 'New Asset',
-        status: 'active',
+        status: 'active' as const,
       };
 
       const mockResponse = {
@@ -816,7 +816,7 @@ describe('API Service', () => {
 
       const response = await assetsAPI.reportProblem('test-id', 'Broken part', ['5', '7']);
 
-      expect(response.data.affected_parts[0].part_name).toBe('Belt');
+      expect(response.data.affected_parts?.[0].part_name).toBe('Belt');
     });
 
     test('reportProblem omits part_ids when the flagged list is empty', async () => {

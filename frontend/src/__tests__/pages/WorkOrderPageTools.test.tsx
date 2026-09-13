@@ -48,7 +48,7 @@ const buildWorkOrder = (tools?: WorkOrderTool[]): WorkOrder =>
     due_date: null,
     assigned_to: null,
     assigned_to_name: 'Alice',
-    completed_by_name: null,
+    completed_by_name: '',
     completed_at: null,
     notes: '',
     loto_completion_note: '',

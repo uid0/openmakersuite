@@ -9,7 +9,7 @@ import MaintenanceHistorySection from '../../components/assets/MaintenanceHistor
 import * as api from '../../services/api';
 
 vi.mock('../../services/api', async () => {
-  const actual = await vi.importActual('../../services/api');
+  const actual = await vi.importActual<typeof import('../../services/api')>('../../services/api');
   return {
     __esModule: true,
     ...actual,

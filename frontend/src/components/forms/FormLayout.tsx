@@ -41,7 +41,7 @@ export function FormLayout({
                 )}
               </>
             )}
-            <Grid gutter={spacing}>
+            <Grid gap={spacing}>
               {React.Children.map(section.children, (child, childIndex) => (
                 <Grid.Col key={childIndex} span={{ base: 12, sm: 6 }}>
                   {child}
@@ -57,7 +57,7 @@ export function FormLayout({
 
   // Otherwise, render children in a 2-column grid
   return (
-    <Grid gutter={spacing}>
+    <Grid gap={spacing}>
       {React.Children.map(children, (child, index) => (
         <Grid.Col key={index} span={{ base: 12, sm: 6 }}>
           {child}

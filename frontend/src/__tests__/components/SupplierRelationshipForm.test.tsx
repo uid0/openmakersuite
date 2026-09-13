@@ -19,7 +19,8 @@ describe('SupplierRelationshipForm Component', () => {
     {
       id: 1,
       name: 'Test Supplier 1',
-      supplier_type: 'amazon',
+      supplier_type: 'online',
+      tax_free_paperwork_filed: false,
       website: 'https://example.com',
       notes: '',
       created_at: '2024-01-01T00:00:00Z',
@@ -28,7 +29,8 @@ describe('SupplierRelationshipForm Component', () => {
     {
       id: 2,
       name: 'Test Supplier 2',
-      supplier_type: 'other',
+      supplier_type: 'local',
+      tax_free_paperwork_filed: false,
       website: 'https://example2.com',
       notes: '',
       created_at: '2024-01-01T00:00:00Z',

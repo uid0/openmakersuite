@@ -55,6 +55,7 @@ const toolRow = (overrides: Partial<WorkOrderToolRow> = {}): WorkOrderToolRow =>
   resolved_location: 'Tool crib, drawer 3',
   is_required: true,
   notes: '',
+  created_at: '2026-01-01T00:00:00Z',
   ...overrides,
 });
 

@@ -63,7 +63,7 @@ const baseItem: api.ReorderDataItem = {
 
 const renderWith = async (
   item: api.ReorderDataItem,
-  supplierOverrides: Partial<typeof supplier> = {}
+  supplierOverrides: Partial<api.ReorderDataSupplier> = {}
 ) => {
   (api.purchaseOrderAPI.getReorderData as jest.Mock).mockResolvedValue({
     data: { suppliers: [{ ...supplier, ...supplierOverrides, items: [item] }] },

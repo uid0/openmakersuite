@@ -14,7 +14,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
-from django.db import IntegrityError, models, transaction
+from django.db import IntegrityError, models, router, transaction
 from django.db.models import Case, F, Q, Value, When
 from django.db.models.functions import Greatest
 from django.utils import timezone
@@ -199,8 +199,8 @@ class LineDeleteCoalescingQuerySet(models.QuerySet):
     ``delete()`` fans ``post_delete`` out per LINE, however the lines are
     reached — directly, or through the cascade from the orders they belong to —
     and each of those is a settlement transition, so removing twenty lines would
-    otherwise re-derive their order twenty times. Coalescing only — Django's own
-    ``delete()`` already owns the transaction.
+    otherwise re-derive their order twenty times. The outer transaction keeps
+    the delete and the deferred flush in one unit of work.
 
     Shared by the line and the order querysets because the cause is the same:
     ``Collector`` collects a cascade through the related model's BASE manager
@@ -212,7 +212,7 @@ class LineDeleteCoalescingQuerySet(models.QuerySet):
     def delete(self, *args, **kwargs):
         from .settlement_signals import settlement_batch
 
-        with settlement_batch():
+        with transaction.atomic(using=self.db), settlement_batch():
             return super().delete(*args, **kwargs)
 
     # Django withholds ``delete`` from managers on purpose, and it does it with
@@ -522,7 +522,11 @@ class PurchaseOrder(models.Model):
         """
         from .settlement_signals import settlement_batch
 
-        with settlement_batch():
+        using = kwargs.get("using")
+        if using is None and args:
+            using = args[0]
+        using = using or router.db_for_write(type(self), instance=self)
+        with transaction.atomic(using=using), settlement_batch():
             return super().delete(*args, **kwargs)
 
     @cached_property

@@ -1656,7 +1656,14 @@ class ItemSupplier(models.Model):
 
         is_new = self.pk is None
         with transaction.atomic():
-            lock_item_supplier_links(self.item_id)
+            stored_item_id = None
+            if not is_new:
+                stored_item_id = (
+                    ItemSupplier.objects.filter(pk=self.pk)
+                    .values_list("item_id", flat=True)
+                    .first()
+                )
+            lock_item_supplier_links(stored_item_id, self.item_id)
             # First, before anything reads the stored row: lock it, refuse a save
             # made from a stale copy, and move the version on
             # (``inventory.services.link_version``).

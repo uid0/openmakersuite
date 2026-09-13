@@ -221,7 +221,11 @@ class ItemSupplierAdminForm(ModelForm):
                 )
             return cleaned_data
         with transaction.atomic():
-            lock_item_supplier_links(self.instance.item_id)
+            cleaned_item = cleaned_data.get("item")
+            lock_item_supplier_links(
+                self.instance.item_id,
+                cleaned_item.pk if cleaned_item is not None else None,
+            )
             current = (
                 ItemSupplier.objects.select_for_update()
                 .filter(pk=self.instance.pk)

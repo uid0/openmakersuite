@@ -1043,3 +1043,62 @@ def test_tokened_primary_patch_racing_a_sibling_promotion_does_not_deadlock(
     assert outcomes["primary"] in (200, 409)
     assert outcomes["sibling"] in (200, 409)
     assert ItemSupplier.objects.filter(item=item, is_primary=True).count() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_two_concurrent_supplier_link_reassignments_lock_items_in_one_order():
+    if connection.vendor != "postgresql":
+        pytest.skip("requires PostgreSQL transaction advisory locks")
+
+    first_item = InventoryItemFactory(image=None)
+    second_item = InventoryItemFactory(image=None)
+    first_link = ItemSupplierFactory(item=first_item, is_primary=False)
+    second_link = ItemSupplierFactory(item=second_item, is_primary=False)
+    first_copy = ItemSupplier.objects.get(pk=first_link.pk)
+    second_copy = ItemSupplier.objects.get(pk=second_link.pk)
+    first_written = threading.Event()
+    release_first = threading.Event()
+    outcomes = {}
+
+    def move_first():
+        try:
+            with transaction.atomic():
+                first_copy.item = second_item
+                first_copy.save()
+                first_written.set()
+                assert release_first.wait(timeout=30)
+            outcomes["first"] = "saved"
+        except Exception as exc:  # pragma: no cover
+            outcomes["first"] = exc
+            first_written.set()
+        finally:
+            connection.close()
+
+    def move_second():
+        try:
+            second_copy.item = first_item
+            second_copy.save()
+            outcomes["second"] = "saved"
+        except Exception as exc:  # pragma: no cover
+            outcomes["second"] = exc
+        finally:
+            connection.close()
+
+    first = threading.Thread(target=move_first, daemon=True)
+    second = threading.Thread(target=move_second, daemon=True)
+    first.start()
+    assert first_written.wait(timeout=30)
+    second.start()
+    try:
+        _wait_until_a_connection_waits_on_a_lock()
+    finally:
+        release_first.set()
+        first.join(timeout=30)
+        second.join(timeout=30)
+
+    assert [first.is_alive(), second.is_alive()] == [False, False]
+    assert outcomes == {"first": "saved", "second": "saved"}
+    first_link.refresh_from_db()
+    second_link.refresh_from_db()
+    assert first_link.item_id == second_item.pk
+    assert second_link.item_id == first_item.pk

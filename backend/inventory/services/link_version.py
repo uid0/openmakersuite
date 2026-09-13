@@ -30,11 +30,12 @@ WHY THE CHECK CANNOT RACE THE WRITE
 -----------------------------------
 
 :func:`lock_item_supplier_links` is the first lock taken by every supplier-link
-write. On PostgreSQL it takes one transaction-scoped advisory lock per item, so
-creates, updates, deletes, primary arbitration and existence checks serialize
-before any caller takes an ``ItemSupplier`` row lock. It is a no-op on other
-databases. One ordering rule prevents a row-lock/advisory-lock inversion while
-also providing a shared boundary when an item has no links yet.
+write. On PostgreSQL it takes transaction-scoped advisory locks for every item
+the write touches, in sorted order, so creates, updates, reassignment, deletes,
+primary arbitration and existence checks serialize before any caller takes an
+``ItemSupplier`` row lock. It is a no-op on other databases. One ordering rule
+prevents row/advisory and cross-item inversions while also providing a shared
+boundary when an item has no links yet.
 
 :func:`claim_version` takes ``SELECT ... FOR UPDATE`` on the row inside the
 save's transaction, compares, and bumps. A second save of the same row blocks
@@ -106,14 +107,16 @@ VERSION_FIELD = "version"
 STALE_VERSION_CODE = "stale_version"
 
 
-def lock_item_supplier_links(item_id) -> None:
+def lock_item_supplier_links(*item_ids) -> None:
     if connection.vendor != "postgresql":
         return
+    ordered_ids = sorted({item_id for item_id in item_ids if item_id is not None}, key=str)
     with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT pg_advisory_xact_lock(hashtext(%s))",
-            [f"inventory.itemsupplier.links:{item_id}"],
-        )
+        for item_id in ordered_ids:
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                [f"inventory.itemsupplier.links:{item_id}"],
+            )
 
 
 class StaleSupplierLink(Exception):

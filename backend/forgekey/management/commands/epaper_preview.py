@@ -18,16 +18,24 @@ Run it inside the backend container, e.g.::
     python manage.py epaper_preview --state overdue
     python manage.py epaper_preview --state never
 
-    # Choose where the PNG lands (default /tmp/epaper_preview.png):
-    python manage.py epaper_preview --out /tmp/foo.png
+    # Choose where the PNG lands (default ./epaper_preview.png):
+    python manage.py epaper_preview --out previews/foo.png
 
-Copy it to the host with::
+The default lands in the working directory (``/app``), not a shared ``/tmp``
+path another local user could pre-plant a symlink at; the write also refuses
+to follow a symlink at the final path component. Parent directories of an
+explicit ``--out`` must be trusted, not shared world-writable locations.
 
-    docker cp oms-backend-1:/tmp/epaper_preview.png /tmp/epaper_preview.png
+In the dev compose stack ``/app`` is the bind-mounted ``./backend``, so the
+PNG is already on the host at ``backend/epaper_preview.png``. From a container
+without that mount, copy it out with::
+
+    docker cp oms-backend-1:/app/epaper_preview.png ./epaper_preview.png
 """
 
 from __future__ import annotations
 
+import os
 from datetime import timedelta
 from uuid import uuid4
 
@@ -48,8 +56,12 @@ class Command(BaseCommand):
             default="ok",
             help="Sample PM state to render (only used when no asset/display given).",
         )
-        # Dev preview tool; /tmp is the documented drop point (docker cp).
-        parser.add_argument("--out", type=str, default="/tmp/epaper_preview.png")  # nosec B108
+        parser.add_argument(
+            "--out",
+            type=str,
+            default="epaper_preview.png",
+            help="PNG output path (default: epaper_preview.png in the working directory).",
+        )
         parser.add_argument(
             "--base-url",
             type=str,
@@ -133,7 +145,12 @@ class Command(BaseCommand):
             transaction.set_rollback(True)
 
     def _write(self, out: str, png: bytes, asset) -> None:
-        with open(out, "wb") as fh:
+        # O_NOFOLLOW: a symlink planted at the target must not redirect the write.
+        try:
+            fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+        except OSError as exc:
+            raise CommandError(f"Cannot write {out}: {exc.strerror}") from exc
+        with os.fdopen(fd, "wb") as fh:
             fh.write(png)
         self.stdout.write(
             self.style.SUCCESS(f"Wrote {len(png)} bytes to {out}  (asset: {asset.name})")

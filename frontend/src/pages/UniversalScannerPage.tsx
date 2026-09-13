@@ -65,9 +65,12 @@ type HistoryEntry = {
 
 const HISTORY_LIMIT = 8;
 
-// @ts-expect-error KNOWN DEFECT: no 'project_storage_stint' label, so a stint
+// KNOWN DEFECT: no 'project_storage_stint' label, so a stint
 // scan toasts "undefined: <name>" and its history badge is blank.
-const actionLabel: Record<ScanDispatchResult['action'], string> = {
+const actionLabel: Record<
+  Exclude<ScanDispatchResult['action'], 'project_storage_stint'>,
+  string
+> & Partial<Record<'project_storage_stint', string>> = {
   inventory_reorder: 'Mark for reorder',
   inventory_receive: 'Receive',
   asset_checkin: 'Asset check-in',
@@ -77,8 +80,11 @@ const actionLabel: Record<ScanDispatchResult['action'], string> = {
   unknown: 'Unknown',
 };
 
-// @ts-expect-error KNOWN DEFECT: no 'project_storage_stint' color (see actionLabel).
-const actionColor: Record<ScanDispatchResult['action'], string> = {
+// KNOWN DEFECT: no 'project_storage_stint' color (see actionLabel).
+const actionColor: Record<
+  Exclude<ScanDispatchResult['action'], 'project_storage_stint'>,
+  string
+> & Partial<Record<'project_storage_stint', string>> = {
   inventory_reorder: 'orange',
   inventory_receive: 'teal',
   asset_checkin: 'blue',

@@ -10,9 +10,12 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { makerBoxesAPI, MakerBox } from '../services/api';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 
-// @ts-expect-error KNOWN DEFECT: no 'pre_conversion' entry, and /maker-boxes/
+// KNOWN DEFECT: no 'pre_conversion' entry, and /maker-boxes/
 // lists pre-conversion rows, so badge.color below throws and the page crashes.
-const STATUS_BADGE: Record<MakerBox['status'], { label: string; color: string }> = {
+const STATUS_BADGE: Record<
+  Exclude<MakerBox['status'], 'pre_conversion'>,
+  { label: string; color: string }
+> & Partial<Record<'pre_conversion', { label: string; color: string }>> = {
   valid: { label: 'Valid', color: '#1f8a3a' },
   grace: { label: 'Grace', color: '#d4a017' },
   expired: { label: 'Expired', color: '#c0392b' },
@@ -167,7 +170,7 @@ const MakerBoxAdminPage: React.FC = () => {
             </thead>
             <tbody>
               {boxes.map((box) => {
-                const badge = STATUS_BADGE[box.status];
+                const badge = STATUS_BADGE[box.status] as { label: string; color: string };
                 return (
                   <tr key={box.id} style={{ borderTop: '1px solid #ddd' }}>
                     <td style={{ padding: '0.25rem' }}>{box.bin_id}</td>

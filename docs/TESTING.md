@@ -1,6 +1,8 @@
 # Testing and Code Coverage
 
-This project uses pytest for the Django backend, Jest and React Testing Library for frontend unit and integration tests, and Playwright for browser-level E2E coverage.
+This project uses pytest for the Django backend, Vitest and React Testing
+Library for frontend unit and integration tests, and Playwright for
+browser-level E2E coverage.
 
 ## One-command local check
 
@@ -10,7 +12,10 @@ Run the checks in the same order as CI:
 ./scripts/test-all.sh
 ```
 
-The script installs backend and frontend dependencies, runs backend formatting/linting/tests with coverage, verifies key frontend dependencies, runs Jest with and without coverage, builds the frontend, and runs Playwright E2E tests.
+The script installs backend and frontend dependencies, runs backend
+formatting/linting/tests with coverage, verifies key frontend dependencies,
+runs Vitest with and without coverage, builds the frontend, and runs Playwright
+E2E tests.
 
 Use this when Playwright services or browsers are not available:
 

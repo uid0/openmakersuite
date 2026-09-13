@@ -60,7 +60,7 @@ This will:
 |------------|---------|----------------|-----------|
 | `pre-commit` | pre-commit framework | black, isort, flake8, bandit, file cleanups, npm lock sync, TS compile | `git commit --no-verify` |
 | `commit-msg` | conventional-pre-commit (Python) and `@commitlint/config-conventional` via Husky | Commit message follows [Conventional Commits](https://www.conventionalcommits.org/) (`<type>(<scope>): <subject>`). Both checks enforce the same spec; either path catches violations. | `git commit --no-verify` |
-| `pre-push` | Husky → `npm run lint` + `npm run test:fast` | Frontend lint + fast Jest run, but only when commits being pushed touched `frontend/` | `git push --no-verify` |
+| `pre-push` | Husky → `npm run lint` + `npm run test:fast` | Frontend lint + fast Vitest run, but only when commits being pushed touched `frontend/` | `git push --no-verify` |
 
 > Use `--no-verify` only for true emergencies. CI re-runs the same gates and will reject violations regardless.
 
@@ -76,7 +76,7 @@ tool versions, working directories, and configuration. Pass `backend` or
 
 ### Frontend builds keep `caniuse-lite` fresh automatically
 
-`frontend/package.json` defines a `prebuild` script that runs `npx --yes update-browserslist-db@latest` before every `npm run build` (npm runs `prebuild` automatically as part of the `build` lifecycle). This refreshes the bundled browserslist database so webpack/react-scripts don't warn about a stale `caniuse-lite`. No manual action is required — local builds, CI, and Docker production builds all pick this up by invoking `npm run build`.
+`frontend/package.json` defines a `prebuild` script that runs `npx --yes update-browserslist-db@latest` before every `npm run build` (npm runs `prebuild` automatically as part of the `build` lifecycle). This refreshes the browserslist database consumed by the Vite build. No manual action is required — local builds, CI, and Docker production builds all pick this up by invoking `npm run build`.
 
 ### Code Style
 

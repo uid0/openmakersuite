@@ -62,8 +62,8 @@ cluster deployments, see **[Supported Deployment Paths](docs/deployment-paths.md
 ### Prerequisites
 
 - Docker & Docker Compose
-- Node.js 18+ (for local frontend development)
-- Python 3.11+ (for local backend development)
+- Python and Node.js at the supported versions documented in
+  [`deploy/PREREQUISITES.md`](deploy/PREREQUISITES.md)
 
 For full per-distro install steps, see [`deploy/PREREQUISITES.md`](deploy/PREREQUISITES.md).
 
@@ -177,8 +177,8 @@ pytest --cov             # Tests with coverage
 # Frontend
 cd frontend
 npm run lint              # ESLint checking
-npm test                  # Jest tests
-npm run test:coverage     # Coverage report
+npm run test:ci           # Vitest unit and integration tests
+npm run test:ci:coverage  # Coverage report
 ```
 
 ### Database Migrations

@@ -23,10 +23,10 @@ grep -n '^    name:' .github/workflows/ci.yml
 ## Why CI is shaped this way
 
 **One required check, many jobs.** The `main` ruleset requires a single
-status check, `✅ CI Complete` (the `ci-complete` job). Every other job is a
+status check, `✅ CI Complete` (the `ci-complete` job). Each validation job is a
 merge gate only because `ci-complete` lists it in `needs:` *and* checks its
-result. A new job added to `ci.yml` but not to both places runs, can fail, and
-still does not block a merge.
+result. A new validation job added to `ci.yml` but not to both places runs, can
+fail, and still does not block a merge.
 
 **Path filters, with skipped counted as passed.** The expensive jobs (tests,
 Docker, prod-stack boot, Helm/K8s rendering) only run when the paths they

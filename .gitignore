@@ -97,7 +97,10 @@ Thumbs.db
 
 # Gas Town / Polecat runtime files
 .runtime/
-.claude/
+# Claude Code writes runtime state under .claude/ (scheduled_tasks.lock,
+# settings.local.json); only the project slash commands are tracked.
+.claude/*
+!.claude/commands/
 .beads/*
 !.beads/routes.jsonl
 

@@ -76,17 +76,13 @@ The primary issue was that React Testing Library's behavior around `act()` can v
 ### Testing Commands (CI-Compatible)
 
 ```bash
-# Frontend (matches CI exactly)
-cd frontend
-npm run lint
-npm run test:ci
+# Frontend lint job (matches CI exactly)
+scripts/ci-lint.sh frontend
+(cd frontend && npm run test:ci)
 
-# Backend (matches CI exactly)
-cd backend
-flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-black --check --diff .
-isort --check-only --diff .
-pytest --cov --cov-report=xml --cov-fail-under=80
+# Backend lint job (matches CI exactly)
+scripts/ci-lint.sh backend
+(cd backend && pytest --cov --cov-report=xml --cov-fail-under=80)
 ```
 
 ## Why This Solves Platform Differences

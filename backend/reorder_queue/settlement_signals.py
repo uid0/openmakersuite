@@ -81,7 +81,8 @@ status re-derives and the stored total is not touched.
 Three properties this has to hold, all of them tested rather than asserted:
 
 * **Coalesced.** Receiving twenty lines re-derives the order once, not twenty
-  times — see :func:`settlement_batch`. Per value: an order owing only a
+  times — see :func:`settlement_batch`. Deleting an order with fifty lines
+  costs the same queries as deleting one with a single line. Per value: an order owing only a
   status re-derivation is not re-priced to keep it company.
 * **Same-request.** The re-derivation happens INSIDE the unit of work, never on
   ``transaction.on_commit``. Endpoints serialize ``purchase_order.status`` into
@@ -493,10 +494,19 @@ def _rederive_after_line_delete(sender, instance, **kwargs):
     When a purchase order is deleted, its lines go FIRST — ``Collector`` deletes
     a dependent model before the model it points at, and sends ``post_delete``
     per row straight after that model's batch — so this fires while the order
-    row is still there and :func:`_run` duly re-reads it. What makes that
-    harmless is not that the order is gone: it is that every line already is, so
-    ``has_received_anything`` is False and the status refresh returns without
-    writing, and the total is re-rolled to the zero its lines now sum to.
+    row is still there. Run on the spot, that re-derived an order about to be
+    deleted once PER LINE: a locking read, a re-read of the lines and a write of
+    the zero total, for nothing. ``PurchaseOrder.delete`` and the order
+    queryset's ``delete`` therefore open a :func:`settlement_batch` around the
+    whole cascade, and the one flush after it finds the order row already gone
+    and re-derives nothing.
+
+    That covers a delete ROOTED at an order. ``Collector`` reaches the lines
+    through their base manager, so no override on the line queryset sees a
+    cascade, and a delete rooted at anything else that cascades to lines — a
+    supplier, an item-supplier, an asset, a user who created orders — still
+    re-derives per line. The answer is the same either way; only the cost
+    differs.
 
     A collector that can FAST-delete sends no signal at all, and neither does
     ``_raw_delete``; see this module's own boundary above.

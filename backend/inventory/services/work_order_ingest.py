@@ -524,6 +524,8 @@ def looks_like_scan(raw_bytes: bytes, *, is_image: bool = False) -> bool:
         if "work_order_id" in fields:
             return False
         return any(True for _ in _iter_pdf_images(reader))
+    # The former B110 suppression targeted an intentionally swallowed error,
+    # but this handler returns the conservative answer instead of passing.
     except Exception:  # noqa: BLE001  # unreadable => not a scan we can OMR
         return False
 
@@ -1150,7 +1152,11 @@ def detect_submission_kind(pdf_bytes: bytes, subject: str = "") -> str:
 
 
 def _looks_like_qr_payload(image_bytes: bytes) -> bool:
-    """Best-effort: does this embedded image contain decodable QR content?"""
+    """Best-effort: does this embedded image contain decodable QR content?
+
+    The former B110 suppression targeted an intentionally swallowed decode
+    error, but the handler converts that expected failure into ``False``.
+    """
     try:
         return bool(_decode_qr_payloads(image_bytes))
     except Exception:  # noqa: BLE001

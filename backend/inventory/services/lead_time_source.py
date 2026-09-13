@@ -40,11 +40,16 @@ Here provenance is PRODUCED by what decides the stored value, and nothing else:
    mistaken for the default. The mark cannot be put on any other number.
 2. **A measurement carries its mark the same way**, via
    :func:`measured_lead_time`, called by the one task that measures.
-3. **Everything else is a DELTA against the stored row** — the same principle
-   ``derive_costs`` follows for prices, for the same reason: only ``save()`` sees
-   both what the caller supplied and what is on disk. A plain number equal to the
-   stored one leaves the stored source alone (an echo cannot relabel, an unknown
-   stays unknown); a different one is ``recorded``.
+3. **Everything else is a DELTA against what this instance loaded.** A plain
+   number equal to the instance's original value leaves its original source
+   alone (an echo cannot relabel, an unknown stays unknown); a different one is
+   ``recorded``. ``from_db()`` captures that pair and ``refresh_from_db()``
+   refreshes it. Before an existing row is written, ``save()`` locks its current
+   database row until the transaction ends. That serializes the comparison and
+   write against concurrent saves, but deliberately does not prevent a stale
+   instance from overwriting a newer value; it guarantees only that such an
+   overwrite keeps the provenance of the value the stale instance actually
+   loaded rather than inventing a new one from the intervening database value.
 
 ``ItemSupplier.save()`` calls :func:`settle_lead_time_source` on every save, and
 the source column is ``editable=False``: no ``ModelForm`` or ``ModelSerializer``
@@ -106,6 +111,7 @@ PLANNING_DEFAULT_DAYS = 7
 
 VALUE_FIELD = "average_lead_time"
 SOURCE_FIELD = "average_lead_time_source"
+SNAPSHOT_ATTRIBUTE = "_loaded_average_lead_time_pair"
 
 
 class LeadTimeSource(models.TextChoices):
@@ -113,6 +119,10 @@ class LeadTimeSource(models.TextChoices):
     DEFAULT = "default", "Planning default (nobody recorded one)"
     RECORDED = "recorded", "Recorded"
     MEASURED = "measured", "Measured from deliveries"
+
+
+class UndecidedLeadTimeWrite(TypeError):
+    """A write contains a lead time whose provenance cannot be decided."""
 
 
 class _PlanningDefault(int):
@@ -153,35 +163,47 @@ def measured_lead_time(days: int) -> int:
     return _Measured(days)
 
 
-def decide_lead_time_source(value, stored: Optional[tuple[int, str]]) -> str:
-    """The source a row holding ``value`` must carry, given what is on disk.
+def decide_lead_time_source(value, loaded: Optional[tuple[int, str]]) -> str:
+    """The source a row holding ``value`` must carry, given what it loaded.
 
-    ``stored`` is the persisted ``(days, source)``, or ``None`` for a create.
+    ``loaded`` is the instance's original ``(days, source)``, or ``None`` for a
+    create.
     """
     if type(value) is _PlanningDefault:
         return LeadTimeSource.DEFAULT
     if type(value) is _Measured:
         return LeadTimeSource.MEASURED
-    try:
-        days = int(value)
-    except (TypeError, ValueError):
-        # Not a number at all: the save fails at the column. Claim nothing.
-        return LeadTimeSource.UNKNOWN
-    if stored is not None and days == stored[0]:
-        return stored[1]
+    if type(value) is not int:
+        raise UndecidedLeadTimeWrite(
+            "ItemSupplier.average_lead_time must be an integer value at save time; "
+            "database expressions and unvalidated values cannot carry truthful provenance."
+        )
+    if loaded is not None and value == loaded[0]:
+        return loaded[1]
     return LeadTimeSource.RECORDED
 
 
-def stored_lead_time(item_supplier: "ItemSupplier") -> Optional[tuple[int, str]]:
-    """The persisted ``(days, source)`` of this row, or ``None`` for a create."""
+def capture_loaded_lead_time(item_supplier: "ItemSupplier") -> None:
+    """Snapshot the coherent value/source pair currently loaded on an instance."""
+    values = item_supplier.__dict__
+    if VALUE_FIELD in values and SOURCE_FIELD in values:
+        setattr(
+            item_supplier,
+            SNAPSHOT_ATTRIBUTE,
+            (values[VALUE_FIELD], values[SOURCE_FIELD]),
+        )
+
+
+def loaded_lead_time(item_supplier: "ItemSupplier") -> Optional[tuple[int, str]]:
+    """The value/source pair this instance loaded, if it came from the database."""
+    return getattr(item_supplier, SNAPSHOT_ATTRIBUTE, None)
+
+
+def lock_stored_lead_time(item_supplier: "ItemSupplier") -> None:
+    """Lock an existing row until the surrounding save transaction completes."""
     if item_supplier.pk is None:
-        return None
-    return (
-        type(item_supplier)
-        .objects.filter(pk=item_supplier.pk)
-        .values_list(VALUE_FIELD, SOURCE_FIELD)
-        .first()
-    )
+        return
+    (type(item_supplier).objects.select_for_update().only("pk").get(pk=item_supplier.pk))
 
 
 def settle_lead_time_source(item_supplier: "ItemSupplier", update_fields):
@@ -192,17 +214,17 @@ def settle_lead_time_source(item_supplier: "ItemSupplier", update_fields):
     either, so a restricted save cannot set one apart from the other.
     """
     if update_fields is not None and VALUE_FIELD not in update_fields:
+        loaded = loaded_lead_time(item_supplier)
+        if loaded is not None:
+            item_supplier.average_lead_time_source = loaded[1]
         return frozenset(update_fields) - {SOURCE_FIELD}
+    lock_stored_lead_time(item_supplier)
     item_supplier.average_lead_time_source = decide_lead_time_source(
-        item_supplier.average_lead_time, stored_lead_time(item_supplier)
+        item_supplier.average_lead_time, loaded_lead_time(item_supplier)
     )
     if update_fields is None:
         return None
     return frozenset(update_fields) | {SOURCE_FIELD}
-
-
-class UndecidedLeadTimeWrite(TypeError):
-    """A bulk write would store a lead time or source ``save()`` never decided."""
 
 
 def _refuse(fields: Iterable[str], call: str) -> None:

@@ -29,6 +29,7 @@ from datetime import timedelta
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth import get_user_model
 from django.db import connection
+from django.db.models import F
 from django.test import RequestFactory
 from django.urls import reverse
 from django.utils import timezone
@@ -621,6 +622,52 @@ def test_every_driver_is_exercised():
     }
     exercised = {case[0] for case in CREATE_CASES + UPDATE_CASES}
     assert drivers == exercised
+
+
+def test_an_orm_expression_is_refused_before_it_can_separate_value_and_source():
+    link = seed_link(InventoryItemFactory(image=None), SupplierFactory(), ("recorded", 12))
+    link.average_lead_time = F("average_lead_time") + 1
+
+    with pytest.raises(TypeError, match="must be an integer value"):
+        link.save(update_fields=["average_lead_time"])
+
+    assert stored(link.pk) == ("recorded", 12)
+
+
+def test_a_stale_untouched_value_keeps_the_provenance_that_instance_loaded():
+    link = seed_link(InventoryItemFactory(image=None), SupplierFactory(), ("default", 7))
+    stale = ItemSupplier.objects.get(pk=link.pk)
+    current = ItemSupplier.objects.get(pk=link.pk)
+    current.average_lead_time = 12
+    current.save(update_fields=["average_lead_time"])
+
+    stale.save(update_fields=["average_lead_time"])
+
+    assert stored(link.pk) == ("default", 7)
+
+
+def test_a_restricted_source_assignment_cannot_poison_the_next_save():
+    link = seed_link(InventoryItemFactory(image=None), SupplierFactory(), ("default", 7))
+    loaded = ItemSupplier.objects.get(pk=link.pk)
+    loaded.average_lead_time_source = "recorded"
+    loaded.save(update_fields=["average_lead_time_source", "supplier_sku"])
+
+    loaded.save(update_fields=["average_lead_time"])
+
+    assert stored(link.pk) == ("default", 7)
+
+
+def test_refreshing_a_lead_time_refreshes_its_provenance_snapshot_too():
+    link = seed_link(InventoryItemFactory(image=None), SupplierFactory(), ("default", 7))
+    loaded = ItemSupplier.objects.get(pk=link.pk)
+    replacement = ItemSupplier.objects.get(pk=link.pk)
+    replacement.average_lead_time = 12
+    replacement.save(update_fields=["average_lead_time"])
+
+    loaded.refresh_from_db(fields=["average_lead_time"])
+    loaded.save(update_fields=["average_lead_time"])
+
+    assert stored(link.pk) == ("recorded", 12)
 
 
 def test_the_source_reaches_the_api_beside_every_stored_value_it_describes(client):

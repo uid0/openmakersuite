@@ -168,8 +168,8 @@ class ItemSupplierAdminForm(ModelForm):
         min_value=0,
         label="Average lead time",
         help_text=(
-            "Calendar days. Leave blank to use the planning default of "
-            f"{PLANNING_DEFAULT_DAYS} days until this supplier quotes their own."
+            "Calendar days. On add, blank uses the planning default of "
+            f"{PLANNING_DEFAULT_DAYS} days; on edit, blank leaves the stored value unchanged."
         ),
     )
 

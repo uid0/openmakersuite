@@ -370,15 +370,12 @@ const InventoryItemFormPage: React.FC = () => {
             );
             nextRelationships[index] = relationshipFromSaved(created.data);
             nextSaved = [...nextSaved, created.data];
-          } else if (
-            relationshipChanged(
-              relationship,
-              nextSaved.find((saved) => saved.id === relationship.id)
-            )
-          ) {
+          } else {
+            const loaded = nextSaved.find((saved) => saved.id === relationship.id);
+            if (!relationshipChanged(relationship, loaded)) continue;
             const updated = await inventoryAPI.updateItemSupplier(
               relationship.id,
-              relationshipPayload(relationship)
+              relationshipPayload(relationship, undefined, loaded)
             );
             nextRelationships[index] = relationshipFromSaved(updated.data);
             nextSaved = nextSaved.map((saved) =>

@@ -206,10 +206,16 @@ export const relationshipFromSaved = (saved: ItemSupplier): SupplierRelationship
   is_primary: saved.is_primary,
 });
 
-/** The offered fields of one row, as the endpoint takes them. */
+/**
+ * The offered fields of one row, as the endpoint takes them.
+ *
+ * `loaded` is the server's copy the row was built from, on an update; a create
+ * has none.
+ */
 export const relationshipPayload = (
   relationship: SupplierRelationship,
-  itemId?: string
+  itemId?: string,
+  loaded?: ItemSupplier
 ): ItemSupplierWritePayload => ({
   ...(itemId === undefined ? {} : { item: itemId }),
   supplier: relationship.supplier as number,
@@ -224,7 +230,16 @@ export const relationshipPayload = (
   // `_sync_primary_supplier` both leave the key out — so a create takes the
   // default and an update leaves a stored quote alone. Sending `0` instead,
   // which this row used to seed, recorded same-day pickup.
-  ...(relationship.average_lead_time === null
+  //
+  // Also omitted where the box still holds the number as loaded: an edit to
+  // the SKU says nothing about the lead time. The server keeps the stored
+  // source when an echoed number equals the stored one
+  // (`inventory/services/lead_time_source.py`), but this page's copy can be
+  // stale — the measuring task may have written 12 (measured) since the page
+  // loaded 7 (default) — and an echoed 7 would then overwrite the measurement
+  // and store it as a quote nobody gave.
+  ...(relationship.average_lead_time === null ||
+  relationship.average_lead_time === loaded?.average_lead_time
     ? {}
     : { average_lead_time: relationship.average_lead_time }),
   is_primary: relationship.is_primary,

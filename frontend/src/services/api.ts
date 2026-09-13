@@ -566,8 +566,9 @@ export interface ItemSupplierWritePayload {
   package_cost: string | null;
   quantity_per_package: number;
   /**
-   * Omitted where the editor has no figure, so a create takes the model's own
-   * default and an update leaves the stored value alone. Sending a number here
+   * Omitted where the editor has no figure, or on an update still holds the
+   * figure it loaded, so a create takes the model's own default and an update
+   * leaves the stored value alone. Sending a number here
    * asserts it as the supplier's quote — including `0`, which is same-day
    * pickup rather than a neutral placeholder.
    */

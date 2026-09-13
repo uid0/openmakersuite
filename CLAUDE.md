@@ -48,7 +48,7 @@ and re-copy.
 A green `pytest` run is necessary but not sufficient. Before declaring a task done:
 
 1. `cd backend && pytest` — backend test suite green.
-2. `cd frontend && npm test` — frontend test suite green.
+2. `cd frontend && npm test` and `npm run typecheck` — frontend tests green, zero type errors.
 3. `pre-commit run --all-files` — all lint/format hooks green.
 4. No new warnings in the diff.
 

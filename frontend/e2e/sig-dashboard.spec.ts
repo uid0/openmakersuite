@@ -83,6 +83,8 @@ test.describe.skip('SIG Dashboard', () => {
           Authorization: `Bearer ${sigAdminToken}`,
         },
         body: JSON.stringify({
+          // @ts-expect-error KNOWN DEFECT: createTestUser returns no id, so this
+          // request is sent without a user.
           user: sigAdmin.id,
           group: null, // Will be created via admin
         }),

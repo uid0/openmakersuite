@@ -22,6 +22,7 @@ import { NotificationProvider } from '../../contexts/NotificationContext';
 import { MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import * as api from '../../services/api';
+import { Fixture } from '../../types';
 
 vi.mock('../../services/api');
 
@@ -31,7 +32,7 @@ vi.mock('react-router-dom', async () => ({
   useNavigate: () => mockNavigate,
 }));
 
-const fixture = (overrides: Partial<api.Fixture> = {}): api.Fixture =>
+const fixture = (overrides: Partial<Fixture> = {}): Fixture =>
   ({
     id: 'fix-1',
     name: 'Hand Soap Dispenser',
@@ -47,7 +48,7 @@ const fixture = (overrides: Partial<api.Fixture> = {}): api.Fixture =>
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
     ...overrides,
-  } as unknown as api.Fixture);
+  } as unknown as Fixture);
 
 const renderPage = () =>
   render(

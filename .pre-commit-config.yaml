@@ -116,9 +116,11 @@ repos:
     hooks:
       - id: typescript-check
         name: TypeScript compilation check
-        entry: bash -c 'cd frontend && OUTPUT=$(npx tsc --noEmit --skipLibCheck 2>&1); SRC_ERRORS=$(echo "$OUTPUT" | grep -v "node_modules" | grep -E "src/.*\.(ts|tsx).*error TS" | wc -l | tr -d " "); if [ "$SRC_ERRORS" = "0" ]; then echo "✓ TypeScript compiled successfully"; else echo "❌ TypeScript compilation failed with $SRC_ERRORS error(s) in src/"; echo "$OUTPUT" | grep -v "node_modules" | grep -E "src/.*\.(ts|tsx).*error TS" | head -10; exit 1; fi'
+        # Same command as CI's Frontend Lint job; trust tsc's exit status rather
+        # than counting matching lines, which passed on errors outside src/.
+        entry: bash -c 'cd frontend && npm run typecheck'
         language: system
-        files: ^frontend/src/.*\.(ts|tsx)$
+        files: ^frontend/((src|e2e)/.*\.(ts|tsx)|tsconfig\.json|vite\.config\.ts|package(-lock)?\.json)$
         pass_filenames: false
         always_run: false
 

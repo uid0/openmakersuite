@@ -1305,17 +1305,19 @@ Updated packages:
   validation." message, and `src/utils/extractErrorMessage.ts` returns only that message.
   A form that has to name the rejected field reads `details` itself —
   `src/utils/supplierRelationships.ts` is the pattern.
-- **The repo tolerates ~70 pre-existing `tsc` errors, so a renamed Mantine prop
-  ships silently.** `@mantine/core` 9.x renamed props without a migration pass:
-  `Collapse` `in` -> `expanded` (fixed, 5 sites) and `Grid` `gutter` -> `gap`
-  (`src/components/forms/FormLayout.tsx`, still open — harmless only because
-  every caller uses the default). An unmigrated prop is DROPPED, not defaulted,
-  so the component silently renders its off state. `npx tsc --noEmit` already
-  names every one of them; grep its output for `does not exist on type` before
-  assuming a dead toggle is a state bug. To prove you added none, capture `tsc`
-  on your branch and on base and diff the two counts; never wrap the command in
-  `timeout` (macOS has no `timeout`; it exits 127 and prints nothing, which
-  reads exactly like success).
+- **`npm run typecheck` is at zero errors and CI's Frontend Lint job fails on
+  any error; keep it at zero.** Vite and Vitest strip types without checking
+  them, so this is the only thing that catches, for example, a renamed Mantine
+  prop: `@mantine/core` 9.x renamed `Collapse` `in` -> `expanded` and `Grid`
+  `gutter` -> `gap`, and an unmigrated prop is DROPPED, not defaulted, so the
+  component silently renders its off state. When a test fixture goes stale, prefer
+  updating it to match the type over casting it away. Where the type is right and the code is
+  wrong, don't change behaviour inside a typing change. Pin it with
+  `// @ts-expect-error KNOWN DEFECT: <what breaks>` instead; the directive
+  itself errors once the defect is fixed. `grep -rn "KNOWN DEFECT" frontend`
+  lists the open ones. Never wrap the command in `timeout` (macOS has no
+  `timeout`; it exits 127 and prints nothing, which reads exactly like
+  success).
 - **Assert VISIBILITY, not presence, on anything collapsible.** Mantine's
   `Collapse` defaults to `keepMounted`, so children stay in the DOM while shut
   and `toBeInTheDocument()` passes on a panel that can never open — that is what

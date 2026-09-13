@@ -56,8 +56,8 @@ const buildProblem = (overrides: Partial<LocationProblem> = {}): LocationProblem
   location_name: 'Bay 4',
   reported_by: 'alice',
   description: 'Door handle is broken',
-  status: 'open',
-  status_display: 'Open',
+  status: 'reported',
+  status_display: 'Reported',
   severity: 'high',
   severity_display: 'High',
   photo: null,
@@ -86,7 +86,7 @@ beforeEach(() => {
 
 describe('LocationProblemDetailPage reactive contract (gh-453)', () => {
   test('resolve patches the problem from the API response — no follow-up GET, no full reload', async () => {
-    const open = buildProblem({ status: 'open', status_display: 'Open' });
+    const open = buildProblem({ status: 'reported', status_display: 'Reported' });
     const resolved = buildProblem({
       status: 'resolved',
       status_display: 'Resolved',

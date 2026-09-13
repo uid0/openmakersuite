@@ -342,7 +342,7 @@ const ForgeKeyEPaperServicePage: React.FC = () => {
         }
         const raw = Array.isArray(res.data) ? res.data : (res.data.results ?? []);
         setLocations(
-          raw.map((l: { id: string; name: string }) => ({
+          raw.map((l: { id: number; name: string }) => ({
             value: String(l.id),
             label: l.name,
           })),

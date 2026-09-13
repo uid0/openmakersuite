@@ -20,7 +20,7 @@ import AuditFeedPage from '../../pages/AuditFeedPage';
 import { dashboardAPI } from '../../services/api';
 
 vi.mock('../../services/api', async () => {
-  const actual = await vi.importActual('../../services/api');
+  const actual = await vi.importActual<typeof import('../../services/api')>('../../services/api');
   return {
     ...actual,
     dashboardAPI: {

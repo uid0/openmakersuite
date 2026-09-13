@@ -72,8 +72,8 @@ const LocationFormPage: React.FC = () => {
     }
   };
 
-  const buildLocationOptions = (items: Location[], excludeId?: number, level: number = 0): JSX.Element[] => {
-    const options: JSX.Element[] = [];
+  const buildLocationOptions = (items: Location[], excludeId?: number, level: number = 0): React.JSX.Element[] => {
+    const options: React.JSX.Element[] = [];
     
     items
       .filter((item) => item.id !== excludeId)

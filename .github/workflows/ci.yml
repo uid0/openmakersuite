@@ -294,6 +294,13 @@ jobs:
           cd frontend
           npm run lint
 
+      # Vite and Vitest strip types without checking them, so nothing else in
+      # CI catches a type error; this job is the only gate.
+      - name: Run TypeScript check
+        run: |
+          cd frontend
+          npm run typecheck
+
       # The scan is stdlib-only and imports nothing from Django, so this job
       # needs no backend ENVIRONMENT — but it does need an interpreter that can
       # PARSE the backend. Without this step it ran under the runner's default

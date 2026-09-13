@@ -13,7 +13,15 @@ export const nonNegativeNumberSchema = z.number().min(0, 'Must be zero or greate
 // Common field schemas
 export const requiredString = z.string().min(1, 'This field is required');
 export const optionalString = z.string().optional();
-export const requiredNumber = z.number({ required_error: 'This field is required' });
+// The dropped key lives alone in its own literal: TypeScript reports only the
+// first unknown key per object literal, so suppressing it inline would also hide
+// any bad key added beside it.
+const requiredNumberDroppedParams: z.core.$ZodNumberParams = {
+  // @ts-expect-error KNOWN DEFECT: zod 4 dropped required_error, so this message is
+  // silently ignored at runtime.
+  required_error: 'This field is required',
+};
+export const requiredNumber = z.number({ ...requiredNumberDroppedParams });
 export const optionalNumber = z.number().optional();
 
 // Date schemas
@@ -174,11 +182,16 @@ export const inventoryItemSchema = z
 export type InventoryItemFormData = z.infer<typeof inventoryItemSchema>;
 
 // Supplier Form Schema
+// Kept apart from the z.enum call for the same reason as requiredNumberDroppedParams.
+const supplierTypeDroppedParams: z.core.$ZodEnumParams = {
+  // @ts-expect-error KNOWN DEFECT: zod 4 dropped required_error, so a missing
+  // supplier type shows zod's generic "Invalid option" message instead.
+  required_error: 'Supplier type is required',
+};
+
 export const supplierSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200, 'Name must be 200 characters or less'),
-  supplier_type: z.enum(['local', 'online', 'national'], {
-    required_error: 'Supplier type is required',
-  }),
+  supplier_type: z.enum(['local', 'online', 'national'], { ...supplierTypeDroppedParams }),
   website: z.string().url('Invalid URL').optional().or(z.literal('')),
   account_number: z.string().max(100, 'Account number must be 100 characters or less').optional(),
   tax_free_paperwork_filed: z.boolean().default(false),

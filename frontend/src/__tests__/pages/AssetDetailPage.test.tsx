@@ -88,6 +88,15 @@ describe('AssetDetailPage', () => {
     needs_compressed_air: true,
     needs_ventilation: false,
     is_chargeable: true,
+    is_cost_recoverable: false,
+    mac_address: '',
+    training_required: false,
+    required_certifications: [],
+    required_certification_details: [],
+    breaker: null,
+    breaker_summary: null,
+    disconnect: null,
+    disconnect_summary: null,
     last_scanned_at: '2024-01-15T00:00:00Z',
     ownership_type: 'space',
     owning_group: null,
@@ -137,6 +146,8 @@ describe('AssetDetailPage', () => {
       created_at: '2024-01-10T00:00:00Z',
       updated_at: '2024-01-10T00:00:00Z',
       resolved_at: null,
+      resolved_by: '',
+      photos: [],
     },
   ];
 
@@ -601,10 +612,13 @@ describe('AssetDetailPage', () => {
       completed_by_name: 'Alice',
       completed_at: '2024-02-01T00:00:00Z',
       notes: '',
+      loto_completion_note: '',
       is_overdue: false,
       task_completions: [],
       material_usage: [],
+      loto_completions: [],
       photos: [],
+      submissions: [],
       created_at: '2024-01-15T00:00:00Z',
       updated_at: '2024-02-01T00:00:00Z',
     };
@@ -1000,7 +1014,7 @@ describe('AssetDetailPage', () => {
       localStorage.setItem('token', 'fake-token');
       try {
         mockAssetsAPI.reportProblem.mockResolvedValue({
-          data: { id: 'prob-2', affected_parts: [] },
+          data: { id: 'prob-2', affected_parts: [] } as unknown as AssetProblem,
           status: 201,
           statusText: 'Created',
           headers: {},

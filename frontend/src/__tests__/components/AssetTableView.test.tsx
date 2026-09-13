@@ -59,6 +59,15 @@ const mockAssets: Asset[] = [
     needs_compressed_air: false,
     needs_ventilation: false,
     is_chargeable: false,
+    is_cost_recoverable: false,
+    mac_address: '',
+    training_required: false,
+    required_certifications: [],
+    required_certification_details: [],
+    breaker: null,
+    breaker_summary: null,
+    disconnect: null,
+    disconnect_summary: null,
     last_scanned_at: null,
     ownership_type: 'space',
     owning_group: null,
@@ -115,6 +124,15 @@ const mockAssets: Asset[] = [
     needs_compressed_air: false,
     needs_ventilation: false,
     is_chargeable: false,
+    is_cost_recoverable: false,
+    mac_address: '',
+    training_required: false,
+    required_certifications: [],
+    required_certification_details: [],
+    breaker: null,
+    breaker_summary: null,
+    disconnect: null,
+    disconnect_summary: null,
     last_scanned_at: null,
     ownership_type: 'group',
     owning_group: 1,
@@ -288,7 +306,9 @@ describe('AssetTableView', () => {
       category_name: '',
       display_manufacturer: '',
       date_received: null,
-      age_in_days: undefined,
+      // Asset.age_in_days is typed number, but the backend sends null when
+      // date_received is null; undefined keeps this test's original input.
+      age_in_days: undefined as unknown as number,
     };
 
     renderComponent({ assets: [assetWithMissingFields] });

@@ -68,6 +68,15 @@ describe('AssetList', () => {
       needs_compressed_air: false,
       needs_ventilation: false,
       is_chargeable: false,
+      is_cost_recoverable: false,
+      mac_address: '',
+      training_required: false,
+      required_certifications: [],
+      required_certification_details: [],
+      breaker: null,
+      breaker_summary: null,
+      disconnect: null,
+      disconnect_summary: null,
       last_scanned_at: null,
       ownership_type: 'space',
       owning_group: null,
@@ -124,6 +133,15 @@ describe('AssetList', () => {
       needs_compressed_air: false,
       needs_ventilation: false,
       is_chargeable: false,
+      is_cost_recoverable: false,
+      mac_address: '',
+      training_required: false,
+      required_certifications: [],
+      required_certification_details: [],
+      breaker: null,
+      breaker_summary: null,
+      disconnect: null,
+      disconnect_summary: null,
       last_scanned_at: null,
       ownership_type: 'space',
       owning_group: null,
@@ -142,8 +160,8 @@ describe('AssetList', () => {
   ];
 
   const mockLocations: Location[] = [
-    { id: 1, name: 'Workshop A', description: '', created_at: '', updated_at: '' },
-    { id: 2, name: 'Workshop B', description: '', created_at: '', updated_at: '' },
+    { id: 1, name: 'Workshop A', description: '', is_active: true, parent: null, created_at: '', updated_at: '' },
+    { id: 2, name: 'Workshop B', description: '', is_active: true, parent: null, created_at: '', updated_at: '' },
   ];
 
   const mockSIGs: SIG[] = [
@@ -452,7 +470,7 @@ describe('AssetList', () => {
       expect(screen.getByText('Asset Page Two')).toBeInTheDocument();
     });
     const calls = (mockAssetsAPI.listAssets as jest.Mock).mock.calls;
-    expect(calls.some((c) => c[0]?.page === 2)).toBe(true);
+    expect(calls.some((c: Parameters<typeof assetsAPI.listAssets>) => c[0]?.page === 2)).toBe(true);
   });
 
   // Bulk cost-recovery flag by category (op-9ho2, W3). Staff-only: the flag

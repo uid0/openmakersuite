@@ -72,6 +72,7 @@ The `.github/workflows/ci.yml` workflow defines the required gates. Branch prote
 
 - **Backend Lint** (black/isort/flake8) — required, parallel with tests so lint failures fail fast.
 - **Backend Tests** (pytest + migrations) — required.
+- **Frontend Lint** (ESLint + `npm run typecheck`) — required; the type check must remain at zero errors.
 - **Frontend Tests** (jest + build + Playwright e2e) — required. Playwright runs with `continue-on-error` (advisory).
 - **Docker Build Test** — required.
 - **Code Quality & Security** (bandit, pip-audit, gitleaks) — required.

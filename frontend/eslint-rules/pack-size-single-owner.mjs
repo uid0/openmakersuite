@@ -36,6 +36,11 @@
  *   `getattr` of this language.
  * - `const { quantity_per_package } = link`, including in a parameter list —
  *   destructuring IS a read, and Python has no spelling of it to mirror.
+ * A dynamic spelling is counted when ESLint's scope manager resolves its key
+ * statically to the column name: a literal, an expression-free template, or a
+ * `const` bound to either. Runtime computations (`let`, imports, function
+ * results, concatenation, `Reflect.get`, or lodash `get`) are not counted, just
+ * as the backend gate counts `getattr` only with a literal name.
  *
  * NOT counted, for the backend's reasons: an object-literal key
  * (`{ quantity_per_package: 5 }` builds a payload, like `create(...)` kwargs),
@@ -128,11 +133,10 @@ const memberName = (node, sourceCode) => {
 };
 
 /** The key a destructuring property names, when it is statically known. */
-const patternKeyName = (prop) => {
+const patternKeyName = (prop, sourceCode) => {
   const { key } = prop;
   if (!prop.computed && key.type === 'Identifier') return key.name;
-  if (key.type === 'Literal' && typeof key.value === 'string') return key.value;
-  return null;
+  return staticString(key, sourceCode);
 };
 
 /**
@@ -189,7 +193,7 @@ export const packSizeSingleOwner = {
         if (memberName(node, sourceCode) === COLUMN && !isWriteTarget(node)) reads.push(node);
       },
       'ObjectPattern > Property'(node) {
-        if (patternKeyName(node) === COLUMN) reads.push(node);
+        if (patternKeyName(node, sourceCode) === COLUMN) reads.push(node);
       },
       'Program:exit'(program) {
         if (allowed === null) {

@@ -79,6 +79,12 @@ describe('pack-size single-owner lint rule', () => {
       { filename: NEW_MODULE, code: 'const { quantity_per_package } = link;', errors: [newReader] },
       {
         filename: NEW_MODULE,
+        code:
+          "const key = 'quantity_per_package'; const { [key]: units } = link; const cases = units || 1;",
+        errors: [newReader],
+      },
+      {
+        filename: NEW_MODULE,
         code: 'const f = ({ quantity_per_package: units }: Link) => units === 0;',
         errors: [newReader],
       },

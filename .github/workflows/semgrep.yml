@@ -42,12 +42,21 @@ jobs:
       - uses: returntocorp/semgrep-action@fcd5ab7459e8d91cb1777481980d1b18b4fc6735
         with:
           publishToken: ${{ secrets.SEMGREP_APP_TOKEN }}
-          publishDeployment: ${{ secrets.SEMGREP_DEPLOYMENT_ID }}
           generateSarif: "1"
 
       # Upload SARIF file generated in previous step
       - name: Upload SARIF file
+        id: upload-sarif
         uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
         with:
           sarif_file: semgrep.sarif
         if: always()
+
+      # GitHub occasionally terminates an upload request before acknowledging it.
+      # Retry once, but keep a repeated upload failure blocking the Scan job.
+      - name: Retry SARIF upload
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: semgrep.sarif
+        if: always() && steps.upload-sarif.outcome == 'failure'

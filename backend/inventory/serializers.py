@@ -1584,10 +1584,10 @@ class KitSupplierTermsSerializer(serializers.ModelSerializer):
             "average_lead_time": {"required": False},
         }
 
-    # The version of this supplier's link the kit page loaded, when it loaded
-    # one (``inventory.services.link_version``). Optional like every term: sent,
-    # an existing link that has moved on since refuses the whole kit save.
-    version = serializers.IntegerField(required=False, min_value=1)
+    # The version of this supplier's link the kit page loaded
+    # (``inventory.services.link_version``). Zero records that the page loaded
+    # no link for this supplier; a positive value records the link it loaded.
+    version = serializers.IntegerField(required=False, min_value=0)
 
     def to_internal_value(self, data):
         """Refuse a key this block does not write, instead of dropping it.
@@ -1817,13 +1817,21 @@ class KitSerializer(InventoryItemSerializer):
         expected_version = terms.get("version")
         sent = {key: value for key, value in terms.items() if key not in ("supplier", "version")}
         with transaction.atomic():
-            link, created = ItemSupplier.objects.select_for_update().get_or_create(
-                item=instance,
-                supplier=terms["supplier"],
-                defaults={**sent, "is_primary": True},
-            )
+            relationship = {"item": instance, "supplier": terms["supplier"]}
+            if expected_version is not None and expected_version > 0:
+                link = ItemSupplier.objects.select_for_update().filter(**relationship).first()
+                if link is None:
+                    raise StaleSupplierLink(None, expected_version, None)
+                created = False
+            else:
+                link, created = ItemSupplier.objects.select_for_update().get_or_create(
+                    **relationship,
+                    defaults={**sent, "is_primary": True},
+                )
             if created:
                 return
+            if expected_version == 0:
+                raise StaleSupplierLink(link.pk, expected_version, link.version)
             # Only the keys the caller actually sent. An absent key is not a
             # value: it must leave the stored column exactly as it was, which is
             # what makes editing a SKU an edit to the SKU and nothing else.

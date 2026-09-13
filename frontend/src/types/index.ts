@@ -2784,9 +2784,10 @@ export interface KitSupplierTerms {
   unit_cost: string | number | null;
   supplier_url?: string;
   average_lead_time?: number;
-  /** The `version` of this supplier's link as the page loaded it, when it has
-   * one. A link written since is refused with a 409 `stale_version`, and the
-   * whole kit save with it (`inventory/services/link_version.py`). */
+  /** The `version` of this supplier's link as the page loaded it. Zero means an
+   * existing kit loaded no link for this supplier; omission means a new kit.
+   * Changed existence or content refuses the whole kit save with a 409
+   * `stale_version` (`inventory/services/link_version.py`). */
   version?: number;
 }
 

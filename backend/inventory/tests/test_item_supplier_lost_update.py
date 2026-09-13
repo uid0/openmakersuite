@@ -444,17 +444,77 @@ class TestKitSupplierTerms:
         assert response.status_code == 200
         assert on_disk(kit_link.pk)["supplier_sku"] == "NO-TOKEN"
 
-    def test_a_version_for_a_supplier_with_no_link_yet_creates_it(self, client, kit_link):
+    def test_a_version_for_a_deleted_link_refuses_recreation(self, client, kit_link):
+        kit_id = kit_link.item_id
+        supplier = kit_link.supplier
+        kit_link.delete()
+
+        response = client.patch(
+            reverse("kit-detail", args=[kit_id]),
+            {
+                "name": "Renamed Kit",
+                "supplier_terms": {"supplier": supplier.pk, "supplier_sku": "STALE", "version": 1},
+            },
+            format="json",
+        )
+
+        assert response.status_code == 409
+        assert response.data["error"]["details"] == {
+            "id": None,
+            "sent_version": 1,
+            "current_version": None,
+        }
+        assert not ItemSupplier.objects.filter(item_id=kit_id, supplier=supplier).exists()
+        assert InventoryItem.objects.get(pk=kit_id).name != "Renamed Kit"
+
+    def test_expected_absence_refuses_a_link_created_since(self, client, kit_link):
+        other = SupplierFactory()
+        newer = ItemSupplierFactory(
+            item=kit_link.item, supplier=other, supplier_sku="NEWER", is_primary=False
+        )
+
+        response = client.patch(
+            reverse("kit-detail", args=[kit_link.item_id]),
+            {
+                "name": "Renamed Kit",
+                "supplier_terms": {"supplier": other.pk, "supplier_sku": "STALE", "version": 0},
+            },
+            format="json",
+        )
+
+        assert response.status_code == 409
+        assert response.data["error"]["details"] == {
+            "id": newer.pk,
+            "sent_version": 0,
+            "current_version": newer.version,
+        }
+        newer.refresh_from_db()
+        assert newer.supplier_sku == "NEWER"
+        assert InventoryItem.objects.get(pk=kit_link.item_id).name != "Renamed Kit"
+
+    def test_expected_absence_creates_when_the_link_is_still_absent(self, client, kit_link):
         other = SupplierFactory()
 
         response = client.patch(
             reverse("kit-detail", args=[kit_link.item_id]),
-            {"supplier_terms": {"supplier": other.pk, "supplier_sku": "NEW", "version": 5}},
+            {"supplier_terms": {"supplier": other.pk, "supplier_sku": "NEW", "version": 0}},
             format="json",
         )
 
         assert response.status_code == 200, response.data
-        assert ItemSupplier.objects.get(item_id=kit_link.item_id, supplier=other).version == 1
+        assert ItemSupplier.objects.get(item_id=kit_link.item_id, supplier=other).supplier_sku == "NEW"
+
+    def test_tokenless_terms_still_create_an_absent_link(self, client, kit_link):
+        other = SupplierFactory()
+
+        response = client.patch(
+            reverse("kit-detail", args=[kit_link.item_id]),
+            {"supplier_terms": {"supplier": other.pk, "supplier_sku": "COMPAT"}},
+            format="json",
+        )
+
+        assert response.status_code == 200, response.data
+        assert ItemSupplier.objects.get(item_id=kit_link.item_id, supplier=other).supplier_sku == "COMPAT"
 
 
 # ---------------------------------------------------------------------------

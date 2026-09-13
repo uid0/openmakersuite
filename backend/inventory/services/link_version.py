@@ -57,7 +57,9 @@ WHO SENDS A TOKEN, AND HOW A REFUSAL REACHES A PERSON
 * ``DELETE /api/inventory/item-suppliers/{id}/?version=N`` — the same refusal;
   the check and deletion share one row lock. The web item form sends the token.
 * ``PATCH``/``PUT /api/inventory/kits/{id}/`` with ``supplier_terms.version`` —
-  the same ``409``, and the whole kit save is rolled back with it.
+  the same ``409``, and the whole kit save is rolled back with it. A positive
+  version means the page loaded that link; zero means an existing kit loaded no
+  link for that supplier. A mismatch in either content or existence is stale.
 * The Django admin (``ItemSupplierAdmin`` and the item admin's inline) — the
   version the page was rendered with rides in a hidden field and a stale POST
   is refused as a form error.

@@ -149,9 +149,8 @@ const KitDetailPage: React.FC = () => {
 
     // The link these terms land on, as this page loaded it — so a link someone
     // else has written since is refused (409 `stale_version`) instead of having
-    // its part number overwritten by the one the SKU box was seeded with. None
-    // when this supplier has no link yet: the save creates one, and a create
-    // has nothing it could be stale against.
+    // its part number overwritten by the one the SKU box was seeded with. Zero
+    // means an existing kit had no link for this supplier when the page loaded.
     const loadedLink =
       supplierId === ''
         ? undefined
@@ -171,7 +170,9 @@ const KitDetailPage: React.FC = () => {
               supplier: Number(supplierId),
               supplier_sku: supplierSku,
               unit_cost: unitCost === '' ? null : String(unitCost),
-              ...(loadedLink === undefined ? {} : { version: loadedLink.version }),
+              ...(isNew
+                ? {}
+                : { version: loadedLink === undefined ? 0 : loadedLink.version }),
             },
           }
         : {}),

@@ -437,12 +437,12 @@ describe('the kit form refuses to overwrite supplier terms someone else changed'
     expect(payload.supplier_terms).toMatchObject({ supplier: 50, supplier_sku: 'T3200', version: 3 });
   });
 
-  it('CONTROL: sends no version for a supplier with no link yet, which the save creates', async () => {
+  it('sends expected absence for an unlinked supplier on an existing kit', async () => {
     (kitAPI.updateKit as ReturnType<typeof vi.fn>).mockResolvedValue({ data: KIT_WITH_LINK });
 
     const { payload } = await saveTermsFor('77');
 
-    expect(payload.supplier_terms).not.toHaveProperty('version');
+    expect(payload.supplier_terms).toMatchObject({ supplier: 77, version: 0 });
   });
 
   it('tells the operator their copy is out of date, and reloads the kit on request', async () => {

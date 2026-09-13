@@ -193,6 +193,46 @@ def outstanding_of(items) -> list:
     return [item for item in items if not item.is_settled]
 
 
+class LineDeleteCoalescingQuerySet(models.QuerySet):
+    """A queryset whose ``delete()`` re-derives each affected order once.
+
+    ``delete()`` fans ``post_delete`` out per LINE, however the lines are
+    reached — directly, or through the cascade from the orders they belong to —
+    and each of those is a settlement transition, so removing twenty lines would
+    otherwise re-derive their order twenty times. Coalescing only — Django's own
+    ``delete()`` already owns the transaction.
+
+    Shared by the line and the order querysets because the cause is the same:
+    ``Collector`` collects a cascade through the related model's BASE manager
+    and deletes it with a ``DeleteQuery``, so an order delete never reaches
+    :class:`PurchaseOrderItemQuerySet`'s override. The batch has to be open
+    around the ROOT of the delete, whichever model that is.
+    """
+
+    def delete(self, *args, **kwargs):
+        from .settlement_signals import settlement_batch
+
+        with settlement_batch():
+            return super().delete(*args, **kwargs)
+
+    # Django withholds ``delete`` from managers on purpose, and it does it with
+    # an attribute rather than a name list: ``queryset_only`` is what stops
+    # ``BaseManager._get_queryset_methods`` copying the method onto the manager.
+    # It does NOT survive an override — redeclaring ``delete`` here without it
+    # un-withholds it, and ``PurchaseOrderItem.objects.delete()`` becomes a bound,
+    # callable method that takes no filter and empties the table.
+    #
+    # ``alters_data`` (which stops a template resolving ``{{ qs.delete }}`` into
+    # a call) is a different story and is set here for symmetry, not to close a
+    # hole: ``QuerySet`` inherits ``AltersData``, whose ``__init_subclass__``
+    # copies ``alters_data`` onto a subclass's overrides automatically. Deleting
+    # this line changes nothing on Django 6. Deleting the one above changes
+    # everything, which is why the test asserts REACHABILITY on the manager
+    # rather than the presence of either attribute.
+    delete.queryset_only = True
+    delete.alters_data = True
+
+
 class PurchaseOrder(models.Model):
     """
     Purchase order placed with a supplier.
@@ -454,6 +494,10 @@ class PurchaseOrder(models.Model):
     # Metadata
     updated_at = models.DateTimeField(auto_now=True)
 
+    #: Deleting orders in bulk — the admin's "Delete selected" — cascades to
+    #: their lines, so it coalesces the same way :meth:`delete` does.
+    objects = LineDeleteCoalescingQuerySet.as_manager()
+
     class Meta:
         ordering = ["-order_date"]
         indexes = [
@@ -464,6 +508,22 @@ class PurchaseOrder(models.Model):
 
     def __str__(self) -> str:
         return f"PO #{self.po_number} - {self.supplier.name} ({self.status})"
+
+    def delete(self, *args, **kwargs):
+        """Delete the order and its lines, re-deriving nothing per line.
+
+        The lines go first and each one's ``post_delete`` marks this order as
+        owing a re-derivation. Unbatched, every mark ran on the spot — a locking
+        read, a re-read of the lines and a write of the total, per line, to an
+        order about to be deleted in the same statement batch. Inside
+        :func:`~reorder_queue.settlement_signals.settlement_batch` the marks
+        collapse into one flush after the order row is gone, which finds no
+        order to re-derive, so the cost no longer grows with the line count.
+        """
+        from .settlement_signals import settlement_batch
+
+        with settlement_batch():
+            return super().delete(*args, **kwargs)
 
     @cached_property
     def _line_item_totals(self) -> dict:
@@ -735,7 +795,7 @@ _PO_ITEM_TARGETS = (
 )
 
 
-class PurchaseOrderItemQuerySet(models.QuerySet):
+class PurchaseOrderItemQuerySet(LineDeleteCoalescingQuerySet):
     """The database's half of the settlement derivation.
 
     :attr:`PurchaseOrderItem.is_settled` and friends answer for a line already
@@ -782,36 +842,6 @@ class PurchaseOrderItemQuerySet(models.QuerySet):
                 )
             }
         )
-
-    def delete(self, *args, **kwargs):
-        """Delete these lines, asking each affected order its status once.
-
-        ``delete()`` fans ``post_delete`` out per row, and each of those is a
-        settlement transition, so removing twenty lines would otherwise re-derive
-        their order twenty times. Coalescing only — Django's own ``delete()``
-        already owns the transaction.
-        """
-        from .settlement_signals import settlement_batch
-
-        with settlement_batch():
-            return super().delete(*args, **kwargs)
-
-    # Django withholds ``delete`` from managers on purpose, and it does it with
-    # an attribute rather than a name list: ``queryset_only`` is what stops
-    # ``BaseManager._get_queryset_methods`` copying the method onto the manager.
-    # It does NOT survive an override — redeclaring ``delete`` here without it
-    # un-withholds it, and ``PurchaseOrderItem.objects.delete()`` becomes a bound,
-    # callable method that takes no filter and empties the table.
-    #
-    # ``alters_data`` (which stops a template resolving ``{{ qs.delete }}`` into
-    # a call) is a different story and is set here for symmetry, not to close a
-    # hole: ``QuerySet`` inherits ``AltersData``, whose ``__init_subclass__``
-    # copies ``alters_data`` onto a subclass's overrides automatically. Deleting
-    # this line changes nothing on Django 6. Deleting the one above changes
-    # everything, which is why the test asserts REACHABILITY on the manager
-    # rather than the presence of either attribute.
-    delete.queryset_only = True
-    delete.alters_data = True
 
     def settled(self):
         """Lines receiving is finished with — the queryset twin of ``is_settled``."""

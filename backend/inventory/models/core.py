@@ -17,6 +17,14 @@ from django.utils.text import slugify
 from imagekit.models import ImageSpecField
 from imagekit.processors import ResizeToFit
 
+from inventory.services.lead_time_source import (
+    ItemSupplierQuerySet,
+    LeadTimeDaysField,
+    LeadTimeSource,
+    planning_default,
+    settle_lead_time_source,
+)
+
 from .ownership import OwnableModel
 
 if TYPE_CHECKING:
@@ -1001,6 +1009,13 @@ class InventoryItem(OwnableModel):
         return link.average_lead_time if link else None
 
     @property
+    def average_lead_time_source(self) -> Optional[str]:
+        """Where :attr:`average_lead_time` came from, off the same link, or ``None``."""
+
+        link = self.primary_item_supplier
+        return link.average_lead_time_source if link else None
+
+    @property
     def package_cost(self) -> Optional[Decimal]:
         """The package cost of the supplier we would BUY through, or ``None``.
 
@@ -1494,19 +1509,28 @@ class ItemSupplier(models.Model):
     # * ``0`` is a RECORDED answer — a counter-pickup vendor — never a
     #   placeholder. Guarding it with truthiness grades the fastest possible
     #   supplier as the slowest; see ``supplier_selection._lead_time_factor``.
-    # * this ``7`` is the system's planning default and the ONE definition of
-    #   it. Write paths take it by OMITTING the key rather than restating the
-    #   number (``KitSupplierTermsSerializer``,
-    #   ``InventoryItemViewSet._process_lead_time_value``, and the web's
-    #   relationship editor through ``utils/supplierRelationships.ts``). The
+    # * the planning default is ``PLANNING_DEFAULT_DAYS`` (7) in
+    #   ``inventory.services.lead_time_source``, the ONE definition of it. Write
+    #   paths take it by OMITTING the key rather than restating the number. The
     #   editor's help text quotes "7 days" as prose for the operator — change
     #   this default and `frontend/src/utils/leadTime.ts` has to say so too.
     #
-    # That a stored 7 cannot be told from a quoted 7 is a schema-level absence
-    # and is deliberately still open (``oms-lead-time-nullable``).
-    average_lead_time = models.PositiveIntegerField(
-        default=7,
+    # Whether a stored 7 is that default or a quoted 7 is
+    # ``average_lead_time_source``, decided in ``save()`` and nowhere else; read
+    # that module's docstring before writing to either column.
+    average_lead_time = LeadTimeDaysField(
+        default=planning_default,
         help_text="Average lead time in CALENDAR days from this supplier",
+    )
+    average_lead_time_source = models.CharField(
+        max_length=8,
+        choices=LeadTimeSource.choices,
+        default=LeadTimeSource.UNKNOWN,
+        editable=False,
+        help_text=(
+            "Where average_lead_time came from. Decided by save() from how the "
+            "value was obtained; never set directly."
+        ),
     )
 
     # Preferences
@@ -1525,6 +1549,9 @@ class ItemSupplier(models.Model):
     notes = models.TextField(blank=True, help_text="Notes about this supplier for this item")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    # Refuses the bulk writes that would bypass ``save()`` for the lead-time pair.
+    objects = ItemSupplierQuerySet.as_manager()
 
     class Meta:
         ordering = ["-is_primary", "unit_cost"]
@@ -1647,6 +1674,10 @@ class ItemSupplier(models.Model):
                 }
                 if derived:
                     kwargs["update_fields"] = frozenset(update_fields) | derived
+
+            # Where this lead time came from, decided from the value object and
+            # the stored row — see ``inventory.services.lead_time_source``.
+            kwargs["update_fields"] = settle_lead_time_source(self, kwargs.get("update_fields"))
 
             enforce_single_primary(self)
             price_changed = pricing_changed(self, stored)

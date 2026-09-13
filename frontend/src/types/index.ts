@@ -191,6 +191,9 @@ export interface SupplierChoice {
   alternatives: SupplierChoiceAlternative[];
 }
 
+/** Where a supplier's lead time came from (`ItemSupplier.average_lead_time_source`). */
+export type LeadTimeSource = 'unknown' | 'default' | 'recorded' | 'measured';
+
 export interface ItemSupplier {
   id: number;
   item: string;
@@ -219,6 +222,11 @@ export interface ItemSupplier {
   // payload that carries no lead time at all. Renderers must not collapse the
   // two into one blank.
   average_lead_time: number;
+  // Where `average_lead_time` came from, decided server-side by
+  // `ItemSupplier.save()` (`inventory/services/lead_time_source.py`) and
+  // read-only. `default` is the planning default nobody supplied, `unknown` a
+  // row stored before the source was kept. No web surface renders it yet.
+  average_lead_time_source: LeadTimeSource;
   is_primary: boolean;
   is_active: boolean;
   // Discontinued BY this supplier: the link still exists (and its history is
@@ -389,6 +397,8 @@ export interface InventoryItem {
    */
   unit_cost?: number | null;
   average_lead_time?: number | null;
+  /** The source of the flat `average_lead_time` above; `null` beside a null. */
+  average_lead_time_source?: LeadTimeSource | null;
   qr_code: string | null;
   is_active: boolean;
   // Retirement (op-jv7r). A retired item is never flagged for reorder and is

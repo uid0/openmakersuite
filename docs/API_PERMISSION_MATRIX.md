@@ -213,7 +213,7 @@ facts in `VENDOR_ONLY_FIELDS`:
 
 | Serializer | Withheld from an anonymous caller |
 | --- | --- |
-| `InventoryItemSerializer` (items, kits, and nested `item_details`) | `supplier_name`, `supplier_sku`, `supplier_url`, `unit_cost`, `package_cost`, `average_lead_time`, `suppliers`, `supplier_choice`, `total_value` |
+| `InventoryItemSerializer` (items, kits, and nested `item_details`) | `supplier_name`, `supplier_sku`, `supplier_url`, `unit_cost`, `package_cost`, `average_lead_time`, `average_lead_time_source`, `suppliers`, `supplier_choice`, `total_value` |
 | `InventoryItemDetailSerializer` | the above plus `supplier_details`, `all_suppliers`, `price_trend_summary` |
 | `InventoryMetricsSerializer` (`items/<id>/metrics/`, `items/?with_metrics=1`) | `lead_time_days`, `unit_cost`, `cost_trend`, `last_po_unit_cost`, `supplier_scored_without_price`, `supplier_scored_without_history` |
 | `KitSummarySerializer` (`items/<id>/kits/`) | `supplier_name`, `supplier_sku`, `unit_cost` |

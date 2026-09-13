@@ -275,6 +275,8 @@ class ItemSupplierSerializer(serializers.ModelSerializer):
             "unit_cost",
             "package_cost",
             "average_lead_time",
+            # Read-only: ``editable=False`` on the model, decided by save().
+            "average_lead_time_source",
             "is_primary",
             "is_active",
             "is_discontinued",
@@ -987,6 +989,7 @@ class InventoryItemSerializer(VendorGatedSerializerMixin, serializers.ModelSeria
         "unit_cost",
         "package_cost",
         "average_lead_time",
+        "average_lead_time_source",
         "suppliers",
         "supplier_choice",
         "total_value",
@@ -1036,6 +1039,7 @@ class InventoryItemSerializer(VendorGatedSerializerMixin, serializers.ModelSeria
             "package_cost",
             "quantity_per_package",
             "average_lead_time",
+            "average_lead_time_source",
             "qr_code",
             # Complete supplier array with all details
             "suppliers",

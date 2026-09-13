@@ -124,6 +124,8 @@ def update_average_lead_times():
 
     from django.utils import timezone
 
+    from inventory.services.lead_time_source import measured_lead_time
+
     ReorderRequest = apps.get_model("reorder_queue", "ReorderRequest")
     ItemSupplier = apps.get_model("inventory", "ItemSupplier")
 
@@ -157,7 +159,9 @@ def update_average_lead_times():
                     count += 1
 
             if count > 0:
-                item_supplier.average_lead_time = total_days // count
+                # Marked as measured, so ``save()`` does not record a computed
+                # average as a supplier's quote (inventory.services.lead_time_source).
+                item_supplier.average_lead_time = measured_lead_time(total_days // count)
                 item_supplier.save(update_fields=["average_lead_time"])
                 updated_count += 1
 

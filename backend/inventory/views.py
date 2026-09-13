@@ -1768,15 +1768,23 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             return None
 
     def _process_lead_time_value(self, lead_time):
-        """Process and validate lead time value."""
+        """The lead time this request RECORDS, or ``None`` to omit the key.
+
+        Absent, blank and unparseable all answer ``None``, on the same terms as
+        :meth:`_process_pack_size`, and the key is left out so the link takes the
+        model's planning default. This used to return the field default itself
+        for those inputs, which stored the right number with the wrong story: a
+        plain ``7`` restated here is indistinguishable from a quoted 7, so
+        ``ItemSupplier.save()`` would have to label ``"soon"`` recorded. Only an
+        omission reaches the default that says it was never supplied — see
+        :mod:`inventory.services.lead_time_source`.
+        """
+        if lead_time in (None, "", "null"):
+            return None
         try:
-            return (
-                int(lead_time)
-                if lead_time not in (None, "", "null")
-                else ItemSupplier._meta.get_field("average_lead_time").default
-            )
+            return int(lead_time)
         except (ValueError, TypeError):
-            return ItemSupplier._meta.get_field("average_lead_time").default
+            return None
 
     def _process_pack_size(self, data):
         """The pack size this request RECORDS, or ``None`` to leave the column alone.
@@ -1853,11 +1861,12 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         defaults = {
             "supplier_sku": data.get("supplier_sku") or item.sku or str(item.id),
             "supplier_url": data.get("supplier_url", ""),
-            "average_lead_time": lead_time,
             "package_upc": data.get("package_upc", ""),
             "unit_upc": data.get("unit_upc", ""),
             "is_primary": True,
         }
+        if lead_time is not None:
+            defaults["average_lead_time"] = lead_time
         if pack_size is not None:
             defaults["quantity_per_package"] = pack_size
         if package_cost_value is not None:

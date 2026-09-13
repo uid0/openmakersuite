@@ -30,10 +30,11 @@
  *    instead. The number in that sentence is prose about the server's
  *    behaviour, not a second source of the default.
  *
- * What this canNOT say, deliberately: whether a stored `7` is the default
- * nobody touched or a seven the supplier actually quoted. The column has no
- * room for that distinction, and giving it one is a migration over supplier
- * data rather than a rendering choice — filed as `oms-lead-time-nullable`.
+ * What this does NOT say yet: whether a stored `7` is the default nobody
+ * touched or a seven the supplier actually quoted. The server now records that
+ * as `average_lead_time_source` on every `ItemSupplier` payload (decided in
+ * `backend/inventory/services/lead_time_source.py`), but no helper here reads
+ * it, so every surface still renders a defaulted 7 as a bare "7 days".
  */
 
 /** How an unrecorded lead time reads. One wording, every surface. */

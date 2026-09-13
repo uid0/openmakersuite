@@ -65,12 +65,30 @@ The table above is every code the exception handler can produce: `_classify` res
 | 409  | `ambiguous`     | `POST /api/reorders/purchase-orders/{id}/items/`            | The identifier matches several items this supplier carries; the server will not pick one.       | `{"candidates": [...]}` — the choice set, strongest match first, capped at 20. |
 | 400  | `not_draft`     | `DELETE /api/reorders/purchase-orders/{id}/items/{item_id}/` | The supplier holds a copy (or the order is closed); the message names void as the alternative.  | Absent.   |
 | 400  | `line_received` | `DELETE /api/reorders/purchase-orders/{id}/items/{item_id}/` | The line records a received quantity, so it is not destroyed. The message names the quantity.   | Absent.   |
-| 409  | `stale_version` | `PUT`/`PATCH /api/inventory/item-suppliers/{id}/`, `DELETE /api/inventory/item-suppliers/{id}/?version=N`, `PUT`/`PATCH /api/inventory/kits/{id}/` | The write sent the `version` it loaded (`supplier_terms.version` on a kit), and the supplier link has been written since — or deleted. For kit terms, `version: 0` means an existing kit loaded no link for that supplier, so a link created since is also stale. Nothing was saved (on a kit, not even its own fields). The message tells the person their copy is out of date and to reload. A write that sends no `version` is never refused this way; the DELETE query value must be an integer of at least 1. See `inventory/services/link_version.py`. | `{"id": int \| null, "sent_version": int, "current_version": int \| null}` — the id is `null` only when kit terms name a supplier whose deleted link id is unknowable; the current version is `null` once the link is gone. |
+| 409  | `stale_version` | `PUT`/`PATCH /api/inventory/item-suppliers/{id}/`, `DELETE /api/inventory/item-suppliers/{id}/?version=N`, `POST /api/inventory/item-suppliers/batch/`, `PUT`/`PATCH /api/inventory/kits/{id}/` | The write sent the `version` it loaded (`supplier_terms.version` on a kit, `links[].version` on a batch), and the supplier link has been written since — or deleted. On a batch, every entry's version is checked before anything is written and `details` names the first stale entry in request order. For kit terms, `version: 0` means an existing kit loaded no link for that supplier, so a link created since is also stale. Nothing was saved (on a kit, not even its own fields). The message tells the person their copy is out of date and to reload. A write that sends no `version` is never refused this way; the DELETE query value must be an integer of at least 1. See `inventory/services/link_version.py`. | `{"id": int \| null, "sent_version": int, "current_version": int \| null}` — the id is `null` only when kit terms name a supplier whose deleted link id is unknowable; the current version is `null` once the link is gone. |
 | 503  | `weather_not_configured` | `GET /api/screens/weather/current/`               | `OPENWEATHER_API_KEY` or the location settings are unset. Operator-fixable; the message says which. | Absent. |
 | 502  | `weather_upstream` | `GET /api/screens/weather/current/`                     | OpenWeather answered with a non-2xx.                                                            | Absent.   |
 | 502  | `weather_unreachable` | `GET /api/screens/weather/current/`                  | OpenWeather could not be reached at all.                                                        | Absent.   |
 
 The same "no line items" refusal on `PATCH /api/reorders/purchase-orders/{id}/` — where setting `status` to `sent`, or attaching a `sales_order_number` to a draft, also sends the order — is **raised** rather than composed, so it arrives under the generic `validation_failed` with that same sentence in `error.message`. A client must not key this refusal on the code alone.
+
+### Supplier-link batch: `POST /api/inventory/item-suppliers/batch/`
+
+Creates and updates several supplier links of ONE item as a single all-or-nothing change. It exists for the change no sequence of single-link writes can make: two links exchanging suppliers (or a new link taking the supplier an existing link is leaving), which `(item, supplier)` uniqueness refuses row by row in every order. The single-link `POST`/`PUT`/`PATCH`/`DELETE` endpoints are unchanged.
+
+```json
+{"item": "<item uuid>",
+ "links": [{"id": 91, "version": 1, "supplier": 2},
+           {"id": 92, "version": 1, "supplier": 1},
+           {"supplier": 3, "supplier_sku": "NEW-1"}]}
+```
+
+- An entry with `id` is a partial update of that link (the fields `PATCH /api/inventory/item-suppliers/{id}/` accepts); an entry without one creates a link for `item`. 1–50 entries; no deletes — use the single-link `DELETE` first, since a removal only ever frees a pair.
+- `version` works as on the single-link endpoints and is optional: every entry that sends one is checked under lock before anything is written, and any stale entry refuses the whole request with `409 stale_version`. An entry without one is unchecked.
+- The pairs are judged once every entry is applied (the constraint is deferred to the end of the transaction). A supplier two links would still share is refused.
+- `200` `{"links": [...]}` — every entry's link as the single-link endpoints represent it, in request order, with each written link's `version` moved on.
+- `400 validation_failed` — `details.links` holds one error map per entry, in request order, `{}` for an entry with nothing wrong. A pair collision reads `{"non_field_errors": ["The fields item, supplier must make a unique set."]}`; an entry naming a link of another item, the same link twice, or more than one `is_primary: true` is refused on that entry.
+- Every refusal, and any failure part-way through the writes, leaves every link exactly as it was. See `backend/inventory/services/link_batch.py`; pinned by `backend/inventory/tests/test_item_supplier_batch.py`.
 
 ## Implementation
 

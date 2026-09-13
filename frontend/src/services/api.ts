@@ -248,10 +248,11 @@ export const inventoryAPI = {
   markItemSupplierDiscontinued: (itemSupplierId: string) =>
     api.post(`/inventory/item-suppliers/${itemSupplierId}/mark_discontinued/`),
 
-  // Item-supplier links are written one row at a time against the same
-  // `item-suppliers` ModelViewSet the list above reads: there is no bulk route,
-  // and none is needed — saving a row with `is_primary` set demotes the item's
-  // other primaries server-side, so "make this one primary" is a single request.
+  // Item-supplier links are normally written one row at a time against the
+  // same `item-suppliers` ModelViewSet the list above reads — saving a row with
+  // `is_primary` set demotes the item's other primaries server-side, so "make
+  // this one primary" is a single request. `batchItemSuppliers` below is for
+  // the one change no row-by-row order can express.
   createItemSupplier: (data: ItemSupplierWritePayload) =>
     api.post<ItemSupplier>('/inventory/item-suppliers/', data),
 
@@ -260,6 +261,17 @@ export const inventoryAPI = {
   // a full replace would blank everything it does not show.
   updateItemSupplier: (itemSupplierId: number, data: Partial<ItemSupplierWritePayload>) =>
     api.patch<ItemSupplier>(`/inventory/item-suppliers/${itemSupplierId}/`, data),
+
+  // Several links of ONE item created and updated all or nothing, with the
+  // `(item, supplier)` pairs judged once every entry is applied — how two rows
+  // exchange suppliers. Each `version` is checked before anything is written,
+  // and a refusal or failure leaves every row as it was. Links come back in
+  // request order. See `docs/API_ERROR_CONTRACT.md`.
+  batchItemSuppliers: (itemId: string, links: ItemSupplierBatchEntry[]) =>
+    api.post<{ links: ItemSupplier[] }>('/inventory/item-suppliers/batch/', {
+      item: itemId,
+      links,
+    }),
 
   deleteItemSupplier: (itemSupplierId: number, version?: number) =>
     api.delete(`/inventory/item-suppliers/${itemSupplierId}/`, {
@@ -583,6 +595,13 @@ export interface ItemSupplierWritePayload {
    */
   version?: number;
 }
+
+/**
+ * One entry of `batchItemSuppliers`: an update of the link `id` names, or a new
+ * link for the batch's item when `id` is absent. `item` is never sent — the
+ * batch names it once.
+ */
+export type ItemSupplierBatchEntry = Omit<ItemSupplierWritePayload, 'item'> & { id?: number };
 
 export type PackTransition = 'open' | 'finish';
 

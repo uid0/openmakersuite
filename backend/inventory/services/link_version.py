@@ -64,6 +64,10 @@ WHO SENDS A TOKEN, AND HOW A REFUSAL REACHES A PERSON
   their copy is out of date, with a reload.
 * ``DELETE /api/inventory/item-suppliers/{id}/?version=N`` — the same refusal;
   the check and deletion share one row lock. The web item form sends the token.
+* ``POST /api/inventory/item-suppliers/batch/`` with ``links[].version`` — the
+  same ``409``, for the first stale entry; every entry is checked under lock
+  before any is written, so a stale entry refuses the whole batch
+  (``inventory.services.link_batch``). The web item form sends the tokens.
 * ``PATCH``/``PUT /api/inventory/kits/{id}/`` with ``supplier_terms.version`` —
   the same ``409``, and the whole kit save is rolled back with it. A positive
   version means the page loaded that link; zero means an existing kit loaded no

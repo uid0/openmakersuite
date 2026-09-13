@@ -24,6 +24,7 @@ from inventory.services.lead_time_source import (
     planning_default,
     settle_lead_time_source,
 )
+from inventory.services.link_batch import SUPPLIER_PAIR_CONSTRAINT
 from inventory.services.link_version import claim_version, lock_item_supplier_links
 
 from .ownership import OwnableModel
@@ -1570,7 +1571,18 @@ class ItemSupplier(models.Model):
 
     class Meta:
         ordering = ["-is_primary", "unit_cost"]
-        unique_together = [["item", "supplier"]]
+        # One link per (item, supplier). DEFERRABLE INITIALLY IMMEDIATE, so every
+        # statement is still checked exactly as a plain unique constraint would
+        # be — the one writer that defers it is the atomic batch of an item's
+        # links, which checks it before its transaction ends so two links can
+        # exchange suppliers (``inventory.services.link_batch``).
+        constraints = [
+            models.UniqueConstraint(
+                fields=["item", "supplier"],
+                name=SUPPLIER_PAIR_CONSTRAINT,
+                deferrable=models.Deferrable.IMMEDIATE,
+            ),
+        ]
         indexes = [
             models.Index(fields=["item", "is_primary"]),
             models.Index(fields=["item", "unit_cost"]),

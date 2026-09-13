@@ -23,7 +23,8 @@ Run it inside the backend container, e.g.::
 
 The default lands in the working directory (``/app``), not a shared ``/tmp``
 path another local user could pre-plant a symlink at; the write also refuses
-to follow a symlink at the target, so an explicit ``--out`` is safe too.
+to follow a symlink at the final path component. Parent directories of an
+explicit ``--out`` must be trusted, not shared world-writable locations.
 
 In the dev compose stack ``/app`` is the bind-mounted ``./backend``, so the
 PNG is already on the host at ``backend/epaper_preview.png``. From a container

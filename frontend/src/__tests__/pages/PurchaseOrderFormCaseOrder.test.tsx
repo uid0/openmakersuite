@@ -49,6 +49,7 @@ const itemWith = (caseOrder: ItemCaseOrder | null): api.ReorderDataItem => ({
   supplier_sku: 'SUP-001',
   supplier_url: 'https://example.com/item',
   is_primary: true,
+  is_selected_ordering_link: true,
   line_total: '100.00',
   count_unit: 'bag',
   reorder_display: {
@@ -120,7 +121,7 @@ test('a line that could not be sized in cases says so and what it ordered instea
 
   const note = screen.getByTestId('po-item-case-order-note-item-1');
   expect(note).toHaveTextContent('Cannot order 4 cases: the case size is unknown');
-  expect(note).toHaveTextContent('25 bags as before.');
+  expect(note).toHaveTextContent('40 bags as before.');
   expect(note).toHaveTextContent(/reactivate a supplier relationship/i);
 });
 
@@ -138,6 +139,28 @@ test('a line ordered by the case with agreeing columns carries no note', async (
   );
 
   expect(screen.queryByTestId('po-item-case-order-note-item-1')).not.toBeInTheDocument();
+});
+
+test('an alternate supplier line names its own rounded prefill', async () => {
+  await renderWith({
+    ...itemWith({
+      reorder_cases: 4,
+      reorder_quantity: 25,
+      order_quantity: 40,
+      case_size: 10,
+      case_size_state: 'known',
+      orders_cases: true,
+      columns_disagree: true,
+    }),
+    suggested_quantity: 42,
+    quantity_per_package: 6,
+    is_primary: false,
+    is_selected_ordering_link: false,
+  });
+
+  expect(screen.getByTestId('po-item-case-order-note-item-1')).toHaveTextContent(
+    "Order sizing uses the selected supplier's 4 cases of 10. Rounded to this supplier's packages of 6, this line prefills 42 bags."
+  );
 });
 
 test('an item the case rule does not govern carries no note', async () => {

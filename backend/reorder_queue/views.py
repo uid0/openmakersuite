@@ -1444,6 +1444,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         "supplier_sku": item_supplier.supplier_sku,
                         "supplier_url": item_supplier.supplier_url,
                         "is_primary": item_supplier.is_primary,
+                        "is_selected_ordering_link": (
+                            choice.item_supplier is not None
+                            and choice.item_supplier.pk == item_supplier.pk
+                        ),
                         "line_total": None if line_total is None else str(line_total),
                         "has_active_reorder_request": has_active_request,
                         "reorder_request_id": reorder_request_id,

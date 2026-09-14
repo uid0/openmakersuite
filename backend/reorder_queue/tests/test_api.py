@@ -2717,6 +2717,40 @@ class TestReorderQuantityIsModeAware:
         # max(shortage 9, reorder 25) = 25 -> 3 packages of 10.
         assert self._line_for(response, item)["suggested_quantity"] == 30
 
+    def test_reorder_data_marks_the_link_that_sized_a_legacy_case_order(self):
+        client = APIClient()
+        user = User.objects.create_user(username="case-links", password="pw")
+        client.force_authenticate(user=user)
+        item = InventoryItemFactory(
+            image=None,
+            use_case_based_reorder=True,
+            current_stock=0,
+            minimum_stock=1,
+            reorder_cases=4,
+            reorder_quantity=25,
+            quantity_per_package=10,
+        )
+        selected = item.item_suppliers.get()
+        alternate = ItemSupplierFactory(
+            item=item,
+            is_primary=False,
+            quantity_per_package=6,
+        )
+
+        response = client.get(self.REORDER_DATA_URL)
+
+        assert response.status_code == status.HTTP_200_OK
+        lines = {
+            line["item_supplier_id"]: line
+            for group in response.data["suppliers"]
+            for line in group["items"]
+            if line["item_id"] == str(item.id)
+        }
+        assert lines[selected.id]["suggested_quantity"] == 40
+        assert lines[selected.id]["is_selected_ordering_link"] is True
+        assert lines[alternate.id]["suggested_quantity"] == 42
+        assert lines[alternate.id]["is_selected_ordering_link"] is False
+
     def test_optimized_order_recommends_whole_packs_of_the_items_chain(self):
         """The pack chain drives the quantity, on a normally PRICED item.
 

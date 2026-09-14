@@ -1994,6 +1994,8 @@ export interface ReorderDataItem {
   supplier_sku: string;
   supplier_url: string;
   is_primary: boolean;
+  /** Whether the item-wide case order was sized from this supplier link. */
+  is_selected_ordering_link?: boolean;
   /** `null` when `unit_cost` is: an unknown price makes an unknown line total. */
   line_total: string | null;
   has_active_reorder_request?: boolean;

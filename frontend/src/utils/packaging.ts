@@ -353,22 +353,35 @@ export const reorderFiling = (
  */
 export const caseOrderNote = (
   caseOrder: ItemCaseOrder | null | undefined,
-  baseUnit: string
+  baseUnit: string,
+  row?: {
+    suggestedQuantity: number;
+    packageSize: number;
+    isSelectedOrderingLink?: boolean;
+  }
 ): string | null => {
   if (!caseOrder) return null;
   const units = (count: number) => `${count} ${pluralizeUnit(baseUnit, count)}`;
   const cases = `${caseOrder.reorder_cases} ${pluralizeUnit('case', caseOrder.reorder_cases)}`;
   if (!caseOrder.orders_cases || caseOrder.case_size === null) {
     const remedy = caseSizeUnknownNote(caseOrder.case_size_state);
+    const ordered = row?.suggestedQuantity ?? caseOrder.order_quantity;
     return (
       `Cannot order ${cases}: the case size is unknown, so a reorder orders ` +
-      `${units(caseOrder.order_quantity)} as before.` +
+      `${units(ordered)} as before.` +
       (remedy ? ` ${remedy}` : '')
+    );
+  }
+  if (row?.isSelectedOrderingLink === false) {
+    return (
+      `Order sizing uses the selected supplier's ${cases} of ${caseOrder.case_size}. ` +
+      `Rounded to this supplier's packages of ${row.packageSize}, this line prefills ` +
+      `${units(row.suggestedQuantity)}.`
     );
   }
   if (caseOrder.columns_disagree) {
     const configured = caseOrder.reorder_cases * caseOrder.case_size;
-    const ordered = caseOrder.order_quantity;
+    const ordered = row?.suggestedQuantity ?? caseOrder.order_quantity;
     return (
       `Reorder Cases and Reorder Quantity disagree: ${cases} of ${caseOrder.case_size} is ` +
       `${units(configured)}, but Reorder Quantity says ${units(caseOrder.reorder_quantity)}. ` +

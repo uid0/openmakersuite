@@ -1239,12 +1239,28 @@ const PurchaseOrderFormPage: React.FC = () => {
                                   the purchaser is told when this line could
                                   not be sized in cases, or when the item's two
                                   reorder columns disagree. */}
-                              {caseOrderNote(item.reorder_display?.case_order, item.count_unit || 'unit') && (
+                              {caseOrderNote(
+                                item.reorder_display?.case_order,
+                                item.count_unit || 'unit',
+                                {
+                                  suggestedQuantity: item.suggested_quantity,
+                                  packageSize: item.quantity_per_package,
+                                  isSelectedOrderingLink: item.is_selected_ordering_link,
+                                }
+                              ) && (
                                 <span
                                   className="case-order-note"
                                   data-testid={`po-item-case-order-note-${item.item_id}`}
                                 >
-                                  {caseOrderNote(item.reorder_display?.case_order, item.count_unit || 'unit')}
+                                  {caseOrderNote(
+                                    item.reorder_display?.case_order,
+                                    item.count_unit || 'unit',
+                                    {
+                                      suggestedQuantity: item.suggested_quantity,
+                                      packageSize: item.quantity_per_package,
+                                      isSelectedOrderingLink: item.is_selected_ordering_link,
+                                    }
+                                  )}
                                 </span>
                               )}
                             </div>

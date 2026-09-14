@@ -3,12 +3,10 @@
  *
  * The page used to POST `/location-checkins/check-ins/`, a path OMS never
  * routed: every location scan 404'd and the history line said the scan failed.
- * The route below is read from the backend's own URLconf rather than typed a
- * second time here, so renaming it on either side fails this test.
+ * CHECKIN_ROUTE is the wire contract OMS pins from its side in
+ * `backend/location_checkins/tests/test_checkin_route.py`; every other path
+ * answers 404 here, as it does on the server.
  */
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
-
 import { MantineProvider } from '@mantine/core';
 import { ModalsProvider } from '@mantine/modals';
 import { Notifications, cleanNotifications } from '@mantine/notifications';
@@ -24,31 +22,8 @@ vi.mock('react-router-dom', async () => ({
   useNavigate: () => jest.fn(),
 }));
 
-const BACKEND_DIR = path.resolve(__dirname, '../../../../backend');
-
-const match = (file: string, pattern: RegExp): string => {
-  const found = readFileSync(path.join(BACKEND_DIR, file), 'utf8').match(pattern);
-  if (!found) throw new Error(`${pattern} not found in backend/${file}`);
-  return found[1];
-};
-
-/**
- * `POST <api prefix>/<router prefix>/<action url_path>/` for the public
- * `LocationCheckInViewSet.checkin` action, relative to the axios baseURL
- * (`/api`), so it is exactly what the web client must call.
- */
-const checkinRoute = () => {
-  const appPrefix = match(
-    'config/urls.py',
-    /path\("api\/([^"]+)",\s*include\("location_checkins\.urls"\)\)/,
-  );
-  const routerPrefix = match(
-    'location_checkins/urls.py',
-    /router\.register\(r"([^"]+)",\s*LocationCheckInViewSet\b/,
-  );
-  const urlPath = match('location_checkins/views.py', /url_path="([^"]+)",?\s*\)\s*def checkin\(/);
-  return `/${appPrefix}${routerPrefix}/${urlPath}/`;
-};
+/** Relative to the axios baseURL (`/api`). */
+const CHECKIN_ROUTE = '/location-checkins/checkins/checkin/';
 
 const renderPage = () =>
   render(
@@ -74,12 +49,7 @@ describe('UniversalScannerPage — location check-in scan', () => {
     mock.restore();
   });
 
-  test('derives the check-in route from the backend URLconf', () => {
-    expect(checkinRoute()).toBe('/location-checkins/checkins/checkin/');
-  });
-
   test('posts the scanned location to the routed check-in action', async () => {
-    const route = checkinRoute();
     const posted: unknown[] = [];
     mock.onPost('/scanner/dispatch/').reply(200, {
       action: 'location_checkin',
@@ -88,7 +58,7 @@ describe('UniversalScannerPage — location check-in scan', () => {
       target_name: 'Wood Shop',
       raw_payload: 'LOC-11',
     });
-    mock.onPost(route).reply((config) => {
+    mock.onPost(CHECKIN_ROUTE).reply((config) => {
       posted.push(JSON.parse(config.data));
       return [201, { id: 'c-1', location: 11, checkin_type: 'anonymous' }];
     });

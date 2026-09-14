@@ -174,6 +174,8 @@ def test_dispatcher_resolves_fixture_serializer_qr_url(api_client):
         f"{FRONTEND_URL}/scan/not-an-item-id",
         f"{FRONTEND_URL}/scan/makerbox/BIN-1/alice/",
         f"{FRONTEND_URL}/scan/asset/00000000-0000-0000-0000-000000000000/anything",
+        f"{FRONTEND_URL}/scan/asset/not-a-uuid",
+        f"{FRONTEND_URL}/scan/donation-item/not-an-int",
     ],
 )
 def test_other_scan_namespace_urls_stay_unknown(api_client, payload):

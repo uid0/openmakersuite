@@ -198,6 +198,11 @@ def _parse_scan_url(path: str) -> Optional[tuple[str, str]]:
     mapped = type_map.get(rest[0])
     if mapped is None:
         return None
+    if bare_id_must_be_uuid:
+        if mapped in {"asset", "fixture"} and not _UUID_RE.fullmatch(rest[1]):
+            return None
+        if mapped in {"location", "donation_item"} and not rest[1].isdigit():
+            return None
     return (mapped, rest[1])
 
 

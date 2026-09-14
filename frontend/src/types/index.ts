@@ -327,14 +327,14 @@ export interface ItemReorderDisplay {
  * "We are ordering by cases and counting by items" (captain, 2026-09-05).
  *
  * A legacy `use_case_based_reorder` item that is not counted in packs orders
- * exactly `reorder_cases` whole cases — the server's `case_order`. The server
- * sends the STATE and actual order;
+ * enough whole cases to cover both `reorder_cases` and the current shortage —
+ * the server's `case_order`. The server sends the STATE and actual order;
  * `utils/packaging.ts`'s `caseOrderNote` words it.
  */
 export interface ItemCaseOrder {
   reorder_cases: number;
   reorder_quantity: number;
-  /** Base units the filing path will order now. */
+  /** Base units the filing path will order now, including any shortage top-up. */
   order_quantity: number;
   /** Base units in one case of the supplier the next order goes through; `null` when unknown. */
   case_size: number | null;

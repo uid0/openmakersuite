@@ -97,13 +97,12 @@ def test_an_unknown_case_size_is_reported_as_a_fact_not_given_a_number():
     assert row["case_size_state"] == PACK_SIZE_RECORDED_ZERO
     assert row["case_size"] == ""
     assert row["row_package_finding"] == "package_size_unknown"
-    assert row["files_today"] == "100"
-    assert row["new_rule_orders"] == "7"
+    assert row["new_rule_orders"] == row["files_today"] == "100"
     assert row["columns_disagree"] == "unknown"
     assert row["finding"] == "case_size_unknown"
 
 
-def test_a_known_case_size_orders_the_configured_cases_despite_a_larger_shortage():
+def test_a_known_case_size_rounds_the_shortage_up_to_whole_cases():
     item = _case_item(
         reorder_cases=2,
         reorder_quantity=5,
@@ -116,7 +115,7 @@ def test_a_known_case_size_orders_the_configured_cases_despite_a_larger_shortage
 
     assert row["files_today"] == "95"
     assert row["po_line_today"] == "100"
-    assert row["new_rule_orders"] == "20"
+    assert row["new_rule_orders"] == "100"
 
 
 def test_an_item_with_no_supplier_link_is_listed_with_a_blank_supplier():

@@ -5628,20 +5628,6 @@ export const scannerAPI = {
     api.post<ScanDispatchResult>('/scanner/dispatch/', { payload }),
 };
 
-// LocationCheckIn create — used by the universal scanner page to record
-// an anonymous "I was here" stamp when someone scans a location QR.
-export const locationCheckinsAPI = {
-  create: (data: {
-    location: number;
-    checkin_type?: 'volunteer' | 'contractor' | 'anonymous';
-    notes?: string;
-  }) =>
-    api.post<{ id: string; location: number; checked_in_at: string }>(
-      '/location-checkins/check-ins/',
-      { checkin_type: 'anonymous', ...data },
-    ),
-};
-
 // Invite-code self-signup workflow.
 //
 // Staff mint single-use invite codes (`inviteCodesAdminAPI`) and send the

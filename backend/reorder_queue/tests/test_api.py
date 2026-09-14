@@ -2748,8 +2748,12 @@ class TestReorderQuantityIsModeAware:
         }
         assert lines[selected.id]["suggested_quantity"] == 40
         assert lines[selected.id]["is_selected_ordering_link"] is True
+        assert lines[selected.id]["case_size"] == 10
+        assert lines[selected.id]["case_size_state"] == "known"
         assert lines[alternate.id]["suggested_quantity"] == 42
         assert lines[alternate.id]["is_selected_ordering_link"] is False
+        assert lines[alternate.id]["case_size"] == 6
+        assert lines[alternate.id]["case_size_state"] == "known"
 
     def test_optimized_order_recommends_whole_packs_of_the_items_chain(self):
         """The pack chain drives the quantity, on a normally PRICED item.

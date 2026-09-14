@@ -111,9 +111,7 @@ def change_set_row(item: InventoryItem, link, selected_case: CaseOrder) -> dict:
     row_pack = pack_size_of(link)
 
     files_today = files_before_the_case_rule(item)
-    po_line_today = (
-        files_today if link is None else supplier_line_quantity(link, files_today)
-    )
+    po_line_today = files_today if link is None else supplier_line_quantity(link, files_today)
 
     if selected_case.quantity is None:
         finding = FINDING_CASE_SIZE_UNKNOWN
@@ -121,9 +119,7 @@ def change_set_row(item: InventoryItem, link, selected_case: CaseOrder) -> dict:
     else:
         disagree = "yes" if selected_case.columns_disagree else "no"
 
-    new_rule_orders = (
-        files_today if link is None else supplier_line_quantity(link)
-    )
+    new_rule_orders = files_today if link is None else supplier_line_quantity(link)
     change = new_rule_orders - po_line_today
     if selected_case.quantity is not None:
         finding = "orders_more" if change > 0 else "orders_less" if change < 0 else "unchanged"
@@ -139,9 +135,7 @@ def change_set_row(item: InventoryItem, link, selected_case: CaseOrder) -> dict:
         "supplier": link.supplier.name if link is not None else "",
         "currently_selected": (
             "yes"
-            if link is not None
-            and selected_link is not None
-            and link.pk == selected_link.pk
+            if link is not None and selected_link is not None and link.pk == selected_link.pk
             else "no"
         ),
         "case_size_state": row_pack.state,

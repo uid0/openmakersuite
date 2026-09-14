@@ -45,6 +45,8 @@ const itemWith = (caseOrder: ItemCaseOrder | null): api.ReorderDataItem => ({
   unit_cost_detail: null,
   package_cost: null,
   quantity_per_package: 10,
+  case_size: 10,
+  case_size_state: 'known',
   lead_time_days: 7,
   supplier_sku: 'SUP-001',
   supplier_url: 'https://example.com/item',
@@ -154,6 +156,7 @@ test('an alternate supplier line names its own rounded prefill', async () => {
     }),
     suggested_quantity: 42,
     quantity_per_package: 6,
+    case_size: 6,
     is_primary: false,
     is_selected_ordering_link: false,
   });
@@ -176,6 +179,8 @@ test('an alternate supplier with an invalid package size names the unrounded pre
     }),
     suggested_quantity: 40,
     quantity_per_package: 0,
+    case_size: null,
+    case_size_state: 'recorded_zero',
     is_primary: false,
     is_selected_ordering_link: false,
   });

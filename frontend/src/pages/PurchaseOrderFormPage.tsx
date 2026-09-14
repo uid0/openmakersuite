@@ -1244,7 +1244,8 @@ const PurchaseOrderFormPage: React.FC = () => {
                                 item.count_unit || 'unit',
                                 {
                                   suggestedQuantity: item.suggested_quantity,
-                                  packageSize: item.quantity_per_package,
+                                  caseSize: item.case_size,
+                                  caseSizeState: item.case_size_state,
                                   isSelectedOrderingLink: item.is_selected_ordering_link,
                                 }
                               ) && (
@@ -1257,7 +1258,8 @@ const PurchaseOrderFormPage: React.FC = () => {
                                     item.count_unit || 'unit',
                                     {
                                       suggestedQuantity: item.suggested_quantity,
-                                      packageSize: item.quantity_per_package,
+                                      caseSize: item.case_size,
+                                      caseSizeState: item.case_size_state,
                                       isSelectedOrderingLink: item.is_selected_ordering_link,
                                     }
                                   )}

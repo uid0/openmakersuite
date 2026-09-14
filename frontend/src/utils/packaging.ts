@@ -356,7 +356,8 @@ export const caseOrderNote = (
   baseUnit: string,
   row?: {
     suggestedQuantity: number;
-    packageSize: number;
+    caseSize: number | null | undefined;
+    caseSizeState: string | undefined;
     isSelectedOrderingLink?: boolean;
   }
 ): string | null => {
@@ -373,16 +374,18 @@ export const caseOrderNote = (
     );
   }
   if (row?.isSelectedOrderingLink === false) {
-    if (row.packageSize <= 0) {
+    if (row.caseSize == null) {
+      const remedy = caseSizeUnknownNote(row.caseSizeState);
       return (
         `Order sizing uses the selected supplier's ${cases} of ${caseOrder.case_size}. ` +
         `This supplier's package size is unknown, so this line keeps the unrounded ` +
-        `prefill of ${units(row.suggestedQuantity)}.`
+        `prefill of ${units(row.suggestedQuantity)}.` +
+        (remedy ? ` ${remedy}` : '')
       );
     }
     return (
       `Order sizing uses the selected supplier's ${cases} of ${caseOrder.case_size}. ` +
-      `Rounded to this supplier's packages of ${row.packageSize}, this line prefills ` +
+      `Rounded to this supplier's packages of ${row.caseSize}, this line prefills ` +
       `${units(row.suggestedQuantity)}.`
     );
   }

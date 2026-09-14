@@ -86,7 +86,6 @@ from django.db.models import Q
 
 from inventory.models import InventoryItem, ItemSupplier
 from inventory.services.kits import build_kit_snapshot
-from inventory.services.pack_size import declares_a_case
 from inventory.services.packaging import supplier_line_quantity
 from inventory.services.pricing import unit_price_of
 

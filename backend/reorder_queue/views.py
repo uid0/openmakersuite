@@ -24,16 +24,17 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from config.api_errors import error_response
 from inventory.models import InventoryItem, Supplier
 from inventory.serializers import SupplierChoiceSerializer
+from inventory.services.pack_size import pack_size_of
 from inventory.services.packaging import (
     base_reorder_quantity,
     count_unit,
     counts_in_packs,
-    supplier_line_quantity,
     low_stock_q,
     on_hand_display,
     parse_at_level,
     reorder_display,
     resolve_base_quantity,
+    supplier_line_quantity,
 )
 from inventory.services.pricing import PriceRollup, explain, package_price_of, unit_price_of
 from inventory.services.supplier_selection import (
@@ -1407,6 +1408,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 unit_price = unit_price_of(item_supplier)
                 package_price = package_price_of(item_supplier)
                 line_total = supplier_data[supplier_id]["rollup"].add(unit_price, suggested_qty)
+                row_pack_size = pack_size_of(item_supplier)
 
                 # Flag the line as request-driven. The API key keeps its
                 # ``has_active_reorder_request`` name (clients read it), but
@@ -1437,6 +1439,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         ),
                         "package_cost": (None if not package_price else str(package_price.amount)),
                         "quantity_per_package": item_supplier.quantity_per_package,
+                        "case_size": row_pack_size.units,
+                        "case_size_state": row_pack_size.state,
                         "lead_time_days": item_supplier.average_lead_time,
                         "supplier_sku": item_supplier.supplier_sku,
                         "supplier_url": item_supplier.supplier_url,

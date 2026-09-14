@@ -2,6 +2,7 @@
  * API service for communicating with the Django backend
  */
 import axios from 'axios';
+import type { CaseSizeState } from '../types';
 import { ActiveMaintenanceRow, Asset, AssetCostRecoveryReport, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, AssignSlotRequest, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, GenerateRackRequest, GenerateRackResult, InventoryItem, InventoryItemMetrics, ItemCountMode, ItemOnHandDisplay, ItemPurchaseHistory, ItemReorderDisplay, ItemSupplier, Kit, KitSummary, KitSupplierTerms, KioskPayload, LightSwitch, Location, LocationProblem, LogUsageRequest, LogUsageResponse, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, MaintenanceTool, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, ReorderRequestCreateResponse, ResilienceStatus, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, StockHistory, StorageAssignment, StorageAssignmentType, StorageOverview, StorageSlot, StorageSlotCardPreview, Supplier, SupplierAgreement, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderAdHocMaterialInput, WorkOrderAdHocToolInput, WorkOrderAttachment, WorkOrderLotoCompletion, WorkOrderMaterialUsage, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderToolRow, WorkOrderUploadResult } from '../types';
 
 /**
@@ -1985,6 +1986,9 @@ export interface ReorderDataItem {
   unit_cost_detail?: string | null;
   package_cost: string | null;
   quantity_per_package: number;
+  /** This supplier row's package size, interpreted by the server. */
+  case_size?: number | null;
+  case_size_state?: CaseSizeState;
   /**
    * The chosen supplier's own quoted wait. `0` is a recorded answer — same-day
    * counter pickup — and `null` is an absence, not a seven. `utils/leadTime.ts`

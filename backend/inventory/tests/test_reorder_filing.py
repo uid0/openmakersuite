@@ -16,6 +16,9 @@ with its wording. The invariants below are what a client may rely on.
 
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
+from django.utils.crypto import get_random_string
+
 import pytest
 from rest_framework import status
 from rest_framework.reverse import reverse
@@ -26,17 +29,30 @@ from inventory.models import (
     MaintenanceItem,
     MaintenanceMaterial,
     PackagingLevel,
+    StockReconciliation,
+)
+from inventory.services.pack_size import (
+    PACK_SIZE_KNOWN,
+    PACK_SIZE_NO_ORDERABLE_LINK,
+    PACK_SIZE_NOT_RECORDED,
+    PACK_SIZE_RECORDED_ZERO,
 )
 from inventory.services.packaging import (
     base_reorder_quantity,
+    case_order,
+    count_at_level,
     counts_in_packs,
+    on_hand_display,
     order_quantity_text,
     reorder_display,
 )
-from inventory.tests.factories import AssetFactory, InventoryItemFactory
+from inventory.tests.factories import AssetFactory, InventoryItemFactory, ItemSupplierFactory
 from reorder_queue.models import ReorderRequest
+from reorder_queue.services import default_quantity
 
 pytestmark = pytest.mark.django_db
+
+_USED = StockReconciliation.ReasonCode.USED_WITHOUT_SCAN
 
 
 def _pack_item(mode=InventoryItem.CountMode.BY_LEVEL, case_size=12, **kwargs):
@@ -76,6 +92,12 @@ def _case_item(**kwargs):
         reorder_cases=kwargs.pop("reorder_cases", 4),
         **kwargs,
     )
+
+
+def _without_supplier_links(item):
+    """``item`` re-read after its factory-made supplier link is deleted."""
+    item.item_suppliers.all().delete()
+    return InventoryItem.objects.get(pk=item.pk)
 
 
 def _bridged_case_item(case_size=12, **kwargs):
@@ -277,65 +299,156 @@ class TestASibilantUnitNounIsPluralisedTheWayTheWebDoes:
         assert order_quantity_text(item, 1) == "1 brush"
 
 
-class TestLegacyCaseBasedItemsAreRecordedAsTheyBehave:
-    """The one shape whose display and filing derivation name different amounts.
+class TestLegacyCaseBasedItemsOrderByTheCase:
+    """"We are ordering by cases and counting by items." (captain, 2026-09-05)
 
-    ``base_reorder_quantity`` routes a legacy ``use_case_based_reorder`` item
-    through the ``each`` branch — a deliberate preservation recorded in
-    ``inventory.services.packaging``'s module docstring ("``each`` items —
-    including legacy ``use_case_based_reorder`` ones — route through the same
-    helpers and come out byte-for-byte where they were"). So an operator's
-    ``reorder_cases`` sizes the DISPLAY while ``reorder_quantity`` sizes the
-    ORDER, and nothing relates the two columns.
+    A legacy ``use_case_based_reorder`` item with no packaging chain of its own
+    used to DISPLAY ``reorder_cases`` while every filing path ordered
+    ``reorder_quantity`` base units, so "Reorder Cases: 4" was discarded by the
+    ordering path. Now ``base_reorder_quantity`` — and so every surface that
+    files — orders ``reorder_cases × order_pack_size``, falling back to
+    ``reorder_quantity`` only when the case size is unknown.
 
-    Pinned here so the divergence is a recorded fact with a number on it rather
-    than a surprise, and so closing it is a visible decision rather than a quiet
-    edit. ``order_quantity`` reports what is actually filed either way, which is
-    what lets the scan page stay honest while the columns disagree.
+    ``reorder_display.case_order`` says which happened and whether the two
+    columns disagree, because an item that cannot be ordered by the case is a
+    fact the operator needs rather than a value to invent. Counting — stock,
+    the case count, the threshold — does not move.
 
-    ``InventoryItem.reorder_cases``'s ``help_text`` is worded off THIS class,
-    clause for clause: "never affects what is ordered" is the first test below,
-    and "only for an item whose counting mode gives this column meaning" is the
-    other two — an unknown case size and the BRIDGED shape are the counting
-    modes that give it none. It used to say "Number of cases/packages to reorder
-    when stock is low", which promised a use no code makes. Whether to close the
-    divergence instead — by having ``base_reorder_quantity`` read
-    ``reorder_cases × order_pack_size`` for these items — changes what is ordered
-    for live items and is routed to the captain as its own decision.
+    ``InventoryItem.reorder_cases``'s ``help_text`` is worded off this class.
     """
 
-    def test_display_reads_reorder_cases_while_the_order_reads_reorder_quantity(self):
-        """The sentence ``reorder_cases``'s help text now makes, with numbers on it."""
+    def test_the_order_is_reorder_cases_times_the_order_pack_size(self):
+        """The rule, with numbers on it: 4 cases of 10 is 40 units, whatever reorder_quantity says."""
         item = _case_item(reorder_cases=4, reorder_quantity=25, quantity_per_package=10)
 
         display = reorder_display(item)
 
+        assert base_reorder_quantity(item) == 40
         assert display["unit"] == "case"
-        assert display["reorder_quantity"] == 4  # four cases, i.e. 40 base units
-        assert display["order_quantity"] == 25  # what any filing path orders
-        assert display["order_text"] == "25 units"
+        assert display["reorder_quantity"] == 4
+        assert display["order_quantity"] == 40
+        assert display["order_text"] == "4 cases (40 units)"
 
-    def test_an_unknown_case_size_names_both_halves_in_base_units(self):
-        """With no case size there is nothing to convert, and both halves agree."""
-        item = _case_item(reorder_cases=2, reorder_quantity=40, quantity_per_package=0)
+    def test_columns_that_name_different_amounts_are_reported_as_disagreeing(self):
+        """25 units against 4 cases of 10: the operator is told, not left to notice."""
+        item = _case_item(reorder_cases=4, reorder_quantity=25, quantity_per_package=10)
+
+        assert reorder_display(item)["case_order"] == {
+            "reorder_cases": 4,
+            "reorder_quantity": 25,
+            "case_size": 10,
+            "case_size_state": PACK_SIZE_KNOWN,
+            "orders_cases": True,
+            "columns_disagree": True,
+        }
+
+    def test_columns_that_name_the_same_amount_do_not_disagree(self):
+        item = _case_item(reorder_cases=4, reorder_quantity=40, quantity_per_package=10)
+
+        case = reorder_display(item)["case_order"]
+
+        assert case["orders_cases"] is True
+        assert case["columns_disagree"] is False
+
+    def test_a_deeply_short_item_still_orders_exactly_its_cases(self):
+        """No shortage top-up: the rule names ``reorder_cases × pack size`` and nothing else.
+
+        The each-mode clause reads ``minimum_stock``, which does not govern a
+        case-based item (``minimum_cases`` does), so it must not size its order.
+        """
+        item = _case_item(
+            reorder_cases=2,
+            reorder_quantity=5,
+            quantity_per_package=10,
+            current_stock=0,
+            minimum_stock=100,
+        )
+
+        assert base_reorder_quantity(item) == 20
+
+    def test_the_pack_size_is_the_order_question_not_the_shelf_one(self):
+        """A discontinued vendor's 12-pack describes the SHELF; the next order ships in 10s."""
+        item = _case_item(
+            reorder_cases=3,
+            reorder_quantity=1,
+            quantity_per_package=12,
+            item_supplier_kwargs={"is_discontinued": True},
+        )
+        ItemSupplierFactory(item=item, quantity_per_package=10, is_primary=False)
+
+        assert item.current_cases == 2  # 24 units / the shelf's 12
+        assert base_reorder_quantity(item) == 30
+        assert reorder_display(item)["case_order"]["case_size"] == 10
+
+    @pytest.mark.parametrize(
+        ("make_unknown", "state"),
+        [
+            (lambda: _case_item(reorder_cases=2, reorder_quantity=7, quantity_per_package=0),
+             PACK_SIZE_RECORDED_ZERO),
+            (lambda: _without_supplier_links(_case_item(reorder_cases=2, reorder_quantity=7)),
+             PACK_SIZE_NOT_RECORDED),
+            (lambda: _case_item(
+                reorder_cases=2,
+                reorder_quantity=7,
+                quantity_per_package=10,
+                item_supplier_kwargs={"is_discontinued": True},
+            ), PACK_SIZE_NO_ORDERABLE_LINK),
+        ],
+        ids=["recorded_zero", "not_recorded", "no_orderable_link"],
+    )
+    def test_an_unknown_case_size_orders_reorder_quantity_and_says_it_cannot_order_cases(
+        self, make_unknown, state
+    ):
+        """The captain's fallback, and the fact beside it — never an invented case size."""
+        item = make_unknown()
 
         display = reorder_display(item)
 
-        assert display["unit"] == "unit"
-        assert display["reorder_quantity"] == 40
-        assert display["order_quantity"] == 40
+        assert base_reorder_quantity(item) == 7
+        assert display["order_quantity"] == 7
+        assert display["order_text"] == "7 units"
+        assert display["case_order"] == {
+            "reorder_cases": 2,
+            "reorder_quantity": 7,
+            "case_size": None,
+            "case_size_state": state,
+            "orders_cases": False,
+            "columns_disagree": None,
+        }
+
+    def test_counting_stays_in_individual_items(self):
+        """Ordering moved; counting did not. Every count reads base units exactly as before."""
+        item = _case_item(
+            reorder_cases=4, reorder_quantity=25, quantity_per_package=10, current_stock=24
+        )
+
+        display = reorder_display(item)
+
+        assert counts_in_packs(item) is False
+        assert count_at_level(item) == 24
+        assert on_hand_display(item)["mode"] == "each"
+        assert on_hand_display(item)["base_units"] == 24
+        assert display["current"] == pytest.approx(2.4)  # cases ON HAND, from units
+        assert display["threshold"] == 2  # minimum_cases
+        assert item.needs_reorder is False  # 2.4 cases > 2
+
+    def test_an_item_that_is_not_case_based_is_not_governed(self):
+        item = InventoryItemFactory(
+            image=None, reorder_cases=4, reorder_quantity=25, quantity_per_package=10
+        )
+
+        assert case_order(item) is None
+        assert reorder_display(item)["case_order"] is None
+        assert base_reorder_quantity(item) == 25
 
     def test_a_bridged_item_reads_reorder_quantity_on_both_halves(self):
         """COUNTING MODE, not the legacy flag, decides whether ``reorder_cases`` means anything.
 
-        ``counts_in_packs`` is tested first in ``reorder_display`` and in
-        ``base_reorder_quantity``, so an item carrying the legacy flag AND a
-        packaging chain reads ``reorder_quantity`` twice and ``reorder_cases``
-        never — the display in PACKS, the order in base units at the pack size.
-        This is the shape the ``help_text``'s "only for an item whose counting
-        mode gives this column meaning" clause excludes, and the one where the
-        old wording ("a reorder orders 'Reorder quantity', in base units") was
-        wrong by the pack factor.
+        ``counts_in_packs`` is tested first in ``reorder_display``, in
+        ``base_reorder_quantity`` and in ``case_order``, so an item carrying the
+        legacy flag AND a packaging chain reads ``reorder_quantity`` twice and
+        ``reorder_cases`` never — the display in PACKS, the order in base units
+        at the pack size.
         """
         item = _bridged_case_item(
             case_size=12, current_stock=36, minimum_stock=2, reorder_quantity=3, reorder_cases=4
@@ -349,6 +462,123 @@ class TestLegacyCaseBasedItemsAreRecordedAsTheyBehave:
         assert display["reorder_quantity"] != item.reorder_cases  # ...and never this column
         assert display["order_quantity"] == 3 * item.count_level.base_units == 36
         assert display["order_text"] == "3 cases (36 bottles)"
+        assert display["case_order"] is None
+
+
+class TestEveryFilingPathOrdersTheCaseFigure:
+    """Each path that files or prefills an order, fed one legacy case item.
+
+    4 cases of 10 against a ``reorder_quantity`` of 25: every path used to order
+    25 (the pad rounded it to 30) and must now order 40. The item sits AT its
+    base-unit floor so the pad's ``low_stock_q`` selects it.
+    """
+
+    def _item(self, **kwargs):
+        kwargs.setdefault("current_stock", 5)
+        kwargs.setdefault("minimum_stock", 5)
+        return _case_item(reorder_cases=4, reorder_quantity=25, quantity_per_package=10, **kwargs)
+
+    def _staff(self):
+        user = get_user_model().objects.create_user(
+            username=get_random_string(8), password=get_random_string(24), is_staff=True
+        )
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def test_the_scan_page_payload_files_forty(self):
+        item = self._item()
+
+        response = APIClient().get(reverse("inventoryitem-detail", kwargs={"pk": str(item.id)}))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["reorder_display"]["order_quantity"] == 40
+        assert response.data["reorder_display"]["case_order"]["orders_cases"] is True
+
+    def test_the_purchase_order_pad_suggests_forty(self):
+        item = self._item()
+
+        response = self._staff().get("/api/reorders/purchase-orders/reorder_data/")
+
+        assert response.status_code == status.HTTP_200_OK
+        lines = [
+            line
+            for group in response.data["suppliers"]
+            for line in group["items"]
+            if line["item_id"] == str(item.id)
+        ]
+        assert [line["suggested_quantity"] for line in lines] == [40]
+
+    def test_the_optimized_order_recommends_forty(self):
+        item = self._item()
+
+        response = self._staff().post(
+            "/api/reorders/purchase-orders/create_optimized_order/", {}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        quantities = {
+            str(line["item_id"]): line["recommended_quantity"]
+            for rec in response.data.get("recommendations", [])
+            for line in rec["items"]
+        }
+        assert quantities[str(item.id)] == 40
+
+    def test_a_freshly_added_po_line_defaults_to_forty(self):
+        item = self._item()
+
+        assert default_quantity(item.item_suppliers.get()) == 40
+
+    def test_the_maintenance_alert_files_forty(self):
+        item = self._item(current_stock=0)
+        maintenance_item = MaintenanceItem.objects.create(
+            asset=AssetFactory(), title="Monthly inspection", description="", interval_days=30
+        )
+        MaintenanceMaterial.objects.create(
+            maintenance_item=maintenance_item,
+            name=item.name,
+            quantity=Decimal("1.00"),
+            inventory_item=item,
+        )
+
+        response = APIClient().get(
+            reverse("maintenanceitem-check-material-stock", args=[maintenance_item.id])
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["low_stock_alerts"][0]["reorder_qty"] == 40
+
+    def test_a_reconciliation_that_trips_the_floor_files_forty(self):
+        item = self._item(current_stock=20)
+
+        response = self._staff().post(
+            "/api/inventory/reconciliations/batch/",
+            {"rows": [{"item_id": str(item.id), "actual_count": 3, "reason": _USED}]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert ReorderRequest.objects.get(item=item).quantity == 40
+        item.refresh_from_db()
+        assert item.current_stock == 3  # the count itself stayed in units
+
+    def test_a_reconciliation_with_an_unknown_case_size_files_reorder_quantity(self):
+        item = _case_item(
+            reorder_cases=4,
+            reorder_quantity=25,
+            quantity_per_package=0,
+            current_stock=20,
+            minimum_stock=5,
+        )
+
+        response = self._staff().post(
+            "/api/inventory/reconciliations/batch/",
+            {"rows": [{"item_id": str(item.id), "actual_count": 3, "reason": _USED}]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert ReorderRequest.objects.get(item=item).quantity == 25
 
 
 class TestTheFiledQuantityIsBaseUnitsEndToEnd:

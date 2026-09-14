@@ -41,6 +41,7 @@ import { showError } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 import {
   baseUnitOf,
+  caseOrderNote,
   countLevelOf,
   countUnitOf,
   countsInPacks,
@@ -925,6 +926,15 @@ const InventoryItemDetailPage: React.FC = () => {
                       {caseSizeUnknownNote(item.case_size_state) && (
                         <Text size="xs" c="dimmed" data-testid="item-case-size-remedy">
                           {caseSizeUnknownNote(item.case_size_state)}
+                        </Text>
+                      )}
+                      {/* Ordering by the case (captain, 2026-09-05): an item
+                          that cannot be ordered by the case, or whose two
+                          reorder columns disagree, is said so here — the
+                          screen those columns are corrected from. */}
+                      {caseOrderNote(item.reorder_display?.case_order, baseUnitOf(item)) && (
+                        <Text size="xs" c="orange" data-testid="item-case-order-note">
+                          {caseOrderNote(item.reorder_display?.case_order, baseUnitOf(item))}
                         </Text>
                       )}
                     </>

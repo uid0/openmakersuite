@@ -13,7 +13,8 @@
  * twin of the server's branch for payloads that omit them. Nothing here
  * converts stock: `current_stock` remains the canonical base-unit count.
  */
-import { InventoryItem, ItemCountMode, PackagingLevel } from '../types';
+import { InventoryItem, ItemCaseOrder, ItemCountMode, PackagingLevel } from '../types';
+import { caseSizeUnknownNote } from './caseSize';
 
 /** The two `count_mode`s that count whole packs rather than base units. */
 export const PACK_COUNT_MODES: ItemCountMode[] = ['by_level', 'open_closed'];
@@ -330,6 +331,49 @@ export const reorderFiling = (
     return null;
   }
   return { quantity: display.order_quantity, text: display.order_text };
+};
+
+/**
+ * What an operator is owed about a case-ordered item, in one sentence, or null.
+ *
+ * "We are ordering by cases and counting by items" (captain, 2026-09-05): the
+ * server orders `reorder_cases × case_size` for a legacy case-based item and
+ * sends `case_order` saying whether it could. Two facts are worth a sentence,
+ * and neither may be papered over with a guess:
+ *
+ * - the case size is UNKNOWN — the item cannot be ordered by the case, and a
+ *   reorder orders Reorder Quantity instead until a supplier link says how many
+ *   units a case holds (the remedy is `caseSizeUnknownNote`'s, keyed the same);
+ * - the two columns DISAGREE — Reorder Quantity names a different amount from
+ *   the cases, and it is the cases that get ordered.
+ *
+ * Takes the `case_order` block rather than an item so the item pages and the
+ * purchase-order pad, whose rows are not `InventoryItem`s, word it once.
+ */
+export const caseOrderNote = (
+  caseOrder: ItemCaseOrder | null | undefined,
+  baseUnit: string
+): string | null => {
+  if (!caseOrder) return null;
+  const units = (count: number) => `${count} ${pluralizeUnit(baseUnit, count)}`;
+  const cases = `${caseOrder.reorder_cases} ${pluralizeUnit('case', caseOrder.reorder_cases)}`;
+  if (!caseOrder.orders_cases || caseOrder.case_size === null) {
+    const remedy = caseSizeUnknownNote(caseOrder.case_size_state);
+    return (
+      `Cannot order ${cases}: the case size is unknown, so a reorder orders ` +
+      `Reorder Quantity (${units(caseOrder.reorder_quantity)}) instead.` +
+      (remedy ? ` ${remedy}` : '')
+    );
+  }
+  if (caseOrder.columns_disagree) {
+    const ordered = caseOrder.reorder_cases * caseOrder.case_size;
+    return (
+      `Reorder Cases and Reorder Quantity disagree: ${cases} of ${caseOrder.case_size} is ` +
+      `${units(ordered)}, but Reorder Quantity says ${units(caseOrder.reorder_quantity)}. ` +
+      `Reorders order the cases (${units(ordered)}).`
+    );
+  }
+  return null;
 };
 
 /**

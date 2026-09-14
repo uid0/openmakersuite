@@ -314,32 +314,28 @@ class InventoryItem(OwnableModel):
     reorder_cases = models.PositiveIntegerField(
         default=1,
         validators=[MinValueValidator(1)],
-        # PRESENTATION ONLY, and the help text says so because the previous wording
-        # ("Number of cases/packages to reorder when stock is low") claimed a use
-        # the code does not make: ``base_reorder_quantity`` — the one derivation
-        # every filing path uses, from the QR-scan page to the purchase-order pad
-        # — has no branch that reads this column, ever.
+        # What is ORDERED for a legacy case-based item (captain, 2026-09-05: "We
+        # are ordering by cases and counting by items"). ``base_reorder_quantity``
+        # — the one derivation every filing path uses, from the QR-scan page to
+        # the purchase-order pad — reads ``reorder_cases × order_pack_size`` for
+        # it, through ``inventory.services.packaging.case_order``. The previous
+        # help text said this column never affected what is ordered, which was
+        # true until that decision and is not now.
         #
-        # The help text states a PRINCIPLE and names no screen, because which
-        # surface reads which column is exactly what drifts. Two facts sit
-        # behind it. Ordering never reads this column. And whether PRESENTATION
-        # reads it is decided by the item's COUNTING MODE, not by
-        # ``use_case_based_reorder``: ``reorder_display`` tests
-        # ``counts_in_packs`` first, so a BRIDGED item — the legacy flag plus a
-        # packaging chain, which ``bridge_case_reorder_to_packaging``
-        # deliberately leaves behind — reads ``reorder_quantity`` on both
-        # halves and this column on neither. Only a legacy case-based item with
-        # a known case size and no chain of its own has its display sized here,
-        # and for it ``base_reorder_quantity`` still orders ``reorder_quantity``
-        # in base units while a bridged item orders that times the pack size.
-        # ``test_reorder_filing.py::TestLegacyCaseBasedItemsAreRecordedAsTheyBehave``
-        # pins both shapes with numbers on them. Closing the divergence would
-        # change what is ordered for live items and is a separate decision;
-        # until it is taken, the field must not promise what it does not do.
+        # Scoped by COUNTING MODE, as the help text says: a BRIDGED item — the
+        # legacy flag plus a packaging chain, which
+        # ``bridge_case_reorder_to_packaging`` deliberately leaves behind —
+        # counts in packs and orders ``reorder_quantity`` packs of its own
+        # chain, never this column. An unknown order pack size falls back to
+        # ``reorder_quantity``, and ``reorder_display.case_order`` tells the
+        # operator so. ``current_stock`` stays in units either way.
+        # ``test_reorder_filing.py::TestLegacyCaseBasedItemsOrderByTheCase``
+        # pins each shape with numbers on it.
         help_text=(
-            "Never affects what is ordered. Sizes only how a reorder amount is "
-            "presented, and only for an item whose counting mode gives this column "
-            "meaning."
+            "Whole cases to order when a case-based item is low. Each case is the "
+            "package size of the supplier it is ordered from; if that size is not "
+            "known, Reorder quantity is ordered instead. Not used for an item counted "
+            "in packaging levels. Stock is still counted in individual units."
         ),
     )
     reorder_instruction = models.TextField(

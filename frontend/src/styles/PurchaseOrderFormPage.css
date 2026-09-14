@@ -319,6 +319,12 @@
   font-family: 'JetBrains Mono', monospace;
 }
 
+.case-order-note {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--warning-text, #b45309);
+}
+
 /* Stock indicators */
 .stock-critical {
   color: #dc2626;

@@ -9,10 +9,12 @@ for display.
 Phase 2a (op-es7c) adds the *reorder* half: :func:`count_at_level` (the whole
 count in the unit an item is counted in), :func:`base_reorder_quantity` (how
 much to suggest ordering, still stored in base units) and :func:`low_stock_q`
-(the SQL twin of ``needs_reorder``). ``each`` items — including legacy
-``use_case_based_reorder`` ones — route through the same helpers and come out
-byte-for-byte where they were; only an item opted into a pack-counting
-``count_mode`` takes the new path.
+(the SQL twin of ``needs_reorder``). ``each`` items route through the same
+helpers and come out byte-for-byte where they were; only an item opted into a
+pack-counting ``count_mode`` takes the new path. Legacy
+``use_case_based_reorder`` items keep COUNTING exactly as ``each`` items do, but
+ORDER by the case (:func:`case_order`): "we are ordering by cases and counting
+by items" (captain, 2026-09-05).
 
 Phase 2b (op-ev14) adds the *write* complement — :func:`resolve_base_quantity`,
 the one seam every stock-moving path (reconcile, cycle count, usage, PO order,
@@ -53,6 +55,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Iterable, Optional, Sequence
 
 from django.core.exceptions import ValidationError
@@ -60,6 +63,7 @@ from django.db.models import ExpressionWrapper, F, IntegerField, Q
 
 if TYPE_CHECKING:
     from inventory.models.core import InventoryItem, PackagingLevel
+    from inventory.services.pack_size import PackSize
 
 
 def _attr(level: Any, name: str) -> Any:
@@ -340,6 +344,78 @@ def reorder_threshold(item: "InventoryItem") -> tuple[int, str]:
     return item.minimum_stock, item.base_unit or "unit"
 
 
+@dataclass(frozen=True)
+class CaseOrder:
+    """What the legacy case rule orders for one item, and whether it can.
+
+    Captain's decision, 2026-09-05: "We are ordering by cases and counting by
+    items." A legacy ``use_case_based_reorder`` item orders ``reorder_cases``
+    whole cases of the box the next order ships in
+    (:func:`inventory.services.pack_size.order_pack_size`), in base units.
+    Counting is untouched: ``current_stock`` stays base units and every
+    count/threshold path reads it exactly as before.
+
+    Both operator-editable columns are carried, because nothing relates them
+    and an operator is owed the fact when they disagree — the item used to
+    DISPLAY ``reorder_cases`` while every filing path ordered
+    ``reorder_quantity``.
+
+    * :attr:`quantity` — ``reorder_cases × pack size``, or ``None`` when the
+      pack size is unknown. ``None`` is a fact, not a number to invent: the
+      caller falls back to ``reorder_quantity`` (the captain's stated rule) and
+      a surface says the item cannot be ordered by the case.
+    * :attr:`columns_disagree` — ``reorder_quantity`` names a different
+      base-unit amount from the case figure. ``None`` when the case figure is
+      unknown, because whether two numbers agree cannot be told when one of
+      them does not exist.
+    """
+
+    reorder_cases: int
+    reorder_quantity: int
+    pack: "PackSize"
+
+    @property
+    def quantity(self) -> Optional[int]:
+        """``reorder_cases × pack size`` in base units, or ``None`` if unknown."""
+        if not self.pack.is_known:
+            return None
+        return self.reorder_cases * self.pack.units
+
+    @property
+    def columns_disagree(self) -> Optional[bool]:
+        """``reorder_quantity`` differs from the case figure; ``None`` if unknown."""
+        quantity = self.quantity
+        if quantity is None:
+            return None
+        return self.reorder_quantity != quantity
+
+
+def case_order(item: "InventoryItem") -> Optional[CaseOrder]:
+    """The legacy case rule's answer for ``item``, or ``None`` if it does not govern it.
+
+    Governs exactly the shape :func:`reorder_threshold` names in cases: the
+    ``use_case_based_reorder`` flag on an item NOT counted in packs.
+    ``counts_in_packs`` is tested first, as it is there, so a BRIDGED item —
+    the flag plus a packaging chain, which ``bridge_case_reorder_to_packaging``
+    leaves behind — keeps ordering whole packs of its own chain and is not
+    governed here.
+
+    The pack size is the ORDER question (``order_pack_size``), not the shelf
+    one: this sizes the box the next purchase ships in, so a dead vendor's
+    recorded case never sizes it.
+    """
+    if counts_in_packs(item) or not item.use_case_based_reorder:
+        return None
+
+    from inventory.services.pack_size import order_pack_size
+
+    return CaseOrder(
+        reorder_cases=item.reorder_cases,
+        reorder_quantity=item.reorder_quantity,
+        pack=order_pack_size(item),
+    )
+
+
 def base_reorder_quantity(item: "InventoryItem") -> int:
     """How much to suggest ordering, in BASE units, before any supplier rounding.
 
@@ -348,6 +424,15 @@ def base_reorder_quantity(item: "InventoryItem") -> int:
 
     * ``each`` → UNCHANGED: ``max(minimum_stock - current_stock, reorder_quantity)``
       base units, which callers may still round up to a whole supplier package.
+    * legacy ``use_case_based_reorder`` (not counted in packs) with a KNOWN
+      order pack size → ``reorder_cases × order_pack_size`` (:func:`case_order`),
+      exactly. The captain's rule names that product and nothing else, so no
+      shortage clause is added: the item's threshold is ``minimum_cases``, and a
+      top-up read off ``minimum_stock`` would size a case order with a column
+      that does not govern it. With the case size UNKNOWN it falls back to the
+      ``each`` arithmetic above — ``reorder_quantity`` — mirroring
+      :func:`reorder_threshold`'s known/unknown branch; :func:`reorder_display`
+      carries ``case_order`` so a surface can say which of the two happened.
     * pack-counting → the same arithmetic one rung up, in the item's count unit,
       then converted through ``count_level``. With stock at the reorder point
       that is exactly ``reorder_quantity × count_level.base_units``; the
@@ -356,7 +441,18 @@ def base_reorder_quantity(item: "InventoryItem") -> int:
       rule. Supplier packaging plays no part — a pack-counting item already
       orders whole packs of its OWN chain.
     """
+    return _reorder_quantity(item, case_order(item))
+
+
+def _reorder_quantity(item: "InventoryItem", case: Optional[CaseOrder]) -> int:
+    """:func:`base_reorder_quantity` with :func:`case_order` already resolved.
+
+    Split out so :func:`reorder_display`, which also serializes the case answer
+    and words the quantity with it, resolves the order pack size once.
+    """
     if not counts_in_packs(item):
+        if case is not None and case.quantity is not None:
+            return case.quantity
         shortage = max(0, item.minimum_stock - item.current_stock)
         return max(shortage, item.reorder_quantity)
 
@@ -386,7 +482,13 @@ def _plural(unit: str, count) -> str:
     return f"{unit}es" if _SIBILANT_ENDING.search(unit) else f"{unit}s"
 
 
-def order_quantity_text(item: "InventoryItem", quantity: int) -> str:
+#: :func:`order_quantity_text`'s "resolve the case answer yourself" default,
+#: distinct from ``None`` — which is itself an answer ("the case rule does not
+#: govern this item").
+_UNRESOLVED: Any = object()
+
+
+def order_quantity_text(item: "InventoryItem", quantity: int, *, case: Any = _UNRESOLVED) -> str:
     """``quantity`` BASE units, worded for a human who is about to have it ordered.
 
     The wording twin of :func:`base_reorder_quantity`, so a surface that FILES a
@@ -401,8 +503,18 @@ def order_quantity_text(item: "InventoryItem", quantity: int) -> str:
     whole packs. A quantity that does not (the shortage clause can produce one
     for a half-configured item) would need "2.5 cases", and a member cannot act
     on a number of boxes that does not exist.
+
+    A legacy case-ordered item (:func:`case_order`) leads with its cases the
+    same way — "4 cases (40 units)" — under the same exact-division rule, and
+    only when its order pack size is known; ``case`` is that answer when the
+    caller has already resolved it.
     """
     base_unit = item.base_unit or "unit"
+    if case is _UNRESOLVED:
+        case = case_order(item)
+    if case is not None and case.pack.is_known and quantity % case.pack.units == 0:
+        cases = quantity // case.pack.units
+        return f"{cases} {_plural('case', cases)} ({quantity} {_plural(base_unit, quantity)})"
     if counts_in_packs(item):
         per_pack = item.count_level.base_units
         if per_pack >= 1 and quantity % per_pack == 0:
@@ -419,7 +531,7 @@ def reorder_display(item: "InventoryItem") -> dict:
     """Reorder point + current count in one unit, ready to label a UI (op-es7c).
 
     ``{mode, unit, threshold, current, reorder_quantity, needs_reorder, text,
-    order_quantity, order_text}``.
+    order_quantity, order_text, case_order}``.
 
     Every quantity is expressed in ``unit`` EXCEPT ``order_quantity``, which is
     BASE units — the unit a filed ``ReorderRequest.quantity`` is stored in — and
@@ -432,20 +544,32 @@ def reorder_display(item: "InventoryItem") -> dict:
     and prints ``order_text``, so the two cannot name different numbers again
     (``test_reorder_filing.py``, ``ScanPage.test.tsx``).
 
-    The two agree for an ``each`` item, differ by the pack size for a
-    pack-counting one (3 cases ↔ 36 bottles), and differ outright for a legacy
-    ``use_case_based_reorder`` item with a KNOWN case size and no packaging
-    chain of its own — the one shape whose display reads ``reorder_cases``
-    while its ordering path reads ``reorder_quantity``. The branch below is the
-    exact rule, and it is narrower than "legacy" twice over. A case-based item
-    whose case size is unknown names both halves in base units
-    (``TestLegacyCaseBasedItemsAreRecordedAsTheyBehave``), and
-    ``counts_in_packs`` is tested FIRST, so an item carrying both the legacy
-    flag and a packaging chain — what ``bridge_case_reorder_to_packaging``
-    leaves behind, since it sets ``count_level`` and deliberately keeps the
-    legacy columns — reads ``reorder_quantity`` on both halves and
-    ``reorder_cases`` on neither. See :func:`base_reorder_quantity`, which owns
-    the ordering half.
+    The two agree for an ``each`` item and differ by the pack size for a
+    pack-counting one (3 cases ↔ 36 bottles) — and for a legacy
+    ``use_case_based_reorder`` item with no packaging chain of its own, which
+    DISPLAYS ``reorder_cases`` and now also ORDERS it: ``reorder_cases ×
+    order_pack_size`` base units (:func:`case_order`; captain, 2026-09-05). A
+    bridged item — the legacy flag plus a packaging chain, which
+    ``bridge_case_reorder_to_packaging`` leaves behind — is tested with
+    ``counts_in_packs`` FIRST and reads ``reorder_quantity`` on both halves.
+
+    ``case_order`` is ``None`` for every item the case rule does not govern.
+    For one it does, it states what an operator is owed rather than a guess
+    (``TestLegacyCaseBasedItemsOrderByTheCase``):
+
+    * ``orders_cases`` — whether the order is ``reorder_cases`` whole cases.
+      ``False`` means the order pack size is unknown, so the item cannot be
+      ordered by the case and ``order_quantity`` is ``reorder_quantity``
+      instead; ``case_size_state`` says which unknown, in
+      :mod:`inventory.services.pack_size`'s vocabulary.
+    * ``columns_disagree`` — ``reorder_quantity`` names a different base-unit
+      amount from ``reorder_cases × case_size``. ``None`` when the case size is
+      unknown: agreement with a number that does not exist cannot be judged.
+
+    The DISPLAY half keeps its own, SHELF-sized branch: ``current`` and
+    ``threshold`` are counting, and counting has not moved. So a case-based item
+    whose shelf case size is unknown still names its display in base units,
+    whatever its ordering half does.
     """
     threshold, unit = reorder_threshold(item)
     current_cases = None if counts_in_packs(item) else item.current_cases
@@ -463,7 +587,8 @@ def reorder_display(item: "InventoryItem") -> dict:
         current = item.current_stock
         quantity = item.reorder_quantity
 
-    order_quantity = base_reorder_quantity(item)
+    case = case_order(item)
+    order_quantity = _reorder_quantity(item, case)
 
     return {
         "mode": item.count_mode,
@@ -472,12 +597,30 @@ def reorder_display(item: "InventoryItem") -> dict:
         "current": current,
         "reorder_quantity": quantity,
         "order_quantity": order_quantity,
-        "order_text": order_quantity_text(item, order_quantity),
+        "order_text": order_quantity_text(item, order_quantity, case=case),
+        "case_order": _case_order_payload(case),
         "needs_reorder": item.needs_reorder,
         "text": (
             f"{current} {_plural(unit, current)} on hand · "
             f"reorder at {threshold} {_plural(unit, threshold)}"
         ),
+    }
+
+
+def _case_order_payload(case: Optional[CaseOrder]) -> Optional[dict]:
+    """The wire shape of :func:`case_order`'s answer — STATE, never a sentence.
+
+    Wording belongs to each client, as it does for ``case_size_state``.
+    """
+    if case is None:
+        return None
+    return {
+        "reorder_cases": case.reorder_cases,
+        "reorder_quantity": case.reorder_quantity,
+        "case_size": case.pack.units,
+        "case_size_state": case.pack.state,
+        "orders_cases": case.quantity is not None,
+        "columns_disagree": case.columns_disagree,
     }
 
 

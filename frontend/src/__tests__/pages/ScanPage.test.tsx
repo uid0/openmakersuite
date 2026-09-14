@@ -179,6 +179,53 @@ describe('ScanPage', () => {
     expect(screen.queryByText(/50\.0 cases/)).toBeNull();
   });
 
+  // Ordering by the case (captain, 2026-09-05). A signed-in operator scanning
+  // a case-based item whose case size is unknown is told it cannot be ordered
+  // by the case and what is ordered instead; an anonymous scanner already reads
+  // the exact amount the page files, so the note is not theirs.
+  const unknownCaseOrderItem = {
+    ...mockItem,
+    use_case_based_reorder: true,
+    minimum_cases: 1,
+    reorder_cases: 2,
+    reorder_quantity: 7,
+    current_cases: null,
+    case_size_state: 'not_recorded',
+    needs_reorder: true,
+    reorder_display: {
+      mode: 'each',
+      unit: 'unit',
+      threshold: 1,
+      current: 50,
+      reorder_quantity: 7,
+      order_quantity: 7,
+      order_text: '7 units',
+      case_order: {
+        reorder_cases: 2,
+        reorder_quantity: 7,
+        case_size: null,
+        case_size_state: 'not_recorded',
+        orders_cases: false,
+        columns_disagree: null,
+      },
+      needs_reorder: false,
+      text: '50 units on hand · reorder at 1 unit',
+    },
+  };
+
+  test('tells a signed-in operator an item cannot be ordered by the case', async () => {
+    localStorage.setItem('token', 'test-token');
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({ data: unknownCaseOrderItem });
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({ data: { results: [] } });
+
+    await renderWithRouter();
+
+    await screen.findByText('Test Widget');
+    const note = screen.getByTestId('scan-case-order-note');
+    expect(note).toHaveTextContent('Cannot order 2 cases: the case size is unknown');
+    expect(note).toHaveTextContent('Reorder Quantity (7 units) instead.');
+  });
+
   // The op-2t4e pair. Both payloads send `current_cases: null`; the page must
   // not tell a member with a missing fact the same thing as a member with a
   // wrong one.

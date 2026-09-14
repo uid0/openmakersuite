@@ -6,11 +6,12 @@
  * pack-counting item needs a resolvable counting level, and anything
  * half-configured degrades to base units rather than throwing.
  */
-import { InventoryItem, PackagingLevel } from '../../types';
+import { InventoryItem, ItemCaseOrder, PackagingLevel } from '../../types';
 import {
   PackagingRow,
   baseUnitOf,
   blankPackagingRow,
+  caseOrderNote,
   countLevelOf,
   countUnitOf,
   countsInPacks,
@@ -364,5 +365,66 @@ describe('reorderFiling', () => {
     });
 
     expect(reorderFiling(partial)).toBeNull();
+  });
+});
+
+describe('caseOrderNote', () => {
+  // "We are ordering by cases and counting by items" (captain, 2026-09-05). The
+  // server orders reorder_cases × case_size and says whether it could; this is
+  // the one wording of the two facts an operator is owed about that.
+
+  const caseOrder = (overrides: Partial<ItemCaseOrder> = {}): ItemCaseOrder => ({
+    reorder_cases: 4,
+    reorder_quantity: 40,
+    case_size: 10,
+    case_size_state: 'known',
+    orders_cases: true,
+    columns_disagree: false,
+    ...overrides,
+  });
+
+  it('says nothing for an item the case rule does not govern', () => {
+    expect(caseOrderNote(null, 'unit')).toBeNull();
+    expect(caseOrderNote(undefined, 'unit')).toBeNull();
+  });
+
+  it('says nothing when the cases are ordered and the columns agree', () => {
+    expect(caseOrderNote(caseOrder(), 'unit')).toBeNull();
+  });
+
+  it('names a disagreement with both amounts and which one is ordered', () => {
+    const note = caseOrderNote(caseOrder({ reorder_quantity: 25, columns_disagree: true }), 'unit');
+
+    expect(note).toBe(
+      'Reorder Cases and Reorder Quantity disagree: 4 cases of 10 is 40 units, ' +
+        'but Reorder Quantity says 25 units. Reorders order the cases (40 units).'
+    );
+  });
+
+  it('says an unknown case size cannot be ordered by the case, what is ordered instead, and the remedy', () => {
+    const note = caseOrderNote(
+      caseOrder({
+        reorder_cases: 2,
+        reorder_quantity: 7,
+        case_size: null,
+        case_size_state: 'recorded_zero',
+        orders_cases: false,
+        columns_disagree: null,
+      }),
+      'bag'
+    );
+
+    expect(note).toMatch(/^Cannot order 2 cases: the case size is unknown/);
+    expect(note).toContain('Reorder Quantity (7 bags) instead.');
+    expect(note).toContain('Correct "Quantity per Package"');
+  });
+
+  it('pluralises one case and one unit correctly', () => {
+    const note = caseOrderNote(
+      caseOrder({ reorder_cases: 1, reorder_quantity: 1, case_size: 12, columns_disagree: true }),
+      'box'
+    );
+
+    expect(note).toContain('1 case of 12 is 12 boxes, but Reorder Quantity says 1 box.');
   });
 });

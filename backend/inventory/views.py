@@ -8476,12 +8476,13 @@ def _apply_reconciliation_row(
     # units against them — or storing a pack count as if it were base units —
     # would be wrong in both directions.
     #
-    # A legacy case-based item ORDERS by the case (captain, 2026-09-05): its
-    # request is ``reorder_cases × order_pack_size`` base units, the figure
-    # ``base_reorder_quantity`` gives every other filing path, because an
-    # approved request is what prefills the purchase-order pad. With the order
-    # pack size unknown it keeps the pre-change shortage calculation. The
-    # TRIGGER above is counting and does not move.
+    # A legacy case-based item ORDERS by the case (captain, 2026-09-05). This
+    # path keeps its own formula SHAPE — the configured amount, no shortage
+    # term — and only changes the quantity it is expressed in: with the order
+    # pack size known, the request is ``reorder_cases × order_pack_size`` base
+    # units. With it unknown the request is exactly what it was before, the
+    # configured ``reorder_quantity``. The TRIGGER above is counting and does
+    # not move.
     if not skip_reorder and not item.is_retired and count_at_level(item) <= item.minimum_stock:
         from reorder_queue.models import ReorderRequest
 
@@ -8489,8 +8490,8 @@ def _apply_reconciliation_row(
         base_units_per_count = item.count_level.base_units if counts_in_packs(item) else 1
         reorder_quantity = (item.reorder_quantity or 1) * base_units_per_count
         case = case_order(item)
-        if case is not None:
-            reorder_quantity = base_reorder_quantity(item)
+        if case is not None and case.pack.is_known:
+            reorder_quantity = case.reorder_cases * case.pack.units
         # Report the trigger in the unit it was judged in. For an ``each`` item
         # that is the previous sentence verbatim; naming the pack for the others
         # keeps the note from reading a base count against a pack threshold.

@@ -596,7 +596,13 @@ class TestEveryFilingPathOrdersTheCaseFigure:
         assert response.status_code == status.HTTP_201_CREATED
         assert ReorderRequest.objects.get(item=item).quantity == 25
 
-    def test_a_reconciliation_with_unknown_case_size_preserves_the_shortage(self):
+    def test_a_deeply_short_reconciliation_with_unknown_case_size_files_reorder_quantity(self):
+        """Reconciliation never had a shortage term, and an unknown case size changes nothing.
+
+        25 configured units against a 100-unit floor counted to zero: main filed
+        25 on this path, so it still files 25 — not the 100 the pad's shortage
+        clause would give.
+        """
         item = _case_item(
             reorder_cases=4,
             reorder_quantity=25,
@@ -612,7 +618,31 @@ class TestEveryFilingPathOrdersTheCaseFigure:
         )
 
         assert response.status_code == status.HTTP_201_CREATED
-        assert ReorderRequest.objects.get(item=item).quantity == 100
+        assert ReorderRequest.objects.get(item=item).quantity == 25
+
+    def test_a_deeply_short_reconciliation_with_known_case_size_files_the_cases_only(self):
+        """Same shape, case quantity: ``reorder_cases × case size`` with no shortage term.
+
+        4 cases of 10 against a 100-unit floor counted to zero files 40, not the
+        100 a case-rounded shortage would give, because this path's formula has
+        never carried a shortage term.
+        """
+        item = _case_item(
+            reorder_cases=4,
+            reorder_quantity=25,
+            quantity_per_package=10,
+            current_stock=120,
+            minimum_stock=100,
+        )
+
+        response = self._staff().post(
+            "/api/inventory/reconciliations/batch/",
+            {"rows": [{"item_id": str(item.id), "actual_count": 0, "reason": _USED}]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert ReorderRequest.objects.get(item=item).quantity == 40
 
     @pytest.mark.parametrize("bridged", [False, True], ids=["unit", "pack"])
     def test_non_governed_reconciliation_keeps_its_configured_quantity(self, bridged):

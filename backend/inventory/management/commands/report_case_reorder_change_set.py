@@ -28,10 +28,10 @@ Columns:
   ``max(minimum_stock - current_stock, reorder_quantity)`` base units.
 * ``po_line_today`` — ``files_today`` rounded up to whole cases of that link, as
   the purchase-order pad rounds it.
-* ``new_rule_orders`` — what the case rule orders, in base units. Already whole
-  cases when the size is known, including enough whole cases to cover the
-  shortage, so the pad's rounding leaves it alone. When the size is unknown it
-  is the unchanged pre-rule quantity, shortage term included.
+* ``new_rule_orders`` — what the live line-sizing path orders through this link,
+  in base units: the selected supplier's case-sized quantity, rounded up to this
+  link's package. When the selected case size is unknown it starts with the
+  unchanged pre-rule quantity, shortage term included.
 * ``change`` — ``new_rule_orders - po_line_today``.
 * ``columns_disagree`` — ``yes`` when ``reorder_quantity`` names a different
   base-unit amount from ``reorder_cases × case_size``; ``unknown`` when the case
@@ -58,8 +58,13 @@ import csv
 from django.core.management.base import BaseCommand
 
 from inventory.models import InventoryItem
-from inventory.services.pack_size import declares_a_case, pack_size_of
-from inventory.services.packaging import CaseOrder, case_order, counts_in_packs
+from inventory.services.pack_size import pack_size_of
+from inventory.services.packaging import (
+    CaseOrder,
+    case_order,
+    counts_in_packs,
+    supplier_line_quantity,
+)
 from inventory.services.supplier_selection import item_suppliers_prefetch
 
 COLUMNS = [
@@ -107,18 +112,22 @@ def change_set_row(item: InventoryItem, link, selected_link) -> dict:
     )
 
     files_today = files_before_the_case_rule(item)
-    declared = declares_a_case(case.pack.link)
-    po_line_today = files_today if declared is None else -(-files_today // declared) * declared
+    po_line_today = (
+        files_today if link is None else supplier_line_quantity(link, files_today)
+    )
 
     if case.quantity is None:
-        new_rule_orders = files_today
         finding = FINDING_CASE_SIZE_UNKNOWN
         disagree = "unknown"
     else:
-        new_rule_orders = case.quantity
-        change = new_rule_orders - po_line_today
-        finding = "orders_more" if change > 0 else "orders_less" if change < 0 else "unchanged"
         disagree = "yes" if case.columns_disagree else "no"
+
+    new_rule_orders = (
+        files_today if link is None else supplier_line_quantity(link)
+    )
+    change = new_rule_orders - po_line_today
+    if case.quantity is not None:
+        finding = "orders_more" if change > 0 else "orders_less" if change < 0 else "unchanged"
 
     return {
         "item_id": str(item.id),

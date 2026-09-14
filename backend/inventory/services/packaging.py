@@ -449,6 +449,22 @@ def base_reorder_quantity(item: "InventoryItem") -> int:
     return _reorder_quantity(item, case_order(item))
 
 
+def supplier_line_quantity(item_supplier, quantity: Optional[int] = None) -> int:
+    """Base-unit reorder quantity rounded for one supplier's package."""
+    item = item_supplier.item
+    if quantity is None:
+        quantity = base_reorder_quantity(item)
+    if counts_in_packs(item):
+        return quantity
+
+    from inventory.services.pack_size import declares_a_case
+
+    case_size = declares_a_case(item_supplier)
+    if case_size is None:
+        return quantity
+    return -(-quantity // case_size) * case_size
+
+
 def _reorder_quantity(item: "InventoryItem", case: Optional[CaseOrder]) -> int:
     """:func:`base_reorder_quantity` with :func:`case_order` already resolved.
 

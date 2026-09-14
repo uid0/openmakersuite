@@ -15,7 +15,8 @@ import pytest
 
 from inventory.models import InventoryItem, ItemSupplier, PackagingLevel
 from inventory.services.pack_size import PACK_SIZE_KNOWN, PACK_SIZE_RECORDED_ZERO
-from inventory.tests.factories import InventoryItemFactory
+from inventory.tests.factories import InventoryItemFactory, ItemSupplierFactory
+from reorder_queue.services.line_entry import default_quantity
 
 pytestmark = pytest.mark.django_db
 
@@ -127,26 +128,28 @@ def test_an_item_with_no_supplier_link_is_listed_with_a_blank_supplier():
     assert row["finding"] == "case_size_unknown"
 
 
-def test_every_supplier_link_uses_its_own_case_size_and_names_the_selected_link():
+def test_every_supplier_link_matches_live_line_sizing():
     item = _case_item(reorder_cases=4, reorder_quantity=25, quantity_per_package=10)
     selected = item.item_suppliers.get()
-    alternate = ItemSupplier.objects.create(
-        item=item,
-        supplier=InventoryItemFactory().item_suppliers.get().supplier,
-        supplier_sku="alternate",
-        quantity_per_package=6,
-    )
+    links = [
+        selected,
+        ItemSupplierFactory(item=item, is_primary=False, quantity_per_package=12),
+        ItemSupplierFactory(item=item, is_primary=False, quantity_per_package=6),
+        ItemSupplierFactory(item=item, is_primary=False, quantity_per_package=1),
+        ItemSupplierFactory(item=item, is_primary=False, quantity_per_package=0),
+    ]
 
     rows, _ = _run()
     matching = [row for row in rows if row["item_id"] == str(item.id)]
 
-    assert len(matching) == 2
+    assert len(matching) == len(links)
     by_supplier = {row["supplier"]: row for row in matching}
-    assert by_supplier[selected.supplier.name]["currently_selected"] == "yes"
-    assert by_supplier[selected.supplier.name]["new_rule_orders"] == "40"
-    assert by_supplier[alternate.supplier.name]["currently_selected"] == "no"
-    assert by_supplier[alternate.supplier.name]["case_size"] == "6"
-    assert by_supplier[alternate.supplier.name]["new_rule_orders"] == "24"
+    for link in links:
+        row = by_supplier[link.supplier.name]
+        assert int(row["new_rule_orders"]) == default_quantity(link)
+        assert row["currently_selected"] == ("yes" if link == selected else "no")
+
+    assert [default_quantity(link) for link in links] == [40, 48, 42, 40, 40]
 
 
 def test_items_the_case_rule_does_not_govern_are_not_listed():

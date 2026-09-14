@@ -41,7 +41,9 @@ def _row(rows, item):
 
 def test_a_known_case_size_reports_the_old_order_the_new_order_and_the_disagreement():
     """25 units rounded to the pad's 30 before; 4 cases of 10 is 40 now."""
-    item = _case_item(name="Trash bags", reorder_cases=4, reorder_quantity=25, quantity_per_package=10)
+    item = _case_item(
+        name="Trash bags", reorder_cases=4, reorder_quantity=25, quantity_per_package=10
+    )
 
     rows, _ = _run()
     row = _row(rows, item)

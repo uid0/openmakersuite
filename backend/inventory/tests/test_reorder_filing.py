@@ -300,7 +300,7 @@ class TestASibilantUnitNounIsPluralisedTheWayTheWebDoes:
 
 
 class TestLegacyCaseBasedItemsOrderByTheCase:
-    """"We are ordering by cases and counting by items." (captain, 2026-09-05)
+    """ "We are ordering by cases and counting by items." (captain, 2026-09-05)
 
     A legacy ``use_case_based_reorder`` item with no packaging chain of its own
     used to DISPLAY ``reorder_cases`` while every filing path ordered
@@ -383,16 +383,23 @@ class TestLegacyCaseBasedItemsOrderByTheCase:
     @pytest.mark.parametrize(
         ("make_unknown", "state"),
         [
-            (lambda: _case_item(reorder_cases=2, reorder_quantity=7, quantity_per_package=0),
-             PACK_SIZE_RECORDED_ZERO),
-            (lambda: _without_supplier_links(_case_item(reorder_cases=2, reorder_quantity=7)),
-             PACK_SIZE_NOT_RECORDED),
-            (lambda: _case_item(
-                reorder_cases=2,
-                reorder_quantity=7,
-                quantity_per_package=10,
-                item_supplier_kwargs={"is_discontinued": True},
-            ), PACK_SIZE_NO_ORDERABLE_LINK),
+            (
+                lambda: _case_item(reorder_cases=2, reorder_quantity=7, quantity_per_package=0),
+                PACK_SIZE_RECORDED_ZERO,
+            ),
+            (
+                lambda: _without_supplier_links(_case_item(reorder_cases=2, reorder_quantity=7)),
+                PACK_SIZE_NOT_RECORDED,
+            ),
+            (
+                lambda: _case_item(
+                    reorder_cases=2,
+                    reorder_quantity=7,
+                    quantity_per_package=10,
+                    item_supplier_kwargs={"is_discontinued": True},
+                ),
+                PACK_SIZE_NO_ORDERABLE_LINK,
+            ),
         ],
         ids=["recorded_zero", "not_recorded", "no_orderable_link"],
     )

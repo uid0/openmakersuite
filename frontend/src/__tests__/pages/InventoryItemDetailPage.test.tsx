@@ -342,6 +342,7 @@ describe('InventoryItemDetailPage', () => {
           case_order: {
             reorder_cases: 4,
             reorder_quantity: 25,
+            order_quantity: 40,
             case_size: 10,
             case_size_state: 'known',
             orders_cases: true,

@@ -306,8 +306,9 @@ class TestLegacyCaseBasedItemsOrderByTheCase:
     used to DISPLAY ``reorder_cases`` while every filing path ordered
     ``reorder_quantity`` base units, so "Reorder Cases: 4" was discarded by the
     ordering path. Now ``base_reorder_quantity`` — and so every surface that
-    files — orders ``reorder_cases × order_pack_size``, falling back to
-    ``reorder_quantity`` only when the case size is unknown.
+    files — orders enough whole cases to cover both ``reorder_cases`` and the
+    current shortage. When case size is unknown, ordering stays exactly as it
+    was before this change, including the shortage term.
 
     ``reorder_display.case_order`` says which happened and whether the two
     columns disagree, because an item that cannot be ordered by the case is a
@@ -336,6 +337,7 @@ class TestLegacyCaseBasedItemsOrderByTheCase:
         assert reorder_display(item)["case_order"] == {
             "reorder_cases": 4,
             "reorder_quantity": 25,
+            "order_quantity": 40,
             "case_size": 10,
             "case_size_state": PACK_SIZE_KNOWN,
             "orders_cases": True,
@@ -350,12 +352,7 @@ class TestLegacyCaseBasedItemsOrderByTheCase:
         assert case["orders_cases"] is True
         assert case["columns_disagree"] is False
 
-    def test_a_deeply_short_item_still_orders_exactly_its_cases(self):
-        """No shortage top-up: the rule names ``reorder_cases × pack size`` and nothing else.
-
-        The each-mode clause reads ``minimum_stock``, which does not govern a
-        case-based item (``minimum_cases`` does), so it must not size its order.
-        """
+    def test_a_deeply_short_item_orders_enough_whole_cases_for_the_shortage(self):
         item = _case_item(
             reorder_cases=2,
             reorder_quantity=5,
@@ -364,7 +361,18 @@ class TestLegacyCaseBasedItemsOrderByTheCase:
             minimum_stock=100,
         )
 
-        assert base_reorder_quantity(item) == 20
+        assert base_reorder_quantity(item) == 100
+
+    def test_a_shortage_is_rounded_up_to_a_whole_case(self):
+        item = _case_item(
+            reorder_cases=2,
+            reorder_quantity=5,
+            quantity_per_package=10,
+            current_stock=0,
+            minimum_stock=95,
+        )
+
+        assert base_reorder_quantity(item) == 100
 
     def test_the_pack_size_is_the_order_question_not_the_shelf_one(self):
         """A discontinued vendor's 12-pack describes the SHELF; the next order ships in 10s."""
@@ -403,7 +411,7 @@ class TestLegacyCaseBasedItemsOrderByTheCase:
         ],
         ids=["recorded_zero", "not_recorded", "no_orderable_link"],
     )
-    def test_an_unknown_case_size_orders_reorder_quantity_and_says_it_cannot_order_cases(
+    def test_an_unknown_case_size_orders_as_before_and_says_it_cannot_order_cases(
         self, make_unknown, state
     ):
         """The captain's fallback, and the fact beside it — never an invented case size."""
@@ -417,6 +425,7 @@ class TestLegacyCaseBasedItemsOrderByTheCase:
         assert display["case_order"] == {
             "reorder_cases": 2,
             "reorder_quantity": 7,
+            "order_quantity": 7,
             "case_size": None,
             "case_size_state": state,
             "orders_cases": False,
@@ -586,6 +595,24 @@ class TestEveryFilingPathOrdersTheCaseFigure:
 
         assert response.status_code == status.HTTP_201_CREATED
         assert ReorderRequest.objects.get(item=item).quantity == 25
+
+    def test_a_reconciliation_with_unknown_case_size_preserves_the_shortage(self):
+        item = _case_item(
+            reorder_cases=4,
+            reorder_quantity=25,
+            quantity_per_package=0,
+            current_stock=120,
+            minimum_stock=100,
+        )
+
+        response = self._staff().post(
+            "/api/inventory/reconciliations/batch/",
+            {"rows": [{"item_id": str(item.id), "actual_count": 0, "reason": _USED}]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert ReorderRequest.objects.get(item=item).quantity == 100
 
 
 class TestTheFiledQuantityIsBaseUnitsEndToEnd:

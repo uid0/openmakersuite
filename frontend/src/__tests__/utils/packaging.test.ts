@@ -376,6 +376,7 @@ describe('caseOrderNote', () => {
   const caseOrder = (overrides: Partial<ItemCaseOrder> = {}): ItemCaseOrder => ({
     reorder_cases: 4,
     reorder_quantity: 40,
+    order_quantity: 40,
     case_size: 10,
     case_size_state: 'known',
     orders_cases: true,
@@ -397,7 +398,7 @@ describe('caseOrderNote', () => {
 
     expect(note).toBe(
       'Reorder Cases and Reorder Quantity disagree: 4 cases of 10 is 40 units, ' +
-        'but Reorder Quantity says 25 units. Reorders order the cases (40 units).'
+        'but Reorder Quantity says 25 units. Reorders order whole cases (40 units right now).'
     );
   });
 
@@ -406,6 +407,7 @@ describe('caseOrderNote', () => {
       caseOrder({
         reorder_cases: 2,
         reorder_quantity: 7,
+        order_quantity: 100,
         case_size: null,
         case_size_state: 'recorded_zero',
         orders_cases: false,
@@ -415,7 +417,7 @@ describe('caseOrderNote', () => {
     );
 
     expect(note).toMatch(/^Cannot order 2 cases: the case size is unknown/);
-    expect(note).toContain('Reorder Quantity (7 bags) instead.');
+    expect(note).toContain('100 bags as before.');
     expect(note).toContain('Correct "Quantity per Package"');
   });
 

@@ -92,6 +92,7 @@ test('a line whose columns disagree names both amounts and which one it orders',
     itemWith({
       reorder_cases: 4,
       reorder_quantity: 25,
+      order_quantity: 40,
       case_size: 10,
       case_size_state: 'known',
       orders_cases: true,
@@ -100,7 +101,7 @@ test('a line whose columns disagree names both amounts and which one it orders',
   );
 
   expect(screen.getByTestId('po-item-case-order-note-item-1')).toHaveTextContent(
-    'Reorder Cases and Reorder Quantity disagree: 4 cases of 10 is 40 bags, but Reorder Quantity says 25 bags. Reorders order the cases (40 bags).'
+    'Reorder Cases and Reorder Quantity disagree: 4 cases of 10 is 40 bags, but Reorder Quantity says 25 bags. Reorders order whole cases (40 bags right now).'
   );
 });
 
@@ -109,6 +110,7 @@ test('a line that could not be sized in cases says so and what it ordered instea
     itemWith({
       reorder_cases: 4,
       reorder_quantity: 25,
+      order_quantity: 25,
       case_size: null,
       case_size_state: 'no_orderable_link',
       orders_cases: false,
@@ -118,7 +120,7 @@ test('a line that could not be sized in cases says so and what it ordered instea
 
   const note = screen.getByTestId('po-item-case-order-note-item-1');
   expect(note).toHaveTextContent('Cannot order 4 cases: the case size is unknown');
-  expect(note).toHaveTextContent('Reorder Quantity (25 bags) instead.');
+  expect(note).toHaveTextContent('25 bags as before.');
   expect(note).toHaveTextContent(/reactivate a supplier relationship/i);
 });
 
@@ -127,6 +129,7 @@ test('a line ordered by the case with agreeing columns carries no note', async (
     itemWith({
       reorder_cases: 4,
       reorder_quantity: 40,
+      order_quantity: 40,
       case_size: 10,
       case_size_state: 'known',
       orders_cases: true,

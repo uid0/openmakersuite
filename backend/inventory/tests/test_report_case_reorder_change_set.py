@@ -83,15 +83,37 @@ def test_an_order_that_shrinks_is_reported_as_orders_less():
 
 
 def test_an_unknown_case_size_is_reported_as_a_fact_not_given_a_number():
-    item = _case_item(reorder_cases=3, reorder_quantity=7, quantity_per_package=0)
+    item = _case_item(
+        reorder_cases=3,
+        reorder_quantity=7,
+        quantity_per_package=0,
+        current_stock=0,
+        minimum_stock=100,
+    )
 
     row = _row(_run()[0], item)
 
     assert row["case_size_state"] == PACK_SIZE_RECORDED_ZERO
     assert row["case_size"] == ""
-    assert row["new_rule_orders"] == row["files_today"] == "7"
+    assert row["new_rule_orders"] == row["files_today"] == "100"
     assert row["columns_disagree"] == "unknown"
     assert row["finding"] == "case_size_unknown"
+
+
+def test_a_known_case_size_rounds_the_shortage_up_to_whole_cases():
+    item = _case_item(
+        reorder_cases=2,
+        reorder_quantity=5,
+        quantity_per_package=10,
+        current_stock=0,
+        minimum_stock=95,
+    )
+
+    row = _row(_run()[0], item)
+
+    assert row["files_today"] == "95"
+    assert row["po_line_today"] == "100"
+    assert row["new_rule_orders"] == "100"
 
 
 def test_an_item_with_no_supplier_link_is_listed_with_a_blank_supplier():

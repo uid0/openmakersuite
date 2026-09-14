@@ -203,6 +203,7 @@ describe('ScanPage', () => {
       case_order: {
         reorder_cases: 2,
         reorder_quantity: 7,
+        order_quantity: 7,
         case_size: null,
         case_size_state: 'not_recorded',
         orders_cases: false,

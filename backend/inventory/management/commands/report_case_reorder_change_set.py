@@ -2,10 +2,10 @@
 
 Captain's decision, 2026-09-05: "We are ordering by cases and counting by
 items." A legacy ``use_case_based_reorder`` item that is not counted in packs
-now orders ``reorder_cases × order_pack_size`` base units
-(:func:`inventory.services.packaging.case_order`), falling back to
-``reorder_quantity`` when the order pack size is unknown. Before that decision
-every filing path ordered ``reorder_quantity`` for it while every screen showed
+now orders enough whole cases to cover both ``reorder_cases`` and the current
+shortage (:func:`inventory.services.packaging.case_order`). When the order pack
+size is unknown it keeps the pre-change shortage calculation. Before that
+decision every filing path used that calculation while every screen showed
 ``reorder_cases``.
 
 That changes ordered quantities on live data, so this command prints the change
@@ -29,15 +29,17 @@ Columns:
 * ``po_line_today`` — ``files_today`` rounded up to whole cases of that link, as
   the purchase-order pad rounds it.
 * ``new_rule_orders`` — what the case rule orders, in base units. Already whole
-  cases, so the pad's rounding leaves it alone.
+  cases when the size is known, including enough whole cases to cover the
+  shortage, so the pad's rounding leaves it alone. When the size is unknown it
+  is the unchanged pre-rule quantity, shortage term included.
 * ``change`` — ``new_rule_orders - po_line_today``.
 * ``columns_disagree`` — ``yes`` when ``reorder_quantity`` names a different
   base-unit amount from ``reorder_cases × case_size``; ``unknown`` when the case
   size is unknown and there is nothing to compare against.
 * ``finding`` — ``orders_more`` / ``orders_less`` / ``unchanged``, or
   ``case_size_unknown``: the item CANNOT be ordered by the case under the stated
-  rule and keeps ordering ``reorder_quantity`` until its supplier link records a
-  pack size. That is a fact for the operator, not a number to invent.
+  rule and keeps ordering as before until its supplier link records a pack size.
+  That is a fact for the operator, not a number to invent.
 
 Bridged items — the legacy flag plus a packaging chain — are counted in packs,
 are not governed by the case rule, and are only counted in the summary.
@@ -99,6 +101,8 @@ def change_set_row(item: InventoryItem, link, selected_link) -> dict:
     case = CaseOrder(
         reorder_cases=item.reorder_cases,
         reorder_quantity=item.reorder_quantity,
+        minimum_stock=item.minimum_stock,
+        current_stock=item.current_stock,
         pack=pack_size_of(link),
     )
 

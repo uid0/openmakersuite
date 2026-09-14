@@ -360,10 +360,11 @@ class CaseOrder:
     DISPLAY ``reorder_cases`` while every filing path ordered
     ``reorder_quantity``.
 
-    * :attr:`quantity` — ``reorder_cases × pack size``, or ``None`` when the
+    * :attr:`quantity` — the larger of ``reorder_cases`` and the current
+      shortage rounded up to whole cases, in base units; or ``None`` when the
       pack size is unknown. ``None`` is a fact, not a number to invent: the
-      caller falls back to ``reorder_quantity`` (the captain's stated rule) and
-      a surface says the item cannot be ordered by the case.
+      caller keeps the pre-change shortage calculation and a surface says the
+      item cannot be ordered by the case.
     * :attr:`columns_disagree` — ``reorder_quantity`` names a different
       base-unit amount from the case figure. ``None`` when the case figure is
       unknown, because whether two numbers agree cannot be told when one of
@@ -372,14 +373,18 @@ class CaseOrder:
 
     reorder_cases: int
     reorder_quantity: int
+    minimum_stock: int
+    current_stock: int
     pack: "PackSize"
 
     @property
     def quantity(self) -> Optional[int]:
-        """``reorder_cases × pack size`` in base units, or ``None`` if unknown."""
+        """Whole cases covering the shortage and configured case order, or ``None``."""
         if not self.pack.is_known:
             return None
-        return self.reorder_cases * self.pack.units
+        shortage = max(0, self.minimum_stock - self.current_stock)
+        shortage_cases = -(-shortage // self.pack.units)
+        return max(shortage_cases, self.reorder_cases) * self.pack.units
 
     @property
     def columns_disagree(self) -> Optional[bool]:
@@ -387,7 +392,8 @@ class CaseOrder:
         quantity = self.quantity
         if quantity is None:
             return None
-        return self.reorder_quantity != quantity
+        configured_quantity = self.reorder_cases * self.pack.units
+        return self.reorder_quantity != configured_quantity
 
 
 def case_order(item: "InventoryItem") -> Optional[CaseOrder]:
@@ -412,6 +418,8 @@ def case_order(item: "InventoryItem") -> Optional[CaseOrder]:
     return CaseOrder(
         reorder_cases=item.reorder_cases,
         reorder_quantity=item.reorder_quantity,
+        minimum_stock=item.minimum_stock,
+        current_stock=item.current_stock,
         pack=order_pack_size(item),
     )
 
@@ -425,14 +433,11 @@ def base_reorder_quantity(item: "InventoryItem") -> int:
     * ``each`` → UNCHANGED: ``max(minimum_stock - current_stock, reorder_quantity)``
       base units, which callers may still round up to a whole supplier package.
     * legacy ``use_case_based_reorder`` (not counted in packs) with a KNOWN
-      order pack size → ``reorder_cases × order_pack_size`` (:func:`case_order`),
-      exactly. The captain's rule names that product and nothing else, so no
-      shortage clause is added: the item's threshold is ``minimum_cases``, and a
-      top-up read off ``minimum_stock`` would size a case order with a column
-      that does not govern it. With the case size UNKNOWN it falls back to the
-      ``each`` arithmetic above — ``reorder_quantity`` — mirroring
-      :func:`reorder_threshold`'s known/unknown branch; :func:`reorder_display`
-      carries ``case_order`` so a surface can say which of the two happened.
+      order pack size → the larger of ``reorder_cases`` and the base-unit
+      shortage rounded up to whole cases (:func:`case_order`). With the case
+      size UNKNOWN it preserves the pre-change ``each`` arithmetic above,
+      including its shortage term; :func:`reorder_display` carries both the
+      case fact and the actual filing quantity so a surface can say what happened.
     * pack-counting → the same arithmetic one rung up, in the item's count unit,
       then converted through ``count_level``. With stock at the reorder point
       that is exactly ``reorder_quantity × count_level.base_units``; the
@@ -547,8 +552,9 @@ def reorder_display(item: "InventoryItem") -> dict:
     The two agree for an ``each`` item and differ by the pack size for a
     pack-counting one (3 cases ↔ 36 bottles) — and for a legacy
     ``use_case_based_reorder`` item with no packaging chain of its own, which
-    DISPLAYS ``reorder_cases`` and now also ORDERS it: ``reorder_cases ×
-    order_pack_size`` base units (:func:`case_order`; captain, 2026-09-05). A
+    DISPLAYS ``reorder_cases`` and now also ORDERS whole cases: enough to cover
+    both that setting and the current shortage (:func:`case_order`; captain,
+    2026-09-05). A
     bridged item — the legacy flag plus a packaging chain, which
     ``bridge_case_reorder_to_packaging`` leaves behind — is tested with
     ``counts_in_packs`` FIRST and reads ``reorder_quantity`` on both halves.
@@ -559,8 +565,8 @@ def reorder_display(item: "InventoryItem") -> dict:
 
     * ``orders_cases`` — whether the order is ``reorder_cases`` whole cases.
       ``False`` means the order pack size is unknown, so the item cannot be
-      ordered by the case and ``order_quantity`` is ``reorder_quantity``
-      instead; ``case_size_state`` says which unknown, in
+      ordered by the case and ``order_quantity`` preserves the pre-change
+      shortage calculation instead; ``case_size_state`` says which unknown, in
       :mod:`inventory.services.pack_size`'s vocabulary.
     * ``columns_disagree`` — ``reorder_quantity`` names a different base-unit
       amount from ``reorder_cases × case_size``. ``None`` when the case size is
@@ -617,6 +623,14 @@ def _case_order_payload(case: Optional[CaseOrder]) -> Optional[dict]:
     return {
         "reorder_cases": case.reorder_cases,
         "reorder_quantity": case.reorder_quantity,
+        "order_quantity": (
+            case.quantity
+            if case.quantity is not None
+            else max(
+                max(0, case.minimum_stock - case.current_stock),
+                case.reorder_quantity,
+            )
+        ),
         "case_size": case.pack.units,
         "case_size_state": case.pack.state,
         "orders_cases": case.quantity is not None,

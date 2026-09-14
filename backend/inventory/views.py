@@ -8480,17 +8480,13 @@ def _apply_reconciliation_row(
     # request is ``reorder_cases × order_pack_size`` base units, the figure
     # ``base_reorder_quantity`` gives every other filing path, because an
     # approved request is what prefills the purchase-order pad. With the order
-    # pack size unknown it keeps the configured ``reorder_quantity``. The
+    # pack size unknown it keeps the pre-change shortage calculation. The
     # TRIGGER above is counting and does not move.
     if not skip_reorder and not item.is_retired and count_at_level(item) <= item.minimum_stock:
         from reorder_queue.models import ReorderRequest
 
         requested_by = (user.get_full_name() or user.username).strip()
-        base_units_per_count = item.count_level.base_units if counts_in_packs(item) else 1
-        reorder_quantity = (item.reorder_quantity or 1) * base_units_per_count
-        case = case_order(item)
-        if case is not None and case.quantity is not None:
-            reorder_quantity = case.quantity
+        reorder_quantity = base_reorder_quantity(item)
         # Report the trigger in the unit it was judged in. For an ``each`` item
         # that is the previous sentence verbatim; naming the pack for the others
         # keeps the note from reading a base count against a pack threshold.

@@ -614,6 +614,116 @@ class TestEveryFilingPathOrdersTheCaseFigure:
         assert response.status_code == status.HTTP_201_CREATED
         assert ReorderRequest.objects.get(item=item).quantity == 100
 
+    @pytest.mark.parametrize("bridged", [False, True], ids=["unit", "pack"])
+    def test_non_governed_reconciliation_keeps_its_configured_quantity(self, bridged):
+        if bridged:
+            item = _pack_item(
+                case_size=12,
+                current_stock=1200,
+                minimum_stock=100,
+                reorder_quantity=5,
+                use_case_based_reorder=True,
+            )
+            expected = 60
+        else:
+            item = InventoryItemFactory(
+                image=None,
+                current_stock=120,
+                minimum_stock=100,
+                reorder_quantity=5,
+            )
+            expected = 5
+
+        response = self._staff().post(
+            "/api/inventory/reconciliations/batch/",
+            {"rows": [{"item_id": str(item.id), "actual_count": 0, "reason": _USED}]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert ReorderRequest.objects.get(item=item).quantity == expected
+
+
+class TestNonLegacyQuantitiesStayOnTheirExistingPaths:
+    @pytest.mark.parametrize("pack_counted", [False, True], ids=["unit", "pack"])
+    def test_every_filing_path_keeps_its_pre_case_rule_quantity(self, pack_counted):
+        if pack_counted:
+            item = _pack_item(
+                case_size=12,
+                current_stock=0,
+                minimum_stock=100,
+                reorder_quantity=5,
+                use_case_based_reorder=True,
+            )
+            existing_filing_quantity = 1200
+            reconciliation_quantity = 60
+        else:
+            item = InventoryItemFactory(
+                image=None,
+                current_stock=0,
+                minimum_stock=100,
+                reorder_quantity=5,
+                quantity_per_package=1,
+            )
+            existing_filing_quantity = 100
+            reconciliation_quantity = 5
+
+        user = get_user_model().objects.create_user(
+            username=get_random_string(8), password=get_random_string(24), is_staff=True
+        )
+        client = APIClient()
+        client.force_authenticate(user=user)
+
+        reorder_data_response = client.get("/api/reorders/purchase-orders/reorder_data/")
+        reorder_data_lines = [
+            line
+            for group in reorder_data_response.data["suppliers"]
+            for line in group["items"]
+            if line["item_id"] == str(item.id)
+        ]
+        optimized_response = client.post(
+            "/api/reorders/purchase-orders/create_optimized_order/", {}, format="json"
+        )
+        optimized_quantities = {
+            str(line["item_id"]): line["recommended_quantity"]
+            for recommendation in optimized_response.data.get("recommendations", [])
+            for line in recommendation["items"]
+        }
+        maintenance_item = MaintenanceItem.objects.create(
+            asset=AssetFactory(), title="Quantity guard", description="", interval_days=30
+        )
+        MaintenanceMaterial.objects.create(
+            maintenance_item=maintenance_item,
+            name=item.name,
+            quantity=Decimal("1.00"),
+            inventory_item=item,
+        )
+        maintenance_response = APIClient().get(
+            reverse("maintenanceitem-check-material-stock", args=[maintenance_item.id])
+        )
+
+        assert reorder_data_response.status_code == status.HTTP_200_OK
+        assert [line["suggested_quantity"] for line in reorder_data_lines] == [
+            existing_filing_quantity
+        ]
+        assert optimized_response.status_code == status.HTTP_200_OK
+        assert optimized_quantities[str(item.id)] == existing_filing_quantity
+        assert default_quantity(item.item_suppliers.get()) == existing_filing_quantity
+        assert reorder_display(item)["order_quantity"] == existing_filing_quantity
+        assert maintenance_response.status_code == status.HTTP_200_OK
+        assert maintenance_response.data["low_stock_alerts"][0]["reorder_qty"] == (
+            existing_filing_quantity
+        )
+
+        reconciliation_response = client.post(
+            "/api/inventory/reconciliations/batch/",
+            {"rows": [{"item_id": str(item.id), "actual_count": 0, "reason": _USED}]},
+            format="json",
+        )
+
+        assert reconciliation_response.status_code == status.HTTP_201_CREATED
+        assert ReorderRequest.objects.get(item=item).quantity == reconciliation_quantity
+
 
 class TestTheFiledQuantityIsBaseUnitsEndToEnd:
     """The unit claim, proved against the endpoint and the stock it moves.

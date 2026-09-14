@@ -8486,7 +8486,11 @@ def _apply_reconciliation_row(
         from reorder_queue.models import ReorderRequest
 
         requested_by = (user.get_full_name() or user.username).strip()
-        reorder_quantity = base_reorder_quantity(item)
+        base_units_per_count = item.count_level.base_units if counts_in_packs(item) else 1
+        reorder_quantity = (item.reorder_quantity or 1) * base_units_per_count
+        case = case_order(item)
+        if case is not None:
+            reorder_quantity = base_reorder_quantity(item)
         # Report the trigger in the unit it was judged in. For an ``each`` item
         # that is the previous sentence verbatim; naming the pack for the others
         # keeps the note from reading a base count against a pack threshold.

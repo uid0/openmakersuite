@@ -96,6 +96,7 @@ def test_an_unknown_case_size_is_reported_as_a_fact_not_given_a_number():
 
     assert row["case_size_state"] == PACK_SIZE_RECORDED_ZERO
     assert row["case_size"] == ""
+    assert row["row_package_finding"] == "package_size_unknown"
     assert row["new_rule_orders"] == row["files_today"] == "100"
     assert row["columns_disagree"] == "unknown"
     assert row["finding"] == "case_size_unknown"
@@ -148,8 +149,31 @@ def test_every_supplier_link_matches_live_line_sizing():
         row = by_supplier[link.supplier.name]
         assert int(row["new_rule_orders"]) == default_quantity(link)
         assert row["currently_selected"] == ("yes" if link == selected else "no")
+        assert row["columns_disagree"] == "yes"
+        assert row["finding"] != "case_size_unknown"
 
     assert [default_quantity(link) for link in links] == [40, 48, 42, 40, 40]
+    assert by_supplier[links[-1].supplier.name]["row_package_finding"] == (
+        "package_size_unknown"
+    )
+
+
+def test_selected_unknown_case_size_governs_every_row_finding():
+    item = _case_item(reorder_cases=4, reorder_quantity=25, quantity_per_package=0)
+    selected = item.item_suppliers.get()
+    alternate = ItemSupplierFactory(item=item, is_primary=False, quantity_per_package=6)
+
+    rows, _ = _run()
+    by_supplier = {
+        row["supplier"]: row for row in rows if row["item_id"] == str(item.id)
+    }
+
+    assert by_supplier[selected.supplier.name]["row_package_finding"] == (
+        "package_size_unknown"
+    )
+    assert by_supplier[alternate.supplier.name]["row_package_finding"] == ""
+    assert {row["finding"] for row in by_supplier.values()} == {"case_size_unknown"}
+    assert {row["columns_disagree"] for row in by_supplier.values()} == {"unknown"}
 
 
 def test_items_the_case_rule_does_not_govern_are_not_listed():

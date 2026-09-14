@@ -20,6 +20,10 @@ Columns:
   size it records, in
   :mod:`inventory.services.pack_size`'s vocabulary. ``case_size`` is blank when
   unknown.
+* ``row_package_finding`` — ``package_size_unknown`` when this row's link
+  cannot round the selected supplier's case-sized quantity. This is separate
+  from ``finding``, which describes whether the selected ordering link can size
+  the case rule at all.
 * ``currently_selected`` — whether the ordering path currently selects this
   link through ``primary_item_supplier`` / ``order_pack_size``.
 * ``reorder_quantity`` / ``reorder_cases`` — the two stored columns, as stored.
@@ -77,6 +81,7 @@ COLUMNS = [
     "currently_selected",
     "case_size_state",
     "case_size",
+    "row_package_finding",
     "reorder_quantity",
     "reorder_cases",
     "files_today",
@@ -101,33 +106,29 @@ def files_before_the_case_rule(item: InventoryItem) -> int:
     return max(shortage, item.reorder_quantity)
 
 
-def change_set_row(item: InventoryItem, link, selected_link) -> dict:
+def change_set_row(item: InventoryItem, link, selected_case: CaseOrder) -> dict:
     """The report row for one supplier link on a governed item."""
-    case = CaseOrder(
-        reorder_cases=item.reorder_cases,
-        reorder_quantity=item.reorder_quantity,
-        minimum_stock=item.minimum_stock,
-        current_stock=item.current_stock,
-        pack=pack_size_of(link),
-    )
+    row_pack = pack_size_of(link)
 
     files_today = files_before_the_case_rule(item)
     po_line_today = (
         files_today if link is None else supplier_line_quantity(link, files_today)
     )
 
-    if case.quantity is None:
+    if selected_case.quantity is None:
         finding = FINDING_CASE_SIZE_UNKNOWN
         disagree = "unknown"
     else:
-        disagree = "yes" if case.columns_disagree else "no"
+        disagree = "yes" if selected_case.columns_disagree else "no"
 
     new_rule_orders = (
         files_today if link is None else supplier_line_quantity(link)
     )
     change = new_rule_orders - po_line_today
-    if case.quantity is not None:
+    if selected_case.quantity is not None:
         finding = "orders_more" if change > 0 else "orders_less" if change < 0 else "unchanged"
+
+    selected_link = selected_case.pack.link
 
     return {
         "item_id": str(item.id),
@@ -143,8 +144,9 @@ def change_set_row(item: InventoryItem, link, selected_link) -> dict:
             and link.pk == selected_link.pk
             else "no"
         ),
-        "case_size_state": case.pack.state,
-        "case_size": "" if case.pack.units is None else case.pack.units,
+        "case_size_state": row_pack.state,
+        "case_size": "" if row_pack.units is None else row_pack.units,
+        "row_package_finding": "package_size_unknown" if row_pack.units is None else "",
         "reorder_quantity": item.reorder_quantity,
         "reorder_cases": item.reorder_cases,
         "files_today": files_today,
@@ -184,10 +186,9 @@ class Command(BaseCommand):
                     bridged += 1
                 continue
             governed_items += 1
-            selected_link = selected_case.pack.link
             links = list(item.item_suppliers.all()) or [None]
             for link in links:
-                row = change_set_row(item, link, selected_link)
+                row = change_set_row(item, link, selected_case)
                 writer.writerow(row)
                 findings[row["finding"]] = findings.get(row["finding"], 0) + 1
                 if row["columns_disagree"] == "yes":

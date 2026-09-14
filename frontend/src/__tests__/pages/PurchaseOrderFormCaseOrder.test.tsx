@@ -163,6 +163,30 @@ test('an alternate supplier line names its own rounded prefill', async () => {
   );
 });
 
+test('an alternate supplier with an invalid package size names the unrounded prefill', async () => {
+  await renderWith({
+    ...itemWith({
+      reorder_cases: 4,
+      reorder_quantity: 25,
+      order_quantity: 40,
+      case_size: 10,
+      case_size_state: 'known',
+      orders_cases: true,
+      columns_disagree: true,
+    }),
+    suggested_quantity: 40,
+    quantity_per_package: 0,
+    is_primary: false,
+    is_selected_ordering_link: false,
+  });
+
+  const note = screen.getByTestId('po-item-case-order-note-item-1');
+  expect(note).toHaveTextContent(
+    "Order sizing uses the selected supplier's 4 cases of 10. This supplier's package size is unknown, so this line keeps the unrounded prefill of 40 bags."
+  );
+  expect(note).not.toHaveTextContent('packages of 0');
+});
+
 test('an item the case rule does not govern carries no note', async () => {
   await renderWith(itemWith(null));
 

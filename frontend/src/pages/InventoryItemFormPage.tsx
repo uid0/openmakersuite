@@ -823,7 +823,7 @@ const InventoryItemFormPage: React.FC = () => {
                             name="reorder_cases"
                             control={control}
                             label="Reorder Cases"
-                            description="Whole cases to order when this item is low. Each case is the package size of the supplier it is ordered from; if that is not known, ordering stays on the existing base-unit calculation. Not used for an item counted in packaging levels. Stock is still counted in individual units."
+                            description="Whole cases to order when this item is low, sized using the selected ordering supplier. A line for another supplier keeps that case-sized amount and rounds it up to that supplier's package size. If the selected supplier's size is not known, ordering stays on the existing base-unit calculation. Not used for an item counted in packaging levels. Stock is still counted in individual units."
                             min={1}
                             required
                           />

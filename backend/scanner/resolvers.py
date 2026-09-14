@@ -6,7 +6,8 @@ the resolution itself has no Django request dependency — all branches
 are unit-testable.
 
 Resolution priority:
-  1. URL-shaped payloads (our own QR codes encode `/inventory/scan/...`).
+  1. URL-shaped payloads (our own QR codes encode `/scan/...`; the
+     `/inventory/scan/...` routes they redirect to are accepted too).
   2. All-digit payloads matching UPC-A (12), UPC-E (8), EAN-13 (13),
      ITF-14 (14) — look up against `ItemSupplier.unit_upc`, then
      `package_upc`. Receive flow.
@@ -138,12 +139,23 @@ def _parse_scan_url(path: str) -> Optional[tuple[str, str]]:
 
     Recognized shapes:
 
-      - ``/inventory/scan/<type>/<id>`` — legacy inventory QR routes
-        (asset / location / fixture / donation-item).
-      - ``/inventory/scan/<id>`` — bare InventoryItem.
+      - ``/scan/<type>/<id>`` and ``/scan/<uuid>`` — what the QR
+        generators print on labels (``inventory.utils.qr_generator``,
+        ``inventory.services.qr_code_service``,
+        ``donations.services.qr_code_service``).
+        ``scanner/tests/test_generated_qr_urls.py`` builds URLs through
+        those generators and parses them back.
+      - ``/inventory/scan/<type>/<id>`` and ``/inventory/scan/<id>`` — the
+        frontend routes the printed ``/scan/...`` URLs redirect to.
       - ``/scan/project-storage/<stint_id>`` — project storage label
         encoded URL (PR 4); the dispatcher routes this to the warden
         detail page.
+
+    ``<type>`` is asset / location / fixture / donation-item; a bare
+    ``<id>`` is an InventoryItem. A bare ``/scan/<id>`` must be a UUID
+    (InventoryItem's pk) because ``/scan/...`` is the frontend's shared
+    scan namespace — the scanner page itself, maker-box verify links —
+    and those must stay ``unknown`` rather than become an item lookup.
 
     Returns ``(target_type, target_id)`` or ``None``.
     """
@@ -151,30 +163,47 @@ def _parse_scan_url(path: str) -> Optional[tuple[str, str]]:
     parts = [seg for seg in path.strip("/").split("/") if seg]
 
     # /scan/project-storage/<stint_id> — emitted by PR 4's label
-    # encoder. Match BEFORE the /inventory/scan/… arm so the deeper
-    # path takes priority over any future overlap.
+    # encoder. Match BEFORE the generic /scan/<type>/<id> arm so the
+    # deeper path takes priority over any future overlap.
     if len(parts) == 3 and parts[0] == "scan" and parts[1] == "project-storage":
         return ("project_storage_stint", parts[2])
 
-    if len(parts) < 3 or parts[0] != "inventory" or parts[1] != "scan":
+    if parts[:2] == ["inventory", "scan"]:
+        rest = parts[2:]
+        bare_id_must_be_uuid = False
+    elif parts[:1] == ["scan"]:
+        rest = parts[1:]
+        bare_id_must_be_uuid = True
+    else:
         return None
 
-    if len(parts) == 3:
-        # /inventory/scan/<id>  →  bare InventoryItem
-        return ("inventory_item", parts[2])
+    if not rest:
+        return None
 
-    type_segment = parts[2]
-    id_segment = parts[3]
+    if len(rest) == 1:
+        # /inventory/scan/<id> or /scan/<uuid>  →  bare InventoryItem
+        if bare_id_must_be_uuid and not _UUID_RE.fullmatch(rest[0]):
+            return None
+        return ("inventory_item", rest[0])
+
+    if len(rest) != 2:
+        return None
+
     type_map = {
         "asset": "asset",
         "location": "location",
         "fixture": "fixture",
         "donation-item": "donation_item",
     }
-    mapped = type_map.get(type_segment)
+    mapped = type_map.get(rest[0])
     if mapped is None:
         return None
-    return (mapped, id_segment)
+    if bare_id_must_be_uuid:
+        if mapped in {"asset", "fixture"} and not _UUID_RE.fullmatch(rest[1]):
+            return None
+        if mapped in {"location", "donation_item"} and not rest[1].isdigit():
+            return None
+    return (mapped, rest[1])
 
 
 def resolve(payload: str) -> ResolvedScan:

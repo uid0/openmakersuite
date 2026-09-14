@@ -19,7 +19,8 @@
  *   inventory_receive  → show item + supplier, deep-link to item page
  *                        (real receive flow lives on item detail)
  *   asset_checkin      → POST /inventory/assets/<id>/scan/
- *   location_checkin   → POST /location-checkins/check-ins/
+ *   location_checkin   → POST /location-checkins/checkins/checkin/ (the same
+ *                        check-in LocationScanPage records)
  *   fixture / donation_item → nav link
  *   unknown            → error card
  *
@@ -47,7 +48,7 @@ import WorkspacePage from '../components/landing/WorkspacePage';
 import QRScanner from '../components/QRScanner';
 import {
   assetsAPI,
-  locationCheckinsAPI,
+  locationCheckinAPI,
   reorderAPI,
   scannerAPI,
   ScanDispatchResult,
@@ -136,10 +137,7 @@ const UniversalScannerPage: React.FC = () => {
           }
           case 'location_checkin': {
             if (!result.target_id) return { outcome: 'error', message: 'Missing location id.' };
-            await locationCheckinsAPI.create({
-              location: Number(result.target_id),
-              checkin_type: 'anonymous',
-            });
+            await locationCheckinAPI.checkin(result.target_id, { checkin_type: 'anonymous' });
             return { outcome: 'success', message: 'Location check-in recorded.' };
           }
           case 'inventory_receive': {

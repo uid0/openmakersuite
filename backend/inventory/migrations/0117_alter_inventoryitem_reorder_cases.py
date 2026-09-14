@@ -16,7 +16,7 @@ class Migration(migrations.Migration):
             name="reorder_cases",
             field=models.PositiveIntegerField(
                 default=1,
-                help_text="Whole cases to order when a case-based item is low. Each case is the package size of the supplier it is ordered from; if that size is not known, Reorder quantity is ordered instead. Not used for an item counted in packaging levels. Stock is still counted in individual units.",
+                help_text="Whole cases to order when a case-based item is low. Each case is the package size of the supplier it is ordered from; if that size is not known, ordering stays on the existing base-unit calculation. Not used for an item counted in packaging levels. Stock is still counted in individual units.",
                 validators=[django.core.validators.MinValueValidator(1)],
             ),
         ),

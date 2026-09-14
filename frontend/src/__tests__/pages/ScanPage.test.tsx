@@ -181,8 +181,8 @@ describe('ScanPage', () => {
 
   // Ordering by the case (captain, 2026-09-05). A signed-in operator scanning
   // a case-based item whose case size is unknown is told it cannot be ordered
-  // by the case and what is ordered instead; an anonymous scanner already reads
-  // the exact amount the page files, so the note is not theirs.
+  // by the case and what the unchanged calculation orders; an anonymous scanner
+  // already reads the exact amount the page files, so the note is not theirs.
   const unknownCaseOrderItem = {
     ...mockItem,
     use_case_based_reorder: true,
@@ -224,7 +224,7 @@ describe('ScanPage', () => {
     await screen.findByText('Test Widget');
     const note = screen.getByTestId('scan-case-order-note');
     expect(note).toHaveTextContent('Cannot order 2 cases: the case size is unknown');
-    expect(note).toHaveTextContent('Reorder Quantity (7 units) instead.');
+    expect(note).toHaveTextContent('7 units as before.');
   });
 
   // The op-2t4e pair. Both payloads send `current_cases: null`; the page must

@@ -326,15 +326,17 @@ class InventoryItem(OwnableModel):
         # legacy flag plus a packaging chain, which
         # ``bridge_case_reorder_to_packaging`` deliberately leaves behind —
         # counts in packs and orders ``reorder_quantity`` packs of its own
-        # chain, never this column. An unknown order pack size falls back to
-        # ``reorder_quantity``, and ``reorder_display.case_order`` tells the
-        # operator so. ``current_stock`` stays in units either way.
+        # chain, never this column. With an unknown order pack size ordering
+        # stays on the existing base-unit calculation, and
+        # ``reorder_display.case_order`` tells the operator so.
+        # ``current_stock`` stays in units either way.
         # ``test_reorder_filing.py::TestLegacyCaseBasedItemsOrderByTheCase``
         # pins each shape with numbers on it.
         help_text=(
             "Whole cases to order when a case-based item is low. Each case is the "
             "package size of the supplier it is ordered from; if that size is not "
-            "known, Reorder quantity is ordered instead. Not used for an item counted "
+            "known, ordering stays on the existing base-unit calculation. Not used "
+            "for an item counted "
             "in packaging levels. Stock is still counted in individual units."
         ),
     )

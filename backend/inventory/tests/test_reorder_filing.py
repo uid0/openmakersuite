@@ -578,7 +578,7 @@ class TestEveryFilingPathOrdersTheCaseFigure:
         item.refresh_from_db()
         assert item.current_stock == 3  # the count itself stayed in units
 
-    def test_a_reconciliation_with_an_unknown_case_size_files_reorder_quantity(self):
+    def test_unknown_case_size_keeps_the_existing_reconciliation_calculation(self):
         item = _case_item(
             reorder_cases=4,
             reorder_quantity=25,

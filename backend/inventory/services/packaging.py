@@ -360,11 +360,10 @@ class CaseOrder:
     DISPLAY ``reorder_cases`` while every filing path ordered
     ``reorder_quantity``.
 
-    * :attr:`quantity` — the larger of ``reorder_cases`` and the current
-      shortage rounded up to whole cases, in base units; or ``None`` when the
-      pack size is unknown. ``None`` is a fact, not a number to invent: the
-      caller keeps the pre-change shortage calculation and a surface says the
-      item cannot be ordered by the case.
+    * :attr:`quantity` — ``reorder_cases`` whole cases in base units; or
+      ``None`` when the pack size is unknown. ``None`` is a fact, not a number
+      to invent: the caller falls back to the stored ``reorder_quantity`` and a
+      surface says the item cannot be ordered by the case.
     * :attr:`columns_disagree` — ``reorder_quantity`` names a different
       base-unit amount from the case figure. ``None`` when the case figure is
       unknown, because whether two numbers agree cannot be told when one of
@@ -379,12 +378,10 @@ class CaseOrder:
 
     @property
     def quantity(self) -> Optional[int]:
-        """Whole cases covering the shortage and configured case order, or ``None``."""
+        """The configured number of whole cases in base units, or ``None``."""
         if not self.pack.is_known:
             return None
-        shortage = max(0, self.minimum_stock - self.current_stock)
-        shortage_cases = -(-shortage // self.pack.units)
-        return max(shortage_cases, self.reorder_cases) * self.pack.units
+        return self.reorder_cases * self.pack.units
 
     @property
     def columns_disagree(self) -> Optional[bool]:
@@ -433,10 +430,9 @@ def base_reorder_quantity(item: "InventoryItem") -> int:
     * ``each`` → UNCHANGED: ``max(minimum_stock - current_stock, reorder_quantity)``
       base units, which callers may still round up to a whole supplier package.
     * legacy ``use_case_based_reorder`` (not counted in packs) with a KNOWN
-      order pack size → the larger of ``reorder_cases`` and the base-unit
-      shortage rounded up to whole cases (:func:`case_order`). With the case
-      size UNKNOWN it preserves the pre-change ``each`` arithmetic above,
-      including its shortage term; :func:`reorder_display` carries both the
+      order pack size → ``reorder_cases`` times that size
+      (:func:`case_order`). With the case size UNKNOWN it falls back to the
+      stored ``reorder_quantity``; :func:`reorder_display` carries both the
       case fact and the actual filing quantity so a surface can say what happened.
     * pack-counting → the same arithmetic one rung up, in the item's count unit,
       then converted through ``count_level``. With stock at the reorder point
@@ -472,8 +468,8 @@ def _reorder_quantity(item: "InventoryItem", case: Optional[CaseOrder]) -> int:
     and words the quantity with it, resolves the order pack size once.
     """
     if not counts_in_packs(item):
-        if case is not None and case.quantity is not None:
-            return case.quantity
+        if case is not None:
+            return case.quantity if case.quantity is not None else case.reorder_quantity
         shortage = max(0, item.minimum_stock - item.current_stock)
         return max(shortage, item.reorder_quantity)
 
@@ -568,9 +564,8 @@ def reorder_display(item: "InventoryItem") -> dict:
     The two agree for an ``each`` item and differ by the pack size for a
     pack-counting one (3 cases ↔ 36 bottles) — and for a legacy
     ``use_case_based_reorder`` item with no packaging chain of its own, which
-    DISPLAYS ``reorder_cases`` and now also ORDERS whole cases: enough to cover
-    both that setting and the current shortage (:func:`case_order`; captain,
-    2026-09-05). A
+    DISPLAYS ``reorder_cases`` and now also ORDERS exactly that many whole cases
+    (:func:`case_order`; captain, 2026-09-05). A
     bridged item — the legacy flag plus a packaging chain, which
     ``bridge_case_reorder_to_packaging`` leaves behind — is tested with
     ``counts_in_packs`` FIRST and reads ``reorder_quantity`` on both halves.
@@ -581,8 +576,8 @@ def reorder_display(item: "InventoryItem") -> dict:
 
     * ``orders_cases`` — whether the order is ``reorder_cases`` whole cases.
       ``False`` means the order pack size is unknown, so the item cannot be
-      ordered by the case and ``order_quantity`` preserves the pre-change
-      shortage calculation instead; ``case_size_state`` says which unknown, in
+      ordered by the case and ``order_quantity`` falls back to the stored
+      ``reorder_quantity`` instead; ``case_size_state`` says which unknown, in
       :mod:`inventory.services.pack_size`'s vocabulary.
     * ``columns_disagree`` — ``reorder_quantity`` names a different base-unit
       amount from ``reorder_cases × case_size``. ``None`` when the case size is

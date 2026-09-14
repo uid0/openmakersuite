@@ -2,9 +2,9 @@
 
 Captain's decision, 2026-09-05: "We are ordering by cases and counting by
 items." A legacy ``use_case_based_reorder`` item that is not counted in packs
-now orders enough whole cases to cover both ``reorder_cases`` and the current
-shortage (:func:`inventory.services.packaging.case_order`). When the order pack
-size is unknown it keeps the pre-change shortage calculation. Before that
+now orders exactly ``reorder_cases`` whole cases
+(:func:`inventory.services.packaging.case_order`). When the order pack size is
+unknown it falls back to the stored ``reorder_quantity``. Before that
 decision every filing path used that calculation while every screen showed
 ``reorder_cases``.
 

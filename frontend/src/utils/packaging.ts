@@ -337,14 +337,15 @@ export const reorderFiling = (
  * What an operator is owed about a case-ordered item, in one sentence, or null.
  *
  * "We are ordering by cases and counting by items" (captain, 2026-09-05): the
- * server orders enough whole cases to cover both `reorder_cases` and the
- * current shortage, and sends `case_order` saying whether it could. Two facts
+ * server orders exactly `reorder_cases` whole cases and sends `case_order`
+ * saying whether it could. Two facts
  * are worth a sentence,
  * and neither may be papered over with a guess:
  *
  * - the case size is UNKNOWN — the item cannot be ordered by the case, and a
- *   reorder keeps ordering as before until a supplier link says how many units
- *   a case holds (the remedy is `caseSizeUnknownNote`'s, keyed the same);
+ *   reorder falls back to the stored `reorder_quantity` until a supplier link
+ *   says how many units a case holds (the remedy is `caseSizeUnknownNote`'s,
+ *   keyed the same);
  * - the two columns DISAGREE — Reorder Quantity names a different amount from
  *   the cases, and it is the cases that get ordered.
  *

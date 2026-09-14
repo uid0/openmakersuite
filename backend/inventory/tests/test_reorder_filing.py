@@ -306,9 +306,8 @@ class TestLegacyCaseBasedItemsOrderByTheCase:
     used to DISPLAY ``reorder_cases`` while every filing path ordered
     ``reorder_quantity`` base units, so "Reorder Cases: 4" was discarded by the
     ordering path. Now ``base_reorder_quantity`` — and so every surface that
-    files — orders enough whole cases to cover both ``reorder_cases`` and the
-    current shortage. When case size is unknown, ordering stays exactly as it
-    was before this change, including the shortage term.
+    files — orders ``reorder_cases`` whole cases. When case size is unknown,
+    ordering falls back to the stored ``reorder_quantity``.
 
     ``reorder_display.case_order`` says which happened and whether the two
     columns disagree, because an item that cannot be ordered by the case is a
@@ -352,7 +351,7 @@ class TestLegacyCaseBasedItemsOrderByTheCase:
         assert case["orders_cases"] is True
         assert case["columns_disagree"] is False
 
-    def test_a_deeply_short_item_orders_enough_whole_cases_for_the_shortage(self):
+    def test_a_deeply_short_item_still_orders_the_configured_number_of_cases(self):
         item = _case_item(
             reorder_cases=2,
             reorder_quantity=5,
@@ -361,9 +360,9 @@ class TestLegacyCaseBasedItemsOrderByTheCase:
             minimum_stock=100,
         )
 
-        assert base_reorder_quantity(item) == 100
+        assert base_reorder_quantity(item) == 20
 
-    def test_a_shortage_is_rounded_up_to_a_whole_case(self):
+    def test_a_shortage_does_not_override_the_configured_number_of_cases(self):
         item = _case_item(
             reorder_cases=2,
             reorder_quantity=5,
@@ -372,7 +371,7 @@ class TestLegacyCaseBasedItemsOrderByTheCase:
             minimum_stock=95,
         )
 
-        assert base_reorder_quantity(item) == 100
+        assert base_reorder_quantity(item) == 20
 
     def test_the_pack_size_is_the_order_question_not_the_shelf_one(self):
         """A discontinued vendor's 12-pack describes the SHELF; the next order ships in 10s."""

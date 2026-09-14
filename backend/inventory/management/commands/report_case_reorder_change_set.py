@@ -9,16 +9,19 @@ every filing path ordered ``reorder_quantity`` for it while every screen showed
 ``reorder_cases``.
 
 That changes ordered quantities on live data, so this command prints the change
-set — one CSV row per governed item, named by the supplier link that sizes its
-order — for the captain to read before it takes effect. It writes nothing: no
+set — one CSV row per supplier link on every governed item — for the captain to
+read before it takes effect. An item with no supplier link gets one row with a
+blank link. It writes nothing: no
 stored column is rewritten, and it is not a data migration.
 
 Columns:
 
-* ``supplier`` / ``case_size`` / ``case_size_state`` — the link the next order
-  goes through and the pack size it records, in
+* ``supplier`` / ``case_size`` / ``case_size_state`` — each link and the pack
+  size it records, in
   :mod:`inventory.services.pack_size`'s vocabulary. ``case_size`` is blank when
   unknown.
+* ``currently_selected`` — whether the ordering path currently selects this
+  link through ``primary_item_supplier`` / ``order_pack_size``.
 * ``reorder_quantity`` / ``reorder_cases`` — the two stored columns, as stored.
 * ``files_today`` — what a filing path (QR scan, maintenance alert, fresh PO
   line before rounding) ordered under the rule before the decision:
@@ -53,8 +56,8 @@ import csv
 from django.core.management.base import BaseCommand
 
 from inventory.models import InventoryItem
-from inventory.services.pack_size import declares_a_case
-from inventory.services.packaging import case_order, counts_in_packs
+from inventory.services.pack_size import declares_a_case, pack_size_of
+from inventory.services.packaging import CaseOrder, case_order, counts_in_packs
 from inventory.services.supplier_selection import item_suppliers_prefetch
 
 COLUMNS = [
@@ -64,6 +67,7 @@ COLUMNS = [
     "is_active",
     "is_retired",
     "supplier",
+    "currently_selected",
     "case_size_state",
     "case_size",
     "reorder_quantity",
@@ -90,11 +94,13 @@ def files_before_the_case_rule(item: InventoryItem) -> int:
     return max(shortage, item.reorder_quantity)
 
 
-def change_set_row(item: InventoryItem) -> dict | None:
-    """The report row for ``item``, or ``None`` when the case rule does not govern it."""
-    case = case_order(item)
-    if case is None:
-        return None
+def change_set_row(item: InventoryItem, link, selected_link) -> dict:
+    """The report row for one supplier link on a governed item."""
+    case = CaseOrder(
+        reorder_cases=item.reorder_cases,
+        reorder_quantity=item.reorder_quantity,
+        pack=pack_size_of(link),
+    )
 
     files_today = files_before_the_case_rule(item)
     declared = declares_a_case(case.pack.link)
@@ -110,7 +116,6 @@ def change_set_row(item: InventoryItem) -> dict | None:
         finding = "orders_more" if change > 0 else "orders_less" if change < 0 else "unchanged"
         disagree = "yes" if case.columns_disagree else "no"
 
-    link = case.pack.link
     return {
         "item_id": str(item.id),
         "item": item.name,
@@ -118,6 +123,13 @@ def change_set_row(item: InventoryItem) -> dict | None:
         "is_active": "yes" if item.is_active else "no",
         "is_retired": "yes" if item.is_retired else "no",
         "supplier": link.supplier.name if link is not None else "",
+        "currently_selected": (
+            "yes"
+            if link is not None
+            and selected_link is not None
+            and link.pk == selected_link.pk
+            else "no"
+        ),
         "case_size_state": case.pack.state,
         "case_size": "" if case.pack.units is None else case.pack.units,
         "reorder_quantity": item.reorder_quantity,
@@ -151,19 +163,28 @@ class Command(BaseCommand):
         findings: dict[str, int] = {}
         disagreements = 0
         bridged = 0
+        governed_items = 0
         for item in items:
-            row = change_set_row(item)
-            if row is None:
+            selected_case = case_order(item)
+            if selected_case is None:
                 if counts_in_packs(item):
                     bridged += 1
                 continue
-            writer.writerow(row)
-            findings[row["finding"]] = findings.get(row["finding"], 0) + 1
-            if row["columns_disagree"] == "yes":
-                disagreements += 1
+            governed_items += 1
+            selected_link = selected_case.pack.link
+            links = list(item.item_suppliers.all()) or [None]
+            for link in links:
+                row = change_set_row(item, link, selected_link)
+                writer.writerow(row)
+                findings[row["finding"]] = findings.get(row["finding"], 0) + 1
+                if row["columns_disagree"] == "yes":
+                    disagreements += 1
 
         total = sum(findings.values())
-        self.stderr.write(f"{total} case-based item(s) governed by the case rule.")
+        self.stderr.write(
+            f"{governed_items} case-based item(s) governed by the case rule; "
+            f"{total} supplier-link row(s)."
+        )
         for finding, count in sorted(findings.items()):
             self.stderr.write(f"  {finding}: {count}")
         self.stderr.write(

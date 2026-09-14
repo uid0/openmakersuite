@@ -1,7 +1,7 @@
 """``report_case_reorder_change_set``: the captain's view of what "ordering by cases" changes.
 
-Read-only by contract. Each row names one legacy case-based item, the link that
-sizes its order, both stored columns, what the rule before 2026-09-05 ordered and
+Read-only by contract. Each row names one supplier link on a legacy case-based
+item, both stored columns, what the rule before 2026-09-05 ordered and
 what the case rule orders instead — plus the two facts the captain asked to be
 said rather than guessed: the columns disagree, or the case size is unknown.
 """
@@ -101,7 +101,30 @@ def test_an_item_with_no_supplier_link_is_listed_with_a_blank_supplier():
     row = _row(_run()[0], item)
 
     assert row["supplier"] == ""
+    assert row["currently_selected"] == "no"
     assert row["finding"] == "case_size_unknown"
+
+
+def test_every_supplier_link_uses_its_own_case_size_and_names_the_selected_link():
+    item = _case_item(reorder_cases=4, reorder_quantity=25, quantity_per_package=10)
+    selected = item.item_suppliers.get()
+    alternate = ItemSupplier.objects.create(
+        item=item,
+        supplier=InventoryItemFactory().item_suppliers.get().supplier,
+        supplier_sku="alternate",
+        quantity_per_package=6,
+    )
+
+    rows, _ = _run()
+    matching = [row for row in rows if row["item_id"] == str(item.id)]
+
+    assert len(matching) == 2
+    by_supplier = {row["supplier"]: row for row in matching}
+    assert by_supplier[selected.supplier.name]["currently_selected"] == "yes"
+    assert by_supplier[selected.supplier.name]["new_rule_orders"] == "40"
+    assert by_supplier[alternate.supplier.name]["currently_selected"] == "no"
+    assert by_supplier[alternate.supplier.name]["case_size"] == "6"
+    assert by_supplier[alternate.supplier.name]["new_rule_orders"] == "24"
 
 
 def test_items_the_case_rule_does_not_govern_are_not_listed():
@@ -129,7 +152,7 @@ def test_the_summary_counts_findings_and_disagreements():
 
     _, summary = _run()
 
-    assert "3 case-based item(s) governed by the case rule." in summary
+    assert "3 case-based item(s) governed by the case rule; 3 supplier-link row(s)." in summary
     assert "  case_size_unknown: 1" in summary
     assert "  orders_more: 1" in summary
     assert "  unchanged: 1" in summary

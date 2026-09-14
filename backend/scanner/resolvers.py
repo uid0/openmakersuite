@@ -186,6 +186,9 @@ def _parse_scan_url(path: str) -> Optional[tuple[str, str]]:
             return None
         return ("inventory_item", rest[0])
 
+    if len(rest) != 2:
+        return None
+
     type_map = {
         "asset": "asset",
         "location": "location",

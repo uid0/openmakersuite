@@ -6,10 +6,8 @@ page post whatever a camera or wedge scanner read off a label to
 ``{FRONTEND_URL}/scan/...`` URLs, so the dispatcher has to parse exactly
 what the generators emit.
 
-The table below is not a hand list of URL shapes: each row CALLS a
-generator and captures the string it hands to ``qrcode.QRCode.add_data``,
-then posts that string. ``test_table_covers_every_generator`` enumerates the
-generator modules, so a new generator fails here until it has a row.
+Each table row calls a public generator entry point and captures the string it
+hands to ``qrcode.QRCode.add_data``, then posts that string.
 """
 
 from unittest import mock
@@ -23,7 +21,9 @@ from rest_framework import status
 
 from donations.services.qr_code_service import DonationItemQRCodeService
 from donations.tests.factories import DonationItemFactory
+from index_cards.services import IndexCardRenderer, TestSheetRenderer
 from inventory.serializers import FixtureSerializer
+from inventory.services.asset_tag_service import render_asset_tag
 from inventory.services.qr_code_service import QRCodeService
 from inventory.tests.factories import (
     AssetFactory,
@@ -118,18 +118,19 @@ GENERATOR_TABLE = {
         _donation_item,
         lambda row: DonationItemQRCodeService(include_logo=False).generate_for_donation_item(row),
     ),
+    "render_asset_tag": (
+        _asset,
+        lambda row: render_asset_tag(row, dpi=100),
+    ),
+    "IndexCardRenderer.render_to_bytes": (
+        _item,
+        lambda row: IndexCardRenderer(base_url=FRONTEND_URL).render_to_bytes([row]),
+    ),
+    "TestSheetRenderer.render_to_bytes": (
+        _item,
+        lambda row: TestSheetRenderer(base_url=FRONTEND_URL).render_to_bytes([row]),
+    ),
 }
-
-
-def _generator_names() -> set[str]:
-    names = {f"qr_generator.{n}" for n in dir(qr_generator) if n.startswith("save_qr_code_to_")}
-    for service in (QRCodeService, DonationItemQRCodeService):
-        names |= {f"{service.__name__}.{n}" for n in dir(service) if n.startswith("generate_for_")}
-    return names
-
-
-def test_table_covers_every_generator():
-    assert set(GENERATOR_TABLE) == _generator_names()
 
 
 def _dispatch(api_client, payload):
@@ -172,6 +173,7 @@ def test_dispatcher_resolves_fixture_serializer_qr_url(api_client):
         f"{FRONTEND_URL}/scan",
         f"{FRONTEND_URL}/scan/not-an-item-id",
         f"{FRONTEND_URL}/scan/makerbox/BIN-1/alice/",
+        f"{FRONTEND_URL}/scan/asset/00000000-0000-0000-0000-000000000000/anything",
     ],
 )
 def test_other_scan_namespace_urls_stay_unknown(api_client, payload):

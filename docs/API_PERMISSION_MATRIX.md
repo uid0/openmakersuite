@@ -328,8 +328,8 @@ case shape, reorder point and quantity, hazard information, and the anonymous
 
 | Method | Path | Class | Notes |
 | --- | --- | --- | --- |
-| POST | `location-checkins/checkin/` (`@action`) | public | Anonymous check-in for a location. **Abuse control:** required (per-IP throttle). |
-| any | `location-checkins/check-ins/` (CRUD) | member-rw | `IsAuthenticatedOrReadOnly`; create is opened to `AllowAny` via `get_permissions()` for the kiosk path. |
+| POST | `location-checkins/checkins/checkin/` (`@action`) | public | Anonymous check-in for a location. **Abuse control:** required (per-IP throttle). |
+| any | `location-checkins/checkins/` (CRUD) | member-rw | `IsAuthenticatedOrReadOnly`; create is opened to `AllowAny` via `get_permissions()` for the kiosk path. |
 | any | `location-checkins/feedback/` (CRUD) | member-rw | `IsAuthenticatedOrReadOnly`; create is `AllowAny` for kiosks. |
 | any | `location-checkins/security-reports/` (CRUD) | member-rw | `IsAuthenticatedOrReadOnly`; the `submit` `@action` is `AllowAny`. |
 | any | `location-checkins/tasks/...` | member | `IsAuthenticated`. |

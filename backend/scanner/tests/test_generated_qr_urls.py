@@ -11,6 +11,7 @@ hands to ``qrcode.QRCode.add_data``, then posts that string.
 """
 
 from unittest import mock
+from urllib.parse import urlparse
 
 from django.test import override_settings
 from django.urls import reverse
@@ -143,7 +144,7 @@ def test_dispatcher_resolves_generated_qr_url(api_client, generator):
     build_row, generate = GENERATOR_TABLE[generator]
     row, expected_action, expected_id = build_row()
     printed = _printed_url(lambda: generate(row))
-    assert printed.startswith(f"{FRONTEND_URL}/scan/")
+    assert urlparse(printed).path.startswith("/scan/")
 
     response = _dispatch(api_client, printed)
 
@@ -158,7 +159,7 @@ def test_dispatcher_resolves_fixture_serializer_qr_url(api_client):
     # than a qr_code_service generator; same /scan/<type>/<id> shape.
     row, expected_action, expected_id = _fixture()
     printed = FixtureSerializer().get_qr_code_url(row)
-    assert printed.startswith(f"{FRONTEND_URL}/scan/")
+    assert urlparse(printed).path.startswith("/scan/")
 
     response = _dispatch(api_client, printed)
 

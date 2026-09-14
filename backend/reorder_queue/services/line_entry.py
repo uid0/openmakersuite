@@ -566,12 +566,12 @@ def _items_supplied_elsewhere(supplier, query, limit):
 def default_quantity(item_supplier):
     """Quantity a freshly added line should land on, in BASE units.
 
-    Same derivation ``create_optimized_order`` uses to fill a pad — the item's
-    own reorder maths (:func:`base_reorder_quantity`), rounded up to a whole
-    supplier package for the ``each`` items where the vendor's case size is the
-    binding constraint. Never zero: an item whose maths produces nothing still
-    gets one unit, because an operator who asked to add a line meant to buy
-    something.
+    Same derivation ``create_optimized_order`` uses to fill a pad:
+    :func:`inventory.services.packaging.supplier_line_quantity`. It applies the
+    item's reorder maths, including the legacy case-order rule, then rounds to
+    this supplier's package where that package is the binding constraint.
+    Never zero: an item whose maths produces nothing still gets one unit,
+    because an operator who asked to add a line meant to buy something.
     """
     return max(1, supplier_line_quantity(item_supplier))
 

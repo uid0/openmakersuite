@@ -51,7 +51,7 @@ services:
   emqx:
     # Digest pinned from `docker pull emqx/emqx-enterprise:6.2.0` on 2026-04-28.
     # To bump: pull the new tag, copy the Digest line, update the exact version in the tag for readability.
-    image: emqx/emqx-enterprise:6.2.3@sha256:4ba2e45111e941f0891bd9c1f465ba24d0699dbdaf2dfc05cc00118dae0a7048
+    image: emqx/emqx-enterprise:6.3.0@sha256:3b6d9c0c419930074b7e0e6cba07baceea584b2094d22f16ff02f6c075c3d5b8
     container_name: oms-emqx
     logging: *default-logging
     ports:

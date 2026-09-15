@@ -312,10 +312,37 @@ export interface ItemReorderDisplay {
    * shows `reorder_quantity`.
    */
   order_quantity: number;
-  /** `order_quantity` worded: "36 bottles", or "3 cases (36 bottles)". */
+  /** `order_quantity` worded: "36 bottles", "3 cases (36 bottles)" or "4 cases (40 units)". */
   order_text: string;
+  /**
+   * The legacy case rule's answer: `null` for an item it does not govern.
+   * Optional because an older payload does not carry it.
+   */
+  case_order?: ItemCaseOrder | null;
   needs_reorder: boolean;
   text: string;
+}
+
+/**
+ * "We are ordering by cases and counting by items" (captain, 2026-09-05).
+ *
+ * A legacy `use_case_based_reorder` item that is not counted in packs orders
+ * enough whole cases to cover both `reorder_cases` and the current shortage —
+ * the server's `case_order`. The server sends the STATE and actual order;
+ * `utils/packaging.ts`'s `caseOrderNote` words it.
+ */
+export interface ItemCaseOrder {
+  reorder_cases: number;
+  reorder_quantity: number;
+  /** Base units the filing path will order now, including any shortage top-up. */
+  order_quantity: number;
+  /** Base units in one case of the supplier the next order goes through; `null` when unknown. */
+  case_size: number | null;
+  case_size_state: CaseSizeState;
+  /** `false`: the case size is unknown, so ordering stays on the pre-change calculation. */
+  orders_cases: boolean;
+  /** `reorder_quantity` names a different amount from the cases; `null` when that cannot be told. */
+  columns_disagree: boolean | null;
 }
 
 export interface InventoryItem {

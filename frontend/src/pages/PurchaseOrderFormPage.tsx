@@ -28,6 +28,7 @@ import { workOrderOptionLabel } from '../utils/associations';
 import { utcYmd, ymdToUtcDateTime } from '../utils/dates';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 import { leadTimeText } from '../utils/leadTime';
+import { caseOrderNote } from '../utils/packaging';
 import {
   derivePaymentSchedule,
   paymentScheduleSummary,
@@ -1234,6 +1235,36 @@ const PurchaseOrderFormPage: React.FC = () => {
                                 )}
                               </div>
                               <span className="item-sku">{item.supplier_sku}</span>
+                              {/* Ordering by the case (captain, 2026-09-05):
+                                  the purchaser is told when this line could
+                                  not be sized in cases, or when the item's two
+                                  reorder columns disagree. */}
+                              {caseOrderNote(
+                                item.reorder_display?.case_order,
+                                item.count_unit || 'unit',
+                                {
+                                  suggestedQuantity: item.suggested_quantity,
+                                  caseSize: item.case_size,
+                                  caseSizeState: item.case_size_state,
+                                  isSelectedOrderingLink: item.is_selected_ordering_link,
+                                }
+                              ) && (
+                                <span
+                                  className="case-order-note"
+                                  data-testid={`po-item-case-order-note-${item.item_id}`}
+                                >
+                                  {caseOrderNote(
+                                    item.reorder_display?.case_order,
+                                    item.count_unit || 'unit',
+                                    {
+                                      suggestedQuantity: item.suggested_quantity,
+                                      caseSize: item.case_size,
+                                      caseSizeState: item.case_size_state,
+                                      isSelectedOrderingLink: item.is_selected_ordering_link,
+                                    }
+                                  )}
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="col-stock">

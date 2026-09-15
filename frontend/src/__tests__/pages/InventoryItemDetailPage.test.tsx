@@ -318,6 +318,51 @@ describe('InventoryItemDetailPage', () => {
     expect(screen.getByTestId('item-reorder-quantity')).toHaveTextContent('40 units');
   });
 
+  // Ordering by the case (captain, 2026-09-05): the server orders
+  // reorder_cases × case size, and this page is where the two columns are
+  // corrected from, so it says when they disagree rather than showing one.
+  it('says when reorder cases and reorder quantity disagree', async () => {
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockItem,
+        use_case_based_reorder: true,
+        minimum_cases: 1,
+        reorder_cases: 4,
+        reorder_quantity: 25,
+        current_cases: 2.5,
+        case_size_state: 'known',
+        reorder_display: {
+          mode: 'each',
+          unit: 'case',
+          threshold: 1,
+          current: 2.5,
+          reorder_quantity: 4,
+          order_quantity: 40,
+          order_text: '4 cases (40 units)',
+          case_order: {
+            reorder_cases: 4,
+            reorder_quantity: 25,
+            order_quantity: 40,
+            case_size: 10,
+            case_size_state: 'known',
+            orders_cases: true,
+            columns_disagree: true,
+          },
+          needs_reorder: false,
+          text: '2.5 cases on hand · reorder at 1 case',
+        },
+      },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('item-case-order-note')).toHaveTextContent(
+        'Reorder Cases and Reorder Quantity disagree: 4 cases of 10 is 40 units, but Reorder Quantity says 25 units.'
+      );
+    });
+  });
+
   it('shows no case-size remedy when the case size is known', async () => {
     (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
       data: {

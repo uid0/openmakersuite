@@ -453,15 +453,10 @@ still open:
    wherever the reader is not being promised what will be filed. Pinned by
    `inventory/tests/test_reorder_filing.py` and `ScanPage.test.tsx`.
 
-   ⚠️ **One part is still open and is the captain's.** For a legacy
-   `use_case_based_reorder` item with no packaging chain of its own,
-   `reorder_cases` sizes only presentation and reaches no ordering path, while
-   `reorder_quantity` sizes what is ordered — so "Reorder Cases: 4" never
-   reaches the order. Closing that changes what is ordered for live items: **do
-   not close it without that decision.**
-   `TestLegacyCaseBasedItemsAreRecordedAsTheyBehave` pins it, including the
-   bridged shape, where `counts_in_packs` wins and both halves read
-   `reorder_quantity` instead.
+   Legacy `use_case_based_reorder` items (no packaging chain of their own)
+   ORDER by the case and COUNT by the item — the captain's 2026-09-05
+   decision. `packaging.case_order` owns the rule, its unknown-case-size
+   fallback and the `case_order` wire block; see its docstring.
 
    Derived set, exclusions, retry-bound reasoning and the ScanTTY check:
    [`docs/oms-scan-autosubmit-units-and-retry-record.md`](docs/oms-scan-autosubmit-units-and-retry-record.md).

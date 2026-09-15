@@ -6,9 +6,12 @@ retries (`fm/oms-scan-autosubmit-units-and-retry`, base `35d71af`).
 
 **This is the PR body's record, parked here because it is a changelog of one
 branch, not standing project knowledge.** `AGENTS.md` keeps only what a future
-session needs — the base-unit invariant, the one derivation a filing surface
-reads, and the still-open captain decision — under "Three more, found by this
-branch's sweeps". Read that first; this file is the evidence behind it.
+session needs — the base-unit invariant and the one derivation a filing surface
+reads — under "Three more, found by this branch's sweeps". The later decision
+for legacy case-based items is owned by
+`inventory.services.packaging.case_order`; this file preserves the behavior
+measured before that decision. Read `AGENTS.md` first; this file is the evidence
+behind it.
 
 ## Which number the purchasing side receives, and how that was established
 

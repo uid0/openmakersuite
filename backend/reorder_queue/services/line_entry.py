@@ -86,8 +86,7 @@ from django.db.models import Q
 
 from inventory.models import InventoryItem, ItemSupplier
 from inventory.services.kits import build_kit_snapshot
-from inventory.services.pack_size import declares_a_case
-from inventory.services.packaging import base_reorder_quantity, counts_in_packs
+from inventory.services.packaging import supplier_line_quantity
 from inventory.services.pricing import unit_price_of
 
 from ..models import PurchaseOrder, PurchaseOrderItem
@@ -566,28 +565,14 @@ def _items_supplied_elsewhere(supplier, query, limit):
 def default_quantity(item_supplier):
     """Quantity a freshly added line should land on, in BASE units.
 
-    Same derivation ``create_optimized_order`` uses to fill a pad — the item's
-    own reorder maths (:func:`base_reorder_quantity`), rounded up to a whole
-    supplier package for the ``each`` items where the vendor's case size is the
-    binding constraint. Never zero: an item whose maths produces nothing still
-    gets one unit, because an operator who asked to add a line meant to buy
-    something.
+    Same derivation ``create_optimized_order`` uses to fill a pad:
+    :func:`inventory.services.packaging.supplier_line_quantity`. It applies the
+    item's reorder maths, including the legacy case-order rule, then rounds to
+    this supplier's package where that package is the binding constraint.
+    Never zero: an item whose maths produces nothing still gets one unit,
+    because an operator who asked to add a line meant to buy something.
     """
-    item = item_supplier.item
-    quantity = base_reorder_quantity(item)
-
-    if not counts_in_packs(item):
-        # "Does this vendor declare a case?" through the ONE pack-size
-        # derivation (op-c1ke) — the same question :func:`repeat_quantity` asks
-        # via ``order_package_size``, so the two cannot drift into disagreeing
-        # about what a package is. Identical rounding for every recorded value;
-        # what changes is that a recorded 0 is no longer indistinguishable from
-        # a vendor that genuinely sells singles.
-        case_size = declares_a_case(item_supplier)
-        if case_size is not None:
-            quantity = -(-quantity // case_size) * case_size
-
-    return max(1, quantity)
+    return max(1, supplier_line_quantity(item_supplier))
 
 
 def repeat_quantity(item_supplier):

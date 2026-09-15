@@ -24,7 +24,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from config.api_errors import error_response
 from inventory.models import InventoryItem, Supplier
 from inventory.serializers import SupplierChoiceSerializer
-from inventory.services.pack_size import declares_a_case
+from inventory.services.pack_size import pack_size_of
 from inventory.services.packaging import (
     base_reorder_quantity,
     count_unit,
@@ -34,6 +34,7 @@ from inventory.services.packaging import (
     parse_at_level,
     reorder_display,
     resolve_base_quantity,
+    supplier_line_quantity,
 )
 from inventory.services.pricing import PriceRollup, explain, package_price_of, unit_price_of
 from inventory.services.supplier_selection import (
@@ -1396,10 +1397,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 # a supplier's case would silently inflate that. "Does this
                 # vendor declare a case?" comes from the ONE pack-size
                 # derivation (op-c1ke); the rounding is unchanged.
-                declared_case = None if counts_in_packs(item) else declares_a_case(item_supplier)
-                if declared_case is not None:
-                    packages_needed = (suggested_qty + declared_case - 1) // declared_case
-                    suggested_qty = packages_needed * declared_case
+                suggested_qty = supplier_line_quantity(item_supplier, suggested_qty)
 
                 # What this vendor charges, through the ONE price derivation
                 # (op-9m2v). Base's ``unit_cost or Decimal("0.00")`` costed an
@@ -1410,6 +1408,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 unit_price = unit_price_of(item_supplier)
                 package_price = package_price_of(item_supplier)
                 line_total = supplier_data[supplier_id]["rollup"].add(unit_price, suggested_qty)
+                row_pack_size = pack_size_of(item_supplier)
 
                 # Flag the line as request-driven. The API key keeps its
                 # ``has_active_reorder_request`` name (clients read it), but
@@ -1440,10 +1439,16 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         ),
                         "package_cost": (None if not package_price else str(package_price.amount)),
                         "quantity_per_package": item_supplier.quantity_per_package,
+                        "case_size": row_pack_size.units,
+                        "case_size_state": row_pack_size.state,
                         "lead_time_days": item_supplier.average_lead_time,
                         "supplier_sku": item_supplier.supplier_sku,
                         "supplier_url": item_supplier.supplier_url,
                         "is_primary": item_supplier.is_primary,
+                        "is_selected_ordering_link": (
+                            choice.item_supplier is not None
+                            and choice.item_supplier.pk == item_supplier.pk
+                        ),
                         "line_total": None if line_total is None else str(line_total),
                         "has_active_reorder_request": has_active_request,
                         "reorder_request_id": reorder_request_id,
@@ -1676,23 +1681,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         packaging chain sets the quantity and the supplier's case size is not
         applied on top (op-es7c); ``each`` items keep the supplier round-up.
         """
-        # Calculate basic reorder quantity (mode-aware; each = today's math)
-        base_quantity = base_reorder_quantity(item)
-
-        if counts_in_packs(item):
-            return base_quantity
-
-        # Adjust for package quantities if the vendor declares a case. Asked of
-        # the ONE pack-size derivation (op-c1ke) rather than the column, so a
-        # recorded 0 is an unknown rather than a silent "sells singles"; the
-        # quantity is unchanged for every recorded value.
-        declared_case = declares_a_case(supplier)
-        if declared_case is not None:
-            # Round up to nearest package
-            packages_needed = (base_quantity + declared_case - 1) // declared_case
-            return packages_needed * declared_case
-
-        return base_quantity
+        return supplier_line_quantity(supplier)
 
     @action(detail=True, methods=["post"])
     def send_to_supplier(self, request, pk=None):

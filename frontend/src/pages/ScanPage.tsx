@@ -12,7 +12,7 @@ import { Checklist, InventoryItem, ItemSupplier } from '../types';
 import { formatDateOnly } from '../utils/dates';
 import { promptInput, showError } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
-import { reorderFiling, reorderQuantityLabel } from '../utils/packaging';
+import { baseUnitOf, caseOrderNote, reorderFiling, reorderQuantityLabel } from '../utils/packaging';
 import { caseSizeUnknownLabel, caseSizeUnknownNote } from '../utils/caseSize';
 import {
   alternativeSupplierNamesText,
@@ -697,6 +697,17 @@ const ScanPage: React.FC = () => {
                   <span className="label">Reorder Quantity:</span>
                   <span className="value" data-testid="reorder-quantity">{reorderQuantityRowLabel}</span>
                 </div>
+                {/* Ordering by the case (captain, 2026-09-05). Signed-in
+                    operators only: it names the columns to correct, and an
+                    anonymous scan already reads the exact amount it files. */}
+                {isLoggedIn && caseOrderNote(item.reorder_display?.case_order, baseUnitOf(item)) && (
+                  <div className="info-item">
+                    <span className="label">Case Ordering:</span>
+                    <span className="value secondary" data-testid="scan-case-order-note">
+                      {caseOrderNote(item.reorder_display?.case_order, baseUnitOf(item))}
+                    </span>
+                  </div>
+                )}
               </>
             ) : (
               // Traditional unit-based display

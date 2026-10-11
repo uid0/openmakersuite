@@ -210,7 +210,7 @@ redis:
   enabled: true
   image:
     repository: redis
-    tag: "8.10.1-alpine"
+    tag: "8.10.2-alpine"
     pullPolicy: IfNotPresent
   service:
     port: 6379

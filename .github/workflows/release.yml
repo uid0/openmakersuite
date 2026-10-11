@@ -215,7 +215,7 @@ jobs:
             frontend/
 
       - name: Install syft for SBOM generation
-        uses: anchore/sbom-action/download-syft@v0.24.2
+        uses: anchore/sbom-action/download-syft@v0.24.3
 
       - name: Generate Software Bill of Materials
         run: |

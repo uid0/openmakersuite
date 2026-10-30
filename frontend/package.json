@@ -109,7 +109,7 @@
     "svgo": "^4.0.0",
     "serialize-javascript": "^7.0.5",
     "underscore": "^1.13.7",
-    "node-forge": "1.4.0",
+    "node-forge": "1.4.2",
     "uuid": "^14.0.0",
     "http-proxy-agent": "^9.0.0",
     "protobufjs": "^8.0.2",

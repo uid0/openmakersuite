@@ -79,9 +79,9 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
-          python-version: "3.14"
+          python-version: "3.15"
           cache: "pip"
           cache-dependency-path: backend/requirements*.txt
 
@@ -147,9 +147,9 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
-          python-version: "3.14"
+          python-version: "3.15"
           cache: "pip"
           cache-dependency-path: backend/requirements*.txt
 
@@ -314,9 +314,9 @@ jobs:
       # syntax was one the scan could not read. It now fails rather than
       # skipping those in silence, so give it the version they are written for.
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
-          python-version: "3.14"
+          python-version: "3.15"
 
       - name: Check no site bypasses an order-level derivation
         run: |
@@ -531,9 +531,9 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
-          python-version: "3.14"
+          python-version: "3.15"
           cache: "pip"
           cache-dependency-path: backend/requirements*.txt
 
@@ -737,9 +737,9 @@ jobs:
           fetch-depth: 0 # Fetch all history for gitleaks
 
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
-          python-version: "3.14"
+          python-version: "3.15"
           cache: "pip"
 
       - name: Install security tools

@@ -215,7 +215,7 @@ jobs:
             frontend/
 
       - name: Install syft for SBOM generation
-        uses: anchore/sbom-action/download-syft@v0.24.2
+        uses: anchore/sbom-action/download-syft@v0.24.3
 
       - name: Generate Software Bill of Materials
         run: |
@@ -347,9 +347,9 @@ jobs:
           name: release-artifacts
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4.1.2
+        uses: sigstore/cosign-installer@v4.1.3
         with:
-          cosign-release: 'v3.1.3'
+          cosign-release: 'v3.1.4'
 
       - name: Sign release artifacts
         run: |
